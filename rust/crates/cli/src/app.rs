@@ -2,7 +2,6 @@ use std::env;
 use std::io;
 
 use crate::cli::*;
-use crate::output;
 use crate::package;
 use crate::self_update::{ReleaseChannel, SelfUpdateTarget};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -11,7 +10,6 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use ed25519_dalek::SigningKey;
 use miette::IntoDiagnostic;
-use qrcode::{render::unicode, QrCode};
 use serde_json::Value;
 use tracing_subscriber::EnvFilter;
 use trellis_rs::auth as authlib;
@@ -23,7 +21,6 @@ mod bootstrap;
 mod deploy;
 mod runtime;
 mod self_cmd;
-mod trust_tooling;
 
 const SELF_UPDATE_TARGET: SelfUpdateTarget = SelfUpdateTarget::new(
     "qlever-llc",
@@ -48,11 +45,12 @@ pub async fn run() -> miette::Result<()> {
         TopLevelCommand::Logout => auth::logout(format).await?,
         TopLevelCommand::Whoami => auth::whoami(format).await?,
         TopLevelCommand::Identity(command) => auth::identity(format, command).await?,
+        TopLevelCommand::Participants(command) => auth::participants(format, command).await?,
+        TopLevelCommand::Issuers(command) => auth::issuers(format, command).await?,
         TopLevelCommand::Users(command) => auth::users(format, command).await?,
         TopLevelCommand::Portals(command) => auth::portals(format, command).await?,
         TopLevelCommand::Svc(command) => deploy::run_svc(format, command).await?,
         TopLevelCommand::Dev(command) => deploy::run_dev(format, command).await?,
-        TopLevelCommand::Infra(command) => bootstrap::infra(format, command).await?,
         TopLevelCommand::Init(command) => bootstrap::init(format, command).await?,
         TopLevelCommand::Keys(command) => match command.command {
             KeysSubcommand::New(args) => runtime::keygen_command(format, &args)?,
@@ -118,10 +116,6 @@ fn map_admin_session_error(error: authlib::TrellisAuthError) -> miette::Report {
         Ok(None) => miette::miette!(error.to_string()),
         Err(report) => report,
     }
-}
-
-fn map_admin_session_result<T>(result: Result<T, authlib::TrellisAuthError>) -> miette::Result<T> {
-    result.map_err(map_admin_session_error)
 }
 
 fn rejected_admin_session_error_report(
@@ -194,21 +188,6 @@ pub(crate) fn json_value_label(value: &Value) -> String {
         .unwrap_or_else(|| value.to_string())
 }
 
-fn render_agent_login_instructions(login_url: &str) -> miette::Result<String> {
-    let qr = QrCode::new(login_url.as_bytes()).into_diagnostic()?;
-    let qr = qr.render::<unicode::Dense1x2>().quiet_zone(false).build();
-    Ok(format!(
-        "Open this activation URL:\n{login_url}\n\nScan this QR code:\n{qr}"
-    ))
-}
-
-fn pending_agent_login_json(login_url: &str) -> Value {
-    serde_json::json!({
-        "status": "pending",
-        "loginUrl": login_url,
-    })
-}
-
 pub(crate) fn release_channel(prerelease: bool) -> ReleaseChannel {
     ReleaseChannel::from_prerelease_flag(prerelease)
 }
@@ -216,7 +195,7 @@ pub(crate) fn release_channel(prerelease: bool) -> ReleaseChannel {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_rejected_admin_session_error, map_admin_session_error, map_admin_session_result,
+        is_rejected_admin_session_error, map_admin_session_error,
         rejected_admin_session_error_report, rejected_admin_session_report, tracing_filter,
     };
     use std::env;
@@ -370,8 +349,7 @@ mod tests {
         assert!(admin_session_path(&test_dir).exists());
 
         let error = TrellisAuthError::BindHttpFailure(401, "session_revoked".to_string());
-        let report = map_admin_session_result::<()>(Err(error))
-            .expect_err("rejected-session result should map to report");
+        let report = map_admin_session_error(error);
 
         assert!(!admin_session_path(&test_dir).exists());
         assert!(report
@@ -395,8 +373,7 @@ mod tests {
         save_admin_session(&test_admin_session_state()).expect("save admin session");
         assert!(admin_session_path(&test_dir).exists());
 
-        let report = map_admin_session_result::<()>(Err(error))
-            .expect_err("explicit rejected-session signal should map to report");
+        let report = map_admin_session_error(error);
 
         assert!(!admin_session_path(&test_dir).exists());
         assert!(report

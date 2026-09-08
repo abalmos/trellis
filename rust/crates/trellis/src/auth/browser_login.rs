@@ -9,8 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_protocol::{
     parse_api, parse_authorization_context, parse_participant, resolve_participant,
-    session_proof_request_digest, SessionProofInput, UserAuthBindSessionProofInput,
-    UserAuthRequestSessionProofInput,
+    SessionProofInput, UserAuthBindSessionProofInput, UserAuthRequestSessionProofInput,
 };
 
 use super::client::connect_admin_client_async;
@@ -20,6 +19,7 @@ use super::models::{
 };
 use super::TrellisAuthError;
 use crate::client::{decode_trellis_http_error, SessionAuth};
+use crate::internal_sdk::auth::types::AuthUsersGetResponseUser;
 use crate::internal_sdk::auth::AuthClient;
 
 pub(crate) const DETACHED_LOGIN_POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -98,41 +98,18 @@ async fn start_auth_request(
     let participant = cli_participant()?;
     let request_id = ulid::Ulid::new().to_string();
     let issued_at = now_ms()?;
-    let session_nkey = auth.nkey_pair()?.public_key();
-    let mut request = json!({
+    let unsigned_request = json!({
         "requestId": request_id,
         "issuedAt": issued_at,
         "sessionPublicKey": auth.session_key,
-        "sessionNkey": session_nkey,
         "participantId": participant.id,
-        "participantArtifactDigest": participant.digest,
-        "participantArtifact": null,
-        "referencedApiArtifacts": [],
         "redirectTarget": redirect_to,
-        "proof": auth.sign_session_proof(&SessionProofInput::user_auth_request(
-            UserAuthRequestSessionProofInput {
-                request_id: request_id.clone(),
-                issued_at,
-                session_public_key: auth.session_key.clone(),
-                session_nkey: session_nkey.clone(),
-                participant_id: participant.id.clone(),
-                participant_digest: participant.digest.clone(),
-                redirect_target: redirect_to.to_owned(),
-                request_digest: participant.digest.clone(),
-            },
-        )?)?,
     });
-    let request_digest = session_proof_request_digest(&request)?;
     let input = SessionProofInput::user_auth_request(UserAuthRequestSessionProofInput {
-        request_id,
-        issued_at,
-        session_public_key: auth.session_key.clone(),
-        session_nkey,
-        participant_id: participant.id,
-        participant_digest: participant.digest,
-        redirect_target: redirect_to.to_owned(),
-        request_digest,
+        origin: trellis_url.clone(),
+        unsigned_request: unsigned_request.clone(),
     })?;
+    let mut request = unsigned_request;
     request["proof"] = serde_json::to_value(auth.sign_session_proof(&input)?)?;
     let client = HttpClient::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -255,18 +232,17 @@ async fn bind_session(
     );
     let request_id = ulid::Ulid::new().to_string();
     let issued_at = now_ms()?;
-    let mut request = json!({
+    let unsigned_request = json!({
         "requestId": request_id,
         "issuedAt": issued_at,
-        "proof": { "format": "trellis.session-proof.v1", "signature": "" },
     });
     let input = SessionProofInput::user_auth_bind(UserAuthBindSessionProofInput {
-        request_id,
-        issued_at,
+        origin: trellis_url.clone(),
         flow_id: flow_id.to_owned(),
         session_public_key: auth.session_key.clone(),
-        request_digest: session_proof_request_digest(&request)?,
+        unsigned_request: unsigned_request.clone(),
     })?;
+    let mut request = unsigned_request;
     request["proof"] = serde_json::to_value(auth.sign_session_proof(&input)?)?;
     let response = client
         .post(bind_url)
@@ -345,46 +321,16 @@ impl AgentLoginChallenge {
             .await
             .map_err(|error| TrellisAuthError::OperationFailed(error.to_string()))?;
         let user = response.user.ok_or_else(|| {
-            TrellisAuthError::NotUserSession(response.session.participant_kind.as_str().to_owned())
+            TrellisAuthError::NotUserSession(response.connection.principal_kind.to_string())
         })?;
+        let user: AuthUsersGetResponseUser = serde_json::from_value(serde_json::to_value(user)?)?;
         let user = super::AuthenticatedUser {
-            user_id: user
-                .get("userId")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            principal_id: user
-                .get("identity")
-                .and_then(|identity| identity.get("identityId"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
-            state: if user.get("active").and_then(serde_json::Value::as_bool) == Some(true) {
-                "active"
-            } else {
-                "disabled"
-            }
-            .to_owned(),
-            capabilities: user
-                .get("capabilities")
-                .and_then(serde_json::Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(serde_json::Value::as_str)
-                .map(str::to_owned)
-                .collect(),
-            email: user
-                .get("email")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned),
-            image: user
-                .get("image")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned),
-            name: user
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_owned),
+            user_id: user.user_id,
+            principal_id: user.principal_id,
+            state: user.state.to_string(),
+            email: user.email,
+            image: user.image,
+            name: user.name,
         };
         let context = client.authorization_context()?.ok_or_else(|| {
             TrellisAuthError::OperationFailed(

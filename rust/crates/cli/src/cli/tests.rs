@@ -1,16 +1,9 @@
 use super::*;
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 
 #[test]
 fn rejects_server_check_command() {
     assert!(Cli::try_parse_from(["trellis", "check"]).is_err());
-}
-
-#[test]
-fn infra_help_describes_offline_trust_tooling() {
-    let help = Cli::command().render_long_help().to_string();
-    assert!(help.contains("Manage offline authorization trust artifacts"));
-    assert!(!help.contains("Apply or check shared infrastructure"));
 }
 
 #[test]
@@ -58,7 +51,7 @@ fn parses_remote_add_and_publish_commands() {
 }
 
 #[test]
-fn parses_identity_grants_revoke_identity_grant_id_positional() {
+fn parses_identity_grants_revoke_participant_id_positional() {
     let cli = Cli::parse_from([
         "trellis",
         "identity",
@@ -73,11 +66,54 @@ fn parses_identity_grants_revoke_identity_grant_id_positional() {
         TopLevelCommand::Identity(command) => match command.command {
             IdentitySubcommand::Grants(command) => match command.command {
                 IdentityGrantsSubcommand::Revoke(args) => {
-                    assert_eq!(args.identity_grant_id, "igrnt_123");
+                    assert_eq!(args.participant_id, "igrnt_123");
                     assert_eq!(args.user.as_deref(), Some("user_123"));
                 }
                 other => panic!("unexpected identity grants command: {other:?}"),
             },
+        },
+        other => panic!("unexpected top-level command: {other:?}"),
+    }
+}
+
+#[test]
+fn parses_participant_install_and_issuer_revoke() {
+    let cli = Cli::parse_from([
+        "trellis",
+        "participants",
+        "install",
+        "--source",
+        ".",
+        "--participant",
+        "acme.app@v1",
+        "--expected-revision",
+        "2",
+    ]);
+    match cli.command {
+        TopLevelCommand::Participants(command) => match command.command {
+            ParticipantsSubcommand::Install(args) => {
+                assert_eq!(args.source, PathBuf::from("."));
+                assert_eq!(args.participant.as_deref(), Some("acme.app@v1"));
+                assert_eq!(args.expected_revision, Some(2));
+            }
+        },
+        other => panic!("unexpected top-level command: {other:?}"),
+    }
+
+    let cli = Cli::parse_from([
+        "trellis",
+        "issuers",
+        "revoke",
+        "issuer_123",
+        "--reason",
+        "rotated",
+    ]);
+    match cli.command {
+        TopLevelCommand::Issuers(command) => match command.command {
+            IssuersSubcommand::Revoke(args) => {
+                assert_eq!(args.key_id, "issuer_123");
+                assert_eq!(args.reason.as_deref(), Some("rotated"));
+            }
         },
         other => panic!("unexpected top-level command: {other:?}"),
     }
@@ -96,10 +132,6 @@ fn parses_users_create_and_edit_options() {
         "--username",
         "ada",
         "--inactive",
-        "--capability",
-        "trellis.core::catalog.read",
-        "--group",
-        "admin",
     ]);
 
     match cli.command {
@@ -109,34 +141,18 @@ fn parses_users_create_and_edit_options() {
                 assert_eq!(args.email.as_deref(), Some("ada@example.com"));
                 assert_eq!(args.username.as_deref(), Some("ada"));
                 assert!(args.inactive);
-                assert_eq!(
-                    args.capabilities,
-                    vec!["trellis.core::catalog.read".to_string()]
-                );
-                assert_eq!(args.groups, vec!["admin".to_string()]);
             }
             other => panic!("unexpected users command: {other:?}"),
         },
         other => panic!("unexpected top-level command: {other:?}"),
     }
 
-    let cli = Cli::parse_from([
-        "trellis",
-        "users",
-        "edit",
-        "user_123",
-        "--active",
-        "--add-group",
-        "operators",
-        "--clear-capabilities",
-    ]);
+    let cli = Cli::parse_from(["trellis", "users", "edit", "user_123", "--active"]);
     match cli.command {
         TopLevelCommand::Users(command) => match command.command {
             UsersSubcommand::Edit(args) => {
                 assert_eq!(args.user_id, "user_123");
                 assert!(args.active);
-                assert_eq!(args.add_groups, vec!["operators".to_string()]);
-                assert!(args.clear_capabilities);
             }
             other => panic!("unexpected users command: {other:?}"),
         },
@@ -228,7 +244,6 @@ fn service_and_device_help_shows_native_target_first_usage() {
     assert!(svc_help.contains("<ID> and <COMMAND> are required"));
     assert!(!svc_help.contains("[ID]"));
     assert!(svc_help.contains("apply"));
-    assert!(svc_help.contains("authority"));
     assert!(!svc_help.contains("grants"));
 
     let dev_error = Cli::try_parse_from(["trellis", "dev", "--help"])
@@ -256,21 +271,18 @@ fn parses_target_first_service_and_device_resource_tokens() {
         "svc",
         "api",
         "apply",
-        "--api",
-        "./trellis.api.json",
+        "--source",
+        ".",
         "--participant",
-        "./trellis.participant.json",
+        "acme.api@v1",
     ]);
     match cli.command {
         TopLevelCommand::Svc(command) => {
             assert_eq!(command.id.as_deref(), Some("api"));
             match command.command {
                 SvcSubcommand::Resource(SvcResourceAction::Apply(args)) => {
-                    assert_eq!(args.api, PathBuf::from("./trellis.api.json"));
-                    assert_eq!(
-                        args.participant,
-                        PathBuf::from("./trellis.participant.json")
-                    );
+                    assert_eq!(args.source, PathBuf::from("."));
+                    assert_eq!(args.participant.as_deref(), Some("acme.api@v1"));
                 }
                 other => panic!("unexpected svc command: {other:?}"),
             }
@@ -307,90 +319,6 @@ fn parses_target_first_service_and_device_resource_tokens() {
                 )) => {
                     assert_eq!(args.review_id, "review_123");
                     assert_eq!(args.reason.as_deref(), Some("approved_by_policy"));
-                }
-                other => panic!("unexpected dev command: {other:?}"),
-            }
-        }
-        other => panic!("unexpected top-level command: {other:?}"),
-    }
-
-    let cli = Cli::parse_from([
-        "trellis",
-        "svc",
-        "billing",
-        "authority",
-        "accept-update",
-        "plan_123",
-        "--expected-desired-version",
-        "version_123",
-    ]);
-    match cli.command {
-        TopLevelCommand::Svc(command) => {
-            assert_eq!(command.id.as_deref(), Some("billing"));
-            match command.command {
-                SvcSubcommand::Resource(SvcResourceAction::Authority(
-                    DeploymentAuthorityCommand::AcceptUpdate(args),
-                )) => {
-                    assert_eq!(args.plan_id, "plan_123");
-                    assert_eq!(
-                        args.expected_desired_version.as_deref(),
-                        Some("version_123")
-                    );
-                }
-                other => panic!("unexpected svc command: {other:?}"),
-            }
-        }
-        other => panic!("unexpected top-level command: {other:?}"),
-    }
-
-    let cli = Cli::parse_from([
-        "trellis",
-        "svc",
-        "billing",
-        "authority",
-        "plan",
-        "list",
-        "--state",
-        "pending",
-        "--classification",
-        "migration",
-    ]);
-    match cli.command {
-        TopLevelCommand::Svc(command) => {
-            assert_eq!(command.id.as_deref(), Some("billing"));
-            match command.command {
-                SvcSubcommand::Resource(SvcResourceAction::Authority(
-                    DeploymentAuthorityCommand::Plan(AuthorityPlanCommand::List(args)),
-                )) => {
-                    assert_eq!(args.state, Some(DeploymentAuthorityPlanState::Pending));
-                    assert_eq!(
-                        args.classification,
-                        Some(DeploymentAuthorityPlanClassification::Migration)
-                    );
-                }
-                other => panic!("unexpected svc command: {other:?}"),
-            }
-        }
-        other => panic!("unexpected top-level command: {other:?}"),
-    }
-
-    let cli = Cli::parse_from([
-        "trellis",
-        "dev",
-        "reader",
-        "authority",
-        "plan",
-        "show",
-        "plan_123",
-    ]);
-    match cli.command {
-        TopLevelCommand::Dev(command) => {
-            assert_eq!(command.id.as_deref(), Some("reader"));
-            match command.command {
-                DevSubcommand::Resource(DevResourceAction::Authority(
-                    DeploymentAuthorityCommand::Plan(AuthorityPlanCommand::Show(args)),
-                )) => {
-                    assert_eq!(args.plan_id, "plan_123");
                 }
                 other => panic!("unexpected dev command: {other:?}"),
             }

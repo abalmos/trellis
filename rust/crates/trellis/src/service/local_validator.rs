@@ -9,6 +9,7 @@
 //! only memory. Unknown context digests are resolved from the registry at most
 //! once per digest, and revocation watch updates are applied immediately.
 
+use base64::Engine;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use trellis_protocol::{
@@ -73,13 +74,13 @@ impl LocalAuthVerifier {
         context: &RequestContext,
         require_exact_permission: bool,
     ) -> Result<RequestValidation, ServerError> {
-        let session_key =
-            context
-                .session_key
-                .clone()
-                .ok_or_else(|| ServerError::MissingSessionKey {
-                    subject: subject.to_string(),
-                })?;
+        let session_key = context
+            .session_key
+            .clone()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| ServerError::MissingSessionKey {
+                subject: subject.to_string(),
+            })?;
         let proof = context
             .proof
             .clone()
@@ -138,18 +139,15 @@ impl LocalAuthVerifier {
                 return Ok(RequestValidation::denied());
             }
         };
-        let verified = match provider.verified_context_raw(&authorization_context) {
-            Ok(Some(verified)) => verified,
-            _ => match provider
-                .resolve_context(&authorization_context, policy.now_unix_seconds)
-                .await
-            {
-                Ok(verified) => verified,
-                Err(error) => {
-                    tracing::warn!(subject, %error, "local authorization context unavailable");
-                    return Ok(RequestValidation::denied());
-                }
-            },
+        let verified = match provider
+            .resolve_context(&authorization_context, policy.now_unix_seconds)
+            .await
+        {
+            Ok(verified) => verified,
+            Err(error) => {
+                tracing::warn!(subject, %error, "local authorization context unavailable");
+                return Ok(RequestValidation::denied());
+            }
         };
         // Memory-only revocation read: the provider watch applies revocations
         // immediately and never un-revokes a digest. A revoked context denies.
@@ -176,7 +174,6 @@ impl LocalAuthVerifier {
         let required_permissions = permission.as_slice();
         let verified = match self.verification.verify_request(RequestVerificationInput {
             context: &verified,
-            session_key: &session_key,
             context_digest: &authorization_context,
             subject,
             payload,
@@ -194,11 +191,21 @@ impl LocalAuthVerifier {
             }
         };
         let caller = verified.caller().clone();
-        Ok(RequestValidation {
+        if caller.session_key != session_key {
+            return Ok(RequestValidation::denied());
+        }
+        let result = RequestValidation {
             allowed: true,
             caller: Some(caller),
             inbox_prefix: Some(verified.caller().inbox_prefix.clone()),
-        })
+        };
+        if provider
+            .revocation_time(&authorization_context)
+            .map_or(true, |revoked_at| revoked_at.is_some())
+        {
+            return Ok(RequestValidation::denied());
+        }
+        Ok(result)
     }
 
     /// Verify a v1 event proof against the digest-keyed context, historical
@@ -252,27 +259,32 @@ impl LocalAuthVerifier {
                 )));
             }
         };
-        let context = match provider.verified_context_raw(&authorization_context) {
-            Ok(Some(context)) => context,
-            _ => match provider
-                .resolve_event_context_for_verification(
-                    &authorization_context,
-                    time::OffsetDateTime::parse(
-                        &event_time,
-                        &time::format_description::well_known::Rfc3339,
-                    )
-                    .map(|value| value.unix_timestamp())
-                    .unwrap_or(policy.now_unix_seconds),
+        let context = match provider
+            .resolve_event_context_for_verification(
+                &authorization_context,
+                time::OffsetDateTime::parse(
+                    &event_time,
+                    &time::format_description::well_known::Rfc3339,
                 )
-                .await
-            {
-                Ok(context) => context,
-                Err(error) => {
-                    tracing::warn!(subject, %error, "local event context resolution failed");
-                    return Err(error);
-                }
-            },
+                .map(|value| value.unix_timestamp())
+                .unwrap_or(policy.now_unix_seconds),
+            )
+            .await
+        {
+            Ok(context) => context,
+            Err(error) => {
+                tracing::warn!(subject, %error, "local event context resolution failed");
+                return Err(error);
+            }
         };
+        if session_key
+            != base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(context.session_key().as_bytes())
+        {
+            return Err(EventVerificationFailure::rejected(
+                "session key does not match authorization context",
+            ));
+        }
         // Memory-only revocation read; the provider watch applies revocations
         // immediately. A revoked context denies.
         let revoked_at = match provider.revocation_time(&authorization_context) {
@@ -301,7 +313,6 @@ impl LocalAuthVerifier {
             .verification
             .verify_event(EventVerificationInput {
                 context: &context,
-                session_key: &session_key,
                 context_digest: &authorization_context,
                 subject,
                 payload,
@@ -317,14 +328,24 @@ impl LocalAuthVerifier {
                 EventVerificationFailure::rejected(format!("invalid event proof: {error}"))
             })?;
         let publisher = verified_event.publisher();
-        Ok(super::runtime_facade::ServiceEventPublisherContext {
+        let result = super::runtime_facade::ServiceEventPublisherContext {
             kind: publisher.kind.clone(),
             deployment_id: publisher.deployment_id.clone(),
             instance_id: publisher.instance_id.clone(),
             contract_id: Some(publisher.participant_id.clone()),
             contract_digest: None,
             session_status: "active".to_owned(),
-        })
+        };
+        if provider
+            .revocation_time(&authorization_context)
+            .map_err(|error| EventVerificationFailure::retryable(error.to_string()))?
+            .is_some()
+        {
+            return Err(EventVerificationFailure::rejected(
+                "authorization context is revoked",
+            ));
+        }
+        Ok(result)
     }
 }
 

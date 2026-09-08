@@ -12,7 +12,6 @@ pub(super) async fn dispatch(
     match subject {
         "rpc.v1.Auth.Devices.Provision" => processor.devices_provision(payload, &caller).await,
         "rpc.v1.Auth.Devices.List" => processor.devices_list(payload).await,
-        "rpc.v1.Auth.Devices.ConnectInfo.Get" => processor.devices_connect_info(payload).await,
         "rpc.v1.Auth.DeviceUserAuthorities.List" => {
             processor.device_user_authorities_list(payload).await
         }

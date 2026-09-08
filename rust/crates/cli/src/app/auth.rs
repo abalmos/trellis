@@ -6,7 +6,8 @@ use qrcode::{render::unicode, QrCode};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use trellis_rs::auth as authlib;
-use trellis_runtime_apis::auth::{types as auth_types, AuthClient};
+use trellis_runtime_apis::auth::types as auth_types;
+use trellis_runtime_apis::auth::{rpc::AuthParticipantsGetError, AuthClient};
 use ulid::Ulid;
 
 pub(crate) fn render_agent_login_instructions(login_url: &str) -> miette::Result<String> {
@@ -30,7 +31,6 @@ fn authenticated_user_json(me: &authlib::AuthenticatedUser) -> Value {
         "principalId": &me.principal_id,
         "state": &me.state,
         "name": &me.name,
-        "capabilities": &me.capabilities,
     })
 }
 
@@ -52,10 +52,27 @@ pub(super) async fn identity(format: OutputFormat, command: IdentityCommand) -> 
             IdentityGrantsSubcommand::List(args) => {
                 identity_grants_list_command(format, &args).await
             }
+            IdentityGrantsSubcommand::Get(args) => identity_grants_get_command(format, &args).await,
+            IdentityGrantsSubcommand::Set(args) => identity_grants_set_command(format, &args).await,
             IdentityGrantsSubcommand::Revoke(args) => {
                 identity_grants_revoke_command(format, &args).await
             }
         },
+    }
+}
+
+pub(super) async fn participants(
+    format: OutputFormat,
+    command: ParticipantsCommand,
+) -> miette::Result<()> {
+    match command.command {
+        ParticipantsSubcommand::Install(args) => participants_install_command(format, &args).await,
+    }
+}
+
+pub(super) async fn issuers(format: OutputFormat, command: IssuersCommand) -> miette::Result<()> {
+    match command.command {
+        IssuersSubcommand::Revoke(args) => issuers_revoke_command(format, &args).await,
     }
 }
 
@@ -116,17 +133,6 @@ fn identity_labels(identities: &[Value]) -> String {
         })
         .collect::<Vec<_>>()
         .join(",")
-}
-
-fn value_string(value: &Value, field: &str) -> String {
-    value
-        .get(field)
-        .and_then(|value| match value {
-            Value::String(value) => Some(value.clone()),
-            Value::Number(value) => Some(value.to_string()),
-            _ => None,
-        })
-        .unwrap_or_default()
 }
 
 fn latest_last_auth_by_user(sessions: &[Value]) -> BTreeMap<String, String> {
@@ -241,7 +247,6 @@ async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
         .sessions_list(&auth_types::AuthSessionsListRequest {
             principal_id: None,
             participant_id: None,
-            deployment_id: None,
             state: None,
             cursor: None,
             limit: Some(100),
@@ -320,11 +325,6 @@ async fn users_create_command(format: OutputFormat, args: &UserCreateArgs) -> mi
     let auth_client = AuthClient::new(&connected);
     let _username = trimmed_optional(&args.username)
         .ok_or_else(|| miette::miette!("--username is required to create a local user"))?;
-    if !args.capabilities.is_empty() || !args.groups.is_empty() {
-        return Err(miette::miette!(
-            "direct capabilities and capability groups were removed; authorize the participant proposal instead"
-        ));
-    }
     let user = auth_client
         .rpc()
         .auth()
@@ -377,19 +377,6 @@ async fn users_edit_command(format: OutputFormat, args: &UserEditArgs) -> miette
         .await
         .into_diagnostic()?
         .user;
-    if args.clear_capabilities
-        || args.clear_groups
-        || !args.set_capabilities.is_empty()
-        || !args.add_capabilities.is_empty()
-        || !args.remove_capabilities.is_empty()
-        || !args.set_groups.is_empty()
-        || !args.add_groups.is_empty()
-        || !args.remove_groups.is_empty()
-    {
-        return Err(miette::miette!(
-            "direct capabilities and capability groups were removed; update participant authority instead"
-        ));
-    }
     let next_name = trimmed_optional(&args.name);
     let next_email = trimmed_optional(&args.email);
 
@@ -526,7 +513,7 @@ pub(super) async fn current_user(
         .map_err(|error| authlib::TrellisAuthError::OperationFailed(error.to_string()))?;
     let user = response.user.ok_or_else(|| {
         authlib::TrellisAuthError::NotUserSession(
-            response.session.participant_kind.as_str().to_owned(),
+            response.connection.principal_kind.as_str().to_owned(),
         )
     })?;
     Ok(serde_json::from_value(serde_json::to_value(user)?)?)
@@ -536,20 +523,9 @@ async fn revoke_current_session(
     connected: &trellis_rs::generated::Caller,
 ) -> Result<(), authlib::TrellisAuthError> {
     let auth = AuthClient::new(connected);
-    let current = auth
-        .rpc()
-        .auth()
-        .sessions_me()
-        .await
-        .map_err(|error| authlib::TrellisAuthError::OperationFailed(error.to_string()))?;
     auth.rpc()
         .auth()
-        .sessions_revoke(&auth_types::AuthSessionsRevokeRequest {
-            session_id: current.session.session_id,
-            expected_version: Some(current.session.version),
-            reason: Some("CLI logout".to_owned()),
-            idempotency_key: cli_idempotency_key(),
-        })
+        .sessions_logout()
         .await
         .map_err(|error| authlib::TrellisAuthError::OperationFailed(error.to_string()))?;
     Ok(())
@@ -585,76 +561,49 @@ async fn identity_grants_list_command(
     args: &IdentityGrantsListArgs,
 ) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
-    let auth_client = AuthClient::new(&connected);
-    let identity_grants = auth_client
+    let owner_id = match &args.user {
+        Some(user) => user.clone(),
+        None => current_user(&connected).await.into_diagnostic()?.user_id,
+    };
+    let response = AuthClient::new(&connected)
         .rpc()
         .auth()
-        .identity_authority_list(&auth_types::AuthIdentityAuthorityListRequest {
-            principal_id: args.user.clone(),
-            participant_id: None,
-            state: None,
+        .grants_list(&auth_types::AuthGrantsListRequest {
             cursor: None,
             limit: Some(100),
+            owner_id: Some(owner_id.clone()),
+            owner_kind: Some(auth_types::AuthGrantsListRequestOwnerKind::User),
+            participant_id: args.participant.clone(),
+            state: None,
         })
         .await
-        .into_diagnostic()?
-        .entries;
-    let identity_values = identity_grants
-        .iter()
-        .map(serde_json::to_value)
-        .collect::<Result<Vec<_>, _>>()
         .into_diagnostic()?;
-    let identity_values = identity_values
-        .into_iter()
-        .filter(|entry| {
-            args.digest.as_deref().is_none_or(|digest| {
-                entry
-                    .get("participantArtifactDigest")
-                    .and_then(Value::as_str)
-                    == Some(digest)
-            })
-        })
-        .collect::<Vec<_>>();
-
     if output::is_json(format) {
-        output::print_json(&json!({
-            "user": args.user,
-            "digest": args.digest,
-            "identityAuthorities": identity_values,
-        }))?;
-        return Ok(());
+        output::print_json(&serde_json::to_value(response).into_diagnostic()?)?;
+    } else {
+        output::print_info(&format!("user={owner_id}"));
+        output::print_info(&format!("matched grants={}", response.entries.len()));
+        let rows = response
+            .entries
+            .iter()
+            .map(|entry| {
+                vec![
+                    entry.owner_id.clone(),
+                    entry.participant_id.clone(),
+                    entry.state.to_string(),
+                    entry.revision.to_string(),
+                    entry.installed_revision.to_string(),
+                ]
+            })
+            .collect();
+        println!(
+            "{}",
+            output::table(
+                &["owner", "participant", "state", "revision", "installed"],
+                rows
+            )
+        );
     }
-
-    output::print_info(&format!(
-        "matched identity grants={}",
-        identity_values.len()
-    ));
-    if let Some(user) = &args.user {
-        output::print_info(&format!("user={user}"));
-    }
-    if let Some(digest) = &args.digest {
-        output::print_info(&format!("digest={digest}"));
-    }
-
-    let rows = identity_values
-        .into_iter()
-        .map(|entry| {
-            vec![
-                value_string(&entry, "authorityId"),
-                value_string(&entry, "participantId"),
-                value_string(&entry, "state"),
-                value_string(&entry, "participantArtifactDigest"),
-                value_string(&entry, "updatedAt"),
-            ]
-        })
-        .collect();
-    println!(
-        "{}",
-        output::table(
-            &["authorityId", "participantId", "state", "digest", "updated"],
-            rows
-        )
-    );
     Ok(())
 }
 
@@ -663,55 +612,214 @@ async fn identity_grants_revoke_command(
     args: &IdentityGrantsRevokeArgs,
 ) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
-    let auth_client = AuthClient::new(&connected);
-    let authority = auth_client
+    let owner_id = match &args.user {
+        Some(user) => user.clone(),
+        None => current_user(&connected).await.into_diagnostic()?.user_id,
+    };
+    let auth = AuthClient::new(&connected);
+    let expected_revision = match args.expected_revision {
+        Some(revision) => revision,
+        None => current_grant_revision(&connected, &owner_id, &args.participant_id)
+            .await?
+            .ok_or_else(|| miette::miette!("grant binding does not exist"))?,
+    };
+    let response = auth
         .rpc()
         .auth()
-        .identity_authority_get(&auth_types::AuthIdentityAuthorityGetRequest {
-            authority_id: args.identity_grant_id.clone(),
-        })
-        .await
-        .into_diagnostic()?
-        .authority;
-    if args
-        .user
-        .as_deref()
-        .is_some_and(|user| authority.principal_id != user)
-    {
-        return Err(miette::miette!(
-            "identity authority does not belong to requested user"
-        ));
-    }
-    auth_client
-        .rpc()
-        .auth()
-        .identity_authority_revoke(&auth_types::AuthIdentityAuthorityRevokeRequest {
-            authority_id: args.identity_grant_id.clone(),
-            expected_version: authority.version,
-            reason: None,
+        .grants_revoke(&auth_types::AuthGrantsRevokeRequest {
+            expected_revision: i64::try_from(expected_revision).into_diagnostic()?,
             idempotency_key: cli_idempotency_key(),
+            owner_id: owner_id.clone(),
+            owner_kind: auth_types::AuthGrantsRevokeRequestOwnerKind::User,
+            participant_id: args.participant_id.clone(),
+            reason: args.reason.clone(),
         })
         .await
         .into_diagnostic()?;
-    let success = true;
-
     if output::is_json(format) {
-        output::print_json(&json!({
-            "success": success,
-            "identityGrantId": args.identity_grant_id,
-            "user": args.user,
-        }))?;
-        return Ok(());
-    }
-
-    if success {
-        output::print_success("revoked identity grant");
+        output::print_json(&serde_json::to_value(response).into_diagnostic()?)?;
     } else {
-        output::print_info("no matching identity grant found");
+        output::print_success("revoked identity grant");
+        output::print_info(&format!("user={owner_id}"));
+        output::print_info(&format!("participant={}", args.participant_id));
     }
-    output::print_info(&format!("identityGrantId={}", args.identity_grant_id));
-    if let Some(user) = &args.user {
-        output::print_info(&format!("user={user}"));
+    Ok(())
+}
+
+async fn identity_grants_get_command(
+    format: OutputFormat,
+    args: &IdentityGrantsGetArgs,
+) -> miette::Result<()> {
+    let (_state, connected) = connect_authenticated_cli_client().await?;
+    let owner_id = match &args.user {
+        Some(user) => user.clone(),
+        None => current_user(&connected).await.into_diagnostic()?.user_id,
+    };
+    let response = AuthClient::new(&connected)
+        .rpc()
+        .auth()
+        .grants_get(&auth_types::AuthGrantsGetRequest {
+            owner_id: owner_id.clone(),
+            owner_kind: auth_types::AuthGrantsGetRequestOwnerKind::User,
+            participant_id: args.participant_id.clone(),
+        })
+        .await
+        .into_diagnostic()?;
+    if output::is_json(format) {
+        output::print_json(&serde_json::to_value(response).into_diagnostic()?)?;
+    } else if let Some(binding) = response.binding {
+        output::print_json(&binding)?;
+    } else {
+        output::print_info("no matching identity grant");
+    }
+    Ok(())
+}
+
+async fn identity_grants_set_command(
+    format: OutputFormat,
+    args: &IdentityGrantsSetArgs,
+) -> miette::Result<()> {
+    let (_state, connected) = connect_authenticated_cli_client().await?;
+    let mut input: Value =
+        serde_json::from_slice(&std::fs::read(&args.input).into_diagnostic()?).into_diagnostic()?;
+    let object = input
+        .as_object_mut()
+        .ok_or_else(|| miette::miette!("grant input must be a JSON object"))?;
+    let expected = [
+        "expiresAt",
+        "grants",
+        "installedRevision",
+        "platformPrivileges",
+    ];
+    if object.len() != expected.len() || expected.iter().any(|field| !object.contains_key(*field)) {
+        return Err(miette::miette!(
+            "grant input must contain exactly installedRevision, grants, platformPrivileges, and expiresAt"
+        ));
+    }
+    let expected_revision = match args.expected_revision {
+        Some(revision) => revision,
+        None => current_grant_revision(&connected, &args.user, &args.participant_id)
+            .await?
+            .unwrap_or(0),
+    };
+    object.insert("ownerKind".to_owned(), json!("user"));
+    object.insert("ownerId".to_owned(), json!(args.user));
+    object.insert("participantId".to_owned(), json!(args.participant_id));
+    object.insert("expectedRevision".to_owned(), json!(expected_revision));
+    object.insert("idempotencyKey".to_owned(), json!(cli_idempotency_key()));
+    let request: auth_types::AuthGrantsSetRequest =
+        serde_json::from_value(input).into_diagnostic()?;
+    let response = AuthClient::new(&connected)
+        .rpc()
+        .auth()
+        .grants_set(&request)
+        .await
+        .into_diagnostic()?;
+    if output::is_json(format) {
+        output::print_json(&serde_json::to_value(response).into_diagnostic()?)?;
+    } else {
+        output::print_success("set identity grant");
+        output::print_info(&format!("user={}", args.user));
+        output::print_info(&format!("participant={}", args.participant_id));
+    }
+    Ok(())
+}
+
+async fn current_grant_revision(
+    connected: &trellis_rs::generated::Caller,
+    owner_id: &str,
+    participant_id: &str,
+) -> miette::Result<Option<u64>> {
+    let response = AuthClient::new(connected)
+        .rpc()
+        .auth()
+        .grants_get(&auth_types::AuthGrantsGetRequest {
+            owner_id: owner_id.to_owned(),
+            owner_kind: auth_types::AuthGrantsGetRequestOwnerKind::User,
+            participant_id: participant_id.to_owned(),
+        })
+        .await
+        .into_diagnostic()?;
+    Ok(response
+        .binding
+        .and_then(|binding| binding.get("revision").and_then(Value::as_u64)))
+}
+
+async fn participants_install_command(
+    format: OutputFormat,
+    args: &ParticipantsInstallArgs,
+) -> miette::Result<()> {
+    let participant =
+        super::deploy::compile_participant_input(&args.source, args.participant.as_deref(), None)?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
+    let auth = AuthClient::new(&connected);
+    let expected_revision = match args.expected_revision {
+        Some(revision) => revision,
+        None => match auth
+            .rpc()
+            .auth()
+            .participants_get(&auth_types::AuthParticipantsGetRequest {
+                participant_id: participant.participant_id.clone(),
+                revision: None,
+            })
+            .await
+        {
+            Ok(current) => u64::try_from(current.participant.revision).into_diagnostic()?,
+            Err(trellis_rs::client::CallError::Declared(error))
+                if matches!(
+                    error.as_ref(),
+                    AuthParticipantsGetError::AuthError(error) if error.reason == "not_found"
+                ) =>
+            {
+                0
+            }
+            Err(error) => return Err(error).into_diagnostic(),
+        },
+    };
+    let response = auth
+        .rpc()
+        .auth()
+        .participants_install(&auth_types::AuthParticipantsInstallRequest {
+            api_artifacts: participant.api_artifacts,
+            expected_revision: i64::try_from(expected_revision).into_diagnostic()?,
+            idempotency_key: cli_idempotency_key(),
+            participant_artifact: participant.participant_artifact,
+        })
+        .await
+        .into_diagnostic()?;
+    if output::is_json(format) {
+        output::print_json(&serde_json::to_value(response).into_diagnostic()?)?;
+    } else {
+        output::print_success("installed participant definition");
+        output::print_info(&format!(
+            "participantId={}",
+            response.participant.participant_id
+        ));
+        output::print_info(&format!("revision={}", response.participant.revision));
+    }
+    Ok(())
+}
+
+async fn issuers_revoke_command(
+    format: OutputFormat,
+    args: &IssuersRevokeArgs,
+) -> miette::Result<()> {
+    let (_state, connected) = connect_authenticated_cli_client().await?;
+    let response = AuthClient::new(&connected)
+        .rpc()
+        .auth()
+        .issuers_revoke(&auth_types::AuthIssuersRevokeRequest {
+            idempotency_key: cli_idempotency_key(),
+            key_id: args.key_id.clone(),
+            reason: args.reason.clone(),
+        })
+        .await
+        .into_diagnostic()?;
+    if output::is_json(format) {
+        output::print_json(&serde_json::to_value(response).into_diagnostic()?)?;
+    } else {
+        output::print_success("revoked issuer");
+        output::print_info(&format!("keyId={}", response.key_id));
     }
     Ok(())
 }
@@ -754,7 +862,6 @@ mod tests {
         let user = AuthenticatedUser {
             principal_id: "usr_123".to_string(),
             state: "active".to_string(),
-            capabilities: vec!["admin".to_string()],
             email: Some("ada@example.com".to_string()),
             image: None,
             name: Some("Ada".to_string()),
@@ -768,7 +875,6 @@ mod tests {
                 "principalId": "usr_123",
                 "state": "active",
                 "name": "Ada",
-                "capabilities": ["admin"],
             })
         );
     }

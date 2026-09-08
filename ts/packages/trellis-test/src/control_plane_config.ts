@@ -437,20 +437,15 @@ target_signing_seed_file = "./auth-target-signing.seed"
 xkey_seed_file = "./auth-sx.seed"
 
 [auth.authorization]
-trust_root_file = "./authorization-root.json"
-issuer_manifest_file = "./authorization-issuer-manifest.json"
 issuer_signing_seed_file = "./authorization-issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
 refresh_jitter_seconds = 15
 minimum_context_lifetime_seconds = 76
 maximum_bootstrap_jwt_lifetime_seconds = 3600
-cleanup_grace_seconds = 3600
 allowed_clock_skew_seconds = 30
 maximum_context_bytes = 16384
 maximum_permissions = 4096
-maximum_capabilities = 256
-trust_bucket = "trellis_authorization_trust"
 context_bucket = "trellis_authorization_contexts"
 registry_replicas = 1
 

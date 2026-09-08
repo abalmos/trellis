@@ -31,8 +31,8 @@ fn browser_flow() -> AuthBrowserFlow {
         request_id: "request-1".to_owned(),
         request_digest: DIGEST.to_owned(),
         participant_id: "app-1".to_owned(),
-        participant_artifact_digest: DIGEST.to_owned(),
-        participant_needs_digest: DIGEST.to_owned(),
+        installed_revision: 1,
+        target_grant_revision: 0,
         consent: BrowserConsentProposal {
             participant_id: "app-1".to_owned(),
             participant_artifact_digest: DIGEST.to_owned(),
@@ -55,7 +55,6 @@ fn browser_flow() -> AuthBrowserFlow {
             optional_capability_definitions,
         },
         session_public_key: "session-key".to_owned(),
-        session_nkey: "USESSIONKEY".to_owned(),
         portal_id: "builtin".to_owned(),
         redirect_target: Some("https://app.example/callback".to_owned()),
         principal_id: None,
@@ -122,6 +121,7 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
     directly_approved.principal_id = Some("user-1".to_owned());
     directly_approved.authenticated_provider_id = Some("local".to_owned());
     directly_approved.portal_binding_digest = Some(DIGEST.to_owned());
+    directly_approved.target_grant_revision = 7;
     directly_approved.version = 2;
     repository
         .replace_browser_flow(1, directly_approved.clone())
@@ -132,9 +132,18 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
     directly_approved.completed_at = Some(200);
     directly_approved.version = 3;
     repository
-        .replace_browser_flow(2, directly_approved)
+        .replace_browser_flow(2, directly_approved.clone())
         .await
         .unwrap();
+    let mut changed_grant_revision = directly_approved;
+    changed_grant_revision.target_grant_revision = 8;
+    changed_grant_revision.version = 4;
+    assert_eq!(
+        repository
+            .replace_browser_flow(3, changed_grant_revision)
+            .await,
+        Err(AuthorizationStateError::StorageConflict)
+    );
 
     let mut approval_required = flow.clone();
     approval_required.state = AuthBrowserFlowState::Authenticated;
@@ -293,17 +302,27 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
         Some(completed)
     );
 
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
     let connection = AuthConnectionPresence {
         format: "trellis.auth-connection-presence.v1".to_owned(),
         connection_id: DIGEST.to_owned(),
-        session_id: "ses_01".to_owned(),
+        runtime_connection_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV".to_owned(),
+        login_session_id: Some("01ARZ3NDEKTSV4RRFFQ69G5FAW".to_owned()),
+        principal_id: "usr_01".to_owned(),
+        principal_kind: trellis_protocol::AuthorizationPrincipalKind::User,
+        participant_id: "app-1".to_owned(),
+        deployment_id: None,
+        instance_id: None,
         context_digest: DIGEST.to_owned(),
         server_id: "server-1".to_owned(),
         client_id: "42".to_owned(),
         user_nkey: "user-nkey".to_owned(),
         remote_address: Some("127.0.0.1".to_owned()),
-        connected_at: 1_000,
-        last_seen_at: 1_000,
+        connected_at: now,
+        last_seen_at: now,
         version: 1,
     };
     repository
@@ -321,7 +340,7 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
         .unwrap();
     assert_eq!(
         repository
-            .list_connection_presence(Some("ses_01"))
+            .list_connection_presence(Some("01ARZ3NDEKTSV4RRFFQ69G5FAW"))
             .await
             .unwrap()
             .len(),
@@ -329,7 +348,7 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
     );
     repository.delete_connection_presence(DIGEST).await.unwrap();
     let remaining = repository
-        .list_connection_presence(Some("ses_01"))
+        .list_connection_presence(Some("01ARZ3NDEKTSV4RRFFQ69G5FAW"))
         .await
         .unwrap();
     assert_eq!(remaining.len(), 1);

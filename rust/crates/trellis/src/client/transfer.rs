@@ -894,7 +894,7 @@ mod tests {
     }
 
     #[test]
-    fn upload_headers_include_session_proof_sequence_and_control_kind() {
+    fn upload_headers_include_context_proof_sequence_and_control_kind() {
         let auth = test_auth();
         let subject = "transfer.v1.upload.test.tx1";
         let reply = "_INBOX.test.reply";

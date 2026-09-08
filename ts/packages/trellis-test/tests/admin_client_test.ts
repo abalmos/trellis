@@ -28,15 +28,14 @@ const expectedAdminMethods = [
   "stateAdminGet",
   "stateAdminList",
   "authDeploymentsCreate",
-  "authDeploymentAuthorityPlan",
-  "authDeploymentAuthorityAcceptUpdate",
-  "authDeploymentAuthorityAcceptMigration",
-  "authDeploymentAuthorityList",
-  "authDeploymentAuthorityReconcile",
-  "authDeploymentAuthorityGet",
+  "authDeploymentsGet",
+  "authDeploymentsApply",
+  "authParticipantsInstall",
+  "authGrantsGet",
+  "authGrantsList",
+  "authGrantsSet",
+  "authGrantsRevoke",
   "authServiceInstancesProvision",
-  "authDeploymentAuthorityPlansList",
-  "authDeploymentAuthorityReject",
   "authSessionsRevoke",
 ] as const;
 
@@ -66,8 +65,6 @@ Deno.test("client auth completion is not an admin RPC", async () => {
     trellisUrl: "http://127.0.0.1",
     adminPassword: "test",
     defaultDeployment: "test",
-    reconciliationMs: 1,
-    autoAccept: [],
     getBootstrapUrl: () => Promise.reject(new Error("not used")),
     bootstrapComplete: true,
   });
@@ -84,11 +81,10 @@ Deno.test("concurrent deployment creation shares failure and permits retry", asy
   let attempts = 0;
   const context: AdminDeploymentContext = {
     defaultDeployment: "test",
-    reconciliationMs: 1,
-    autoAccept: new Set(),
     createdDeployments: new Map(),
+    deploymentBindingRevisions: new Map(),
     deploymentIds: new Map(),
-    authorityIds: new Map(),
+    installedParticipants: new Map(),
     protocolApis: new Map(),
     rpc: <M extends TrellisTestAdminRpcMethod>(
       method: M,

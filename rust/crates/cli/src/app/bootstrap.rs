@@ -12,12 +12,6 @@ use time::OffsetDateTime;
 use trellis_bootstrap::{generate_trellis_bootstrap, BootstrapError, TrellisBootstrapOptions};
 use ulid::Ulid;
 
-pub(super) async fn infra(format: OutputFormat, command: InfraCommand) -> miette::Result<()> {
-    match command.command {
-        InfraSubcommand::Trust(args) => super::trust_tooling::run(format, args),
-    }
-}
-
 pub(super) async fn init(format: OutputFormat, command: InitCommand) -> miette::Result<()> {
     match command.command {
         InitSubcommand::Config(args) => init_config_command(format, &args),

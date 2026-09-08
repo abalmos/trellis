@@ -507,7 +507,6 @@ async fn resolve_snapshot(
                     "reason": review.reason,
                     "version": review.version,
                 },
-                "authority": null,
             }))?;
             Ok(snapshot(
                 &review,
@@ -560,7 +559,6 @@ async fn resolve_snapshot(
                     "reason": review.reason,
                     "version": review.version,
                 },
-                "authority": null,
             }))?;
             Ok(snapshot(
                 &review,
@@ -613,7 +611,6 @@ async fn resolve_snapshot(
                     "reason": review.reason,
                     "version": review.version,
                 },
-                "authority": null,
             }))?;
             Ok(snapshot(
                 &review,

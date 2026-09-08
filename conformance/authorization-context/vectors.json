@@ -1,54 +1,33 @@
 {
-  "format": "trellis.authorization-context.conformance.v3",
-  "cryptography": {
-    "hash": "SHA-256",
-    "signature": "Ed25519",
-    "binaryEncoding": "base64url without padding",
-    "jsonCanonicalization": "RFC 8785",
-    "integerEncoding": "ASCII decimal safe integers only",
-    "lengthPrefix": "unsigned 32-bit big endian"
-  },
-  "execution": {
-    "base": "Every case starts from the complete root, manifest, and signed context JSON objects.",
-    "mutations": "mutations are RFC 6902 add, remove, or replace operations with a target selecting root, manifest, context, request, or event.",
-    "resign": "resign deterministically signs named objects after mutations with the complete-chain seeds.",
-    "expected": "Each case compares valid, code, path, and the optional output subset."
-  },
   "completeChain": {
-    "rootSeed": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
-    "issuerSeed": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
-    "sessionSeed": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
-    "rootPublicKey": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
-    "rootKeyId": "NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4",
-    "rootCanonicalJson": "{\"authority\":\"trellis-test\",\"format\":\"trellis.authorization-trust-root.v1\",\"keyId\":\"NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4\",\"publicKey\":\"iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w\"}",
-    "rootDigest": "5UukrkM5tHc81s0tVtlRT_ZDhVgcO8SgTSQuUr0dPAk",
-    "issuerPublicKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+    "contextCanonicalJson": "{\"connectionId\":\"01JY0000000000000000000001\",\"critical\":[],\"deploymentId\":null,\"expiresAt\":1300,\"extensions\":{},\"format\":\"trellis.authorization-context.v1\",\"grantRevision\":12,\"grants\":{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Get\",\"surface\":\"rpc\"}}]},\"identityKeyId\":null,\"inboxPrefix\":\"_INBOX.test\",\"instanceId\":null,\"issuedAt\":1100,\"issuerKeyId\":\"ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc\",\"loginSessionId\":\"01JY0000000000000000000003\",\"notBefore\":1100,\"ownerId\":\"01JY0000000000000000000002\",\"ownerKind\":\"user\",\"participantId\":\"documents-web\",\"platformPrivileges\":[],\"principalId\":\"01JY0000000000000000000002\",\"principalKind\":\"user\",\"sessionKey\":\"7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E\",\"signature\":\"F5xi0mU42VjA_9kWwQ0UODt8ViwnOm6CErmTlu1BxhqqVgVDb7g5tXKMHKAvb2i3uXyFxKnb_gyHv2UH04hxAg\"}",
+    "contextDigest": "xsMRUU8wEhLKyW2mkpp8yFlP742z3FY4FATyZaeJsC4",
+    "eventProof": "OReWseX3OtCjHhD0agzg175qp_S5isoWcDRgm6lpKFJQTEB1vFN-6hdi0FplIbVKky5cVrEcErDvhYpCVuoWBA",
+    "eventProofDigest": "ToQoe9IiCDm3zSk3oQtb9BwaN0HRGUO0wt_FQN1Wjcs",
+    "eventProofInputHex": "000000247472656c6c69732e617574686f72697a6174696f6e2d6576656e742d70726f6f662e763100000020c6c311514f301212cac96da6929a7cc8594fef8db3dc56381404f265a789b02e000000216576656e74732e76312e446f63756d656e74732e4368616e6765642e646f632d31000000209eb803b2c601706a797e2e58a58cb40b01ff0a0b024b1056ae044cafce2da786000000096576745f646f635f3100000014313937302d30312d30315430303a31393a31305a",
     "issuerKeyId": "ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc",
-    "manifestUnsignedCanonicalJson": "{\"authority\":\"trellis-test\",\"critical\":[],\"expiresAt\":1500,\"extensions\":{},\"format\":\"trellis.authorization-issuer-manifest.v1\",\"generation\":7,\"issuedAt\":1000,\"issuers\":[{\"keyId\":\"ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc\",\"publicKey\":\"gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q\"}],\"notBefore\":1000,\"rootKeyId\":\"NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4\"}",
-    "manifestSignature": "7HkXELf-84aEMjoutco7PCo5GQTNXZIpyz0VLLBrXuBFlvw8L5hmIvygq72OGVMYbo5ss42Rvy6NxWBkQ4p0BA",
-    "manifestCanonicalJson": "{\"authority\":\"trellis-test\",\"critical\":[],\"expiresAt\":1500,\"extensions\":{},\"format\":\"trellis.authorization-issuer-manifest.v1\",\"generation\":7,\"issuedAt\":1000,\"issuers\":[{\"keyId\":\"ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc\",\"publicKey\":\"gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q\"}],\"notBefore\":1000,\"rootKeyId\":\"NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4\",\"signature\":\"7HkXELf-84aEMjoutco7PCo5GQTNXZIpyz0VLLBrXuBFlvw8L5hmIvygq72OGVMYbo5ss42Rvy6NxWBkQ4p0BA\"}",
-    "manifestDigest": "yUGCBig70TF3IKHEY4tD7Padyc-UhJD330XkwVtgdSw",
+    "issuerPublicKey": "gTl3Dqh9F19Wo1Rmw0x-zMuNipG07jeiXfYPW4_Js5Q",
+    "issuerSeed": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+    "requestProof": "dwvwvqmg-xf1y6NJPVhfYoSBLCpV6tNB43aHfw26rUUu5pYaB92L1FYhIOhfibDwuQB8x3qcDHirTfm61FOEAA",
+    "requestProofDigest": "HXj-iOpMDgXx2jTO2iWxB2vfuBjEh8TVpJCsOJgBoJg",
+    "requestProofInputHex": "000000267472656c6c69732e617574686f72697a6174696f6e2d726571756573742d70726f6f662e763100000020c6c311514f301212cac96da6929a7cc8594fef8db3dc56381404f265a789b02e000000147270632e76312e446f63756d656e74732e476574000000115f494e424f582e746573742e7265706c79000000209eb803b2c601706a797e2e58a58cb40b01ff0a0b024b1056ae044cafce2da7860000000431313030000000087265715f74657374",
     "sessionPublicKey": "7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E",
-    "sessionKeyId": "ti6Gf6LzOv5i1daxZC4WIdVDMHhGsqV7iX5xCRm3Zwk",
-    "contextSignature": "3ka_pOmXJcN0eI5za4THEcKhhMGG-hFemL8TMcOeKWUSojl_VWwHNyoElZh1ehVWvvntmGkvtL_qJq7lIOaUBw",
-    "contextCanonicalJson": "{\"authority\":\"trellis-test\",\"authorityRef\":{\"id\":\"usr_test\",\"kind\":\"identity\",\"version\":12},\"capabilities\":[\"platform.read\"],\"critical\":[],\"expiresAt\":1300,\"extensions\":{},\"format\":\"trellis.authorization-context.v1\",\"grantSet\":{\"format\":\"trellis.grant-set.v1\",\"permissions\":[{\"action\":\"call\",\"target\":{\"api\":\"documents@v1\",\"kind\":\"apiSurface\",\"name\":\"Documents.Get\",\"surface\":\"rpc\"}}]},\"inboxPrefix\":\"_INBOX.test\",\"instanceId\":null,\"issuedAt\":1100,\"issuerKeyId\":\"ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc\",\"issuerManifestGeneration\":7,\"notBefore\":1100,\"participant\":{\"artifactDigest\":\"BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ\",\"id\":\"documents-web\",\"kind\":\"app\",\"needsDigest\":\"BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU\"},\"principal\":{\"id\":\"usr_test\",\"kind\":\"user\"},\"sessionId\":\"ses_test\",\"sessionKey\":\"7UkoxijRwsbq6QM4kFmVYSlZJzpcY_k2NsFGFKyHN9E\",\"signature\":\"3ka_pOmXJcN0eI5za4THEcKhhMGG-hFemL8TMcOeKWUSojl_VWwHNyoElZh1ehVWvvntmGkvtL_qJq7lIOaUBw\"}",
-    "contextDigest": "QBG0Utl1erhLs1aYVhNpyoe0JGLTfBbrRiwO_ImK00w",
-    "requestProofInputHex": "000000267472656c6c69732e617574686f72697a6174696f6e2d726571756573742d70726f6f662e7631000000204011b452d9757ab84bb35698561369ca87b42462d37c16eb462c0efc898ad34c000000147270632e76312e446f63756d656e74732e476574000000115f494e424f582e746573742e7265706c79000000209eb803b2c601706a797e2e58a58cb40b01ff0a0b024b1056ae044cafce2da7860000000431313030000000087265715f74657374",
-    "requestProofDigest": "fHyDchawXxUdjCSg6htzOV04ET9FLKg8E4hBufPfz64",
-    "requestProof": "3dsRlkhh_cDiRyrUlKYeVKoYrRnxsxl_9CrvhZOMTrqPnWDcchMAIubEPqW78IL5ABxNqkT1KFlvWjoQSK74Cw",
-    "eventProofInputHex": "000000247472656c6c69732e617574686f72697a6174696f6e2d6576656e742d70726f6f662e7631000000204011b452d9757ab84bb35698561369ca87b42462d37c16eb462c0efc898ad34c000000216576656e74732e76312e446f63756d656e74732e4368616e6765642e646f632d31000000209eb803b2c601706a797e2e58a58cb40b01ff0a0b024b1056ae044cafce2da786000000096576745f646f635f3100000014313937302d30312d30315430303a31393a31305a",
-    "eventProofDigest": "Gnrw9PeHuWExhLrBAxQOHcXFEd-9eq9U_UTFWn79ris",
-    "eventProof": "v_zQhj4LNAggTfoWqqTvXOgyNeB0UqtRRGxlWKZRBgMJOGJk94uW119bVW3KgkUKLZhBN1dkU53v-OtxacDTBg"
+    "sessionSeed": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM"
+  },
+  "cryptography": {
+    "binaryEncoding": "base64url without padding",
+    "hash": "SHA-256",
+    "integerEncoding": "ASCII decimal safe integers only",
+    "jsonCanonicalization": "RFC 8785",
+    "lengthPrefix": "unsigned 32-bit big endian",
+    "signature": "Ed25519"
   },
   "defaults": {
-    "policy": {
-      "nowUnixSeconds": 1100,
-      "allowedClockSkewSeconds": 30,
-      "maximumContextLifetimeSeconds": 300,
-      "maximumContextBytes": 16384,
-      "maximumPermissions": 16,
-      "maximumCapabilities": 16,
-      "minimumManifestGeneration": 7
+    "event": {
+      "eventId": "evt_doc_1",
+      "eventTime": "1970-01-01T00:19:10Z",
+      "payload": "{\"id\":\"doc-1\"}",
+      "subject": "events.v1.Documents.Changed.doc-1"
     },
     "permission": {
       "action": "call",
@@ -59,259 +38,20 @@
         "surface": "rpc"
       }
     },
-    "request": {
-      "subject": "rpc.v1.Documents.Get",
-      "reply": "_INBOX.test.reply",
-      "payload": "{\"id\":\"doc-1\"}",
-      "iat": 1100,
-      "requestId": "req_test"
+    "policy": {
+      "allowedClockSkewSeconds": 30,
+      "maximumContextBytes": 16384,
+      "maximumContextLifetimeSeconds": 300,
+      "maximumPermissions": 16,
+      "nowUnixSeconds": 1100
     },
-    "event": {
-      "subject": "events.v1.Documents.Changed.doc-1",
+    "request": {
+      "iat": 1100,
       "payload": "{\"id\":\"doc-1\"}",
-      "eventId": "evt_doc_1",
-      "eventTime": "1970-01-01T00:19:10Z"
+      "reply": "_INBOX.test.reply",
+      "requestId": "req_test",
+      "subject": "rpc.v1.Documents.Get"
     }
   },
-  "cases": [
-    {
-      "name": "valid-chain",
-      "operation": "verifyContext",
-      "expected": {
-        "valid": true,
-        "output": {
-          "issuerKeyId": "ajgD1fBZkCocba-8m6RykhL3yqwIY0zDrnaydSnwOCc",
-          "issuerManifestGeneration": 7,
-          "contextDigest": "QBG0Utl1erhLs1aYVhNpyoe0JGLTfBbrRiwO_ImK00w"
-        }
-      }
-    },
-    {
-      "name": "bad-manifest-root-signature",
-      "operation": "verifyManifest",
-      "mutations": [
-        {
-          "target": "manifest",
-          "op": "replace",
-          "path": "/signature",
-          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-        }
-      ],
-      "expected": {
-        "valid": false,
-        "code": "InvalidSignature",
-        "path": "/signature"
-      }
-    },
-    {
-      "name": "manifest-key-id-public-key-mismatch",
-      "operation": "verifyManifest",
-      "mutations": [
-        {
-          "target": "manifest",
-          "op": "replace",
-          "path": "/issuers/0/keyId",
-          "value": "NHUPmL1Z_PyUbaRaqr6TO-FUpLUJThxKv0KGZQXzyX4"
-        }
-      ],
-      "expected": {
-        "valid": false,
-        "code": "InvalidKeyId",
-        "path": "/issuers/0/keyId"
-      }
-    },
-    {
-      "name": "manifest-rollback",
-      "operation": "verifyManifest",
-      "inputs": { "policy": { "minimumManifestGeneration": 8 } },
-      "expected": {
-        "valid": false,
-        "code": "ManifestRollback",
-        "path": "/generation"
-      }
-    },
-    {
-      "name": "context-generation-mismatch",
-      "operation": "verifyContext",
-      "mutations": [
-        {
-          "target": "context",
-          "op": "replace",
-          "path": "/issuerManifestGeneration",
-          "value": 8
-        }
-      ],
-      "resign": ["context"],
-      "expected": {
-        "valid": false,
-        "code": "ManifestGenerationMismatch",
-        "path": "/issuerManifestGeneration"
-      }
-    },
-    {
-      "name": "issuer-absent",
-      "operation": "verifyContext",
-      "mutations": [
-        { "target": "manifest", "op": "remove", "path": "/issuers/0" }
-      ],
-      "resign": ["manifest"],
-      "expected": {
-        "valid": false,
-        "code": "IssuerNotListed",
-        "path": "/issuerKeyId"
-      }
-    },
-    {
-      "name": "issuer-signature-invalid",
-      "operation": "verifyContext",
-      "mutations": [
-        {
-          "target": "context",
-          "op": "replace",
-          "path": "/signature",
-          "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-        }
-      ],
-      "expected": {
-        "valid": false,
-        "code": "InvalidSignature",
-        "path": "/signature"
-      }
-    },
-    {
-      "name": "context-outlives-manifest",
-      "operation": "verifyContext",
-      "mutations": [
-        {
-          "target": "context",
-          "op": "replace",
-          "path": "/expiresAt",
-          "value": 1600
-        }
-      ],
-      "resign": ["context"],
-      "expected": {
-        "valid": false,
-        "code": "ContextOutlivesManifest",
-        "path": "/expiresAt"
-      }
-    },
-    {
-      "name": "permission-limit",
-      "operation": "verifyContext",
-      "mutations": [
-        {
-          "target": "context",
-          "op": "add",
-          "path": "/grantSet/permissions/-",
-          "value": {
-            "action": "call",
-            "target": {
-              "api": "documents@v1",
-              "kind": "apiSurface",
-              "name": "Documents.List",
-              "surface": "rpc"
-            }
-          }
-        }
-      ],
-      "resign": ["context"],
-      "inputs": { "policy": { "maximumPermissions": 1 } },
-      "expected": {
-        "valid": false,
-        "code": "InvalidFormat",
-        "path": "/grantSet/permissions"
-      }
-    },
-    {
-      "name": "capability-limit",
-      "operation": "verifyContext",
-      "mutations": [
-        {
-          "target": "context",
-          "op": "add",
-          "path": "/capabilities/-",
-          "value": "platform.write"
-        }
-      ],
-      "resign": ["context"],
-      "inputs": { "policy": { "maximumCapabilities": 1 } },
-      "expected": {
-        "valid": false,
-        "code": "InvalidFormat",
-        "path": "/capabilities"
-      }
-    },
-    {
-      "name": "current-request-proof-valid",
-      "operation": "verifyRequest",
-      "inputs": {
-        "request": {
-          "subject": "rpc.v1.Documents.Get",
-          "reply": "_INBOX.test.reply",
-          "payload": "{\"id\":\"doc-1\"}",
-          "iat": 1100,
-          "requestId": "req_test"
-        }
-      },
-      "expected": { "valid": true }
-    },
-    {
-      "name": "current-request-proof-invalid",
-      "operation": "verifyRequest",
-      "inputs": {
-        "request": {
-          "subject": "rpc.v1.Documents.Get",
-          "reply": "_INBOX.test.reply",
-          "payload": "changed",
-          "iat": 1100,
-          "requestId": "req_test"
-        }
-      },
-      "expected": {
-        "valid": false,
-        "code": "InvalidRequestProof",
-        "path": "/proof"
-      }
-    },
-    {
-      "name": "event-proof-valid",
-      "operation": "verifyEvent",
-      "inputs": { "policy": { "nowUnixSeconds": 1400 } },
-      "expected": { "valid": true }
-    },
-    {
-      "name": "event-proof-invalid",
-      "operation": "verifyEvent",
-      "mutations": [
-        {
-          "target": "event",
-          "op": "replace",
-          "path": "/eventId",
-          "value": "evt_changed"
-        }
-      ],
-      "expected": {
-        "valid": false,
-        "code": "InvalidEventProof",
-        "path": "/proof"
-      }
-    },
-    {
-      "name": "historical-exact-generation",
-      "operation": "verifyEvent",
-      "inputs": { "policy": { "nowUnixSeconds": 1400 }, "historical": true },
-      "expected": { "valid": true, "output": { "issuerManifestGeneration": 7 } }
-    },
-    {
-      "name": "current-floor-rejection",
-      "operation": "verifyContext",
-      "inputs": { "policy": { "minimumManifestGeneration": 8 } },
-      "expected": {
-        "valid": false,
-        "code": "ManifestRollback",
-        "path": "/generation"
-      }
-    }
-  ]
+  "format": "trellis.authorization-context.conformance.v4"
 }

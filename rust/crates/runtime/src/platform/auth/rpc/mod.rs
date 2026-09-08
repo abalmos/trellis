@@ -16,38 +16,30 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use trellis_protocol::{
-    parse_session_proof, session_proof_request_digest, verify_session_proof,
-    AuthorizationPrincipalKind, DeviceBootstrapSessionProofInput, SessionProofInput,
-    SessionProofPolicy,
-};
+use trellis_protocol::AuthorizationPrincipalKind;
 use trellis_rs::service::Router;
 #[cfg(test)]
 use trellis_runtime_apis::auth as trellis_sdk_auth;
 use ulid::Ulid;
 
+use super::context::AuthorizationContextRepository;
 use super::{
-    activation_review_event_action_id, ensure_authority_dependencies, ensure_deployment_resources,
-    validate_connection_kick_response, AccountFlowKind, AccountRepository, AuthConnectionPresence,
-    AuthEphemeralRepository, AuthService, AuthorityDecision, AuthorityDecisionOutcome,
-    AuthorityDecisionRecord, AuthorityEvidenceRepository, AuthorityKind, AuthorityProposalKind,
-    AuthorityProposalRecord, AuthorityProposalState, AuthorityRepository, AuthorityState,
-    AuthorityTarget, AuthorizationStateError, CapabilityGroupRecord, ChangePasswordInput,
-    ContextRepository, CreateAccountFlowInput, CreateAuthorityProposalInput, CreateUserInput,
-    DecideActivationReviewInput, DecideAuthorityProposalInput, DeploymentAuthorityRecord,
+    activation_review_event_action_id, validate_connection_kick_response, AccountFlowKind,
+    AccountRepository, AuthConnectionPresence, AuthEphemeralRepository, AuthService,
+    AuthorityEvidenceRepository, AuthorizationStateError, CapabilityGroupRecord,
+    ChangePasswordInput, CreateAccountFlowInput, CreateUserInput, DecideActivationReviewInput,
     DeploymentProfileCreation, DeploymentProfileMutation, DeploymentProfileRecord,
-    DeploymentProfileState, DeploymentRepository, DesiredAuthorityRecord,
-    DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceDelegationMutation,
-    DeviceDelegationRecord, DeviceDelegationState, DeviceReviewMode, IdempotencyResultRecord,
-    IdempotentOutcome, IdentityAuthorityRecord, LoginPortalMutation, LoginPortalRecord,
-    LoginSettingsRecord, NatsAuthEphemeralRepository, OutboxRepository, PortalGrantOverrideRecord,
-    PortalPolicyReconciliationHandle, PortalRepository, PortalRoleMapping, PortalRouteMutation,
-    PortalRouteRecord, PortalRouteRemoval, PostCommitActionKind, PostCommitActionRecord,
-    PrincipalKind, PrincipalState, ProviderIdentityUnlink, ProvisionDeviceInput,
-    ProvisionServiceIdentityInput, ProvisionedIdentityKind, ProvisionedIdentityRecord,
-    ProvisionedIdentityState, ProvisionedInstanceMutation, ProvisioningRepository,
-    RuntimeInstanceState, SessionRecord, SessionRepository, SqliteAuthorizationStore,
-    UpdateUserInput, UserAccount,
+    DeploymentProfileState, DeploymentRepository, DeviceActivationReviewRecord,
+    DeviceActivationReviewState, DeviceDelegationMutation, DeviceDelegationRecord,
+    DeviceDelegationState, DeviceReviewMode, GrantOwnerKind, IdempotencyResultRecord,
+    IdempotentOutcome, LoginPortalMutation, LoginPortalRecord, LoginSettingsRecord,
+    NatsAuthEphemeralRepository, PortalGrantOverrideRecord, PortalPolicyReconciliationHandle,
+    PortalRepository, PortalRoleMapping, PortalRouteMutation, PortalRouteRecord,
+    PortalRouteRemoval, PostCommitActionKind, PostCommitActionRecord, PrincipalKind,
+    PrincipalState, ProviderIdentityUnlink, ProvisionDeviceInput, ProvisionServiceIdentityInput,
+    ProvisionedIdentityKind, ProvisionedIdentityRecord, ProvisionedIdentityState,
+    ProvisionedInstanceMutation, ProvisioningRepository, RuntimeInstanceState, SessionRecord,
+    SessionRepository, SessionState, SqliteAuthorizationStore, UpdateUserInput, UserAccount,
 };
 use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
@@ -66,8 +58,6 @@ pub(crate) struct AuthRpcProcessor {
     pub(crate) service: AuthService<SqliteAuthorizationStore>,
     pub(crate) ephemeral: NatsAuthEphemeralRepository,
     pub(crate) public_origin: String,
-    pub(crate) native_nats_servers: Vec<String>,
-    pub(crate) websocket_nats_servers: Vec<String>,
     pub(crate) verifier: crate::platform::auth::verifier::RuntimeAuthVerifier,
     pub(crate) routes: Arc<Router>,
     pub(crate) portal_reconciliation: PortalPolicyReconciliationHandle,
@@ -76,7 +66,7 @@ pub(crate) struct AuthRpcProcessor {
 struct ValidatedRequest {
     principal_id: String,
     principal_kind: PrincipalKind,
-    session_id: String,
+    context: trellis_protocol::VerifiedAuthorizationContext,
     session_public_key: String,
     platform_privileges: Vec<trellis_protocol::PlatformPrivilege>,
 }
@@ -121,67 +111,6 @@ impl AuthRpcRuntime {
 }
 
 impl AuthRpcProcessor {
-    async fn deployment_authority_plan(
-        &self,
-        payload: &[u8],
-        caller: &ValidatedRequest,
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let deployment_id = required_string(&input, "deploymentId")?;
-        let participant_artifact = input
-            .get("participantArtifact")
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("participantArtifact is required".to_owned())
-            })?
-            .clone();
-        let referenced_api_artifacts = input
-            .get("referencedApiArtifacts")
-            .and_then(Value::as_array)
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord(
-                    "referencedApiArtifacts is required".to_owned(),
-                )
-            })?
-            .clone();
-        let now = now_millis()?;
-        let idempotency_key = required_string(&input, "idempotencyKey")?;
-        let outcome = self
-            .service
-            .present_deployment_authority(super::PresentDeploymentAuthorityInput {
-                deployment_id: deployment_id.to_owned(),
-                participant_artifact,
-                referenced_api_artifacts,
-                created_at: now,
-                expires_at: input.get("expiresAt").and_then(Value::as_i64),
-                idempotency: rpc_idempotency(
-                    "Auth.DeploymentAuthority.Plan",
-                    &caller.principal_id,
-                    idempotency_key,
-                    &input,
-                    now,
-                )?,
-                actions: Vec::new(),
-            })
-            .await?;
-        let proposal = match outcome {
-            IdempotentOutcome::Applied(proposal) => proposal,
-            IdempotentOutcome::Replayed(value) => {
-                let proposal_id = value
-                    .get("proposalId")
-                    .and_then(Value::as_str)
-                    .ok_or(AuthorizationStateError::StorageConflict)?;
-                self.service
-                    .repository()
-                    .get_authority_proposal(proposal_id)
-                    .await?
-                    .map(|value| value.0)
-                    .ok_or(AuthorizationStateError::StorageConflict)?
-            }
-        };
-        Ok(json!({ "proposal": proposal_value(proposal, None) }))
-    }
-
     async fn process(&self, message: async_nats::Message) -> Result<(), RuntimeError> {
         tracing::debug!(subject = %message.subject, reply = ?message.reply, "processing Auth RPC request");
         let Some(reply) = message.reply.clone() else {
@@ -331,6 +260,60 @@ impl AuthRpcProcessor {
         Ok(paginate_values(entries, &input))
     }
 
+    async fn deployments_get(
+        &self,
+        payload: &[u8],
+        caller: &ValidatedRequest,
+    ) -> Result<Value, AuthorizationStateError> {
+        let input: Value = serde_json::from_slice(payload)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let deployment_id = required_string(&input, "deploymentId")?;
+        let profile = self
+            .service
+            .repository()
+            .get_deployment_profile(deployment_id)
+            .await?
+            .ok_or(AuthorizationStateError::NotFound)?;
+        let participant_id = profile.participant_id.clone().ok_or_else(|| {
+            AuthorizationStateError::InvalidRecord(
+                "deployment has no installed participant".to_owned(),
+            )
+        })?;
+        let binding = self
+            .service
+            .repository()
+            .get_grant_binding(
+                GrantOwnerKind::Deployment,
+                deployment_id.to_owned(),
+                participant_id.clone(),
+            )
+            .await?;
+        if binding.is_some()
+            && !(caller.context.owner_kind() == GrantOwnerKind::Deployment
+                && caller.context.owner_id() == deployment_id)
+        {
+            require_admin(caller)?;
+        }
+        let resources = if let Some(binding) = &binding {
+            self.service
+                .repository()
+                .get_resource_bindings(
+                    GrantOwnerKind::Deployment,
+                    deployment_id.to_owned(),
+                    participant_id,
+                    binding.installed_revision,
+                )
+                .await?
+        } else {
+            Vec::new()
+        };
+        Ok(json!({
+            "deployment": self.deployment_value(profile).await?,
+            "binding": binding,
+            "resources": resources,
+        }))
+    }
+
     async fn deployments_set_state(
         &self,
         payload: &[u8],
@@ -436,7 +419,7 @@ impl AuthRpcProcessor {
     async fn bind_deployment_participant(
         &self,
         deployment_id: &str,
-        mut requested_participant_id: Option<String>,
+        requested_participant_id: Option<String>,
         expected_kind: PrincipalKind,
         input: &Value,
         caller: &ValidatedRequest,
@@ -452,16 +435,6 @@ impl AuthRpcProcessor {
             })?;
         if profile.kind != expected_kind || profile.state != DeploymentProfileState::Active {
             return Err(AuthorizationStateError::StorageConflict);
-        }
-        if requested_participant_id.is_none() && profile.participant_id.is_none() {
-            requested_participant_id = self
-                .service
-                .repository()
-                .list_deployment_authorities()
-                .await?
-                .into_iter()
-                .find(|authority| authority.deployment_id == deployment_id)
-                .map(|authority| authority.participant_id);
         }
         if profile
             .participant_id
@@ -479,16 +452,6 @@ impl AuthRpcProcessor {
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned)
             });
-            if profile.participant_id.is_none() {
-                profile.participant_id = self
-                    .service
-                    .repository()
-                    .list_deployment_authorities()
-                    .await?
-                    .into_iter()
-                    .find(|authority| authority.deployment_id == deployment_id)
-                    .map(|authority| authority.participant_id);
-            }
             if profile.participant_id.is_none() {
                 return Err(AuthorizationStateError::InvalidRecord(
                     "participantId is required before provisioning".to_owned(),
@@ -683,108 +646,6 @@ impl AuthRpcProcessor {
         Ok(json!({
             "device": self.device_value(&principal_id, &instance_id, &profile).await?,
             "provisioningSecret": provisioning_secret,
-        }))
-    }
-
-    async fn devices_connect_info(&self, payload: &[u8]) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let deployment_id = required_string(&input, "deploymentId")?;
-        let instance_id = required_string(&input, "instanceId")?;
-        let identity_key_id = required_string(&input, "deviceIdentityKeyId")?;
-        let identity = self
-            .service
-            .repository()
-            .get_provisioned_identity(identity_key_id)
-            .await?
-            .filter(|identity| {
-                identity.kind == ProvisionedIdentityKind::Device
-                    && identity.state == ProvisionedIdentityState::Active
-                    && identity.deployment_id == deployment_id
-                    && identity.instance_id == instance_id
-            })
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("device identity is not active".to_owned())
-            })?;
-        self.service
-            .repository()
-            .get_device(&identity.principal_id, deployment_id)
-            .await?
-            .filter(|device| device.state == crate::platform::auth::DeviceState::Active)
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("device is not active".to_owned())
-            })?;
-        let participant_id = required_string(&input, "participantId")?;
-        let participant_digest = required_string(&input, "participantDigest")?;
-        let mut proof_request = input.clone();
-        proof_request
-            .as_object_mut()
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("request must be an object".to_owned())
-            })?
-            .insert("proof".to_owned(), Value::Null);
-        let request_digest = session_proof_request_digest(&proof_request)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let proof_input = SessionProofInput::device_bootstrap(DeviceBootstrapSessionProofInput {
-            request_id: required_string(&input, "requestId")?.to_owned(),
-            issued_at: required_i64(&input, "issuedAt")?,
-            deployment_id: deployment_id.to_owned(),
-            instance_id: instance_id.to_owned(),
-            device_identity_key_id: identity_key_id.to_owned(),
-            new_session_public_key: required_string(&input, "newSessionPublicKey")?.to_owned(),
-            new_session_nkey: required_string(&input, "newSessionNkey")?.to_owned(),
-            participant_id: participant_id.to_owned(),
-            participant_digest: participant_digest.to_owned(),
-            challenge_digest: Some(required_string(&input, "challengeDigest")?.to_owned()),
-            request_digest,
-        })
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let now = now_millis()?;
-        verify_session_proof(
-            &proof_input,
-            &parse_session_proof(input.get("proof").ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("proof is required".to_owned())
-            })?)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-            &identity.identity_public_key,
-            now,
-            SessionProofPolicy::default(),
-        )
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let delegation_required = self
-            .service
-            .repository()
-            .get_deployment_profile(deployment_id)
-            .await?
-            .is_some_and(|profile| profile.requires_device_delegation);
-        if delegation_required {
-            self.service
-                .repository()
-                .get_device_delegation(&identity.principal_id, deployment_id)
-                .await?
-                .filter(|delegation| {
-                    delegation.state == DeviceDelegationState::Active
-                        && delegation
-                            .expires_at
-                            .is_none_or(|expires_at| expires_at > now)
-                })
-                .ok_or_else(|| {
-                    AuthorizationStateError::InvalidRecord(
-                        "device delegation is not active".to_owned(),
-                    )
-                })?;
-        }
-        Ok(json!({
-            "deploymentId": deployment_id,
-            "instanceId": instance_id,
-            "participantId": participant_id,
-            "endpoints": {
-                "native": self.native_nats_servers,
-                "websocket": self.websocket_nats_servers,
-                "authMode": "session_nkey",
-                "authorityMode": "server_issued",
-                "maximumClockSkewMs": 5_000,
-            },
         }))
     }
 
@@ -1071,7 +932,6 @@ impl AuthRpcProcessor {
                 .ok_or(AuthorizationStateError::StorageConflict)?;
             entries.push(json!({
                 "device": self.device_value(&device.principal_id, instance_id, &profile).await?,
-                "authority": null,
             }));
         }
         Ok(paginate_values(entries, &input))
@@ -1387,37 +1247,6 @@ impl AuthRpcProcessor {
         Ok(json!({ "review": activation_review_value(review) }))
     }
 
-    async fn identity_authority_list(
-        &self,
-        payload: &[u8],
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let mut entries = self
-            .service
-            .repository()
-            .list_identity_authorities()
-            .await?;
-        entries.retain(|authority| {
-            input
-                .get("principalId")
-                .and_then(Value::as_str)
-                .is_none_or(|value| authority.principal_id == value)
-                && input
-                    .get("participantId")
-                    .and_then(Value::as_str)
-                    .is_none_or(|value| authority.participant_id == value)
-                && input
-                    .get("state")
-                    .and_then(Value::as_str)
-                    .is_none_or(|value| enum_string(authority.state) == value)
-        });
-        Ok(paginate_values(
-            entries.into_iter().map(identity_authority_value).collect(),
-            &input,
-        ))
-    }
-
     async fn capability_groups_list(
         &self,
         payload: &[u8],
@@ -1505,7 +1334,7 @@ impl AuthRpcProcessor {
                 expected_version,
                 rpc_idempotency(
                     "Auth.CapabilityGroups.Put",
-                    &caller.session_id,
+                    &caller.principal_id,
                     required_string(&input, "idempotencyKey")?,
                     &input,
                     now,
@@ -1540,7 +1369,7 @@ impl AuthRpcProcessor {
                 required_u64(&input, "expectedVersion")?,
                 rpc_idempotency(
                     "Auth.CapabilityGroups.Delete",
-                    &caller.session_id,
+                    &caller.principal_id,
                     required_string(&input, "idempotencyKey")?,
                     &input,
                     now,
@@ -1555,93 +1384,6 @@ impl AuthRpcProcessor {
             })?,
         };
         Ok(json!({ "success": success }))
-    }
-
-    async fn identity_grants_list(
-        &self,
-        payload: &[u8],
-        caller: &ValidatedRequest,
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let principal_id = input
-            .get("user")
-            .and_then(Value::as_str)
-            .unwrap_or(&caller.principal_id);
-        if principal_id != caller.principal_id && !caller_is_admin(&caller) {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "identity grants belong to another user".to_owned(),
-            ));
-        }
-        let mut entries = Vec::new();
-        for authority in self
-            .service
-            .repository()
-            .list_identity_authorities()
-            .await?
-        {
-            if authority.principal_id != principal_id || authority.state != AuthorityState::Accepted
-            {
-                continue;
-            }
-            let binding = self
-                .service
-                .repository()
-                .get_participant_binding(
-                    &authority.participant_id,
-                    &authority.participant_artifact_digest,
-                )
-                .await?
-                .ok_or(AuthorizationStateError::ParticipantMissing)?;
-            entries.push(identity_grant_value(authority, &binding.participant_json)?);
-        }
-        Ok(offset_page(entries, &input))
-    }
-
-    async fn identity_grants_revoke(
-        &self,
-        payload: &[u8],
-        caller: &ValidatedRequest,
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let authority_id = required_string(&input, "identityGrantId")?;
-        let authority = self
-            .service
-            .repository()
-            .list_identity_authorities()
-            .await?
-            .into_iter()
-            .find(|authority| authority.authority_id == authority_id);
-        let Some(authority) = authority else {
-            return Ok(json!({ "success": false }));
-        };
-        let target = input
-            .get("user")
-            .and_then(Value::as_str)
-            .unwrap_or(&caller.principal_id);
-        if authority.principal_id != target
-            || (target != caller.principal_id && !caller_is_admin(&caller))
-        {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "identity grant belongs to another user".to_owned(),
-            ));
-        }
-        let mut revoke = json!({
-            "authorityId": authority.authority_id,
-            "expectedVersion": authority.version,
-            "idempotencyKey": format!("identity-grant-revoke:{}:{}", caller.session_id, authority_id),
-        });
-        if let Some(reason) = input.get("reason") {
-            revoke["reason"] = reason.clone();
-        }
-        self.identity_authority_revoke(
-            &serde_json::to_vec(&revoke)
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-            caller,
-        )
-        .await?;
-        Ok(json!({ "success": true }))
     }
 
     async fn portal_grant_overrides_list(
@@ -1721,7 +1463,7 @@ impl AuthRpcProcessor {
                 expected_version,
                 rpc_idempotency(
                     "Auth.Portals.GrantOverrides.Put",
-                    &caller.session_id,
+                    &caller.principal_id,
                     required_string(&input, "idempotencyKey")?,
                     &input,
                     now,
@@ -1755,7 +1497,7 @@ impl AuthRpcProcessor {
                 required_u64(&input, "expectedVersion")?,
                 rpc_idempotency(
                     "Auth.Portals.GrantOverrides.Remove",
-                    &caller.session_id,
+                    &caller.principal_id,
                     required_string(&input, "idempotencyKey")?,
                     &input,
                     now,
@@ -1773,599 +1515,51 @@ impl AuthRpcProcessor {
         Ok(removed.map_or_else(|| json!({}), |removed| json!({ "removed": removed })))
     }
 
-    async fn identity_authority_get(
-        &self,
-        payload: &[u8],
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let authority_id = input
-            .get("authorityId")
-            .or_else(|| input.get("deploymentId"))
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("deploymentId is required".to_owned())
-            })?;
-        self.service
-            .repository()
-            .list_identity_authorities()
-            .await?
-            .into_iter()
-            .find(|authority| authority.authority_id == authority_id)
-            .map(|authority| json!({ "authority": identity_authority_value(authority) }))
-            .ok_or_else(|| AuthorizationStateError::InvalidRecord("authority not found".to_owned()))
-    }
-
-    async fn identity_authority_revoke(
-        &self,
-        payload: &[u8],
-        caller: &ValidatedRequest,
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let authority_id = input
-            .get("authorityId")
-            .or_else(|| input.get("deploymentId"))
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("deploymentId is required".to_owned())
-            })?;
-        let authority = self
-            .service
-            .repository()
-            .list_identity_authorities()
-            .await?
-            .into_iter()
-            .find(|authority| authority.authority_id == authority_id)
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("authority not found".to_owned())
-            })?;
-        if authority.principal_id != caller.principal_id {
-            require_admin(caller)?;
-        }
-        if input
-            .get("expectedVersion")
-            .and_then(Value::as_u64)
-            .is_some_and(|expected| expected != authority.version)
-        {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
-        let idempotency_key = required_string(&input, "idempotencyKey")?;
-        let now = now_millis()?;
-        let proposal_outcome = self
-            .service
-            .create_authority_proposal(CreateAuthorityProposalInput {
-                authority_kind: crate::platform::auth::AuthorityKind::Identity,
-                authority_id: authority.authority_id.clone(),
-                deployment_id: None,
-                proposal_kind: AuthorityProposalKind::Update,
-                participant_id: authority.participant_id.clone(),
-                participant_artifact_digest: authority.participant_artifact_digest.clone(),
-                participant_needs_digest: authority.accepted_needs_digest.clone(),
-                grant_set: authority.desired_grant_set.clone(),
-                capabilities: authority.desired_capabilities.clone(),
-                base_authority_version: Some(authority.version),
-                payload: json!({
-                    "principalId": authority.principal_id,
-                    "baseAuthorityVersion": authority.version,
-                    "reason": input.get("reason"),
-                }),
-                created_at: now,
-                expires_at: None,
-                idempotency: rpc_idempotency(
-                    "Auth.IdentityAuthority.Revoke.Proposal",
-                    &caller.principal_id,
-                    idempotency_key,
-                    &input,
-                    now,
-                )?,
-                actions: Vec::new(),
-            })
-            .await?;
-        let proposal = match proposal_outcome {
-            IdempotentOutcome::Applied(proposal) => proposal,
-            IdempotentOutcome::Replayed(value) => self
-                .service
-                .repository()
-                .get_authority_proposal(required_string(&value, "proposalId")?)
-                .await?
-                .map(|value| value.0)
-                .ok_or(AuthorizationStateError::StorageConflict)?,
-        };
-        let reason = input
-            .get("reason")
-            .map(|_| nullable_string(&input, "reason"))
-            .transpose()?
-            .flatten();
-        let revoked = IdentityAuthorityRecord {
-            state: AuthorityState::Revoked,
-            version: authority.version + 1,
-            updated_at: now,
-            decision: Some(AuthorityDecision {
-                decided_at: now,
-                decided_by: caller.principal_id.clone(),
-                reason: reason.clone(),
-            }),
-            ..authority
-        };
-        self.service
-            .decide_authority_proposal(DecideAuthorityProposalInput {
-                proposal_id: proposal.proposal_id,
-                expected_version: proposal.version,
-                expected_base_authority_version: None,
-                outcome: AuthorityDecisionOutcome::Accepted,
-                decided_by: caller.principal_id.clone(),
-                reason,
-                desired_authority: Some(DesiredAuthorityRecord::Identity(revoked)),
-                decided_at: now,
-                idempotency: rpc_idempotency(
-                    "Auth.IdentityAuthority.Revoke.Decision",
-                    &caller.principal_id,
-                    idempotency_key,
-                    &input,
-                    now,
-                )?,
-                portal_binding: Some(None),
-                expected_portal_binding: None,
-                portal_policy_snapshot: None,
-                actions: Vec::new(),
-            })
-            .await?;
-        let authority = self
-            .service
-            .repository()
-            .list_identity_authorities()
-            .await?
-            .into_iter()
-            .find(|authority| authority.authority_id == authority_id)
-            .ok_or(AuthorizationStateError::StorageConflict)?;
-        Ok(json!({ "authority": identity_authority_value(authority) }))
-    }
-
-    async fn deployment_authority_list(
-        &self,
-        payload: &[u8],
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let mut entries = self
-            .service
-            .repository()
-            .list_deployment_authorities()
-            .await?;
-        entries.retain(|authority| {
-            input
-                .get("deploymentId")
-                .and_then(Value::as_str)
-                .is_none_or(|value| authority.deployment_id == value)
-                && input
-                    .get("participantId")
-                    .and_then(Value::as_str)
-                    .is_none_or(|value| authority.participant_id == value)
-                && input
-                    .get("state")
-                    .and_then(Value::as_str)
-                    .is_none_or(|value| enum_string(authority.state) == value)
-        });
-        Ok(paginate_values(
-            entries.into_iter().map(authority_value).collect(),
-            &input,
-        ))
-    }
-
-    async fn deployment_authority_get(
-        &self,
-        payload: &[u8],
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let authority_id = required_string(&input, "authorityId")?;
-        let authority = self
-            .service
-            .repository()
-            .list_deployment_authorities()
-            .await?
-            .into_iter()
-            .find(|authority| authority.authority_id == authority_id)
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("authority not found".to_owned())
-            })?;
-        let mut value = authority_value(authority);
-        value["materialization"] = serde_json::to_value(
-            self.service
-                .repository()
-                .get_materialized_authority(AuthorityKind::Deployment, authority_id)
-                .await?
-                .map(|replacement| replacement.authority),
-        )
-        .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
-        Ok(json!({ "authority": value }))
-    }
-
-    async fn deployment_authority_reconcile(
-        &self,
-        payload: &[u8],
-        caller: &ValidatedRequest,
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let authority_id = required_string(&input, "authorityId")?;
-        let authority = self
-            .service
-            .repository()
-            .list_deployment_authorities()
-            .await?
-            .into_iter()
-            .find(|authority| authority.authority_id == authority_id)
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("authority not found".to_owned())
-            })?;
-        if input
-            .get("expectedVersion")
-            .and_then(Value::as_u64)
-            .is_some_and(|expected| expected != authority.version)
-        {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
-        let now = now_millis()?;
-        let target = AuthorityTarget::new(
-            crate::platform::auth::AuthorityKind::Deployment,
-            authority.authority_id.clone(),
-        )?;
-        let binding = self
-            .service
-            .repository()
-            .get_participant_binding(
-                &authority.participant_id,
-                &authority.participant_artifact_digest,
-            )
-            .await?
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("participant binding not found".to_owned())
-            })?;
-        let scope = super::AuthorityEvidenceScope {
-            target: target.clone(),
-            participant_id: binding.participant_id.clone(),
-            participant_artifact_digest: binding.artifact_digest.clone(),
-            participant_needs_digest: binding.needs_digest.clone(),
-        };
-        ensure_deployment_resources(
-            &self.client,
-            self.service.repository(),
-            scope.clone(),
-            &binding,
-            &authority.deployment_id,
-            now,
-        )
-        .await?;
-        ensure_authority_dependencies(self.service.repository(), scope, &binding, now).await?;
-        self.service
-            .authorization()
-            .reconcile_authority(&target, now)
-            .await?;
-        let authority = self
-            .service
-            .repository()
-            .list_deployment_authorities()
-            .await?
-            .into_iter()
-            .find(|authority| authority.authority_id == authority_id)
-            .ok_or(AuthorizationStateError::StorageConflict)?;
-        let result = json!({ "authority": authority_value(authority) });
-        let mut idempotency = rpc_idempotency(
-            "Auth.DeploymentAuthority.Reconcile",
-            &caller.principal_id,
-            required_string(&input, "idempotencyKey")?,
-            &input,
-            now,
-        )?;
-        idempotency.result = result.clone();
-        match self
-            .service
-            .repository()
-            .record_idempotency_result(idempotency)
-            .await?
-        {
-            IdempotentOutcome::Applied(value) | IdempotentOutcome::Replayed(value) => Ok(value),
-        }
-    }
-
-    async fn authority_plans_list(&self, payload: &[u8]) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let deployment_id = input.get("deploymentId").and_then(Value::as_str);
-        let state = input.get("state").and_then(Value::as_str);
-        let now = now_millis()?;
-        let entries = self
-            .service
-            .repository()
-            .list_authority_proposals()
-            .await?
-            .into_iter()
-            .map(|(proposal, decision)| (effective_proposal(proposal, now), decision))
-            .filter(|(proposal, _)| authority_plan_matches(proposal, deployment_id, state))
-            .map(|(proposal, decision)| proposal_value(proposal, decision))
-            .collect();
-        Ok(paginate_values(entries, &input))
-    }
-
-    async fn authority_plans_get(&self, payload: &[u8]) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let proposal_id = required_string(&input, "proposalId")?;
-        let now = now_millis()?;
-        self.service
-            .repository()
-            .get_authority_proposal(proposal_id)
-            .await?
-            .map(|(proposal, decision)| {
-                json!({ "proposal": proposal_value(effective_proposal(proposal, now), decision) })
-            })
-            .ok_or_else(|| AuthorizationStateError::InvalidRecord("proposal not found".to_owned()))
-    }
-
-    async fn authority_accept(
-        &self,
-        payload: &[u8],
-        caller: &ValidatedRequest,
-        expected_kind: AuthorityProposalKind,
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let proposal_id = plan_id(&input)?;
-        let idempotency_key = input
-            .get("idempotencyKey")
-            .and_then(Value::as_str)
-            .unwrap_or(proposal_id);
-        let (proposal, _) = self
-            .service
-            .repository()
-            .get_authority_proposal(proposal_id)
-            .await?
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("proposal not found".to_owned())
-            })?;
-        if proposal.authority_kind != crate::platform::auth::AuthorityKind::Deployment {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "proposal is not deployment authority".to_owned(),
-            ));
-        }
-        let classification_matches = match expected_kind {
-            AuthorityProposalKind::Update => matches!(
-                proposal.proposal_kind,
-                AuthorityProposalKind::Initial | AuthorityProposalKind::Update
-            ),
-            AuthorityProposalKind::Migration => {
-                proposal.proposal_kind == AuthorityProposalKind::Migration
-            }
-            AuthorityProposalKind::Initial => false,
-        };
-        if !classification_matches {
-            return Err(AuthorizationStateError::InvalidRecord(format!(
-                "proposal classification is {}, expected {}",
-                enum_string(proposal.proposal_kind),
-                enum_string(expected_kind)
-            )));
-        }
-        let current = self
-            .service
-            .repository()
-            .list_deployment_authorities()
-            .await?
-            .into_iter()
-            .find(|authority| authority.authority_id == proposal.authority_id);
-        let deployment_id = proposal.deployment_id.clone().ok_or_else(|| {
-            AuthorizationStateError::InvalidRecord("proposal deploymentId is missing".to_owned())
-        })?;
-        if proposal.authority_id
-            != crate::platform::auth::deployment_authority_id(
-                &deployment_id,
-                &proposal.participant_id,
-            )?
-        {
-            tracing::warn!(
-                proposal_id = %proposal.proposal_id,
-                authority_id = %proposal.authority_id,
-                deployment_id = %deployment_id,
-                participant_id = %proposal.participant_id,
-                "authority proposal identity conflict"
-            );
-            return Err(AuthorizationStateError::StorageConflict);
-        }
-        let binding = self
-            .service
-            .repository()
-            .get_participant_binding(
-                &proposal.participant_id,
-                &proposal.participant_artifact_digest,
-            )
-            .await?
-            .filter(|binding| binding.needs_digest == proposal.participant_needs_digest)
-            .ok_or(AuthorizationStateError::ParticipantMissing)?;
-        let participant_kind = binding.participant_kind;
-        let now = now_millis()?;
-        let reason = input
-            .get("reason")
-            .map(|_| nullable_string(&input, "reason"))
-            .transpose()?
-            .flatten();
-        let desired = DesiredAuthorityRecord::Deployment(DeploymentAuthorityRecord {
-            authority_id: proposal.authority_id.clone(),
-            deployment_id: deployment_id.clone(),
-            participant_id: proposal.participant_id.clone(),
-            participant_kind,
-            participant_artifact_digest: proposal.participant_artifact_digest.clone(),
-            accepted_needs_digest: proposal.participant_needs_digest.clone(),
-            desired_grant_set: proposal.proposed_grant_set.clone(),
-            desired_capabilities: proposal.proposed_capabilities.clone(),
-            state: AuthorityState::Accepted,
-            version: current
-                .as_ref()
-                .map_or(1, |authority| authority.version + 1),
-            created_at: current
-                .as_ref()
-                .map_or(now, |authority| authority.created_at),
-            updated_at: now,
-            expires_at: current.as_ref().and_then(|authority| authority.expires_at),
-            decision: Some(AuthorityDecision {
-                decided_at: now,
-                decided_by: caller.principal_id.clone(),
-                reason: reason.clone(),
-            }),
-        });
-        self.service
-            .decide_authority_proposal(DecideAuthorityProposalInput {
-                proposal_id: proposal_id.to_owned(),
-                expected_version: proposal.version,
-                expected_base_authority_version: Some(
-                    match input
-                        .get("expectedBaseAuthorityVersion")
-                        .or_else(|| input.get("expectedDesiredVersion"))
-                    {
-                        Some(Value::Null) => None,
-                        Some(value) => Some(value.as_u64().ok_or_else(|| {
-                            AuthorizationStateError::InvalidRecord(
-                        "expectedBaseAuthorityVersion must be a non-negative integer or null"
-                            .to_owned(),
-                    )
-                        })?),
-                        None => proposal
-                            .payload
-                            .get("baseAuthorityVersion")
-                            .and_then(Value::as_u64),
-                    },
-                ),
-                outcome: AuthorityDecisionOutcome::Accepted,
-                decided_by: caller.principal_id.clone(),
-                reason,
-                desired_authority: Some(desired),
-                decided_at: now,
-                idempotency: rpc_idempotency(
-                    "Auth.DeploymentAuthority.Accept",
-                    &caller.principal_id,
-                    idempotency_key,
-                    &input,
-                    now,
-                )?,
-                portal_binding: None,
-                expected_portal_binding: None,
-                portal_policy_snapshot: None,
-                actions: Vec::new(),
-            })
-            .await?;
-        let target = AuthorityTarget::new(AuthorityKind::Deployment, &proposal.authority_id)?;
-        ensure_deployment_resources(
-            &self.client,
-            self.service.repository(),
-            super::AuthorityEvidenceScope {
-                target: target.clone(),
-                participant_id: binding.participant_id.clone(),
-                participant_artifact_digest: binding.artifact_digest.clone(),
-                participant_needs_digest: binding.needs_digest.clone(),
-            },
-            &binding,
-            &deployment_id,
-            now,
-        )
-        .await?;
-        ensure_authority_dependencies(
-            self.service.repository(),
-            super::AuthorityEvidenceScope {
-                target: target.clone(),
-                participant_id: binding.participant_id.clone(),
-                participant_artifact_digest: binding.artifact_digest.clone(),
-                participant_needs_digest: binding.needs_digest.clone(),
-            },
-            &binding,
-            now,
-        )
-        .await?;
-        self.service
-            .authorization()
-            .reconcile_authority(&target, now)
-            .await?;
-        let (proposal, decision) = self
-            .service
-            .repository()
-            .get_authority_proposal(proposal_id)
-            .await?
-            .ok_or(AuthorizationStateError::StorageConflict)?;
-        let authority = self
-            .service
-            .repository()
-            .list_deployment_authorities()
-            .await?
-            .into_iter()
-            .find(|authority| authority.authority_id == proposal.authority_id)
-            .ok_or(AuthorizationStateError::StorageConflict)?;
-        Ok(json!({
-            "proposal": proposal_value(proposal, decision),
-            "authority": authority_value(authority),
-        }))
-    }
-
-    async fn authority_reject(
-        &self,
-        payload: &[u8],
-        caller: &ValidatedRequest,
-    ) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let proposal_id = required_string(&input, "proposalId")?;
-        let idempotency_key = required_string(&input, "idempotencyKey")?;
-        let (proposal, _) = self
-            .service
-            .repository()
-            .get_authority_proposal(proposal_id)
-            .await?
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("proposal not found".to_owned())
-            })?;
-        let now = now_millis()?;
-        self.service
-            .decide_authority_proposal(DecideAuthorityProposalInput {
-                proposal_id: proposal_id.to_owned(),
-                expected_version: proposal.version,
-                expected_base_authority_version: None,
-                outcome: AuthorityDecisionOutcome::Rejected,
-                decided_by: caller.principal_id.clone(),
-                reason: nullable_string(&input, "reason")?,
-                desired_authority: None,
-                decided_at: now,
-                idempotency: rpc_idempotency(
-                    "Auth.DeploymentAuthority.Reject",
-                    &caller.principal_id,
-                    idempotency_key,
-                    &input,
-                    now,
-                )?,
-                portal_binding: None,
-                expected_portal_binding: None,
-                portal_policy_snapshot: None,
-                actions: Vec::new(),
-            })
-            .await?;
-        let (proposal, decision) = self
-            .service
-            .repository()
-            .get_authority_proposal(proposal_id)
-            .await?
-            .ok_or(AuthorizationStateError::StorageConflict)?;
-        Ok(json!({ "proposal": proposal_value(proposal, decision) }))
-    }
-
     async fn sessions_me(
         &self,
         validated: ValidatedRequest,
     ) -> Result<Value, AuthorizationStateError> {
-        let session = self
+        let now = now_millis()?;
+        let issued = self
             .service
             .repository()
-            .get_session_by_public_key(&validated.session_public_key)
+            .get_context_by_digest(validated.context.context_digest())
             .await?
-            .ok_or(AuthorizationStateError::SessionMissing)?;
+            .ok_or(AuthorizationStateError::NotAuthorized)?;
+        if issued.state != super::context::AuthorizationContextState::Active {
+            return Err(AuthorizationStateError::NotAuthorized);
+        }
+        let installed = self
+            .service
+            .repository()
+            .get_installed_participant(issued.participant_id, Some(issued.installed_revision))
+            .await?;
+        let session = match validated.context.login_session_id() {
+            Some(id) => {
+                let session = self
+                    .service
+                    .repository()
+                    .get_session(id)
+                    .await?
+                    .ok_or(AuthorizationStateError::SessionMissing)?;
+                if session.principal_id != validated.principal_id
+                    || session.participant_id != validated.context.participant_id()
+                    || session.session_public_key != validated.session_public_key
+                {
+                    return Err(AuthorizationStateError::NotAuthorized);
+                }
+                if session.state == SessionState::Revoked {
+                    return Err(AuthorizationStateError::SessionRevoked);
+                }
+                if session.state == SessionState::Expired
+                    || session.expires_at.is_some_and(|expires| expires <= now)
+                {
+                    return Err(AuthorizationStateError::SessionExpired);
+                }
+                Some(session)
+            }
+            None => None,
+        };
         let user = if validated.principal_kind == PrincipalKind::User {
             let (principal, profile) = self
                 .service
@@ -2376,22 +1570,35 @@ impl AuthRpcProcessor {
             if principal.state != PrincipalState::Active {
                 return Err(AuthorizationStateError::PrincipalInactive);
             }
-            let mut value = user_value(UserAccount { principal, profile });
-            value["platformPrivileges"] = json!(validated.platform_privileges);
-            Some(value)
+            Some(user_value(UserAccount { principal, profile }))
         } else {
             None
         };
-        let binding = self
-            .service
-            .repository()
-            .get_session_runtime_binding(&validated.session_id)
-            .await?;
+        let mut connection = json!({
+            "connectionId": validated.context.connection_id(),
+            "sessionKey": validated.session_public_key,
+            "inboxPrefix": validated.context.inbox_prefix(),
+            "participantId": validated.context.participant_id(),
+            "participantKind": installed["participant"]["participantKind"],
+            "principalId": validated.principal_id,
+            "principalKind": validated.principal_kind,
+            "grants": validated.context.grant_set(),
+            "platformPrivileges": validated.context.platform_privileges(),
+        });
+        for (field, value) in [
+            ("loginSessionId", validated.context.login_session_id()),
+            ("identityKeyId", validated.context.identity_key_id()),
+            ("deploymentId", validated.context.deployment_id()),
+            ("instanceId", validated.context.instance_id()),
+        ] {
+            if let Some(value) = value {
+                connection[field] = json!(value);
+            }
+        }
         Ok(json!({
             "session": session,
             "user": user,
-            "deploymentId": binding.as_ref().map(|binding| &binding.deployment_id),
-            "instanceId": binding.as_ref().map(|binding| &binding.instance_id),
+            "connection": connection,
         }))
     }
 
@@ -2797,9 +2004,32 @@ impl AuthRpcProcessor {
         Ok(json!({ "routeId": route_id, "removed": true }))
     }
 
-    async fn sessions_list(&self, payload: &[u8]) -> Result<Value, AuthorizationStateError> {
-        let input: Value = serde_json::from_slice(payload)
+    async fn sessions_list(
+        &self,
+        payload: &[u8],
+        caller: &ValidatedRequest,
+    ) -> Result<Value, AuthorizationStateError> {
+        let request: trellis_runtime_apis::auth::types::AuthSessionsListRequest =
+            serde_json::from_slice(payload)
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        if request
+            .limit
+            .is_some_and(|limit| !(1..=100).contains(&limit))
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "invalid page limit".into(),
+            ));
+        }
+        let mut input = serde_json::to_value(request)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        if !caller_is_admin(caller) {
+            if nullable_string(&input, "principalId")?
+                .is_some_and(|principal_id| principal_id != caller.principal_id)
+            {
+                return Err(AuthorizationStateError::NotAuthorized);
+            }
+            input["principalId"] = json!(caller.principal_id);
+        }
         let mut entries = self.service.repository().list_sessions().await?;
         entries.retain(|session| {
             input
@@ -2821,21 +2051,6 @@ impl AuthRpcProcessor {
                             == Some(value)
                     })
         });
-        if let Some(deployment_id) = input.get("deploymentId").and_then(Value::as_str) {
-            let mut deployed = Vec::new();
-            for session in entries {
-                if self
-                    .service
-                    .repository()
-                    .get_session_runtime_binding(&session.session_id)
-                    .await?
-                    .is_some_and(|binding| binding.deployment_id == deployment_id)
-                {
-                    deployed.push(session);
-                }
-            }
-            entries = deployed;
-        }
         entries.sort_by(|left, right| left.session_id.cmp(&right.session_id));
         Ok(paginate_sessions(entries, &input))
     }
@@ -2847,13 +2062,17 @@ impl AuthRpcProcessor {
     ) -> Result<Value, AuthorizationStateError> {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        if input.as_object().is_none_or(|input| !input.is_empty()) {
+        if !input.is_object() {
             return Err(AuthorizationStateError::InvalidRecord(
-                "logout request must be an empty object".to_owned(),
+                "logout request must be an object".to_owned(),
             ));
         }
+        let login_session_id = caller
+            .context
+            .login_session_id()
+            .ok_or(AuthorizationStateError::WrongPrincipalKind)?;
         let input = json!({
-            "sessionId": caller.session_id,
+            "sessionId": login_session_id,
             "expectedVersion": null,
             "idempotencyKey": "logout",
             "reason": null,
@@ -3064,6 +2283,10 @@ impl AuthRpcProcessor {
     ) -> Result<Value, AuthorizationStateError> {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let login_session_id = caller
+            .context
+            .login_session_id()
+            .ok_or(AuthorizationStateError::WrongPrincipalKind)?;
         let now = now_millis()?;
         let action = PostCommitActionRecord {
             predecessor_action_id: None,
@@ -3075,7 +2298,7 @@ impl AuthRpcProcessor {
             kind: PostCommitActionKind::Kick,
             payload: json!({
                 "principalId": caller.principal_id,
-                "exceptSessionId": caller.session_id,
+                "exceptSessionId": login_session_id,
             }),
             created_at: now,
             attempts: 0,
@@ -3087,7 +2310,7 @@ impl AuthRpcProcessor {
             .service
             .change_password(ChangePasswordInput {
                 principal_id: caller.principal_id.clone(),
-                current_session_id: caller.session_id.clone(),
+                current_session_id: login_session_id.to_owned(),
                 current_password: required_string(&input, "currentPassword")?.to_owned(),
                 new_password: required_string(&input, "newPassword")?.to_owned(),
                 changed_at: now,
@@ -3418,14 +2641,11 @@ impl AuthRpcProcessor {
         caller: &ValidatedRequest,
         principal_id: &str,
     ) -> Result<bool, AuthorizationStateError> {
-        let now = now_millis()?;
         let admin_target = self
             .service
             .repository()
-            .list_identity_authorities()
-            .await?
-            .iter()
-            .any(|authority| authority_is_current_admin(authority, principal_id, now));
+            .user_is_admin(principal_id.to_owned())
+            .await?;
         if admin_target && !caller_is_admin(caller) {
             require_admin(caller)?;
         }
@@ -3436,7 +2656,13 @@ impl AuthRpcProcessor {
 fn connection_value(connection: AuthConnectionPresence) -> Value {
     json!({
         "connectionId": connection.connection_id,
-        "sessionId": connection.session_id,
+        "runtimeConnectionId": connection.runtime_connection_id,
+        "loginSessionId": connection.login_session_id,
+        "contextDigest": connection.context_digest,
+        "principalId": connection.principal_id,
+        "participantId": connection.participant_id,
+        "deploymentId": connection.deployment_id,
+        "instanceId": connection.instance_id,
         "serverId": connection.server_id,
         "clientId": connection.client_id,
         "userNkey": connection.user_nkey,
@@ -3444,82 +2670,6 @@ fn connection_value(connection: AuthConnectionPresence) -> Value {
         "connectedAt": connection.connected_at,
         "lastSeenAt": connection.last_seen_at,
     })
-}
-
-fn authority_value(authority: DeploymentAuthorityRecord) -> Value {
-    json!({
-        "authorityId": authority.authority_id,
-        "participantId": authority.participant_id,
-        "participantArtifactDigest": authority.participant_artifact_digest,
-        "acceptedNeedsDigest": authority.accepted_needs_digest,
-        "desiredGrantSet": authority.desired_grant_set,
-        "desiredCapabilities": authority.desired_capabilities,
-        "state": authority.state,
-        "version": authority.version,
-        "createdAt": authority.created_at,
-        "updatedAt": authority.updated_at,
-        "expiresAt": authority.expires_at,
-        "decision": authority.decision,
-        "materialization": null,
-        "kind": "deployment",
-        "deploymentId": authority.deployment_id,
-        "participantKind": authority.participant_kind,
-    })
-}
-
-fn identity_authority_value(authority: IdentityAuthorityRecord) -> Value {
-    json!({
-        "authorityId": authority.authority_id,
-        "participantId": authority.participant_id,
-        "participantArtifactDigest": authority.participant_artifact_digest,
-        "acceptedNeedsDigest": authority.accepted_needs_digest,
-        "desiredGrantSet": authority.desired_grant_set,
-        "desiredCapabilities": authority.desired_capabilities,
-        "state": authority.state,
-        "version": authority.version,
-        "createdAt": authority.created_at,
-        "updatedAt": authority.updated_at,
-        "expiresAt": authority.expires_at,
-        "decision": authority.decision,
-        "materialization": null,
-        "kind": "identity",
-        "principalId": authority.principal_id,
-    })
-}
-
-fn identity_grant_value(
-    authority: IdentityAuthorityRecord,
-    participant_json: &str,
-) -> Result<Value, AuthorizationStateError> {
-    let participant: Value = serde_json::from_str(participant_json)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let kind = participant["kind"].as_str().unwrap_or("app");
-    let anchor = match kind {
-        "app" => json!({
-            "kind": "web",
-            "contractId": authority.participant_id,
-            "origin": "unknown",
-        }),
-        _ => json!({
-            "kind": "native",
-            "contractId": authority.participant_id,
-            "sessionPublicKey": authority.authority_id,
-        }),
-    };
-    Ok(json!({
-        "identityGrantId": authority.authority_id,
-        "identityAnchor": anchor,
-        "contractEvidence": {
-            "contractId": authority.participant_id,
-            "contractDigest": authority.participant_artifact_digest,
-        },
-        "displayName": participant["displayName"].as_str().unwrap_or(&authority.participant_id),
-        "description": participant["description"].as_str().unwrap_or("Trellis participant authority"),
-        "participantKind": kind,
-        "capabilities": authority.desired_capabilities,
-        "grantedAt": millis_rfc3339(authority.created_at)?,
-        "updatedAt": millis_rfc3339(authority.updated_at)?,
-    }))
 }
 
 fn service_instance_value(
@@ -3557,122 +2707,6 @@ fn activation_review_value(review: DeviceActivationReviewRecord) -> Value {
         "reason": review.reason,
         "version": review.version,
     })
-}
-
-fn proposal_value(
-    proposal: AuthorityProposalRecord,
-    decision: Option<AuthorityDecisionRecord>,
-) -> Value {
-    let subject_id = proposal
-        .deployment_id
-        .clone()
-        .or_else(|| {
-            proposal
-                .payload
-                .get("subjectId")
-                .or_else(|| proposal.payload.get("deploymentId"))
-                .and_then(Value::as_str)
-                .map(String::from)
-        })
-        .unwrap_or_else(|| proposal.authority_id.clone());
-    let reasons = proposal
-        .payload
-        .get("reasons")
-        .cloned()
-        .unwrap_or_else(|| json!([]));
-    let base_authority_version = proposal.payload.get("baseAuthorityVersion").cloned();
-    json!({
-        "proposalId": proposal.proposal_id,
-        "authorityKind": proposal.authority_kind,
-        "subjectId": subject_id,
-        "participantId": proposal.participant_id,
-        "participantArtifactDigest": proposal.participant_artifact_digest,
-        "participantNeedsDigest": proposal.participant_needs_digest,
-        "proposedGrantSet": proposal.proposed_grant_set,
-        "proposedCapabilities": proposal.proposed_capabilities,
-        "classification": proposal.proposal_kind,
-        "state": proposal.state,
-        "reasons": reasons,
-        "createdAt": proposal.created_at,
-        "expiresAt": proposal.expires_at,
-        "decisionAt": decision.as_ref().map(|value| value.decided_at),
-        "decisionBy": decision.as_ref().map(|value| value.decided_by.clone()),
-        "decisionReason": decision.and_then(|value| value.reason),
-        "baseAuthorityVersion": base_authority_version,
-    })
-}
-
-#[cfg(test)]
-mod response_tests {
-    use super::*;
-
-    #[test]
-    fn accept_update_response_round_trips_through_generated_type() {
-        let value = json!({
-            "authority": {
-                "acceptedNeedsDigest": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-                "authorityId": "dpa_test",
-                "createdAt": 1,
-                "decision": null,
-                "deploymentId": "dep_test",
-                "desiredCapabilities": ["publishEvents"],
-                "desiredGrantSet": { "format": "trellis.grant-set.v1", "permissions": [] },
-                "expiresAt": null,
-                "kind": "deployment",
-                "materialization": null,
-                "participantArtifactDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-                "participantId": "test@v1",
-                "participantKind": "service",
-                "state": "accepted",
-                "updatedAt": 2,
-                "version": 1
-            },
-            "proposal": {
-                "proposalId": "apr_test",
-                "authorityKind": "deployment",
-                "subjectId": "dep_test",
-                "participantId": "test@v1",
-                "participantArtifactDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-                "participantNeedsDigest": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-                "proposedGrantSet": { "format": "trellis.grant-set.v1", "permissions": [] },
-                "proposedCapabilities": ["publishEvents"],
-                "classification": "initial",
-                "state": "accepted",
-                "reasons": [],
-                "createdAt": 1,
-                "expiresAt": null,
-                "decisionAt": 2,
-                "decisionBy": "usr_test",
-                "decisionReason": null,
-                "baseAuthorityVersion": null
-            }
-        });
-        serde_json::from_value::<
-            trellis_runtime_apis::auth::types::AuthDeploymentAuthorityAcceptUpdateResponse,
-        >(value)
-        .unwrap();
-    }
-}
-
-fn effective_proposal(mut proposal: AuthorityProposalRecord, now: i64) -> AuthorityProposalRecord {
-    if proposal.state == AuthorityProposalState::Pending
-        && proposal
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= now)
-    {
-        proposal.state = AuthorityProposalState::Expired;
-    }
-    proposal
-}
-
-fn authority_plan_matches(
-    proposal: &AuthorityProposalRecord,
-    deployment_id: Option<&str>,
-    state: Option<&str>,
-) -> bool {
-    proposal.authority_kind == AuthorityKind::Deployment
-        && deployment_id.is_none_or(|id| proposal.deployment_id.as_deref() == Some(id))
-        && state.is_none_or(|value| enum_string(proposal.state) == value)
 }
 
 fn enum_string(value: impl serde::Serialize) -> String {
@@ -3750,9 +2784,7 @@ fn require_admin(caller: &ValidatedRequest) -> Result<(), AuthorizationStateErro
     if caller_is_admin(caller) {
         Ok(())
     } else {
-        Err(AuthorizationStateError::InvalidRecord(
-            "trellis.auth::admin platform privilege is required".to_owned(),
-        ))
+        Err(AuthorizationStateError::NotAuthorized)
     }
 }
 
@@ -3762,37 +2794,12 @@ fn caller_is_admin(caller: &ValidatedRequest) -> bool {
         .contains(&trellis_protocol::PlatformPrivilege::Admin)
 }
 
-fn authority_is_current_admin(
-    authority: &IdentityAuthorityRecord,
-    principal_id: &str,
-    now: i64,
-) -> bool {
-    authority.principal_id == principal_id
-        && authority.state == AuthorityState::Accepted
-        && authority
-            .expires_at
-            .is_none_or(|expires_at| expires_at > now)
-        && authority
-            .desired_capabilities
-            .iter()
-            .any(|capability| capability == "trellis.auth::admin")
-}
-
 fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, AuthorizationStateError> {
     value
         .get(key)
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AuthorizationStateError::InvalidRecord(format!("{key} is required")))
-}
-
-fn plan_id(value: &Value) -> Result<&str, AuthorizationStateError> {
-    value
-        .get("planId")
-        .or_else(|| value.get("proposalId"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| AuthorizationStateError::InvalidRecord("planId is required".to_owned()))
 }
 
 fn millis_rfc3339(value: i64) -> Result<String, AuthorizationStateError> {
@@ -3983,34 +2990,11 @@ fn now_millis() -> Result<i64, AuthorizationStateError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trellis_protocol::{
-        ApiSurfaceKind, GrantSet, PermissionAction, PermissionAtom, PermissionTarget,
-    };
 
     #[test]
     fn offset_page_omits_exhausted_next_offset() {
         let page = offset_page(vec![json!({ "id": 1 })], &json!({ "limit": 1 }));
         assert_eq!(page.get("nextOffset"), None);
-    }
-
-    #[test]
-    fn administrator_context_requires_admin_platform_privilege() {
-        let mut caller = ValidatedRequest {
-            principal_id: "prn_user".to_owned(),
-            principal_kind: PrincipalKind::User,
-            session_id: "ses_user".to_owned(),
-            session_public_key: "UAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-                .to_owned(),
-            platform_privileges: vec![trellis_protocol::PlatformPrivilege::Delegate],
-        };
-        assert!(matches!(
-            require_admin(&caller),
-            Err(AuthorizationStateError::InvalidRecord(_))
-        ));
-        caller
-            .platform_privileges
-            .push(trellis_protocol::PlatformPrivilege::Admin);
-        assert!(require_admin(&caller).is_ok());
     }
 
     #[test]
@@ -4036,52 +3020,11 @@ mod tests {
     }
 
     #[test]
-    fn initial_authority_plan_filters_without_an_accepted_authority() {
-        let proposal = AuthorityProposalRecord {
-            proposal_id: "apr_01".to_owned(),
-            authority_kind: AuthorityKind::Deployment,
-            authority_id: "dau_test".to_owned(),
-            deployment_id: Some("dep_test".to_owned()),
-            proposal_kind: AuthorityProposalKind::Initial,
-            participant_id: "participant.test@v1".to_owned(),
-            participant_artifact_digest: "A".repeat(43),
-            participant_needs_digest: "B".repeat(43),
-            proposed_grant_set: GrantSet::new(Vec::new()),
-            proposed_capabilities: Vec::new(),
-            proposal_digest: "C".repeat(43),
-            payload: json!({
-                "deploymentId": "dep_test",
-                "subjectId": "dep_test",
-                "baseAuthorityVersion": null,
-            }),
-            state: AuthorityProposalState::Pending,
-            created_at: 100,
-            expires_at: Some(200),
-            superseded_at: None,
-            version: 1,
-        };
-        assert!(authority_plan_matches(
-            &proposal,
-            Some("dep_test"),
-            Some("pending")
-        ));
-        assert!(!authority_plan_matches(&proposal, Some("dep_other"), None));
-        let expired = effective_proposal(proposal.clone(), 200);
-        assert_eq!(expired.state, AuthorityProposalState::Expired);
-        assert!(authority_plan_matches(
-            &expired,
-            Some("dep_test"),
-            Some("expired")
-        ));
-        assert_eq!(proposal_value(proposal, None)["subjectId"], "dep_test");
-    }
-
-    #[test]
     fn every_auth_rpc_subject_has_an_explicit_handler() {
         let artifact: Value =
             serde_json::from_str(include_str!("../../../../trellis.api.json")).unwrap();
         let sources = [
-            include_str!("workflows/authority.rs"),
+            include_str!("workflows/grants.rs"),
             include_str!("workflows/deployments.rs"),
             include_str!("workflows/devices.rs"),
             include_str!("workflows/portals.rs"),
@@ -4096,31 +3039,6 @@ mod tests {
                 sources.iter().any(|source| source.contains(&subject)),
                 "missing Auth RPC handler for {name}"
             );
-        }
-    }
-
-    #[test]
-    fn authored_event_ownership_is_explicit_required_authority() {
-        let binding = crate::platform::auth::auth_runtime_participant_binding(1).unwrap();
-        let grants = binding
-            .resolve()
-            .unwrap()
-            .proposal()
-            .required()
-            .grant_set()
-            .clone();
-        for event in [
-            "Auth.Sessions.Revoked",
-            "Auth.DeviceUserAuthorities.Resolved",
-        ] {
-            assert!(grants.permissions().contains(
-                &PermissionAtom::new(
-                    PermissionTarget::api_surface("trellis.auth@v1", ApiSurfaceKind::Event, event,)
-                        .unwrap(),
-                    PermissionAction::Publish,
-                )
-                .unwrap()
-            ));
         }
     }
 
@@ -4150,37 +3068,6 @@ mod tests {
     }
 
     #[test]
-    fn operation_control_permissions_remain_exact() {
-        let mut routes = Router::new();
-        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
-        let invoke = routes
-            .required_permission("operations.v1.Auth.DeviceUserAuthorities.Resolve", b"{}")
-            .unwrap()
-            .expect("operation invoke route");
-        let invoke = invoke.permission_atom().unwrap();
-        assert_eq!(invoke.action(), PermissionAction::Invoke);
-        assert_eq!(
-            invoke.target(),
-            &PermissionTarget::api_surface(
-                "trellis.auth@v1",
-                ApiSurfaceKind::Operation,
-                "Auth.DeviceUserAuthorities.Resolve",
-            )
-            .unwrap()
-        );
-        let control = routes
-            .required_permission(
-                "operations.v1.Auth.DeviceUserAuthorities.Resolve.control",
-                br#"{"action":"get","operationId":"op_test"}"#,
-            )
-            .unwrap()
-            .expect("operation control route");
-        let control = control.permission_atom().unwrap();
-        assert_eq!(control.action(), PermissionAction::Observe);
-        assert_eq!(control.target(), invoke.target());
-    }
-
-    #[test]
     fn public_rpc_errors_never_serialize_internal_causes() {
         let secret = "postgres://admin:secret@internal/auth";
         let payload = public_rpc_error(
@@ -4192,7 +3079,7 @@ mod tests {
         assert_eq!(payload["type"], "UnexpectedError");
         assert_eq!(payload["context"]["code"], "internal_error");
         let invalid = public_rpc_error(
-            "rpc.v1.Auth.DeploymentAuthority.Plan",
+            "rpc.v1.Auth.Grants.Set",
             &AuthorizationStateError::InvalidRecord(secret.to_owned()),
         );
         assert_eq!(invalid["type"], "AuthError");

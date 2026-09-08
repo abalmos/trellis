@@ -1,7 +1,8 @@
 use async_nats::jetstream;
 use bytes::Bytes;
 use futures_util::{stream, StreamExt};
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_rs::client::SessionAuth;
@@ -24,9 +25,25 @@ pub(crate) struct AuthPostCommitRuntime {
     ephemeral: NatsAuthEphemeralRepository,
     auth_client: async_nats::Client,
     system_client: async_nats::Client,
-    event_session: SessionAuth,
-    event_context_digest: String,
+    event_publisher: tokio::sync::Mutex<AuthEventPublisher>,
     contexts: AuthorizationContextService,
+}
+
+struct AuthEventPublisher {
+    session: SessionAuth,
+    identity_key_id: String,
+    connection_id: String,
+    context_digest: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EventDelivery {
+    subject: String,
+    event_time: String,
+    context_digest: String,
+    session_key: String,
+    proof: String,
 }
 
 impl AuthPostCommitRuntime {
@@ -36,6 +53,8 @@ impl AuthPostCommitRuntime {
         auth_client: async_nats::Client,
         system_client: async_nats::Client,
         event_session: SessionAuth,
+        event_identity_key_id: String,
+        event_connection_id: String,
         event_context_digest: String,
         contexts: AuthorizationContextService,
     ) -> Self {
@@ -44,8 +63,12 @@ impl AuthPostCommitRuntime {
             ephemeral,
             auth_client,
             system_client,
-            event_session,
-            event_context_digest,
+            event_publisher: tokio::sync::Mutex::new(AuthEventPublisher {
+                session: event_session,
+                identity_key_id: event_identity_key_id,
+                connection_id: event_connection_id,
+                context_digest: event_context_digest,
+            }),
             contexts,
         }
     }
@@ -127,7 +150,7 @@ impl AuthPostCommitRuntime {
         action: &PostCommitActionRecord,
     ) -> Result<(), AuthorizationStateError> {
         match action.kind {
-            PostCommitActionKind::Event => self.publish_event(&action.payload).await,
+            PostCommitActionKind::Event => self.publish_event(action).await,
             PostCommitActionKind::Kick => self.kick(&action.payload).await,
             PostCommitActionKind::ContextPublish => {
                 self.dispatch_context(&action.payload, false).await
@@ -172,7 +195,11 @@ impl AuthPostCommitRuntime {
         Ok(())
     }
 
-    async fn publish_event(&self, payload: &Value) -> Result<(), AuthorizationStateError> {
+    async fn publish_event(
+        &self,
+        action: &PostCommitActionRecord,
+    ) -> Result<(), AuthorizationStateError> {
+        let payload = &action.payload;
         let event_type = payload
             .get("eventType")
             .and_then(Value::as_str)
@@ -198,46 +225,110 @@ impl AuthPostCommitRuntime {
         let event_id = payload
             .get("eventId")
             .and_then(Value::as_str)
+            .map(str::to_owned)
             .ok_or_else(|| {
                 AuthorizationStateError::InvalidRecord("post-commit eventId is required".to_owned())
             })?;
-        let occurred_at = payload
-            .get("occurredAt")
-            .and_then(Value::as_i64)
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord(
-                    "post-commit occurredAt is required".to_owned(),
-                )
-            })?;
-        let event_time =
-            OffsetDateTime::from_unix_timestamp_nanos(i128::from(occurred_at) * 1_000_000)
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
-                .format(&Rfc3339)
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        if payload.get("occurredAt").and_then(Value::as_i64).is_none() {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "post-commit occurredAt is required".to_owned(),
+            ));
+        }
         let payload = Bytes::from(
-            serde_json::to_vec(&payload)
+            trellis_protocol::canonicalize_json(&Value::Object(payload.clone()))
                 .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?,
         );
-        let mut headers = async_nats::HeaderMap::new();
-        headers.insert("Nats-Msg-Id", event_id);
-        headers.insert("Trellis-Event-Time", event_time.as_str());
-        headers.insert("session-key", self.event_session.session_key.as_str());
-        headers.insert("authorization-context", self.event_context_digest.as_str());
-        headers.insert(
-            "proof",
-            self.event_session
+        let now = now_millis()?;
+        let event_time = OffsetDateTime::from_unix_timestamp_nanos(i128::from(now) * 1_000_000)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
+            .format(&Rfc3339)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let mut publisher = self.event_publisher.lock().await;
+        let context_status = self
+            .contexts
+            .require_current_context(
+                &publisher.connection_id,
+                &publisher.context_digest,
+                now.div_euclid(1_000),
+            )
+            .await;
+        if let Err(error) = context_status {
+            if error != AuthorizationStateError::AuthorityStale {
+                return Err(error);
+            }
+            let request_id = ulid::Ulid::new().to_string();
+            let issued = self
+                .contexts
+                .issue(
+                    super::auth::context::AuthorizationContextIssueRequest {
+                        connection: super::auth::IssuanceConnection {
+                            credential: super::auth::IssuanceCredential::Native(
+                                publisher.identity_key_id.clone(),
+                            ),
+                            connection_id: publisher.connection_id.clone(),
+                            session_public_key: publisher.session.session_key.clone(),
+                        },
+                        request_id: request_id.clone(),
+                        request_digest: trellis_protocol::digest_json(&json!({
+                            "purpose": "auth.event_session.context",
+                            "requestId": request_id,
+                            "sessionKey": publisher.session.session_key,
+                        }))
+                        .map_err(|error| {
+                            AuthorizationStateError::InvalidRecord(error.to_string())
+                        })?,
+                    },
+                    now.div_euclid(1_000),
+                )
+                .await?;
+            publisher.context_digest =
+                trellis_protocol::parse_authorization_context(&issued.context)
+                    .and_then(|context| context.digest())
+                    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        }
+        let candidate = EventDelivery {
+            subject: event_subject.clone(),
+            event_time: event_time.clone(),
+            context_digest: publisher.context_digest.clone(),
+            session_key: publisher.session.session_key.clone(),
+            proof: publisher
+                .session
                 .create_event_proof(
-                    &self.event_context_digest,
+                    &publisher.context_digest,
                     &event_subject,
                     &payload,
-                    event_id,
+                    &event_id,
                     &event_time,
                 )
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
-                .as_str(),
-        );
+                .map(|proof| proof.as_str().to_owned())
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+        };
+        drop(publisher);
+        let delivery: EventDelivery = serde_json::from_value(
+            self.repository
+                .prepare_post_commit_event_delivery(
+                    &action.action_id,
+                    action
+                        .claimed_until
+                        .ok_or(AuthorizationStateError::StorageConflict)?,
+                    action.attempts,
+                    serde_json::to_value(candidate)
+                        .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?,
+                )
+                .await?,
+        )
+        .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
+        if delivery.subject != event_subject {
+            return Err(AuthorizationStateError::StorageConflict);
+        }
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("Nats-Msg-Id", event_id);
+        headers.insert("Trellis-Event-Time", delivery.event_time.as_str());
+        headers.insert("authorization-context", delivery.context_digest.as_str());
+        headers.insert("session-key", delivery.session_key.as_str());
+        headers.insert("proof", delivery.proof.as_str());
         let ack = jetstream::new(self.auth_client.clone())
-            .publish_with_headers(event_subject, headers, payload)
+            .publish_with_headers(delivery.subject, headers, payload)
             .await
             .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
         ack.await

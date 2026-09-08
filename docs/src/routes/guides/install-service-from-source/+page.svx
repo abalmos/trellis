@@ -12,24 +12,25 @@ existing deployment checkout, use `trellis install` to reproduce its lock, then
 format, check, test, and build commands before deployment. Do not edit generated
 artifacts or rewrite imports as an installation step.
 
-## Establish deployment authority
+## Install and apply the participant
 
 Log in to the target runtime with `trellis login <url>`. Create the service
 deployment, apply its generated canonical API and participant artifacts, and
 provision an instance using `trellis svc <id> create`, `apply`, and `provision`.
-Review the requested boundary before accepting authority. See
-[installing an image](/guides/install-service-from-image) for the artifact flags
-and provisioning sequence; source and image deployments use the same authority
-model.
+`apply --source <project-root>` compiles and installs the selected participant,
+updates deployment resources, and writes its participant-scoped grant. See
+[installing an image](/guides/install-service-from-image) for the matching
+provisioning sequence.
 
 ## Run and update
 
 Store the returned private identity seed securely and configure the service's
-documented Trellis URL, deployment ID, and instance ID. Start its normal run
-command. Bootstrap resolves its resource handles; application code must not
+documented Trellis URL and identity seed. Start its normal run command.
+Bootstrap resolves deployment/instance assignment, installed participant,
+grants, transports, and resource handles; application code must not
 inject NATS administrator credentials or binding payloads.
 
-For an update, rebuild from the new IDL and source, apply the matching artifacts,
-review any pending authority change, then restart the service. Keep the same
+For an update, rebuild from the new IDL and source, run direct apply, then
+restart the service. Keep the same
 provisioned identity for the same instance. Do not reprovision merely because
 the generated SDK or application binary changed.

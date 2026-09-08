@@ -12,18 +12,17 @@ pub mod bootstrap;
 mod state;
 
 use auth::{
-    authorization_reconciliation_channel, portal_policy_reconciliation, AccountRepository,
-    AuthService, AuthServiceConfig, AuthorityDecision, AuthorityEvidenceRepository,
-    AuthorityEvidenceScope, AuthorityKind, AuthorityRepository, AuthorityState, AuthorityTarget,
-    AuthorizationStateService, CreateSessionInput, DeploymentAuthorityRecord, DeploymentRecord,
-    FirstAdminAuthorityTarget, IdempotencyResultRecord, LoginPortalMutation, LoginPortalRecord,
-    LoginSettingsRecord, ParticipantBindingRecord, PortalRepository, PrincipalKind,
-    PrincipalRecord, PrincipalState, ResourceBindingEvidence, ResourceBindingState,
-    ResourceProviderIdentity, RuntimeInstanceRecord, RuntimeInstanceState, SessionRepository,
+    portal_policy_reconciliation, AuthService, AuthServiceConfig, AuthorityEvidenceRepository,
+    DeploymentProfileCreation, DeploymentProfileRecord, DeploymentProfileState, DeploymentRecord,
+    DeploymentRepository, FirstAdminAuthorityTarget, IdempotencyResultRecord, LoginPortalMutation,
+    LoginPortalRecord, LoginSettingsRecord, ParticipantBindingRecord, PortalRepository,
+    PrincipalKind, PrincipalRecord, PrincipalState, ResourceBindingEvidence, ResourceBindingState,
+    ResourceProviderIdentity, RuntimeInstanceRecord, RuntimeInstanceState,
     SqliteAuthorizationStore,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use serde_json::Value;
 use trellis_rs::client::SessionAuth;
 use trellis_rs::service::Router;
 use trellis_runtime_apis::auth as trellis_sdk_auth;
@@ -55,6 +54,32 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .put_participant_binding(cli.clone())
         .await
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let cli_revision = auth_store
+        .get_installed_participant_record(cli.participant_id.clone(), None)
+        .await
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?
+        .ok_or_else(|| RuntimeError::Platform("CLI participant installation missing".to_owned()))?
+        .0;
+    let console = auth::console_participant_binding(now)
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    auth_store
+        .put_participant_binding(console.clone())
+        .await
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let console_revision = auth_store
+        .get_installed_participant_record(console.participant_id.clone(), None)
+        .await
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?
+        .ok_or_else(|| {
+            RuntimeError::Platform("Console participant installation missing".to_owned())
+        })?
+        .0;
+    let portal = auth::portal_participant_binding(now)
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    auth_store
+        .put_participant_binding(portal.clone())
+        .await
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     auth_store
         .ensure_admin_capability_group(now)
         .await
@@ -66,13 +91,6 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .await
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     ensure_builtin_portal(&auth_store, now).await?;
-    let authorization = AuthorizationStateService::new(auth_store.clone());
-    authorization
-        .reconcile_all(now)
-        .await
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let (reconciliation, reconciliation_worker) =
-        authorization_reconciliation_channel(authorization.clone(), 256);
     let nats = context
         .config
         .resolve_nats_runtime_with(context.nats_override.as_ref().map(|o| o.servers.as_str()))
@@ -126,7 +144,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     let auth_service = AuthService::new(auth_store.clone(), AuthServiceConfig::default())
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let (portal_reconciliation, portal_reconciliation_worker) =
-        portal_policy_reconciliation(auth_service.clone(), reconciliation.clone());
+        portal_policy_reconciliation(auth_service.clone());
     portal_reconciliation_worker
         .reconcile_startup()
         .await
@@ -148,22 +166,20 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     )
     .await
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let (auth_event_session, auth_operation_session) =
-        ensure_auth_event_session(&auth_service, &authorization, &auth_participant, now).await?;
-    let event_session = auth_service
-        .repository()
-        .get_session_by_public_key(&auth_event_session.session_key)
-        .await
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?
-        .ok_or_else(|| RuntimeError::Platform("auth event session missing".to_owned()))?;
+    let (auth_event_session, auth_operation_session, event_identity_key_id, event_connection_id) =
+        ensure_auth_event_session(&auth_service, &auth_participant, now).await?;
     let event_context = authorization_contexts
         .issue(
             auth::context::AuthorizationContextIssueRequest {
-                session_id: event_session.session_id.clone(),
+                connection: auth::IssuanceConnection {
+                    credential: auth::IssuanceCredential::Native(event_identity_key_id.clone()),
+                    connection_id: event_connection_id.clone(),
+                    session_public_key: auth_event_session.session_key.clone(),
+                },
                 request_id: ulid::Ulid::new().to_string(),
                 request_digest: trellis_protocol::digest_json(&serde_json::json!({
                     "purpose": "auth.event_session.context",
-                    "sessionId": event_session.session_id,
+                    "sessionKey": auth_event_session.session_key,
                 }))
                 .map_err(|error| RuntimeError::Platform(error.to_string()))?,
             },
@@ -209,8 +225,6 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         service: auth_service.clone(),
         ephemeral: ephemeral.clone(),
         public_origin: public_origin.clone(),
-        native_nats_servers: native_nats_servers.clone(),
-        websocket_nats_servers: websocket_nats_servers.clone(),
         verifier: verifier.clone(),
         routes: Arc::new(auth_rpc_routes),
         portal_reconciliation: portal_reconciliation.clone(),
@@ -223,12 +237,23 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         post_commit_nats,
         post_commit_system_nats,
         auth_event_session,
+        event_identity_key_id,
+        event_connection_id,
         event_context_digest,
         authorization_contexts.clone(),
     );
     ensure_first_admin(
         &auth_service,
-        &cli,
+        &[
+            FirstAdminAuthorityTarget {
+                participant_id: cli.participant_id,
+                installed_revision: cli_revision,
+            },
+            FirstAdminAuthorityTarget {
+                participant_id: console.participant_id,
+                installed_revision: console_revision,
+            },
+        ],
         &public_origin,
         context.reset_admin,
         now,
@@ -278,12 +303,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     }
     let task_stop = stop.clone();
     let join = tokio::spawn(async move {
-        let _authorization = authorization;
-        let _reconciliation = reconciliation;
         tokio::select! {
-            result = reconciliation_worker.run(task_stop.clone()) => {
-                result.map_err(|error| RuntimeError::Platform(error.to_string()))
-            }
             result = portal_reconciliation_worker.run(task_stop.clone()) => {
                 result.map_err(|error| RuntimeError::Platform(error.to_string()))
             }
@@ -375,23 +395,18 @@ async fn start_validator_cache(
 
 async fn ensure_first_admin(
     service: &AuthService<SqliteAuthorizationStore>,
-    administration: &ParticipantBindingRecord,
+    authority_targets: &[FirstAdminAuthorityTarget],
     public_origin: &str,
     reset_admin: bool,
     now: i64,
 ) -> Result<(), RuntimeError> {
-    let target = FirstAdminAuthorityTarget {
-        participant_id: administration.participant_id.clone(),
-        participant_artifact_digest: administration.artifact_digest.clone(),
-        participant_needs_digest: administration.needs_digest.clone(),
-    };
     let bootstrap = if reset_admin {
         service
-            .rotate_admin_account_flow(public_origin, &target, now)
+            .rotate_admin_account_flow(public_origin, authority_targets, now)
             .await
     } else {
         service
-            .ensure_admin_account_flow(public_origin, &target, now)
+            .ensure_admin_account_flow(public_origin, authority_targets, now)
             .await
     }
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
@@ -417,24 +432,20 @@ async fn ensure_first_admin(
 
 async fn ensure_auth_event_session(
     service: &AuthService<SqliteAuthorizationStore>,
-    authorization: &AuthorizationStateService<SqliteAuthorizationStore>,
     participant: &ParticipantBindingRecord,
     now: i64,
-) -> Result<(SessionAuth, SessionAuth), RuntimeError> {
-    const PRINCIPAL_ID: &str = "svc_trellis_auth_runtime";
+) -> Result<(SessionAuth, SessionAuth, String, String), RuntimeError> {
     const DEPLOYMENT_ID: &str = "dep_trellis_auth_runtime";
-    const INSTANCE_ID: &str = "inst_trellis_auth_runtime";
-    const AUTHORITY_ID: &str = "dpa_trellis_auth_runtime";
 
     if service
         .repository()
-        .get_principal(PRINCIPAL_ID)
+        .get_deployment_profile(DEPLOYMENT_ID)
         .await
         .map_err(|error| RuntimeError::Platform(error.to_string()))?
         .is_none()
     {
         let principal = PrincipalRecord {
-            principal_id: PRINCIPAL_ID.to_owned(),
+            principal_id: DEPLOYMENT_ID.to_owned(),
             kind: PrincipalKind::Service,
             state: PrincipalState::Active,
             created_at: now,
@@ -445,98 +456,118 @@ async fn ensure_auth_event_session(
         };
         auth::validate_principal(&principal)
             .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-        service
-            .repository()
-            .create_principal(principal)
-            .await
-            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    }
-    let deployment = DeploymentRecord {
-        deployment_id: DEPLOYMENT_ID.to_owned(),
-        participant_id: participant.participant_id.clone(),
-        participant_kind: participant.participant_kind,
-        active: true,
-        expires_at: None,
-    };
-    auth::validate_deployment_evidence(&deployment)
+        let request_digest = trellis_protocol::digest_json(&serde_json::json!({
+            "deploymentId": DEPLOYMENT_ID,
+            "participantId": participant.participant_id,
+        }))
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    service
-        .repository()
-        .put_deployment_evidence(deployment)
-        .await
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    if service
-        .repository()
-        .get_runtime_instance(INSTANCE_ID)
-        .await
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?
-        .is_none()
-    {
-        let instance = RuntimeInstanceRecord {
-            instance_id: INSTANCE_ID.to_owned(),
-            deployment_id: DEPLOYMENT_ID.to_owned(),
-            principal_id: PRINCIPAL_ID.to_owned(),
-            state: RuntimeInstanceState::Active,
-            created_at: now,
-            updated_at: now,
-            version: 1,
-        };
-        auth::validate_runtime_instance(&instance)
-            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
         service
             .repository()
-            .put_runtime_instance(instance)
-            .await
-            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    }
-    if service
-        .repository()
-        .list_deployment_authorities()
-        .await
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?
-        .into_iter()
-        .all(|authority| authority.authority_id != AUTHORITY_ID)
-    {
-        let proposal = participant
-            .resolve()
-            .map_err(|error| RuntimeError::Platform(error.to_string()))?
-            .proposal()
-            .clone();
-        service
-            .repository()
-            .put_deployment_authority(
-                DeploymentAuthorityRecord {
-                    authority_id: AUTHORITY_ID.to_owned(),
+            .create_deployment_profile(DeploymentProfileCreation {
+                principal,
+                profile: DeploymentProfileRecord {
                     deployment_id: DEPLOYMENT_ID.to_owned(),
-                    participant_id: participant.participant_id.clone(),
-                    participant_kind: participant.participant_kind,
-                    participant_artifact_digest: participant.artifact_digest.clone(),
-                    accepted_needs_digest: participant.needs_digest.clone(),
-                    desired_grant_set: proposal.required().grant_set().clone(),
-                    desired_capabilities: proposal
-                        .required()
-                        .capabilities()
-                        .iter()
-                        .map(|capability| capability.name().to_owned())
-                        .collect(),
-                    state: AuthorityState::Accepted,
-                    version: 1,
+                    kind: PrincipalKind::Service,
+                    display_name: "Trellis Auth Runtime".to_owned(),
+                    participant_id: Some(participant.participant_id.clone()),
+                    portal_id: None,
+                    review_mode: None,
+                    requires_device_delegation: false,
+                    expires_at: None,
+                    state: DeploymentProfileState::Active,
                     created_at: now,
                     updated_at: now,
-                    expires_at: None,
-                    decision: Some(AuthorityDecision {
-                        decided_at: now,
-                        decided_by: "system:startup".to_owned(),
-                        reason: Some("Rust auth runtime event publisher".to_owned()),
-                    }),
+                    version: 1,
                 },
-                None,
+                idempotency: IdempotencyResultRecord {
+                    scope_key: request_digest.clone(),
+                    purpose: "auth.event_deployment.start".to_owned(),
+                    signer_id: "system:startup".to_owned(),
+                    request_id: "builtin-v1".to_owned(),
+                    request_digest,
+                    result: serde_json::json!({ "deploymentId": DEPLOYMENT_ID }),
+                    created_at: now,
+                    expires_at: auth::MAX_PROTOCOL_INTEGER as i64,
+                },
+                actions: Vec::new(),
+            })
+            .await
+            .map_err(|error| {
+                RuntimeError::Platform(format!("create Auth event deployment: {error}"))
+            })?;
+    }
+    service
+        .repository()
+        .put_deployment_evidence(DeploymentRecord {
+            deployment_id: DEPLOYMENT_ID.to_owned(),
+            participant_id: participant.participant_id.clone(),
+            participant_kind: participant.participant_kind,
+            active: true,
+            expires_at: None,
+        })
+        .await
+        .map_err(|error| RuntimeError::Platform(format!("store Auth deployment: {error}")))?;
+    let installed = service
+        .repository()
+        .get_installed_participant(participant.participant_id.clone(), None)
+        .await
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let installed_revision = installed
+        .get("participant")
+        .and_then(|value| value.get("revision"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            RuntimeError::Platform("installed Auth participant revision is missing".to_owned())
+        })?;
+    let current = service
+        .repository()
+        .get_grant_binding(
+            auth::GrantOwnerKind::Deployment,
+            DEPLOYMENT_ID.to_owned(),
+            participant.participant_id.clone(),
+        )
+        .await
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let expected_revision = current.as_ref().map_or(0, |binding| binding.revision);
+    if current.as_ref().is_none_or(|binding| {
+        binding.installed_revision != installed_revision
+            || binding.state != auth::GrantBindingState::Active
+    }) {
+        let grants = participant
+            .resolve()
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?
+            .select_grants(&[])
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+        let digest = trellis_protocol::digest_json(&serde_json::json!({ "ownerId": DEPLOYMENT_ID, "participantId": participant.participant_id, "installedRevision": installed_revision, "grants": grants })).map_err(|error| RuntimeError::Platform(error.to_string()))?;
+        service
+            .repository()
+            .set_grant_binding(
+                auth::GrantBindingReplacement {
+                    owner_kind: auth::GrantOwnerKind::Deployment,
+                    owner_id: DEPLOYMENT_ID.to_owned(),
+                    participant_id: participant.participant_id.clone(),
+                    installed_revision,
+                    grants,
+                    platform_privileges: Vec::new(),
+                    expected_revision,
+                    state: auth::GrantBindingState::Active,
+                    expires_at: None,
+                    provenance: None,
+                },
+                IdempotencyResultRecord {
+                    scope_key: digest.clone(),
+                    purpose: "auth.event_binding.start".to_owned(),
+                    signer_id: DEPLOYMENT_ID.to_owned(),
+                    request_id: digest.clone(),
+                    request_digest: digest,
+                    result: Value::Null,
+                    created_at: now,
+                    expires_at: auth::MAX_PROTOCOL_INTEGER as i64,
+                },
             )
             .await
-            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+            .map_err(|error| RuntimeError::Platform(format!("bind Auth deployment: {error}")))?;
     }
-    let target = AuthorityTarget::new(AuthorityKind::Deployment, AUTHORITY_ID)
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let resources = [
         ("browserFlows", "trellis_auth_browser_flows"),
         ("oauthStates", "trellis_auth_oauth_states"),
@@ -556,76 +587,61 @@ async fn ensure_auth_event_session(
         error: None,
     })
     .collect::<Vec<_>>();
-    auth::validate_resource_evidence(&resources)
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     service
         .repository()
-        .replace_resource_evidence(
-            AuthorityEvidenceScope {
-                target: target.clone(),
-                participant_id: participant.participant_id.clone(),
-                participant_artifact_digest: participant.artifact_digest.clone(),
-                participant_needs_digest: participant.needs_digest.clone(),
-            },
+        .replace_resource_bindings(
+            auth::GrantOwnerKind::Deployment,
+            DEPLOYMENT_ID.to_owned(),
+            participant.participant_id.clone(),
+            installed_revision,
             resources,
         )
         .await
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let event_authority = authorization
-        .reconcile_authority(&target, now)
-        .await
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    if !event_authority
-        .materialization
-        .as_ref()
-        .is_some_and(|value| value.authority.state == auth::MaterializationState::Available)
-    {
-        return Err(RuntimeError::Platform(format!(
-            "auth event authority did not materialize: {event_authority:?}"
-        )));
-    }
+        .map_err(|error| RuntimeError::Platform(format!("bind Auth resources: {error}")))?;
 
     let mut seed = [0_u8; 32];
     getrandom::fill(&mut seed).map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let seed = URL_SAFE_NO_PAD.encode(seed);
-    let session_auth = SessionAuth::from_seed_base64url(&seed)
+    let event_auth = SessionAuth::from_seed_base64url(&seed)
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let identity_key_id =
+        auth::validate_ed25519_public_key("identityPublicKey", &event_auth.session_key)
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    let instance_id = ulid::Ulid::new().to_string();
+    service
+        .repository()
+        .install_runtime_identity(
+            RuntimeInstanceRecord {
+                instance_id: instance_id.clone(),
+                deployment_id: DEPLOYMENT_ID.to_owned(),
+                principal_id: DEPLOYMENT_ID.to_owned(),
+                state: RuntimeInstanceState::Active,
+                created_at: now,
+                updated_at: now,
+                version: 1,
+            },
+            auth::ProvisionedIdentityRecord {
+                identity_key_id: identity_key_id.clone(),
+                identity_public_key: event_auth.session_key.clone(),
+                principal_id: DEPLOYMENT_ID.to_owned(),
+                deployment_id: DEPLOYMENT_ID.to_owned(),
+                instance_id,
+                kind: auth::ProvisionedIdentityKind::Service,
+                state: auth::ProvisionedIdentityState::Active,
+                created_at: now,
+                revoked_at: None,
+            },
+        )
+        .await
+        .map_err(|error| RuntimeError::Platform(format!("install Auth identity: {error}")))?;
     let operation_auth = SessionAuth::from_seed_base64url(&seed)
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    let request_digest = trellis_protocol::digest_json(&serde_json::json!({
-        "principalId": PRINCIPAL_ID,
-        "sessionKey": session_auth.session_key,
-        "createdAt": now,
-    }))
-    .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    service
-        .create_session(CreateSessionInput {
-            principal_id: PRINCIPAL_ID.to_owned(),
-            principal_kind: PrincipalKind::Service,
-            participant_id: participant.participant_id.clone(),
-            participant_kind: participant.participant_kind,
-            participant_artifact_digest: participant.artifact_digest.clone(),
-            participant_needs_digest: participant.needs_digest.clone(),
-            session_public_key: session_auth.session_key.clone(),
-            desired_authority: None,
-            deployment_id: Some(DEPLOYMENT_ID.to_owned()),
-            instance_id: Some(INSTANCE_ID.to_owned()),
-            created_at: now,
-            idempotency: IdempotencyResultRecord {
-                scope_key: request_digest.clone(),
-                purpose: "auth.event_session.start".to_owned(),
-                signer_id: PRINCIPAL_ID.to_owned(),
-                request_id: request_digest.clone(),
-                request_digest,
-                result: serde_json::Value::Null,
-                created_at: now,
-                expires_at: now.saturating_add(86_400_000),
-            },
-            actions: Vec::new(),
-        })
-        .await
-        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
-    Ok((session_auth, operation_auth))
+    Ok((
+        event_auth,
+        operation_auth,
+        identity_key_id,
+        ulid::Ulid::new().to_string(),
+    ))
 }
 
 async fn ensure_builtin_portal(
@@ -733,57 +749,6 @@ fn advertised_endpoints(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use auth::SessionRepository;
-
-    #[tokio::test]
-    async fn auth_event_session_materializes_owned_event_permissions() {
-        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
-        let participant = auth::auth_runtime_participant_binding(1_700_000_000_000).unwrap();
-        store
-            .put_participant_binding(participant.clone())
-            .await
-            .unwrap();
-        let authorization = AuthorizationStateService::new(store.clone());
-        let service = AuthService::new(store.clone(), AuthServiceConfig::default()).unwrap();
-        let (session_auth, _) =
-            ensure_auth_event_session(&service, &authorization, &participant, 1_700_000_000_000)
-                .await
-                .unwrap();
-        let session = store
-            .get_session_by_public_key(&session_auth.session_key)
-            .await
-            .unwrap()
-            .unwrap();
-        let issuable = authorization
-            .resolve_issuable_state(&session.session_id, 1_700_000_000_001)
-            .await
-            .unwrap();
-        assert!(issuable.grant_set.permissions().iter().any(|permission| {
-            permission.action() == trellis_protocol::PermissionAction::Publish
-                && matches!(
-                    permission.target(),
-                    trellis_protocol::PermissionTarget::ApiSurface {
-                        api,
-                        surface: trellis_protocol::ApiSurfaceKind::Event,
-                        ..
-                    } if api == "trellis.auth@v1"
-                )
-        }));
-        let permissions = auth::compile_test_transport_permissions(
-            &issuable,
-            &participant,
-            &auth::AuthorizationRegistryBinding::from_runtime_parts(
-                crate::config::AuthorizationConfig::default().context_bucket,
-            ),
-        )
-        .unwrap();
-        assert!(permissions
-            .publish
-            .contains(&"events.v1.Auth.Sessions.Revoked".to_owned()));
-        assert!(permissions
-            .publish
-            .contains(&"events.v1.Auth.DeviceUserAuthorities.Resolved.*".to_owned()));
-    }
 
     fn config_with_client_endpoints() -> RuntimeConfig {
         RuntimeConfig::from_toml_str(
@@ -838,5 +803,27 @@ ws_nats_servers = ["ws://advertised.example:8080"]
         let (native, websocket) = advertised_endpoints(&config, &resolved, Some(&override_));
         assert_eq!(native, vec!["nats://external.example:4222"]);
         assert_eq!(websocket, vec!["ws://advertised.example:8080"]);
+    }
+
+    #[tokio::test]
+    async fn auth_event_identity_has_an_active_deployment_before_binding() {
+        let store = SqliteAuthorizationStore::open_in_memory().expect("open store");
+        let participant = auth::auth_runtime_participant_binding(1).expect("participant");
+        store
+            .put_participant_binding(participant.clone())
+            .await
+            .expect("install participant");
+        let service =
+            AuthService::new(store.clone(), AuthServiceConfig::default()).expect("create service");
+        ensure_auth_event_session(&service, &participant, 1)
+            .await
+            .expect("initialize Auth event identity");
+
+        let profile = store
+            .get_deployment_profile("dep_trellis_auth_runtime")
+            .await
+            .expect("load deployment")
+            .expect("deployment profile");
+        assert_eq!(profile.state, DeploymentProfileState::Active);
     }
 }

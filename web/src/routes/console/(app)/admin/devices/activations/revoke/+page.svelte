@@ -26,12 +26,8 @@
   let selectedInstanceId = $state(page.url.searchParams.get("instance") ?? "");
   let confirmationModal: ConfirmationModal | undefined = $state();
 
-  const activeActivations = $derived(activations.filter((activation) => activation.authority?.state === "accepted"));
+  const activeActivations = $derived(activations.filter((activation) => activation.device.delegationState === "active"));
   const selectedActivation = $derived(activeActivations.find((activation) => activation.device.instanceId === selectedInstanceId) ?? null);
-
-  function formatActivatedBy(actor: NonNullable<Activation["authority"]>["decision"]): string {
-    return actor?.decidedBy ?? "—";
-  }
 
   async function load() {
     loading = true;
@@ -40,7 +36,7 @@
       const response = await trellis.authDeviceUserAuthoritiesList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       const loadedActivations = response.entries ?? [];
-      const loadedActiveActivations = loadedActivations.filter((activation) => activation.authority?.state === "accepted");
+      const loadedActiveActivations = loadedActivations.filter((activation) => activation.device.delegationState === "active");
       activations = loadedActivations;
       if (selectedInstanceId && !loadedActiveActivations.some((activation) => activation.device.instanceId === selectedInstanceId)) {
         selectedInstanceId = "";
@@ -81,7 +77,7 @@
     if (!selectedActivation) return;
     const confirmed = await confirmationModal?.confirm({
       title: "Revoke device activation?",
-      message: "This terminates the activated user authority for this device instance.",
+      message: "This terminates the active user delegation for this device instance.",
       confirmLabel: "Revoke activation",
       targetLabel: "Device instance",
       targetName: selectedActivation.device.instanceId,
@@ -126,8 +122,8 @@
           <div class="rounded-box border border-base-300 bg-base-200/40 p-3 text-sm">
             <div class="trellis-identifier font-medium">{selectedActivation.device.instanceId}</div>
             <div class="text-base-content/60">Deployment: {selectedActivation.device.deploymentId}</div>
-            <div class="text-base-content/60">Activated: {formatDate(selectedActivation.authority?.createdAt)}</div>
-            <div class="text-base-content/60">Activated by: {formatActivatedBy(selectedActivation.authority?.decision ?? null)}</div>
+            <div class="text-base-content/60">Created: {formatDate(selectedActivation.device.createdAt)}</div>
+            <div class="text-base-content/60">Principal: <span class="trellis-identifier">{selectedActivation.device.principalId}</span></div>
           </div>
         {/if}
 

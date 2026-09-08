@@ -26,7 +26,6 @@ import { recordTrellisDuration } from "./admin/metrics.ts";
 import { isRecord, postJson } from "./admin/transport.ts";
 import { generateSessionSeed } from "./control_plane_config.ts";
 import type {
-  TrellisTestAuthorityPlanClassification,
   TrellisTestParticipantApproval,
   TrellisTestParticipantLike,
   TrellisTestServiceKey,
@@ -49,8 +48,6 @@ export class TrellisTestAdminAutomation {
     trellisUrl: string;
     adminPassword: string;
     defaultDeployment: string;
-    reconciliationMs: number;
-    autoAccept: readonly TrellisTestAuthorityPlanClassification[];
     getBootstrapUrl: () => Promise<string>;
     bootstrapComplete?: boolean;
   }) {
@@ -59,11 +56,10 @@ export class TrellisTestAdminAutomation {
     this.#getBootstrapUrl = args.getBootstrapUrl;
     this.#deployment = {
       defaultDeployment: args.defaultDeployment,
-      reconciliationMs: args.reconciliationMs,
-      autoAccept: new Set(args.autoAccept),
       createdDeployments: new Map(),
+      deploymentBindingRevisions: new Map(),
       deploymentIds: new Map(),
-      authorityIds: new Map(),
+      installedParticipants: new Map(),
       protocolApis: new Map(),
       rpc: <M extends TrellisTestAdminRpcMethod>(
         method: M,
@@ -116,7 +112,6 @@ export class TrellisTestAdminAutomation {
           participant: adminParticipant,
           auth: {
             mode: "session_key",
-            authorizationContextEphemeral: true,
             sessionKeySeed,
             redirectTo: `${this.#trellisUrl}/_trellis/test/admin-auth`,
           },
@@ -193,7 +188,11 @@ export class TrellisTestAdminAutomation {
   ): Promise<
     import("../trellis/index.js").apis.auth.AuthDevicesProvisionOutput
   > {
-    return await this.#rpc("authDevicesProvision", input);
+    return await this.#rpc("authDevicesProvision", {
+      ...input,
+      deploymentId: this.#deployment.deploymentIds.get(input.deploymentId) ??
+        input.deploymentId,
+    });
   }
 
   async stateAdminGet(
@@ -241,31 +240,24 @@ export class TrellisTestAdminAutomation {
     return { status: "bound", flowId };
   }
 
-  /** Plans, accepts, reconciles, and waits for a contract authority change. */
-  async approveContract(args: {
+  /** Installs a participant and atomically replaces its deployment GrantBinding. */
+  async applyParticipant(args: {
     deployment?: string;
     contract: TrellisTestParticipantLike;
-    allowPlanClassifications?:
-      readonly TrellisTestAuthorityPlanClassification[];
   }): Promise<TrellisTestParticipantApproval> {
-    return await adminDeployment.approveContract(this.#deployment, args);
+    return await adminDeployment.applyParticipant(this.#deployment, args);
   }
 
-  /** Triggers deployment-authority reconciliation for a service deployment. */
-  async reconcile(deployment: string, label = "reconcile"): Promise<void> {
-    return await adminDeployment.reconcile(this.#deployment, deployment, label);
-  }
-
-  /** Waits until materialized deployment authority is current. */
-  async waitReady(deployment: string, label = "waitReady"): Promise<void> {
-    return await adminDeployment.waitReady(this.#deployment, deployment, label);
+  async installParticipant(args: {
+    contract: TrellisTestParticipantLike;
+  }): Promise<TrellisTestParticipantApproval> {
+    return await adminDeployment.installParticipant(this.#deployment, args);
   }
 
   /** Provisions a service instance key through `Auth.ServiceInstances.Provision`. */
   async provisionServiceInstance(args: {
     deployment?: string;
     contract: TrellisTestParticipantLike;
-    sessionKeySeed?: string;
   }): Promise<TrellisTestServiceKey> {
     return await adminDeployment.provisionServiceInstance(
       this.#deployment,
@@ -277,53 +269,13 @@ export class TrellisTestAdminAutomation {
   async registerService(args: {
     deployment?: string;
     contract: TrellisTestParticipantLike;
-    sessionKeySeed?: string;
   }): Promise<TrellisTestServiceKey> {
     return await adminDeployment.registerService(this.#deployment, args);
   }
 
-  /** Lists deployment authority plans. */
-  async listAuthorityPlans(args: {
-    deploymentId?: string;
-    state?: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    limit?: number;
-    cursor?: string;
-  }): Promise<{ entries: unknown[]; nextCursor: string | null }> {
-    return await adminDeployment.listAuthorityPlans(this.#deployment, args);
-  }
-
-  /** Rejects a pending deployment authority plan. */
-  async rejectAuthorityPlan(args: {
-    planId: string;
-    reason?: string;
-  }): Promise<unknown> {
-    return await adminDeployment.rejectAuthorityPlan(this.#deployment, args);
-  }
-
-  /** Accepts a pending deployment authority update plan. */
-  async acceptAuthorityUpdate(args: {
-    planId: string;
-    expectedDesiredVersion?: number;
-  }): Promise<unknown> {
-    return await adminDeployment.acceptAuthorityUpdate(this.#deployment, args);
-  }
-
-  /** Accepts a pending deployment authority migration plan. Requires an acknowledgement string. */
-  async acceptAuthorityMigration(args: {
-    planId: string;
-    acknowledgement: string;
-    expectedDesiredVersion?: number;
-  }): Promise<unknown> {
-    return await adminDeployment.acceptAuthorityMigration(
-      this.#deployment,
-      args,
-    );
-  }
-
-  /** Provisions a service instance key without approving the contract or altering authority. */
+  /** Provisions a service instance key without applying a participant or grant. */
   async provisionServiceInstanceOnly(args: {
     deployment?: string;
-    sessionKeySeed?: string;
   }): Promise<{ seed: string; sessionKey: string }> {
     return await adminDeployment.provisionServiceInstanceOnly(
       this.#deployment,

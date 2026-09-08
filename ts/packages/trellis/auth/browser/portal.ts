@@ -1,10 +1,10 @@
 import { decodeTrellisHttpError } from "../http_error.ts";
-import { type PortalFlowState, PortalFlowStateSchema } from "../protocol.ts";
+import { type PortalFlowState, PortalFlowStateSchema } from "./flow_types.ts";
 import type { StaticDecode } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 
-export type { PortalFlowState } from "../protocol.ts";
+export type { PortalFlowState } from "./flow_types.ts";
 export type ApprovalDecision = "approved" | "denied";
 export type AuthConfig = {
   authUrl: string;
@@ -56,11 +56,18 @@ export async function getOrCreatePortalBinding(
   const key = `${PORTAL_BINDING_KEY_PREFIX}${flowId}`;
   const stored = storage.getItem(key);
   const storedBytes = stored ? decodeBase64Url(stored) : null;
-  const created = storedBytes?.length === 32
-    ? null
-    : await createPortalBinding();
-  const bytes = storedBytes ?? decodeBase64Url(created!.secret)!;
-  const secret = created?.secret ?? stored!;
+  let bytes: Uint8Array;
+  let secret: string;
+  if (stored && storedBytes?.length === 32) {
+    bytes = storedBytes;
+    secret = stored;
+  } else {
+    const created = await createPortalBinding();
+    const decoded = decodeBase64Url(created.secret);
+    if (!decoded) throw new Error("generated portal binding is invalid");
+    bytes = decoded;
+    secret = created.secret;
+  }
   if (secret !== stored) storage.setItem(key, secret);
   return {
     secret,

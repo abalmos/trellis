@@ -39,7 +39,6 @@
     "npm:daisyui@5.5.19": "5.5.19",
     "npm:devalue@^5.7.1": "5.9.2",
     "npm:diff@9": "9.0.0",
-    "npm:drizzle-orm@0.44.7": "0.44.7_@libsql+client@0.15.15_@opentelemetry+api@1.9.1",
     "npm:esm-env@^1.2.2": "1.2.2",
     "npm:fake-indexeddb@6.2.5": "6.2.5",
     "npm:fflate@~0.8.2": "0.8.3",
@@ -909,17 +908,6 @@
     "diff@9.0.0": {
       "integrity": "sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw=="
     },
-    "drizzle-orm@0.44.7_@libsql+client@0.15.15_@opentelemetry+api@1.9.1": {
-      "integrity": "sha512-quIpnYznjU9lHshEOAYLoZ9s3jweleHlZIAWR/jX9gAWNg/JhQ1wj0KGRf7/Zm+obRrYd9GjPVJg790QY9N5AQ==",
-      "dependencies": [
-        "@libsql/client",
-        "@opentelemetry/api"
-      ],
-      "optionalPeers": [
-        "@libsql/client",
-        "@opentelemetry/api"
-      ]
-    },
     "enhanced-resolve@5.24.5": {
       "integrity": "sha512-L1l8TNvomm6UVW5B253AGxQagSQr+vGwhMlrrfRS2qmhx46AMpMVJKQYLvWYbysTMY8VoicOvzHzoHMbyzB+4A==",
       "dependencies": [
@@ -1602,9 +1590,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@deno/dnt@~0.42.3",
       "jsr:@hono/hono@^4.12.15",
-      "jsr:@nats-io/transport-deno@^3.3.1",
       "jsr:@std/assert@^1.0.19",
       "jsr:@std/cli@^1.0.29",
       "jsr:@std/collections@^1.1.7",
@@ -1643,7 +1629,6 @@
       "npm:daisyui@5.5.19",
       "npm:devalue@^5.7.1",
       "npm:diff@9",
-      "npm:drizzle-orm@0.44.7",
       "npm:esm-env@^1.2.2",
       "npm:fake-indexeddb@6.2.5",
       "npm:fflate@~0.8.2",
@@ -1686,7 +1671,6 @@
       "jsr:@qlever-llc/trellis-svelte@0.12.0": {},
       "jsr:@qlever-llc/trellis-test@0.12.0": {
         "dependencies": [
-          "jsr:@nats-io/transport-deno@^3.3.1",
           "jsr:@qlever-llc/trellis@0.12",
           "jsr:@std/assert@^1.0.19",
           "jsr:@std/path@^1.1.4",
@@ -1694,15 +1678,13 @@
           "npm:@nats-io/jetstream@^3.3.1",
           "npm:@nats-io/kv@^3.3.1",
           "npm:@nats-io/nats-core@^3.3.1",
+          "npm:@nats-io/transport-node@^3.3.1",
           "npm:fflate@~0.8.2",
+          "npm:typebox@^1.1.33",
           "npm:ulid@^3.0.2"
         ]
       },
-      "jsr:@qlever-llc/trellis@0.12.0": {
-        "dependencies": [
-          "npm:drizzle-orm@0.44.7"
-        ]
-      }
+      "jsr:@qlever-llc/trellis@0.12.0": {}
     }
   }
 }

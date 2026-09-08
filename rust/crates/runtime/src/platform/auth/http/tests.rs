@@ -3,7 +3,8 @@ use axum::response::IntoResponse;
 use super::{
     canonical_origin, first_admin_token_hash, oauth_cookie_header, oauth_cookie_name,
     oidc_portal_policy_digest, project_service_resource_bindings, require_oauth_browser_binding,
-    select_browser_authority, validate_redirect, NatsBootstrapIssuer, EMBEDDED_WEB_ASSETS,
+    select_browser_authority, session_public_key_to_user_nkey, validate_redirect,
+    NatsBootstrapIssuer, EMBEDDED_WEB_ASSETS,
 };
 use crate::platform::auth::AuthorizationStateError;
 use crate::platform::auth::{
@@ -26,6 +27,16 @@ use trellis_protocol::{
 };
 
 const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+#[test]
+fn session_public_key_derives_the_same_nats_user_key() {
+    let key = KeyPair::new_user();
+    let (_, raw) = nkeys::from_public_key(&key.public_key()).unwrap();
+    assert_eq!(
+        session_public_key_to_user_nkey(&URL_SAFE_NO_PAD.encode(raw)).unwrap(),
+        key.public_key()
+    );
+}
 
 fn permission(target: PermissionTarget, action: PermissionAction) -> PermissionAtom {
     PermissionAtom::new(target, action).unwrap()
@@ -359,50 +370,12 @@ fn bootstrap_jwt_is_session_keyed_and_deny_all() {
 }
 
 #[test]
-fn refresh_transport_metadata_omits_unconfigured_native_transport() {
-    let value = serde_json::to_value(super::NatsBootstrapResponse::new(
-        super::IssuedBootstrapJwt {
-            jwt: "jwt".to_owned(),
-            expires_at: 10,
-        },
-        Vec::new(),
-        vec!["ws://localhost:8080".to_owned()],
-    ))
-    .unwrap();
-    assert_eq!(
-        value,
-        serde_json::json!({
-            "jwt": "jwt",
-            "jwtExpiresAt": 10,
-            "transports": {
-                "websocket": { "natsServers": ["ws://localhost:8080"] },
-            },
-        })
-    );
-    assert!(value["transports"].get("native").is_none());
-    assert_eq!(
-        value["transports"]["websocket"]["natsServers"],
-        serde_json::json!(["ws://localhost:8080"])
-    );
-    assert!(value.get("servers").is_none());
-}
-#[test]
-fn administrator_grants_include_optional_console_surfaces() {
+fn administrator_grants_include_console_surfaces() {
     let binding = super::super::cli_participant_binding(0).expect("CLI participant binding");
-    let (grants, capabilities) = super::browser::complete_participant_authority(&binding)
+    let grants = super::browser::complete_participant_grants(&binding)
         .unwrap_or_else(|_| panic!("complete administration grant set"));
     let json = serde_json::to_string(&grants).expect("serialize administration grants");
     assert!(json.contains("Health.Query"));
     assert!(json.contains("Health.Watch"));
     assert!(json.contains("EventLog.Query"));
-    assert!(capabilities.contains(&"trellis.jobs::read".to_owned()));
-    assert!(capabilities.contains(&"trellis.jobs::mutate".to_owned()));
-    assert!(capabilities.contains(&"trellis.jobs::stream".to_owned()));
-    assert!(capabilities.contains(&"trellis.eventlog::read".to_owned()));
-    assert!(capabilities.contains(&"trellis.eventlog::stream".to_owned()));
-    assert!(
-        capabilities.contains(&"trellis.auth::capabilities.delegate".to_owned()),
-        "{capabilities:?}"
-    );
-    assert!(capabilities.contains(&"trellis.health::read".to_owned()));
 }

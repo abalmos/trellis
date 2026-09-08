@@ -50,7 +50,6 @@ Deno.test("control panel keeps admin navigation focused on active sections", () 
     "Events",
     "Jobs",
     "Grants",
-    "Authority Plans",
     "Capability Groups",
     "Portals",
   ]);

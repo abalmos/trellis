@@ -1,20 +1,16 @@
-use serde_json::Value;
-
 use super::super::authority::{
-    validate_deployment_authority, validate_device_delegation, validate_identity_authority,
-    validate_principal, validate_provider_identity, validate_runtime_instance,
+    validate_device_delegation, validate_principal, validate_provider_identity,
+    validate_runtime_instance,
 };
 use super::super::domain::{
-    canonical_capabilities, require_digest, require_nonempty, require_positive,
-    require_protocol_timestamp,
+    require_digest, require_nonempty, require_positive, require_protocol_timestamp,
 };
 use super::super::{
-    AccountFlowKind, AccountFlowRecord, AccountFlowState, AuthorityKind, AuthorityProposalRecord,
-    AuthorityProposalState, AuthorityState, DeviceActivationReviewRecord,
-    DeviceActivationReviewState, IdempotencyResultRecord, IdentityAuthorityRecord,
-    LocalCredentialRecord, LoginPortalRecord, LoginSettingsRecord, PostCommitActionKind,
-    PostCommitActionRecord, PrincipalKind, PrincipalRecord, PrincipalState,
-    ProvisionedIdentityKind, ProvisioningSecretState, UserProfileRecord, MAX_PROTOCOL_INTEGER,
+    AccountFlowKind, AccountFlowRecord, AccountFlowState, DeviceActivationReviewRecord,
+    DeviceActivationReviewState, IdempotencyResultRecord, LocalCredentialRecord, LoginPortalRecord,
+    LoginSettingsRecord, PostCommitActionKind, PostCommitActionRecord, PrincipalKind,
+    PrincipalRecord, PrincipalState, ProvisionedIdentityKind, ProvisioningSecretState,
+    UserProfileRecord, MAX_PROTOCOL_INTEGER,
 };
 use super::repository::LocalLoginAttempt;
 
@@ -34,28 +30,6 @@ pub(crate) fn validate_session_revocation_actions(
     {
         return Err(super::super::AuthorizationStateError::InvalidRecord(
             "session revocation requires deterministic event and kick actions".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_session_desired_authority(
-    session: &super::super::SessionRecord,
-    desired: &super::super::DesiredAuthorityRecord,
-) -> Result<(), super::super::AuthorizationStateError> {
-    let super::super::DesiredAuthorityRecord::Identity(authority) = desired else {
-        return Err(super::super::AuthorizationStateError::InvalidRecord(
-            "user session desired authority must be identity kind".to_owned(),
-        ));
-    };
-    if session.principal_kind != PrincipalKind::User
-        || authority.principal_id != session.principal_id
-        || authority.participant_id != session.participant_id
-        || authority.participant_artifact_digest != session.participant_artifact_digest
-        || authority.accepted_needs_digest != session.participant_needs_digest
-    {
-        return Err(super::super::AuthorizationStateError::InvalidRecord(
-            "session desired authority does not match the session exactly".to_owned(),
         ));
     }
     Ok(())
@@ -122,35 +96,6 @@ pub(crate) fn validate_new_user_account(
                 "local credential requires a matching local identity".to_owned(),
             ));
         }
-    }
-    Ok(())
-}
-
-pub(crate) fn validate_first_admin_authority(
-    authority: &IdentityAuthorityRecord,
-    principal: &PrincipalRecord,
-    completed_at: i64,
-) -> Result<(), super::super::AuthorizationStateError> {
-    let mut validated = authority.clone();
-    validate_identity_authority(&mut validated)?;
-    if validated != *authority
-        || authority.principal_id != principal.principal_id
-        || authority.state != AuthorityState::Accepted
-        || !authority
-            .desired_capabilities
-            .iter()
-            .any(|value| value == "trellis.auth::admin")
-        || !authority
-            .desired_capabilities
-            .iter()
-            .any(|value| value == "trellis.auth::capabilities.delegate")
-        || authority
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= completed_at)
-    {
-        return Err(super::super::AuthorizationStateError::InvalidRecord(
-            "bootstrap authority must be accepted, exact, active, and delegating".to_owned(),
-        ));
     }
     Ok(())
 }
@@ -297,80 +242,6 @@ pub(crate) fn validate_account_flow(
         ));
     }
     Ok(())
-}
-
-pub(crate) fn validate_authority_proposal(
-    proposal: &AuthorityProposalRecord,
-) -> Result<(), super::super::AuthorizationStateError> {
-    require_nonempty("proposalId", &proposal.proposal_id)?;
-    require_nonempty("authorityId", &proposal.authority_id)?;
-    require_nonempty("participantId", &proposal.participant_id)?;
-    require_digest(
-        "participantArtifactDigest",
-        &proposal.participant_artifact_digest,
-    )?;
-    require_digest("participantNeedsDigest", &proposal.participant_needs_digest)?;
-    require_digest("proposalDigest", &proposal.proposal_digest)?;
-    match proposal.authority_kind {
-        AuthorityKind::Deployment => {
-            let deployment_id = proposal.deployment_id.as_deref().ok_or_else(|| {
-                super::super::AuthorizationStateError::InvalidRecord(
-                    "deployment proposal is missing deploymentId".to_owned(),
-                )
-            })?;
-            if proposal.authority_id
-                != super::super::model::deployment_authority_id(
-                    deployment_id,
-                    &proposal.participant_id,
-                )?
-                || proposal.payload.get("deploymentId").and_then(Value::as_str)
-                    != Some(deployment_id)
-                || proposal
-                    .payload
-                    .get("subjectId")
-                    .and_then(Value::as_str)
-                    .is_some_and(|subject_id| subject_id != deployment_id)
-            {
-                return Err(super::super::AuthorizationStateError::InvalidRecord(
-                    "deployment proposal lineage is inconsistent".to_owned(),
-                ));
-            }
-        }
-        AuthorityKind::Identity if proposal.deployment_id.is_some() => {
-            return Err(super::super::AuthorizationStateError::InvalidRecord(
-                "identity proposal cannot name a deployment".to_owned(),
-            ));
-        }
-        AuthorityKind::Identity => {}
-    }
-    require_protocol_timestamp("createdAt", proposal.created_at)?;
-    if let Some(expires_at) = proposal.expires_at {
-        require_protocol_timestamp("expiresAt", expires_at)?;
-    }
-    if proposal.state != AuthorityProposalState::Pending
-        || proposal.superseded_at.is_some()
-        || proposal.version != 1
-        || proposal
-            .expires_at
-            .is_some_and(|expires| expires <= proposal.created_at)
-    {
-        return Err(super::super::AuthorizationStateError::InvalidRecord(
-            "new authority proposal lifecycle is invalid".to_owned(),
-        ));
-    }
-    if canonical_capabilities(proposal.proposed_capabilities.clone())?
-        != proposal.proposed_capabilities
-    {
-        return Err(super::super::AuthorizationStateError::InvalidRecord(
-            "proposedCapabilities must be canonical".to_owned(),
-        ));
-    }
-    match proposal.payload.get("baseAuthorityVersion") {
-        Some(Value::Null) | Some(Value::Number(_)) => Ok(()),
-        _ => Err(super::super::AuthorizationStateError::InvalidRecord(
-            "proposal payload is missing baseAuthorityVersion".to_owned(),
-        )),
-    }
 }
 
 pub(crate) fn validate_provisioning_aggregate(
@@ -547,19 +418,6 @@ pub(crate) fn validate_idempotency_and_actions(
         validate_post_commit_action(action)?;
     }
     Ok(())
-}
-
-pub(crate) fn validate_authority_record(
-    authority: &mut super::super::DesiredAuthorityRecord,
-) -> Result<(), super::super::AuthorizationStateError> {
-    match authority {
-        super::super::DesiredAuthorityRecord::Identity(record) => {
-            validate_identity_authority(record)
-        }
-        super::super::DesiredAuthorityRecord::Deployment(record) => {
-            validate_deployment_authority(record)
-        }
-    }
 }
 
 #[cfg(test)]

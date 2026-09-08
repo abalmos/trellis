@@ -16,7 +16,6 @@ export const routeTitles = {
   "/admin/users": "Users",
   "/admin/users/edit": "Edit User",
   "/admin/sessions": "Sessions",
-  "/admin/authority/plans": "Authority Plans",
   "/admin/services": "Services",
   "/admin/devices": "Devices",
   "/admin/sessions/revoke": "Revoke Session",
@@ -122,12 +121,6 @@ const navSections: NavSection[] = [
         href: "/admin/grants",
         label: "Grants",
         icon: "key",
-        capabilities: [CAPABILITIES.authorityRead],
-      },
-      {
-        href: "/admin/authority/plans",
-        label: "Authority Plans",
-        icon: "clipboard",
         capabilities: [CAPABILITIES.authorityRead],
       },
       {

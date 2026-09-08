@@ -494,18 +494,36 @@ pub struct AuthConnectionsListResponseEntriesItem {
     /// The `connectionId` wire field.
     #[serde(rename = "connectionId")]
     pub connection_id: String,
+    /// The `contextDigest` wire field.
+    #[serde(rename = "contextDigest")]
+    pub context_digest: String,
+    /// The `deploymentId` wire field.
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: Option<String>,
+    /// The `instanceId` wire field.
+    #[serde(rename = "instanceId")]
+    pub instance_id: Option<String>,
     /// The `lastSeenAt` wire field.
     #[serde(rename = "lastSeenAt")]
     pub last_seen_at: i64,
+    /// The `loginSessionId` wire field.
+    #[serde(rename = "loginSessionId")]
+    pub login_session_id: Option<String>,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    pub participant_id: String,
+    /// The `principalId` wire field.
+    #[serde(rename = "principalId")]
+    pub principal_id: String,
     /// The `remoteAddress` wire field.
     #[serde(rename = "remoteAddress")]
     pub remote_address: Option<String>,
+    /// The `runtimeConnectionId` wire field.
+    #[serde(rename = "runtimeConnectionId")]
+    pub runtime_connection_id: String,
     /// The `serverId` wire field.
     #[serde(rename = "serverId")]
     pub server_id: String,
-    /// The `sessionId` wire field.
-    #[serde(rename = "sessionId")]
-    pub session_id: String,
     /// The `userNkey` wire field.
     #[serde(rename = "userNkey")]
     pub user_nkey: String,
@@ -518,5675 +536,6 @@ pub struct AuthConnectionsListResponse {
     /// The `nextCursor` wire field.
     #[serde(rename = "nextCursor")]
     pub next_cursor: Option<String>,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptMigrationRequest {
-    /// The `expectedBaseAuthorityVersion` wire field.
-    #[serde(rename = "expectedBaseAuthorityVersion")]
-    pub expected_base_authority_version: Option<i64>,
-    /// The `idempotencyKey` wire field.
-    #[serde(rename = "idempotencyKey")]
-    pub idempotency_key: String,
-    /// The `proposalId` wire field.
-    #[serde(rename = "proposalId")]
-    pub proposal_id: String,
-    /// The `reason` wire field.
-    pub reason: Option<String>,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetFormat
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetFormat
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetFormat>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl
-    PartialEq<
-        AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    > for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTarget
-{
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action:
-        AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target:
-        AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseAuthorityKind {
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptMigrationResponseAuthorityKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityAcceptMigrationResponseAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthorityParticipantKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseAuthorityParticipantKind {
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseAuthorityParticipantKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Service => "service",
-            Self::Device => "device",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityParticipantKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityParticipantKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityParticipantKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptMigrationResponseAuthorityParticipantKind> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseAuthorityParticipantKind,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthorityState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseAuthorityState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-    /// The `stale` wire value.
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseAuthorityState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Revoked => "revoked",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptMigrationResponseAuthorityState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptMigrationResponseAuthorityState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityAcceptMigrationResponseAuthorityState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseAuthority`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptMigrationResponseAuthority {
-    /// The `acceptedNeedsDigest` wire field.
-    #[serde(rename = "acceptedNeedsDigest")]
-    pub accepted_needs_digest: String,
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    pub deployment_id: String,
-    /// The `desiredCapabilities` wire field.
-    #[serde(rename = "desiredCapabilities")]
-    pub desired_capabilities: Vec<String>,
-    /// The `desiredGrantSet` wire field.
-    #[serde(rename = "desiredGrantSet")]
-    pub desired_grant_set: AuthDeploymentAuthorityAcceptMigrationResponseAuthorityDesiredGrantSet,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `kind` wire field.
-    pub kind: AuthDeploymentAuthorityAcceptMigrationResponseAuthorityKind,
-    /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantKind` wire field.
-    #[serde(rename = "participantKind")]
-    pub participant_kind: AuthDeploymentAuthorityAcceptMigrationResponseAuthorityParticipantKind,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityAcceptMigrationResponseAuthorityState,
-    /// The `updatedAt` wire field.
-    #[serde(rename = "updatedAt")]
-    pub updated_at: i64,
-    /// The `version` wire field.
-    pub version: i64,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposalAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseProposalAuthorityKind {
-    /// The `identity` wire value.
-    #[serde(rename = "identity")]
-    Identity,
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseProposalAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Identity => "identity",
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptMigrationResponseProposalAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptMigrationResponseProposalAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptMigrationResponseProposalAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptMigrationResponseProposalAuthorityKind> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseProposalAuthorityKind,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposalClassification`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseProposalClassification {
-    /// The `initial` wire value.
-    #[serde(rename = "initial")]
-    Initial,
-    /// The `update` wire value.
-    #[serde(rename = "update")]
-    Update,
-    /// The `migration` wire value.
-    #[serde(rename = "migration")]
-    Migration,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseProposalClassification {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Initial => "initial",
-            Self::Update => "update",
-            Self::Migration => "migration",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptMigrationResponseProposalClassification {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptMigrationResponseProposalClassification {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptMigrationResponseProposalClassification {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptMigrationResponseProposalClassification> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseProposalClassification,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetFormat
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetFormat
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetFormat>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemAction
-{
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl
-    PartialEq<
-        AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemAction,
-    > for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTarget
-{
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action:
-        AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target:
-        AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposalState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptMigrationResponseProposalState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `superseded` wire value.
-    #[serde(rename = "superseded")]
-    Superseded,
-    /// The `expired` wire value.
-    #[serde(rename = "expired")]
-    Expired,
-}
-impl AuthDeploymentAuthorityAcceptMigrationResponseProposalState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Superseded => "superseded",
-            Self::Expired => "expired",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptMigrationResponseProposalState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptMigrationResponseProposalState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptMigrationResponseProposalState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptMigrationResponseProposalState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityAcceptMigrationResponseProposalState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponseProposal`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptMigrationResponseProposal {
-    /// The `authorityKind` wire field.
-    #[serde(rename = "authorityKind")]
-    pub authority_kind: AuthDeploymentAuthorityAcceptMigrationResponseProposalAuthorityKind,
-    /// The `baseAuthorityVersion` wire field.
-    #[serde(rename = "baseAuthorityVersion")]
-    pub base_authority_version: Option<i64>,
-    /// The `classification` wire field.
-    pub classification: AuthDeploymentAuthorityAcceptMigrationResponseProposalClassification,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decisionAt` wire field.
-    #[serde(rename = "decisionAt")]
-    pub decision_at: Option<i64>,
-    /// The `decisionBy` wire field.
-    #[serde(rename = "decisionBy")]
-    pub decision_by: Option<String>,
-    /// The `decisionReason` wire field.
-    #[serde(rename = "decisionReason")]
-    pub decision_reason: Option<String>,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantNeedsDigest` wire field.
-    #[serde(rename = "participantNeedsDigest")]
-    pub participant_needs_digest: String,
-    /// The `proposalId` wire field.
-    #[serde(rename = "proposalId")]
-    pub proposal_id: String,
-    /// The `proposedCapabilities` wire field.
-    #[serde(rename = "proposedCapabilities")]
-    pub proposed_capabilities: Vec<String>,
-    /// The `proposedGrantSet` wire field.
-    #[serde(rename = "proposedGrantSet")]
-    pub proposed_grant_set: AuthDeploymentAuthorityAcceptMigrationResponseProposalProposedGrantSet,
-    /// The `reasons` wire field.
-    pub reasons: Vec<String>,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityAcceptMigrationResponseProposalState,
-    /// The `subjectId` wire field.
-    #[serde(rename = "subjectId")]
-    pub subject_id: String,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptMigrationResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptMigrationResponse {
-    /// The `authority` wire field.
-    pub authority: AuthDeploymentAuthorityAcceptMigrationResponseAuthority,
-    /// The `proposal` wire field.
-    pub proposal: AuthDeploymentAuthorityAcceptMigrationResponseProposal,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptUpdateRequest {
-    /// The `expectedBaseAuthorityVersion` wire field.
-    #[serde(rename = "expectedBaseAuthorityVersion")]
-    pub expected_base_authority_version: Option<i64>,
-    /// The `idempotencyKey` wire field.
-    #[serde(rename = "idempotencyKey")]
-    pub idempotency_key: String,
-    /// The `proposalId` wire field.
-    #[serde(rename = "proposalId")]
-    pub proposal_id: String,
-    /// The `reason` wire field.
-    pub reason: Option<String>,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetFormat
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetFormat> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl
-    PartialEq<
-        AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    > for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action:
-        AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target:
-        AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseAuthorityKind {
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptUpdateResponseAuthorityKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityAcceptUpdateResponseAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthorityParticipantKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseAuthorityParticipantKind {
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseAuthorityParticipantKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Service => "service",
-            Self::Device => "device",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityParticipantKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityParticipantKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityParticipantKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptUpdateResponseAuthorityParticipantKind> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptUpdateResponseAuthorityParticipantKind,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthorityState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseAuthorityState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-    /// The `stale` wire value.
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseAuthorityState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Revoked => "revoked",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptUpdateResponseAuthorityState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptUpdateResponseAuthorityState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityAcceptUpdateResponseAuthorityState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseAuthority`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptUpdateResponseAuthority {
-    /// The `acceptedNeedsDigest` wire field.
-    #[serde(rename = "acceptedNeedsDigest")]
-    pub accepted_needs_digest: String,
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    pub deployment_id: String,
-    /// The `desiredCapabilities` wire field.
-    #[serde(rename = "desiredCapabilities")]
-    pub desired_capabilities: Vec<String>,
-    /// The `desiredGrantSet` wire field.
-    #[serde(rename = "desiredGrantSet")]
-    pub desired_grant_set: AuthDeploymentAuthorityAcceptUpdateResponseAuthorityDesiredGrantSet,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `kind` wire field.
-    pub kind: AuthDeploymentAuthorityAcceptUpdateResponseAuthorityKind,
-    /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantKind` wire field.
-    #[serde(rename = "participantKind")]
-    pub participant_kind: AuthDeploymentAuthorityAcceptUpdateResponseAuthorityParticipantKind,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityAcceptUpdateResponseAuthorityState,
-    /// The `updatedAt` wire field.
-    #[serde(rename = "updatedAt")]
-    pub updated_at: i64,
-    /// The `version` wire field.
-    pub version: i64,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposalAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseProposalAuthorityKind {
-    /// The `identity` wire value.
-    #[serde(rename = "identity")]
-    Identity,
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseProposalAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Identity => "identity",
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptUpdateResponseProposalAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptUpdateResponseProposalAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptUpdateResponseProposalAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptUpdateResponseProposalAuthorityKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityAcceptUpdateResponseProposalAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposalClassification`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseProposalClassification {
-    /// The `initial` wire value.
-    #[serde(rename = "initial")]
-    Initial,
-    /// The `update` wire value.
-    #[serde(rename = "update")]
-    Update,
-    /// The `migration` wire value.
-    #[serde(rename = "migration")]
-    Migration,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseProposalClassification {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Initial => "initial",
-            Self::Update => "update",
-            Self::Migration => "migration",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptUpdateResponseProposalClassification {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptUpdateResponseProposalClassification {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptUpdateResponseProposalClassification {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptUpdateResponseProposalClassification> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptUpdateResponseProposalClassification,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetFormat
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetFormat> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl
-    PartialEq<
-        AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemAction,
-    > for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action:
-        AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target:
-        AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposalState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityAcceptUpdateResponseProposalState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `superseded` wire value.
-    #[serde(rename = "superseded")]
-    Superseded,
-    /// The `expired` wire value.
-    #[serde(rename = "expired")]
-    Expired,
-}
-impl AuthDeploymentAuthorityAcceptUpdateResponseProposalState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Superseded => "superseded",
-            Self::Expired => "expired",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityAcceptUpdateResponseProposalState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityAcceptUpdateResponseProposalState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityAcceptUpdateResponseProposalState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityAcceptUpdateResponseProposalState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityAcceptUpdateResponseProposalState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponseProposal`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptUpdateResponseProposal {
-    /// The `authorityKind` wire field.
-    #[serde(rename = "authorityKind")]
-    pub authority_kind: AuthDeploymentAuthorityAcceptUpdateResponseProposalAuthorityKind,
-    /// The `baseAuthorityVersion` wire field.
-    #[serde(rename = "baseAuthorityVersion")]
-    pub base_authority_version: Option<i64>,
-    /// The `classification` wire field.
-    pub classification: AuthDeploymentAuthorityAcceptUpdateResponseProposalClassification,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decisionAt` wire field.
-    #[serde(rename = "decisionAt")]
-    pub decision_at: Option<i64>,
-    /// The `decisionBy` wire field.
-    #[serde(rename = "decisionBy")]
-    pub decision_by: Option<String>,
-    /// The `decisionReason` wire field.
-    #[serde(rename = "decisionReason")]
-    pub decision_reason: Option<String>,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantNeedsDigest` wire field.
-    #[serde(rename = "participantNeedsDigest")]
-    pub participant_needs_digest: String,
-    /// The `proposalId` wire field.
-    #[serde(rename = "proposalId")]
-    pub proposal_id: String,
-    /// The `proposedCapabilities` wire field.
-    #[serde(rename = "proposedCapabilities")]
-    pub proposed_capabilities: Vec<String>,
-    /// The `proposedGrantSet` wire field.
-    #[serde(rename = "proposedGrantSet")]
-    pub proposed_grant_set: AuthDeploymentAuthorityAcceptUpdateResponseProposalProposedGrantSet,
-    /// The `reasons` wire field.
-    pub reasons: Vec<String>,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityAcceptUpdateResponseProposalState,
-    /// The `subjectId` wire field.
-    #[serde(rename = "subjectId")]
-    pub subject_id: String,
-}
-/// Generated schema type `AuthDeploymentAuthorityAcceptUpdateResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityAcceptUpdateResponse {
-    /// The `authority` wire field.
-    pub authority: AuthDeploymentAuthorityAcceptUpdateResponseAuthority,
-    /// The `proposal` wire field.
-    pub proposal: AuthDeploymentAuthorityAcceptUpdateResponseProposal,
-}
-/// Generated schema type `AuthDeploymentAuthorityGetRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityGetRequest {
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetFormat> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetFormat) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl
-    AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action: AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target: AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions: Vec<AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityGetResponseAuthorityKind {
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityGetResponseAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityGetResponseAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityGetResponseAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityGetResponseAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityGetResponseAuthorityKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityGetResponseAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthorityParticipantKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityGetResponseAuthorityParticipantKind {
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
-}
-impl AuthDeploymentAuthorityGetResponseAuthorityParticipantKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Service => "service",
-            Self::Device => "device",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityGetResponseAuthorityParticipantKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityGetResponseAuthorityParticipantKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityGetResponseAuthorityParticipantKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityGetResponseAuthorityParticipantKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityGetResponseAuthorityParticipantKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthorityState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityGetResponseAuthorityState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-    /// The `stale` wire value.
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl AuthDeploymentAuthorityGetResponseAuthorityState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Revoked => "revoked",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityGetResponseAuthorityState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityGetResponseAuthorityState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityGetResponseAuthorityState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityGetResponseAuthorityState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityGetResponseAuthorityState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponseAuthority`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityGetResponseAuthority {
-    /// The `acceptedNeedsDigest` wire field.
-    #[serde(rename = "acceptedNeedsDigest")]
-    pub accepted_needs_digest: String,
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    pub deployment_id: String,
-    /// The `desiredCapabilities` wire field.
-    #[serde(rename = "desiredCapabilities")]
-    pub desired_capabilities: Vec<String>,
-    /// The `desiredGrantSet` wire field.
-    #[serde(rename = "desiredGrantSet")]
-    pub desired_grant_set: AuthDeploymentAuthorityGetResponseAuthorityDesiredGrantSet,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `kind` wire field.
-    pub kind: AuthDeploymentAuthorityGetResponseAuthorityKind,
-    /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantKind` wire field.
-    #[serde(rename = "participantKind")]
-    pub participant_kind: AuthDeploymentAuthorityGetResponseAuthorityParticipantKind,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityGetResponseAuthorityState,
-    /// The `updatedAt` wire field.
-    #[serde(rename = "updatedAt")]
-    pub updated_at: i64,
-    /// The `version` wire field.
-    pub version: i64,
-}
-/// Generated schema type `AuthDeploymentAuthorityGetResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityGetResponse {
-    /// The `authority` wire field.
-    pub authority: AuthDeploymentAuthorityGetResponseAuthority,
-}
-/// Generated schema type `AuthDeploymentAuthorityListRequestState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityListRequestState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-    /// The `stale` wire value.
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl AuthDeploymentAuthorityListRequestState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Revoked => "revoked",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityListRequestState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityListRequestState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityListRequestState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityListRequestState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityListRequestState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityListRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityListRequest {
-    /// The `cursor` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_id: Option<String>,
-    /// The `limit` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<i64>,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub participant_id: Option<String>,
-    /// The `state` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub state: Option<AuthDeploymentAuthorityListRequestState>,
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetFormat> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action: AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target: AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItemKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityListResponseEntriesItemKind {
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityListResponseEntriesItemKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityListResponseEntriesItemKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityListResponseEntriesItemKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityListResponseEntriesItemKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityListResponseEntriesItemKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityListResponseEntriesItemKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItemParticipantKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityListResponseEntriesItemParticipantKind {
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
-}
-impl AuthDeploymentAuthorityListResponseEntriesItemParticipantKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Service => "service",
-            Self::Device => "device",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityListResponseEntriesItemParticipantKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityListResponseEntriesItemParticipantKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityListResponseEntriesItemParticipantKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityListResponseEntriesItemParticipantKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityListResponseEntriesItemParticipantKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItemState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityListResponseEntriesItemState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-    /// The `stale` wire value.
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl AuthDeploymentAuthorityListResponseEntriesItemState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Revoked => "revoked",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityListResponseEntriesItemState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityListResponseEntriesItemState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityListResponseEntriesItemState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityListResponseEntriesItemState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityListResponseEntriesItemState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponseEntriesItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityListResponseEntriesItem {
-    /// The `acceptedNeedsDigest` wire field.
-    #[serde(rename = "acceptedNeedsDigest")]
-    pub accepted_needs_digest: String,
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    pub deployment_id: String,
-    /// The `desiredCapabilities` wire field.
-    #[serde(rename = "desiredCapabilities")]
-    pub desired_capabilities: Vec<String>,
-    /// The `desiredGrantSet` wire field.
-    #[serde(rename = "desiredGrantSet")]
-    pub desired_grant_set: AuthDeploymentAuthorityListResponseEntriesItemDesiredGrantSet,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `kind` wire field.
-    pub kind: AuthDeploymentAuthorityListResponseEntriesItemKind,
-    /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantKind` wire field.
-    #[serde(rename = "participantKind")]
-    pub participant_kind: AuthDeploymentAuthorityListResponseEntriesItemParticipantKind,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityListResponseEntriesItemState,
-    /// The `updatedAt` wire field.
-    #[serde(rename = "updatedAt")]
-    pub updated_at: i64,
-    /// The `version` wire field.
-    pub version: i64,
-}
-/// Generated schema type `AuthDeploymentAuthorityListResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityListResponse {
-    /// The `entries` wire field.
-    pub entries: Vec<AuthDeploymentAuthorityListResponseEntriesItem>,
-    /// The `nextCursor` wire field.
-    #[serde(rename = "nextCursor")]
-    pub next_cursor: Option<String>,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlanRequest {
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    pub deployment_id: String,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `idempotencyKey` wire field.
-    #[serde(rename = "idempotencyKey")]
-    pub idempotency_key: String,
-    /// The `participantArtifact` wire field.
-    #[serde(rename = "participantArtifact")]
-    pub participant_artifact: BTreeMap<String, serde_json::Value>,
-    /// The `referencedApiArtifacts` wire field.
-    #[serde(rename = "referencedApiArtifacts")]
-    pub referenced_api_artifacts: Vec<BTreeMap<String, serde_json::Value>>,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlanResponseProposalAuthorityKind {
-    /// The `identity` wire value.
-    #[serde(rename = "identity")]
-    Identity,
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityPlanResponseProposalAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Identity => "identity",
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlanResponseProposalAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlanResponseProposalAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlanResponseProposalAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlanResponseProposalAuthorityKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityPlanResponseProposalAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalClassification`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlanResponseProposalClassification {
-    /// The `initial` wire value.
-    #[serde(rename = "initial")]
-    Initial,
-    /// The `update` wire value.
-    #[serde(rename = "update")]
-    Update,
-    /// The `migration` wire value.
-    #[serde(rename = "migration")]
-    Migration,
-}
-impl AuthDeploymentAuthorityPlanResponseProposalClassification {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Initial => "initial",
-            Self::Update => "update",
-            Self::Migration => "migration",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlanResponseProposalClassification {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlanResponseProposalClassification {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlanResponseProposalClassification {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlanResponseProposalClassification> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityPlanResponseProposalClassification) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetFormat> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemAction>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action: AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target: AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalProposedGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlanResponseProposalProposedGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthDeploymentAuthorityPlanResponseProposalProposedGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposalState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlanResponseProposalState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `superseded` wire value.
-    #[serde(rename = "superseded")]
-    Superseded,
-    /// The `expired` wire value.
-    #[serde(rename = "expired")]
-    Expired,
-}
-impl AuthDeploymentAuthorityPlanResponseProposalState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Superseded => "superseded",
-            Self::Expired => "expired",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlanResponseProposalState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlanResponseProposalState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlanResponseProposalState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlanResponseProposalState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityPlanResponseProposalState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponseProposal`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlanResponseProposal {
-    /// The `authorityKind` wire field.
-    #[serde(rename = "authorityKind")]
-    pub authority_kind: AuthDeploymentAuthorityPlanResponseProposalAuthorityKind,
-    /// The `baseAuthorityVersion` wire field.
-    #[serde(rename = "baseAuthorityVersion")]
-    pub base_authority_version: Option<i64>,
-    /// The `classification` wire field.
-    pub classification: AuthDeploymentAuthorityPlanResponseProposalClassification,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decisionAt` wire field.
-    #[serde(rename = "decisionAt")]
-    pub decision_at: Option<i64>,
-    /// The `decisionBy` wire field.
-    #[serde(rename = "decisionBy")]
-    pub decision_by: Option<String>,
-    /// The `decisionReason` wire field.
-    #[serde(rename = "decisionReason")]
-    pub decision_reason: Option<String>,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantNeedsDigest` wire field.
-    #[serde(rename = "participantNeedsDigest")]
-    pub participant_needs_digest: String,
-    /// The `proposalId` wire field.
-    #[serde(rename = "proposalId")]
-    pub proposal_id: String,
-    /// The `proposedCapabilities` wire field.
-    #[serde(rename = "proposedCapabilities")]
-    pub proposed_capabilities: Vec<String>,
-    /// The `proposedGrantSet` wire field.
-    #[serde(rename = "proposedGrantSet")]
-    pub proposed_grant_set: AuthDeploymentAuthorityPlanResponseProposalProposedGrantSet,
-    /// The `reasons` wire field.
-    pub reasons: Vec<String>,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityPlanResponseProposalState,
-    /// The `subjectId` wire field.
-    #[serde(rename = "subjectId")]
-    pub subject_id: String,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlanResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlanResponse {
-    /// The `proposal` wire field.
-    pub proposal: AuthDeploymentAuthorityPlanResponseProposal,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlansGetRequest {
-    /// The `proposalId` wire field.
-    #[serde(rename = "proposalId")]
-    pub proposal_id: String,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposalAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansGetResponseProposalAuthorityKind {
-    /// The `identity` wire value.
-    #[serde(rename = "identity")]
-    Identity,
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityPlansGetResponseProposalAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Identity => "identity",
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlansGetResponseProposalAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlansGetResponseProposalAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlansGetResponseProposalAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlansGetResponseProposalAuthorityKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityPlansGetResponseProposalAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposalClassification`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansGetResponseProposalClassification {
-    /// The `initial` wire value.
-    #[serde(rename = "initial")]
-    Initial,
-    /// The `update` wire value.
-    #[serde(rename = "update")]
-    Update,
-    /// The `migration` wire value.
-    #[serde(rename = "migration")]
-    Migration,
-}
-impl AuthDeploymentAuthorityPlansGetResponseProposalClassification {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Initial => "initial",
-            Self::Update => "update",
-            Self::Migration => "migration",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlansGetResponseProposalClassification {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlansGetResponseProposalClassification {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlansGetResponseProposalClassification {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlansGetResponseProposalClassification> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityPlansGetResponseProposalClassification) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetFormat> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemAction>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action:
-        AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target:
-        AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposalState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansGetResponseProposalState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `superseded` wire value.
-    #[serde(rename = "superseded")]
-    Superseded,
-    /// The `expired` wire value.
-    #[serde(rename = "expired")]
-    Expired,
-}
-impl AuthDeploymentAuthorityPlansGetResponseProposalState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Superseded => "superseded",
-            Self::Expired => "expired",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlansGetResponseProposalState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlansGetResponseProposalState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlansGetResponseProposalState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlansGetResponseProposalState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityPlansGetResponseProposalState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponseProposal`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlansGetResponseProposal {
-    /// The `authorityKind` wire field.
-    #[serde(rename = "authorityKind")]
-    pub authority_kind: AuthDeploymentAuthorityPlansGetResponseProposalAuthorityKind,
-    /// The `baseAuthorityVersion` wire field.
-    #[serde(rename = "baseAuthorityVersion")]
-    pub base_authority_version: Option<i64>,
-    /// The `classification` wire field.
-    pub classification: AuthDeploymentAuthorityPlansGetResponseProposalClassification,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decisionAt` wire field.
-    #[serde(rename = "decisionAt")]
-    pub decision_at: Option<i64>,
-    /// The `decisionBy` wire field.
-    #[serde(rename = "decisionBy")]
-    pub decision_by: Option<String>,
-    /// The `decisionReason` wire field.
-    #[serde(rename = "decisionReason")]
-    pub decision_reason: Option<String>,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantNeedsDigest` wire field.
-    #[serde(rename = "participantNeedsDigest")]
-    pub participant_needs_digest: String,
-    /// The `proposalId` wire field.
-    #[serde(rename = "proposalId")]
-    pub proposal_id: String,
-    /// The `proposedCapabilities` wire field.
-    #[serde(rename = "proposedCapabilities")]
-    pub proposed_capabilities: Vec<String>,
-    /// The `proposedGrantSet` wire field.
-    #[serde(rename = "proposedGrantSet")]
-    pub proposed_grant_set: AuthDeploymentAuthorityPlansGetResponseProposalProposedGrantSet,
-    /// The `reasons` wire field.
-    pub reasons: Vec<String>,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityPlansGetResponseProposalState,
-    /// The `subjectId` wire field.
-    #[serde(rename = "subjectId")]
-    pub subject_id: String,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansGetResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlansGetResponse {
-    /// The `proposal` wire field.
-    pub proposal: AuthDeploymentAuthorityPlansGetResponseProposal,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListRequestState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansListRequestState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `superseded` wire value.
-    #[serde(rename = "superseded")]
-    Superseded,
-    /// The `expired` wire value.
-    #[serde(rename = "expired")]
-    Expired,
-}
-impl AuthDeploymentAuthorityPlansListRequestState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Superseded => "superseded",
-            Self::Expired => "expired",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlansListRequestState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlansListRequestState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlansListRequestState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlansListRequestState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityPlansListRequestState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlansListRequest {
-    /// The `cursor` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_id: Option<String>,
-    /// The `limit` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<i64>,
-    /// The `state` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub state: Option<AuthDeploymentAuthorityPlansListRequestState>,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItemAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansListResponseEntriesItemAuthorityKind {
-    /// The `identity` wire value.
-    #[serde(rename = "identity")]
-    Identity,
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityPlansListResponseEntriesItemAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Identity => "identity",
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlansListResponseEntriesItemAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlansListResponseEntriesItemAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlansListResponseEntriesItemAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlansListResponseEntriesItemAuthorityKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityPlansListResponseEntriesItemAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItemClassification`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansListResponseEntriesItemClassification {
-    /// The `initial` wire value.
-    #[serde(rename = "initial")]
-    Initial,
-    /// The `update` wire value.
-    #[serde(rename = "update")]
-    Update,
-    /// The `migration` wire value.
-    #[serde(rename = "migration")]
-    Migration,
-}
-impl AuthDeploymentAuthorityPlansListResponseEntriesItemClassification {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Initial => "initial",
-            Self::Update => "update",
-            Self::Migration => "migration",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlansListResponseEntriesItemClassification {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlansListResponseEntriesItemClassification {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlansListResponseEntriesItemClassification {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlansListResponseEntriesItemClassification> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlansListResponseEntriesItemClassification,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetFormat
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetFormat> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl
-    PartialEq<
-        AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemAction,
-    > for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action:
-        AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target:
-        AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItemState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityPlansListResponseEntriesItemState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `superseded` wire value.
-    #[serde(rename = "superseded")]
-    Superseded,
-    /// The `expired` wire value.
-    #[serde(rename = "expired")]
-    Expired,
-}
-impl AuthDeploymentAuthorityPlansListResponseEntriesItemState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Superseded => "superseded",
-            Self::Expired => "expired",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityPlansListResponseEntriesItemState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityPlansListResponseEntriesItemState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityPlansListResponseEntriesItemState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityPlansListResponseEntriesItemState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityPlansListResponseEntriesItemState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponseEntriesItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlansListResponseEntriesItem {
-    /// The `authorityKind` wire field.
-    #[serde(rename = "authorityKind")]
-    pub authority_kind: AuthDeploymentAuthorityPlansListResponseEntriesItemAuthorityKind,
-    /// The `baseAuthorityVersion` wire field.
-    #[serde(rename = "baseAuthorityVersion")]
-    pub base_authority_version: Option<i64>,
-    /// The `classification` wire field.
-    pub classification: AuthDeploymentAuthorityPlansListResponseEntriesItemClassification,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decisionAt` wire field.
-    #[serde(rename = "decisionAt")]
-    pub decision_at: Option<i64>,
-    /// The `decisionBy` wire field.
-    #[serde(rename = "decisionBy")]
-    pub decision_by: Option<String>,
-    /// The `decisionReason` wire field.
-    #[serde(rename = "decisionReason")]
-    pub decision_reason: Option<String>,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantNeedsDigest` wire field.
-    #[serde(rename = "participantNeedsDigest")]
-    pub participant_needs_digest: String,
-    /// The `proposalId` wire field.
-    #[serde(rename = "proposalId")]
-    pub proposal_id: String,
-    /// The `proposedCapabilities` wire field.
-    #[serde(rename = "proposedCapabilities")]
-    pub proposed_capabilities: Vec<String>,
-    /// The `proposedGrantSet` wire field.
-    #[serde(rename = "proposedGrantSet")]
-    pub proposed_grant_set: AuthDeploymentAuthorityPlansListResponseEntriesItemProposedGrantSet,
-    /// The `reasons` wire field.
-    pub reasons: Vec<String>,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityPlansListResponseEntriesItemState,
-    /// The `subjectId` wire field.
-    #[serde(rename = "subjectId")]
-    pub subject_id: String,
-}
-/// Generated schema type `AuthDeploymentAuthorityPlansListResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityPlansListResponse {
-    /// The `entries` wire field.
-    pub entries: Vec<AuthDeploymentAuthorityPlansListResponseEntriesItem>,
-    /// The `nextCursor` wire field.
-    #[serde(rename = "nextCursor")]
-    pub next_cursor: Option<String>,
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityReconcileRequest {
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-    /// The `expectedVersion` wire field.
-    #[serde(rename = "expectedVersion")]
-    pub expected_version: Option<i64>,
-    /// The `idempotencyKey` wire field.
-    #[serde(rename = "idempotencyKey")]
-    pub idempotency_key: String,
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetFormat> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl
-    PartialEq<AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemAction>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action:
-        AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target:
-        AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityReconcileResponseAuthorityKind {
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityReconcileResponseAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityReconcileResponseAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityReconcileResponseAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityReconcileResponseAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityReconcileResponseAuthorityKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityReconcileResponseAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthorityParticipantKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityReconcileResponseAuthorityParticipantKind {
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
-}
-impl AuthDeploymentAuthorityReconcileResponseAuthorityParticipantKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Service => "service",
-            Self::Device => "device",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityReconcileResponseAuthorityParticipantKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityReconcileResponseAuthorityParticipantKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityReconcileResponseAuthorityParticipantKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityReconcileResponseAuthorityParticipantKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityReconcileResponseAuthorityParticipantKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthorityState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityReconcileResponseAuthorityState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-    /// The `stale` wire value.
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl AuthDeploymentAuthorityReconcileResponseAuthorityState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Revoked => "revoked",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityReconcileResponseAuthorityState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityReconcileResponseAuthorityState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityReconcileResponseAuthorityState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityReconcileResponseAuthorityState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityReconcileResponseAuthorityState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponseAuthority`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityReconcileResponseAuthority {
-    /// The `acceptedNeedsDigest` wire field.
-    #[serde(rename = "acceptedNeedsDigest")]
-    pub accepted_needs_digest: String,
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    pub deployment_id: String,
-    /// The `desiredCapabilities` wire field.
-    #[serde(rename = "desiredCapabilities")]
-    pub desired_capabilities: Vec<String>,
-    /// The `desiredGrantSet` wire field.
-    #[serde(rename = "desiredGrantSet")]
-    pub desired_grant_set: AuthDeploymentAuthorityReconcileResponseAuthorityDesiredGrantSet,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `kind` wire field.
-    pub kind: AuthDeploymentAuthorityReconcileResponseAuthorityKind,
-    /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantKind` wire field.
-    #[serde(rename = "participantKind")]
-    pub participant_kind: AuthDeploymentAuthorityReconcileResponseAuthorityParticipantKind,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityReconcileResponseAuthorityState,
-    /// The `updatedAt` wire field.
-    #[serde(rename = "updatedAt")]
-    pub updated_at: i64,
-    /// The `version` wire field.
-    pub version: i64,
-}
-/// Generated schema type `AuthDeploymentAuthorityReconcileResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityReconcileResponse {
-    /// The `authority` wire field.
-    pub authority: AuthDeploymentAuthorityReconcileResponseAuthority,
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityRejectRequest {
-    /// The `idempotencyKey` wire field.
-    #[serde(rename = "idempotencyKey")]
-    pub idempotency_key: String,
-    /// The `proposalId` wire field.
-    #[serde(rename = "proposalId")]
-    pub proposal_id: String,
-    /// The `reason` wire field.
-    pub reason: Option<String>,
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposalAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityRejectResponseProposalAuthorityKind {
-    /// The `identity` wire value.
-    #[serde(rename = "identity")]
-    Identity,
-    /// The `deployment` wire value.
-    #[serde(rename = "deployment")]
-    Deployment,
-}
-impl AuthDeploymentAuthorityRejectResponseProposalAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Identity => "identity",
-            Self::Deployment => "deployment",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityRejectResponseProposalAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityRejectResponseProposalAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityRejectResponseProposalAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityRejectResponseProposalAuthorityKind> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityRejectResponseProposalAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposalClassification`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityRejectResponseProposalClassification {
-    /// The `initial` wire value.
-    #[serde(rename = "initial")]
-    Initial,
-    /// The `update` wire value.
-    #[serde(rename = "update")]
-    Update,
-    /// The `migration` wire value.
-    #[serde(rename = "migration")]
-    Migration,
-}
-impl AuthDeploymentAuthorityRejectResponseProposalClassification {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Initial => "initial",
-            Self::Update => "update",
-            Self::Migration => "migration",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityRejectResponseProposalClassification {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityRejectResponseProposalClassification {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityRejectResponseProposalClassification {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityRejectResponseProposalClassification> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityRejectResponseProposalClassification) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetFormat> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemAction>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action: AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target: AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposalProposedGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityRejectResponseProposalProposedGrantSet {
-    /// The `format` wire field.
-    pub format: AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthDeploymentAuthorityRejectResponseProposalProposedGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposalState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDeploymentAuthorityRejectResponseProposalState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `superseded` wire value.
-    #[serde(rename = "superseded")]
-    Superseded,
-    /// The `expired` wire value.
-    #[serde(rename = "expired")]
-    Expired,
-}
-impl AuthDeploymentAuthorityRejectResponseProposalState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Superseded => "superseded",
-            Self::Expired => "expired",
-        }
-    }
-}
-impl AsRef<str> for AuthDeploymentAuthorityRejectResponseProposalState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDeploymentAuthorityRejectResponseProposalState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDeploymentAuthorityRejectResponseProposalState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDeploymentAuthorityRejectResponseProposalState> for &str {
-    fn eq(&self, other: &AuthDeploymentAuthorityRejectResponseProposalState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponseProposal`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityRejectResponseProposal {
-    /// The `authorityKind` wire field.
-    #[serde(rename = "authorityKind")]
-    pub authority_kind: AuthDeploymentAuthorityRejectResponseProposalAuthorityKind,
-    /// The `baseAuthorityVersion` wire field.
-    #[serde(rename = "baseAuthorityVersion")]
-    pub base_authority_version: Option<i64>,
-    /// The `classification` wire field.
-    pub classification: AuthDeploymentAuthorityRejectResponseProposalClassification,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decisionAt` wire field.
-    #[serde(rename = "decisionAt")]
-    pub decision_at: Option<i64>,
-    /// The `decisionBy` wire field.
-    #[serde(rename = "decisionBy")]
-    pub decision_by: Option<String>,
-    /// The `decisionReason` wire field.
-    #[serde(rename = "decisionReason")]
-    pub decision_reason: Option<String>,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `participantNeedsDigest` wire field.
-    #[serde(rename = "participantNeedsDigest")]
-    pub participant_needs_digest: String,
-    /// The `proposalId` wire field.
-    #[serde(rename = "proposalId")]
-    pub proposal_id: String,
-    /// The `proposedCapabilities` wire field.
-    #[serde(rename = "proposedCapabilities")]
-    pub proposed_capabilities: Vec<String>,
-    /// The `proposedGrantSet` wire field.
-    #[serde(rename = "proposedGrantSet")]
-    pub proposed_grant_set: AuthDeploymentAuthorityRejectResponseProposalProposedGrantSet,
-    /// The `reasons` wire field.
-    pub reasons: Vec<String>,
-    /// The `state` wire field.
-    pub state: AuthDeploymentAuthorityRejectResponseProposalState,
-    /// The `subjectId` wire field.
-    #[serde(rename = "subjectId")]
-    pub subject_id: String,
-}
-/// Generated schema type `AuthDeploymentAuthorityRejectResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDeploymentAuthorityRejectResponse {
-    /// The `proposal` wire field.
-    pub proposal: AuthDeploymentAuthorityRejectResponseProposal,
 }
 /// Generated schema type `AuthDeploymentsApplyRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -6551,16 +900,12 @@ pub enum AuthDeploymentsApplyResponseBindingPlatformPrivilegesItem {
     /// The `trellis.auth::admin` wire value.
     #[serde(rename = "trellis.auth::admin")]
     TrellisAuthAdmin,
-    /// The `trellis.auth::capabilities.delegate` wire value.
-    #[serde(rename = "trellis.auth::capabilities.delegate")]
-    TrellisAuthCapabilitiesDelegate,
 }
 impl AuthDeploymentsApplyResponseBindingPlatformPrivilegesItem {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::TrellisAuthAdmin => "trellis.auth::admin",
-            Self::TrellisAuthCapabilitiesDelegate => "trellis.auth::capabilities.delegate",
         }
     }
 }
@@ -6626,6 +971,9 @@ impl PartialEq<AuthDeploymentsApplyResponseBindingState> for &str {
 /// Generated schema type `AuthDeploymentsApplyResponseBinding`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDeploymentsApplyResponseBinding {
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
     /// The `expiresAt` wire field.
     #[serde(rename = "expiresAt")]
     pub expires_at: Option<i64>,
@@ -6652,6 +1000,9 @@ pub struct AuthDeploymentsApplyResponseBinding {
     pub revision: i64,
     /// The `state` wire field.
     pub state: AuthDeploymentsApplyResponseBindingState,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
 }
 /// Generated schema type `AuthDeploymentsApplyResponseDeploymentKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -7500,6 +1851,310 @@ pub struct AuthDeploymentsEnableResponse {
     /// The `mutation` wire field.
     pub mutation: AuthDeploymentsEnableResponseMutation,
 }
+/// Generated schema type `AuthDeploymentsGetRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthDeploymentsGetRequest {
+    /// The `deploymentId` wire field.
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: String,
+}
+/// Generated schema type `AuthDeploymentsGetResponseDeploymentKind`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeploymentsGetResponseDeploymentKind {
+    /// The `service` wire value.
+    #[serde(rename = "service")]
+    Service,
+    /// The `device` wire value.
+    #[serde(rename = "device")]
+    Device,
+}
+impl AuthDeploymentsGetResponseDeploymentKind {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Service => "service",
+            Self::Device => "device",
+        }
+    }
+}
+impl AsRef<str> for AuthDeploymentsGetResponseDeploymentKind {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthDeploymentsGetResponseDeploymentKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthDeploymentsGetResponseDeploymentKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthDeploymentsGetResponseDeploymentKind> for &str {
+    fn eq(&self, other: &AuthDeploymentsGetResponseDeploymentKind) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthDeploymentsGetResponseDeploymentReviewMode`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeploymentsGetResponseDeploymentReviewMode {
+    /// The `none` wire value.
+    #[serde(rename = "none")]
+    None,
+    /// The `required` wire value.
+    #[serde(rename = "required")]
+    Required,
+}
+impl AuthDeploymentsGetResponseDeploymentReviewMode {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Required => "required",
+        }
+    }
+}
+impl AsRef<str> for AuthDeploymentsGetResponseDeploymentReviewMode {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthDeploymentsGetResponseDeploymentReviewMode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthDeploymentsGetResponseDeploymentReviewMode {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthDeploymentsGetResponseDeploymentReviewMode> for &str {
+    fn eq(&self, other: &AuthDeploymentsGetResponseDeploymentReviewMode) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthDeploymentsGetResponseDeploymentState`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeploymentsGetResponseDeploymentState {
+    /// The `active` wire value.
+    #[serde(rename = "active")]
+    Active,
+    /// The `disabled` wire value.
+    #[serde(rename = "disabled")]
+    Disabled,
+    /// The `revoked` wire value.
+    #[serde(rename = "revoked")]
+    Revoked,
+}
+impl AuthDeploymentsGetResponseDeploymentState {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Disabled => "disabled",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+impl AsRef<str> for AuthDeploymentsGetResponseDeploymentState {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthDeploymentsGetResponseDeploymentState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthDeploymentsGetResponseDeploymentState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthDeploymentsGetResponseDeploymentState> for &str {
+    fn eq(&self, other: &AuthDeploymentsGetResponseDeploymentState) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthDeploymentsGetResponseDeployment`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthDeploymentsGetResponseDeployment {
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    /// The `deploymentId` wire field.
+    #[serde(rename = "deploymentId")]
+    pub deployment_id: String,
+    /// The `disabledAt` wire field.
+    #[serde(rename = "disabledAt")]
+    pub disabled_at: Option<i64>,
+    /// The `displayName` wire field.
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    /// The `expiresAt` wire field.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: Option<i64>,
+    /// The `kind` wire field.
+    pub kind: AuthDeploymentsGetResponseDeploymentKind,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    pub participant_id: Option<String>,
+    /// The `portalId` wire field.
+    #[serde(rename = "portalId")]
+    pub portal_id: Option<String>,
+    /// The `requiresDeviceDelegation` wire field.
+    #[serde(rename = "requiresDeviceDelegation")]
+    pub requires_device_delegation: bool,
+    /// The `reviewMode` wire field.
+    #[serde(rename = "reviewMode")]
+    pub review_mode: Option<AuthDeploymentsGetResponseDeploymentReviewMode>,
+    /// The `revokedAt` wire field.
+    #[serde(rename = "revokedAt")]
+    pub revoked_at: Option<i64>,
+    /// The `state` wire field.
+    pub state: AuthDeploymentsGetResponseDeploymentState,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+    /// The `version` wire field.
+    pub version: i64,
+}
+/// Generated schema type `AuthDeploymentsGetResponseResourcesItemProviderIdentity`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind")]
+pub enum AuthDeploymentsGetResponseResourcesItemProviderIdentity {
+    /// The `kv` variant.
+    #[serde(rename = "kv")]
+    Kv {
+        /// The `bucket` wire field.
+        bucket: String,
+    },
+    /// The `store` variant.
+    #[serde(rename = "store")]
+    Store {
+        /// The `bucket` wire field.
+        bucket: String,
+    },
+    /// The `state` variant.
+    #[serde(rename = "state")]
+    State {
+        /// The `bucket` wire field.
+        bucket: String,
+    },
+    /// The `jobQueue` variant.
+    #[serde(rename = "jobQueue")]
+    JobQueue {
+        /// The `consumer` wire field.
+        consumer: String,
+        /// The `namespace` wire field.
+        namespace: String,
+        /// The `publishPrefix` wire field.
+        #[serde(rename = "publishPrefix")]
+        publish_prefix: String,
+        /// The `updatesPrefix` wire field.
+        #[serde(rename = "updatesPrefix")]
+        updates_prefix: Option<String>,
+        /// The `workStream` wire field.
+        #[serde(rename = "workStream")]
+        work_stream: String,
+        /// The `workSubject` wire field.
+        #[serde(rename = "workSubject")]
+        work_subject: String,
+    },
+    /// The `eventConsumer` variant.
+    #[serde(rename = "eventConsumer")]
+    EventConsumer {
+        /// The `consumer` wire field.
+        consumer: String,
+        /// The `filterSubjects` wire field.
+        #[serde(rename = "filterSubjects")]
+        filter_subjects: Vec<String>,
+        /// The `stream` wire field.
+        stream: String,
+    },
+}
+/// Generated schema type `AuthDeploymentsGetResponseResourcesItemState`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthDeploymentsGetResponseResourcesItemState {
+    /// The `available` wire value.
+    #[serde(rename = "available")]
+    Available,
+    /// The `unavailable` wire value.
+    #[serde(rename = "unavailable")]
+    Unavailable,
+    /// The `stale` wire value.
+    #[serde(rename = "stale")]
+    Stale,
+}
+impl AuthDeploymentsGetResponseResourcesItemState {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Unavailable => "unavailable",
+            Self::Stale => "stale",
+        }
+    }
+}
+impl AsRef<str> for AuthDeploymentsGetResponseResourcesItemState {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthDeploymentsGetResponseResourcesItemState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthDeploymentsGetResponseResourcesItemState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthDeploymentsGetResponseResourcesItemState> for &str {
+    fn eq(&self, other: &AuthDeploymentsGetResponseResourcesItemState) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthDeploymentsGetResponseResourcesItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthDeploymentsGetResponseResourcesItem {
+    /// The `bindingId` wire field.
+    #[serde(rename = "bindingId")]
+    pub binding_id: String,
+    /// The `error` wire field.
+    pub error: Option<String>,
+    /// The `localName` wire field.
+    #[serde(rename = "localName")]
+    pub local_name: String,
+    /// The `materializedAt` wire field.
+    #[serde(rename = "materializedAt")]
+    pub materialized_at: i64,
+    /// The `ownerParticipantId` wire field.
+    #[serde(rename = "ownerParticipantId")]
+    pub owner_participant_id: String,
+    /// The `providerIdentity` wire field.
+    #[serde(rename = "providerIdentity")]
+    pub provider_identity: AuthDeploymentsGetResponseResourcesItemProviderIdentity,
+    /// The `resourceKind` wire field.
+    #[serde(rename = "resourceKind")]
+    pub resource_kind: String,
+    /// The `state` wire field.
+    pub state: AuthDeploymentsGetResponseResourcesItemState,
+}
+/// Generated schema type `AuthDeploymentsGetResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthDeploymentsGetResponse {
+    /// The `binding` wire field.
+    pub binding: Option<BTreeMap<String, serde_json::Value>>,
+    /// The `deployment` wire field.
+    pub deployment: AuthDeploymentsGetResponseDeployment,
+    /// The `resources` wire field.
+    pub resources: Vec<AuthDeploymentsGetResponseResourcesItem>,
+}
 /// Generated schema type `AuthDeploymentsListRequestKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuthDeploymentsListRequestKind {
@@ -8186,8 +2841,6 @@ pub struct AuthDeviceUserAuthoritiesListResponseEntriesItemDevice {
 /// Generated schema type `AuthDeviceUserAuthoritiesListResponseEntriesItem`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDeviceUserAuthoritiesListResponseEntriesItem {
-    /// The `authority` wire field.
-    pub authority: Option<BTreeMap<String, serde_json::Value>>,
     /// The `device` wire field.
     pub device: AuthDeviceUserAuthoritiesListResponseEntriesItemDevice,
 }
@@ -8729,187 +3382,6 @@ pub struct AuthDeviceUserAuthoritiesRevokeResponse {
     /// The `kickedSessionCount` wire field.
     #[serde(rename = "kickedSessionCount")]
     pub kicked_session_count: i64,
-}
-/// Generated schema type `AuthDevicesConnectInfoGetRequestProofFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDevicesConnectInfoGetRequestProofFormat {
-    /// The `trellis.session-proof.v1` wire value.
-    #[serde(rename = "trellis.session-proof.v1")]
-    TrellisSessionProofV1,
-}
-impl AuthDevicesConnectInfoGetRequestProofFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisSessionProofV1 => "trellis.session-proof.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthDevicesConnectInfoGetRequestProofFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDevicesConnectInfoGetRequestProofFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDevicesConnectInfoGetRequestProofFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDevicesConnectInfoGetRequestProofFormat> for &str {
-    fn eq(&self, other: &AuthDevicesConnectInfoGetRequestProofFormat) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDevicesConnectInfoGetRequestProof`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDevicesConnectInfoGetRequestProof {
-    /// The `format` wire field.
-    pub format: AuthDevicesConnectInfoGetRequestProofFormat,
-    /// The `signature` wire field.
-    pub signature: String,
-}
-/// Generated schema type `AuthDevicesConnectInfoGetRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDevicesConnectInfoGetRequest {
-    /// The `challengeDigest` wire field.
-    #[serde(rename = "challengeDigest")]
-    pub challenge_digest: Option<String>,
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    pub deployment_id: String,
-    /// The `deviceIdentityKeyId` wire field.
-    #[serde(rename = "deviceIdentityKeyId")]
-    pub device_identity_key_id: String,
-    /// The `instanceId` wire field.
-    #[serde(rename = "instanceId")]
-    pub instance_id: String,
-    /// The `issuedAt` wire field.
-    #[serde(rename = "issuedAt")]
-    pub issued_at: i64,
-    /// The `newSessionNkey` wire field.
-    #[serde(rename = "newSessionNkey")]
-    pub new_session_nkey: String,
-    /// The `newSessionPublicKey` wire field.
-    #[serde(rename = "newSessionPublicKey")]
-    pub new_session_public_key: String,
-    /// The `participantDigest` wire field.
-    #[serde(rename = "participantDigest")]
-    pub participant_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `proof` wire field.
-    pub proof: AuthDevicesConnectInfoGetRequestProof,
-    /// The `requestId` wire field.
-    #[serde(rename = "requestId")]
-    pub request_id: String,
-}
-/// Generated schema type `AuthDevicesConnectInfoGetResponseEndpointsAuthMode`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDevicesConnectInfoGetResponseEndpointsAuthMode {
-    /// The `session_nkey` wire value.
-    #[serde(rename = "session_nkey")]
-    SessionNkey,
-}
-impl AuthDevicesConnectInfoGetResponseEndpointsAuthMode {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::SessionNkey => "session_nkey",
-        }
-    }
-}
-impl AsRef<str> for AuthDevicesConnectInfoGetResponseEndpointsAuthMode {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDevicesConnectInfoGetResponseEndpointsAuthMode {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDevicesConnectInfoGetResponseEndpointsAuthMode {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDevicesConnectInfoGetResponseEndpointsAuthMode> for &str {
-    fn eq(&self, other: &AuthDevicesConnectInfoGetResponseEndpointsAuthMode) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDevicesConnectInfoGetResponseEndpointsAuthorityMode`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthDevicesConnectInfoGetResponseEndpointsAuthorityMode {
-    /// The `server_issued` wire value.
-    #[serde(rename = "server_issued")]
-    ServerIssued,
-}
-impl AuthDevicesConnectInfoGetResponseEndpointsAuthorityMode {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::ServerIssued => "server_issued",
-        }
-    }
-}
-impl AsRef<str> for AuthDevicesConnectInfoGetResponseEndpointsAuthorityMode {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthDevicesConnectInfoGetResponseEndpointsAuthorityMode {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthDevicesConnectInfoGetResponseEndpointsAuthorityMode {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthDevicesConnectInfoGetResponseEndpointsAuthorityMode> for &str {
-    fn eq(&self, other: &AuthDevicesConnectInfoGetResponseEndpointsAuthorityMode) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthDevicesConnectInfoGetResponseEndpoints`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDevicesConnectInfoGetResponseEndpoints {
-    /// The `authMode` wire field.
-    #[serde(rename = "authMode")]
-    pub auth_mode: AuthDevicesConnectInfoGetResponseEndpointsAuthMode,
-    /// The `authorityMode` wire field.
-    #[serde(rename = "authorityMode")]
-    pub authority_mode: AuthDevicesConnectInfoGetResponseEndpointsAuthorityMode,
-    /// The `maximumClockSkewMs` wire field.
-    #[serde(rename = "maximumClockSkewMs")]
-    pub maximum_clock_skew_ms: i64,
-    /// The `native` wire field.
-    pub native: Vec<String>,
-    /// The `websocket` wire field.
-    pub websocket: Vec<String>,
-}
-/// Generated schema type `AuthDevicesConnectInfoGetResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthDevicesConnectInfoGetResponse {
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    pub deployment_id: String,
-    /// The `endpoints` wire field.
-    pub endpoints: AuthDevicesConnectInfoGetResponseEndpoints,
-    /// The `instanceId` wire field.
-    #[serde(rename = "instanceId")]
-    pub instance_id: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: Option<String>,
 }
 /// Generated schema type `AuthDevicesDisableRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -10083,6 +4555,561 @@ pub struct AuthGrantsGetResponse {
     /// The `binding` wire field.
     pub binding: Option<BTreeMap<String, serde_json::Value>>,
 }
+/// Generated schema type `AuthGrantsListRequestOwnerKind`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthGrantsListRequestOwnerKind {
+    /// The `deployment` wire value.
+    #[serde(rename = "deployment")]
+    Deployment,
+    /// The `user` wire value.
+    #[serde(rename = "user")]
+    User,
+}
+impl AuthGrantsListRequestOwnerKind {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Deployment => "deployment",
+            Self::User => "user",
+        }
+    }
+}
+impl AsRef<str> for AuthGrantsListRequestOwnerKind {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthGrantsListRequestOwnerKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthGrantsListRequestOwnerKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthGrantsListRequestOwnerKind> for &str {
+    fn eq(&self, other: &AuthGrantsListRequestOwnerKind) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthGrantsListRequestState`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthGrantsListRequestState {
+    /// The `active` wire value.
+    #[serde(rename = "active")]
+    Active,
+    /// The `revoked` wire value.
+    #[serde(rename = "revoked")]
+    Revoked,
+}
+impl AuthGrantsListRequestState {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+impl AsRef<str> for AuthGrantsListRequestState {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthGrantsListRequestState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthGrantsListRequestState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthGrantsListRequestState> for &str {
+    fn eq(&self, other: &AuthGrantsListRequestState) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthGrantsListRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthGrantsListRequest {
+    /// The `cursor` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    /// The `limit` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i64>,
+    /// The `ownerId` wire field.
+    #[serde(rename = "ownerId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_id: Option<String>,
+    /// The `ownerKind` wire field.
+    #[serde(rename = "ownerKind")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_kind: Option<AuthGrantsListRequestOwnerKind>,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub participant_id: Option<String>,
+    /// The `state` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<AuthGrantsListRequestState>,
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItemGrantsFormat`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthGrantsListResponseEntriesItemGrantsFormat {
+    /// The `trellis.grant-set.v1` wire value.
+    #[serde(rename = "trellis.grant-set.v1")]
+    TrellisGrantSetV1,
+}
+impl AuthGrantsListResponseEntriesItemGrantsFormat {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
+        }
+    }
+}
+impl AsRef<str> for AuthGrantsListResponseEntriesItemGrantsFormat {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthGrantsListResponseEntriesItemGrantsFormat {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthGrantsListResponseEntriesItemGrantsFormat {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthGrantsListResponseEntriesItemGrantsFormat> for &str {
+    fn eq(&self, other: &AuthGrantsListResponseEntriesItemGrantsFormat) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItemGrantsPermissionsItemAction`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthGrantsListResponseEntriesItemGrantsPermissionsItemAction {
+    /// The `call` wire value.
+    #[serde(rename = "call")]
+    Call,
+    /// The `invoke` wire value.
+    #[serde(rename = "invoke")]
+    Invoke,
+    /// The `observe` wire value.
+    #[serde(rename = "observe")]
+    Observe,
+    /// The `cancel` wire value.
+    #[serde(rename = "cancel")]
+    Cancel,
+    /// The `control` wire value.
+    #[serde(rename = "control")]
+    Control,
+    /// The `publish` wire value.
+    #[serde(rename = "publish")]
+    Publish,
+    /// The `subscribe` wire value.
+    #[serde(rename = "subscribe")]
+    Subscribe,
+    /// The `read` wire value.
+    #[serde(rename = "read")]
+    Read,
+    /// The `write` wire value.
+    #[serde(rename = "write")]
+    Write,
+    /// The `delete` wire value.
+    #[serde(rename = "delete")]
+    Delete,
+    /// The `submit` wire value.
+    #[serde(rename = "submit")]
+    Submit,
+    /// The `process` wire value.
+    #[serde(rename = "process")]
+    Process,
+    /// The `consume` wire value.
+    #[serde(rename = "consume")]
+    Consume,
+}
+impl AuthGrantsListResponseEntriesItemGrantsPermissionsItemAction {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Call => "call",
+            Self::Invoke => "invoke",
+            Self::Observe => "observe",
+            Self::Cancel => "cancel",
+            Self::Control => "control",
+            Self::Publish => "publish",
+            Self::Subscribe => "subscribe",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Delete => "delete",
+            Self::Submit => "submit",
+            Self::Process => "process",
+            Self::Consume => "consume",
+        }
+    }
+}
+impl AsRef<str> for AuthGrantsListResponseEntriesItemGrantsPermissionsItemAction {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthGrantsListResponseEntriesItemGrantsPermissionsItemAction {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthGrantsListResponseEntriesItemGrantsPermissionsItemAction {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthGrantsListResponseEntriesItemGrantsPermissionsItemAction> for &str {
+    fn eq(&self, other: &AuthGrantsListResponseEntriesItemGrantsPermissionsItemAction) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetApiSurfaceSurface`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetApiSurfaceSurface {
+    /// The `rpc` wire value.
+    #[serde(rename = "rpc")]
+    Rpc,
+    /// The `operation` wire value.
+    #[serde(rename = "operation")]
+    Operation,
+    /// The `event` wire value.
+    #[serde(rename = "event")]
+    Event,
+    /// The `feed` wire value.
+    #[serde(rename = "feed")]
+    Feed,
+    /// The `state` wire value.
+    #[serde(rename = "state")]
+    State,
+}
+impl AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetApiSurfaceSurface {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Rpc => "rpc",
+            Self::Operation => "operation",
+            Self::Event => "event",
+            Self::Feed => "feed",
+            Self::State => "state",
+        }
+    }
+}
+impl AsRef<str> for AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetApiSurfaceSurface {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display
+    for AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetApiSurfaceSurface
+{
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str>
+    for AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetApiSurfaceSurface
+{
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetApiSurfaceSurface>
+    for &str
+{
+    fn eq(
+        &self,
+        other: &AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetApiSurfaceSurface,
+    ) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetParticipantResourceResource`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetParticipantResourceResource {
+    /// The `state` wire value.
+    #[serde(rename = "state")]
+    State,
+    /// The `jobQueue` wire value.
+    #[serde(rename = "jobQueue")]
+    JobQueue,
+    /// The `eventConsumer` wire value.
+    #[serde(rename = "eventConsumer")]
+    EventConsumer,
+    /// The `kv` wire value.
+    #[serde(rename = "kv")]
+    Kv,
+    /// The `store` wire value.
+    #[serde(rename = "store")]
+    Store,
+}
+impl AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetParticipantResourceResource {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::JobQueue => "jobQueue",
+            Self::EventConsumer => "eventConsumer",
+            Self::Kv => "kv",
+            Self::Store => "store",
+        }
+    }
+}
+impl AsRef<str>
+    for AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetParticipantResourceResource
+{
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display
+    for AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetParticipantResourceResource
+{
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str>
+    for AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetParticipantResourceResource
+{
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl
+    PartialEq<
+        AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetParticipantResourceResource,
+    > for &str
+{
+    fn eq(
+        &self,
+        other: &AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetParticipantResourceResource,
+    ) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItemGrantsPermissionsItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind")]
+pub enum AuthGrantsListResponseEntriesItemGrantsPermissionsItemTarget {
+    /// The `apiSurface` variant.
+    #[serde(rename = "apiSurface")]
+    ApiSurface {
+        /// The `api` wire field.
+        api: String,
+        /// The `name` wire field.
+        name: String,
+        /// The `surface` wire field.
+        surface: AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetApiSurfaceSurface,
+    },
+    /// The `operationSignal` variant.
+    #[serde(rename = "operationSignal")]
+    OperationSignal {
+        /// The `api` wire field.
+        api: String,
+        /// The `operation` wire field.
+        operation: String,
+        /// The `signal` wire field.
+        signal: String,
+    },
+    /// The `participantResource` variant.
+    #[serde(rename = "participantResource")]
+    ParticipantResource {
+        /// The `name` wire field.
+        name: String,
+        /// The `participant` wire field.
+        participant: String,
+        /// The `resource` wire field.
+        resource:
+            AuthGrantsListResponseEntriesItemGrantsPermissionsItemTargetParticipantResourceResource,
+    },
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItemGrantsPermissionsItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthGrantsListResponseEntriesItemGrantsPermissionsItem {
+    /// The `action` wire field.
+    pub action: AuthGrantsListResponseEntriesItemGrantsPermissionsItemAction,
+    /// The `target` wire field.
+    pub target: AuthGrantsListResponseEntriesItemGrantsPermissionsItemTarget,
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItemGrants`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthGrantsListResponseEntriesItemGrants {
+    /// The `format` wire field.
+    pub format: AuthGrantsListResponseEntriesItemGrantsFormat,
+    /// The `permissions` wire field.
+    pub permissions: Vec<AuthGrantsListResponseEntriesItemGrantsPermissionsItem>,
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItemOwnerKind`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthGrantsListResponseEntriesItemOwnerKind {
+    /// The `deployment` wire value.
+    #[serde(rename = "deployment")]
+    Deployment,
+    /// The `user` wire value.
+    #[serde(rename = "user")]
+    User,
+}
+impl AuthGrantsListResponseEntriesItemOwnerKind {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Deployment => "deployment",
+            Self::User => "user",
+        }
+    }
+}
+impl AsRef<str> for AuthGrantsListResponseEntriesItemOwnerKind {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthGrantsListResponseEntriesItemOwnerKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthGrantsListResponseEntriesItemOwnerKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthGrantsListResponseEntriesItemOwnerKind> for &str {
+    fn eq(&self, other: &AuthGrantsListResponseEntriesItemOwnerKind) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItemPlatformPrivilegesItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthGrantsListResponseEntriesItemPlatformPrivilegesItem {
+    /// The `trellis.auth::admin` wire value.
+    #[serde(rename = "trellis.auth::admin")]
+    TrellisAuthAdmin,
+}
+impl AuthGrantsListResponseEntriesItemPlatformPrivilegesItem {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::TrellisAuthAdmin => "trellis.auth::admin",
+        }
+    }
+}
+impl AsRef<str> for AuthGrantsListResponseEntriesItemPlatformPrivilegesItem {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthGrantsListResponseEntriesItemPlatformPrivilegesItem {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthGrantsListResponseEntriesItemPlatformPrivilegesItem {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthGrantsListResponseEntriesItemPlatformPrivilegesItem> for &str {
+    fn eq(&self, other: &AuthGrantsListResponseEntriesItemPlatformPrivilegesItem) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItemState`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthGrantsListResponseEntriesItemState {
+    /// The `active` wire value.
+    #[serde(rename = "active")]
+    Active,
+    /// The `revoked` wire value.
+    #[serde(rename = "revoked")]
+    Revoked,
+}
+impl AuthGrantsListResponseEntriesItemState {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Revoked => "revoked",
+        }
+    }
+}
+impl AsRef<str> for AuthGrantsListResponseEntriesItemState {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthGrantsListResponseEntriesItemState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthGrantsListResponseEntriesItemState {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthGrantsListResponseEntriesItemState> for &str {
+    fn eq(&self, other: &AuthGrantsListResponseEntriesItemState) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthGrantsListResponseEntriesItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthGrantsListResponseEntriesItem {
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    /// The `expiresAt` wire field.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: Option<i64>,
+    /// The `grants` wire field.
+    pub grants: AuthGrantsListResponseEntriesItemGrants,
+    /// The `installedRevision` wire field.
+    #[serde(rename = "installedRevision")]
+    pub installed_revision: i64,
+    /// The `ownerId` wire field.
+    #[serde(rename = "ownerId")]
+    pub owner_id: String,
+    /// The `ownerKind` wire field.
+    #[serde(rename = "ownerKind")]
+    pub owner_kind: AuthGrantsListResponseEntriesItemOwnerKind,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    pub participant_id: String,
+    /// The `platformPrivileges` wire field.
+    #[serde(rename = "platformPrivileges")]
+    pub platform_privileges: Vec<AuthGrantsListResponseEntriesItemPlatformPrivilegesItem>,
+    /// The `provenance` wire field.
+    pub provenance: Option<BTreeMap<String, serde_json::Value>>,
+    /// The `revision` wire field.
+    pub revision: i64,
+    /// The `state` wire field.
+    pub state: AuthGrantsListResponseEntriesItemState,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
+}
+/// Generated schema type `AuthGrantsListResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthGrantsListResponse {
+    /// The `entries` wire field.
+    pub entries: Vec<AuthGrantsListResponseEntriesItem>,
+    /// The `nextCursor` wire field.
+    #[serde(rename = "nextCursor")]
+    pub next_cursor: Option<String>,
+}
 /// Generated schema type `AuthGrantsRevokeRequestOwnerKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuthGrantsRevokeRequestOwnerKind {
@@ -10140,6 +5167,9 @@ pub struct AuthGrantsRevokeRequest {
     /// The `participantId` wire field.
     #[serde(rename = "participantId")]
     pub participant_id: String,
+    /// The `reason` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 /// Generated schema type `AuthGrantsRevokeResponseBindingGrantsFormat`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -10479,16 +5509,12 @@ pub enum AuthGrantsRevokeResponseBindingPlatformPrivilegesItem {
     /// The `trellis.auth::admin` wire value.
     #[serde(rename = "trellis.auth::admin")]
     TrellisAuthAdmin,
-    /// The `trellis.auth::capabilities.delegate` wire value.
-    #[serde(rename = "trellis.auth::capabilities.delegate")]
-    TrellisAuthCapabilitiesDelegate,
 }
 impl AuthGrantsRevokeResponseBindingPlatformPrivilegesItem {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::TrellisAuthAdmin => "trellis.auth::admin",
-            Self::TrellisAuthCapabilitiesDelegate => "trellis.auth::capabilities.delegate",
         }
     }
 }
@@ -10554,6 +5580,9 @@ impl PartialEq<AuthGrantsRevokeResponseBindingState> for &str {
 /// Generated schema type `AuthGrantsRevokeResponseBinding`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthGrantsRevokeResponseBinding {
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
     /// The `expiresAt` wire field.
     #[serde(rename = "expiresAt")]
     pub expires_at: Option<i64>,
@@ -10580,6 +5609,9 @@ pub struct AuthGrantsRevokeResponseBinding {
     pub revision: i64,
     /// The `state` wire field.
     pub state: AuthGrantsRevokeResponseBindingState,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
 }
 /// Generated schema type `AuthGrantsRevokeResponse`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -10912,16 +5944,12 @@ pub enum AuthGrantsSetRequestPlatformPrivilegesItem {
     /// The `trellis.auth::admin` wire value.
     #[serde(rename = "trellis.auth::admin")]
     TrellisAuthAdmin,
-    /// The `trellis.auth::capabilities.delegate` wire value.
-    #[serde(rename = "trellis.auth::capabilities.delegate")]
-    TrellisAuthCapabilitiesDelegate,
 }
 impl AuthGrantsSetRequestPlatformPrivilegesItem {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::TrellisAuthAdmin => "trellis.auth::admin",
-            Self::TrellisAuthCapabilitiesDelegate => "trellis.auth::capabilities.delegate",
         }
     }
 }
@@ -10959,6 +5987,9 @@ pub struct AuthGrantsSetRequest {
     /// The `idempotencyKey` wire field.
     #[serde(rename = "idempotencyKey")]
     pub idempotency_key: String,
+    /// The `installedRevision` wire field.
+    #[serde(rename = "installedRevision")]
+    pub installed_revision: i64,
     /// The `ownerId` wire field.
     #[serde(rename = "ownerId")]
     pub owner_id: String,
@@ -11305,16 +6336,12 @@ pub enum AuthGrantsSetResponseBindingPlatformPrivilegesItem {
     /// The `trellis.auth::admin` wire value.
     #[serde(rename = "trellis.auth::admin")]
     TrellisAuthAdmin,
-    /// The `trellis.auth::capabilities.delegate` wire value.
-    #[serde(rename = "trellis.auth::capabilities.delegate")]
-    TrellisAuthCapabilitiesDelegate,
 }
 impl AuthGrantsSetResponseBindingPlatformPrivilegesItem {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::TrellisAuthAdmin => "trellis.auth::admin",
-            Self::TrellisAuthCapabilitiesDelegate => "trellis.auth::capabilities.delegate",
         }
     }
 }
@@ -11380,6 +6407,9 @@ impl PartialEq<AuthGrantsSetResponseBindingState> for &str {
 /// Generated schema type `AuthGrantsSetResponseBinding`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthGrantsSetResponseBinding {
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
     /// The `expiresAt` wire field.
     #[serde(rename = "expiresAt")]
     pub expires_at: Option<i64>,
@@ -11406,1591 +6436,15 @@ pub struct AuthGrantsSetResponseBinding {
     pub revision: i64,
     /// The `state` wire field.
     pub state: AuthGrantsSetResponseBindingState,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
 }
 /// Generated schema type `AuthGrantsSetResponse`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthGrantsSetResponse {
     /// The `binding` wire field.
     pub binding: AuthGrantsSetResponseBinding,
-}
-/// Generated schema type `AuthIdentityAuthorityGetRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityGetRequest {
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetFormat> for &str {
-    fn eq(&self, other: &AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetFormat) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl
-    AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action: AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target: AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSet {
-    /// The `format` wire field.
-    pub format: AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions: Vec<AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponseAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityGetResponseAuthorityKind {
-    /// The `identity` wire value.
-    #[serde(rename = "identity")]
-    Identity,
-}
-impl AuthIdentityAuthorityGetResponseAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Identity => "identity",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityGetResponseAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityAuthorityGetResponseAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityAuthorityGetResponseAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityGetResponseAuthorityKind> for &str {
-    fn eq(&self, other: &AuthIdentityAuthorityGetResponseAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponseAuthorityState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityGetResponseAuthorityState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-    /// The `stale` wire value.
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl AuthIdentityAuthorityGetResponseAuthorityState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Revoked => "revoked",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityGetResponseAuthorityState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityAuthorityGetResponseAuthorityState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityAuthorityGetResponseAuthorityState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityGetResponseAuthorityState> for &str {
-    fn eq(&self, other: &AuthIdentityAuthorityGetResponseAuthorityState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponseAuthority`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityGetResponseAuthority {
-    /// The `acceptedNeedsDigest` wire field.
-    #[serde(rename = "acceptedNeedsDigest")]
-    pub accepted_needs_digest: String,
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `desiredCapabilities` wire field.
-    #[serde(rename = "desiredCapabilities")]
-    pub desired_capabilities: Vec<String>,
-    /// The `desiredGrantSet` wire field.
-    #[serde(rename = "desiredGrantSet")]
-    pub desired_grant_set: AuthIdentityAuthorityGetResponseAuthorityDesiredGrantSet,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `kind` wire field.
-    pub kind: AuthIdentityAuthorityGetResponseAuthorityKind,
-    /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `principalId` wire field.
-    #[serde(rename = "principalId")]
-    pub principal_id: String,
-    /// The `state` wire field.
-    pub state: AuthIdentityAuthorityGetResponseAuthorityState,
-    /// The `updatedAt` wire field.
-    #[serde(rename = "updatedAt")]
-    pub updated_at: i64,
-    /// The `version` wire field.
-    pub version: i64,
-}
-/// Generated schema type `AuthIdentityAuthorityGetResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityGetResponse {
-    /// The `authority` wire field.
-    pub authority: AuthIdentityAuthorityGetResponseAuthority,
-}
-/// Generated schema type `AuthIdentityAuthorityListRequestState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityListRequestState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-    /// The `stale` wire value.
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl AuthIdentityAuthorityListRequestState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Revoked => "revoked",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityListRequestState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityAuthorityListRequestState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityAuthorityListRequestState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityListRequestState> for &str {
-    fn eq(&self, other: &AuthIdentityAuthorityListRequestState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityListRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityListRequest {
-    /// The `cursor` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cursor: Option<String>,
-    /// The `limit` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<i64>,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub participant_id: Option<String>,
-    /// The `principalId` wire field.
-    #[serde(rename = "principalId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub principal_id: Option<String>,
-    /// The `state` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub state: Option<AuthIdentityAuthorityListRequestState>,
-}
-/// Generated schema type `AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetFormat> for &str {
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action: AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target: AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSet {
-    /// The `format` wire field.
-    pub format: AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthIdentityAuthorityListResponseEntriesItemKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityListResponseEntriesItemKind {
-    /// The `identity` wire value.
-    #[serde(rename = "identity")]
-    Identity,
-}
-impl AuthIdentityAuthorityListResponseEntriesItemKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Identity => "identity",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityListResponseEntriesItemKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityAuthorityListResponseEntriesItemKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityAuthorityListResponseEntriesItemKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityListResponseEntriesItemKind> for &str {
-    fn eq(&self, other: &AuthIdentityAuthorityListResponseEntriesItemKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityListResponseEntriesItemState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityListResponseEntriesItemState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-    /// The `stale` wire value.
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl AuthIdentityAuthorityListResponseEntriesItemState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Revoked => "revoked",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityListResponseEntriesItemState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityAuthorityListResponseEntriesItemState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityAuthorityListResponseEntriesItemState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityListResponseEntriesItemState> for &str {
-    fn eq(&self, other: &AuthIdentityAuthorityListResponseEntriesItemState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityListResponseEntriesItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityListResponseEntriesItem {
-    /// The `acceptedNeedsDigest` wire field.
-    #[serde(rename = "acceptedNeedsDigest")]
-    pub accepted_needs_digest: String,
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `desiredCapabilities` wire field.
-    #[serde(rename = "desiredCapabilities")]
-    pub desired_capabilities: Vec<String>,
-    /// The `desiredGrantSet` wire field.
-    #[serde(rename = "desiredGrantSet")]
-    pub desired_grant_set: AuthIdentityAuthorityListResponseEntriesItemDesiredGrantSet,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `kind` wire field.
-    pub kind: AuthIdentityAuthorityListResponseEntriesItemKind,
-    /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `principalId` wire field.
-    #[serde(rename = "principalId")]
-    pub principal_id: String,
-    /// The `state` wire field.
-    pub state: AuthIdentityAuthorityListResponseEntriesItemState,
-    /// The `updatedAt` wire field.
-    #[serde(rename = "updatedAt")]
-    pub updated_at: i64,
-    /// The `version` wire field.
-    pub version: i64,
-}
-/// Generated schema type `AuthIdentityAuthorityListResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityListResponse {
-    /// The `entries` wire field.
-    pub entries: Vec<AuthIdentityAuthorityListResponseEntriesItem>,
-    /// The `nextCursor` wire field.
-    #[serde(rename = "nextCursor")]
-    pub next_cursor: Option<String>,
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityRevokeRequest {
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-    /// The `expectedVersion` wire field.
-    #[serde(rename = "expectedVersion")]
-    pub expected_version: i64,
-    /// The `idempotencyKey` wire field.
-    #[serde(rename = "idempotencyKey")]
-    pub idempotency_key: String,
-    /// The `reason` wire field.
-    pub reason: Option<String>,
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetFormat`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetFormat {
-    /// The `trellis.grant-set.v1` wire value.
-    #[serde(rename = "trellis.grant-set.v1")]
-    TrellisGrantSetV1,
-}
-impl AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetFormat {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetFormat {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetFormat {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetFormat {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetFormat> for &str {
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetFormat,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemAction`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// The `call` wire value.
-    #[serde(rename = "call")]
-    Call,
-    /// The `invoke` wire value.
-    #[serde(rename = "invoke")]
-    Invoke,
-    /// The `observe` wire value.
-    #[serde(rename = "observe")]
-    Observe,
-    /// The `cancel` wire value.
-    #[serde(rename = "cancel")]
-    Cancel,
-    /// The `control` wire value.
-    #[serde(rename = "control")]
-    Control,
-    /// The `publish` wire value.
-    #[serde(rename = "publish")]
-    Publish,
-    /// The `subscribe` wire value.
-    #[serde(rename = "subscribe")]
-    Subscribe,
-    /// The `read` wire value.
-    #[serde(rename = "read")]
-    Read,
-    /// The `write` wire value.
-    #[serde(rename = "write")]
-    Write,
-    /// The `delete` wire value.
-    #[serde(rename = "delete")]
-    Delete,
-    /// The `submit` wire value.
-    #[serde(rename = "submit")]
-    Submit,
-    /// The `process` wire value.
-    #[serde(rename = "process")]
-    Process,
-    /// The `consume` wire value.
-    #[serde(rename = "consume")]
-    Consume,
-}
-impl AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemAction {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Call => "call",
-            Self::Invoke => "invoke",
-            Self::Observe => "observe",
-            Self::Cancel => "cancel",
-            Self::Control => "control",
-            Self::Publish => "publish",
-            Self::Subscribe => "subscribe",
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Delete => "delete",
-            Self::Submit => "submit",
-            Self::Process => "process",
-            Self::Consume => "consume",
-        }
-    }
-}
-impl AsRef<str>
-    for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-    for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-    for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemAction
-{
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemAction>
-    for &str
-{
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface
-{
-    /// The `rpc` wire value.
-    #[serde(rename = "rpc")]
-    Rpc,
-    /// The `operation` wire value.
-    #[serde(rename = "operation")]
-    Operation,
-    /// The `event` wire value.
-    #[serde(rename = "event")]
-    Event,
-    /// The `feed` wire value.
-    #[serde(rename = "feed")]
-    Feed,
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-}
-impl AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Rpc => "rpc",
-            Self::Operation => "operation",
-            Self::Event => "event",
-            Self::Feed => "feed",
-            Self::State => "state",
-        }
-    }
-}
-impl AsRef<str>
-for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource
-{
-    /// The `state` wire value.
-    #[serde(rename = "state")]
-    State,
-    /// The `jobQueue` wire value.
-    #[serde(rename = "jobQueue")]
-    JobQueue,
-    /// The `eventConsumer` wire value.
-    #[serde(rename = "eventConsumer")]
-    EventConsumer,
-    /// The `kv` wire value.
-    #[serde(rename = "kv")]
-    Kv,
-    /// The `store` wire value.
-    #[serde(rename = "store")]
-    Store,
-}
-impl AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::State => "state",
-            Self::JobQueue => "jobQueue",
-            Self::EventConsumer => "eventConsumer",
-            Self::Kv => "kv",
-            Self::Store => "store",
-        }
-    }
-}
-impl AsRef<str>
-for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display
-for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str>
-for AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<
-    AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-> for &str {
-    fn eq(
-        &self,
-        other: &AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    ) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTarget`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTarget {
-    /// The `apiSurface` variant.
-    #[serde(rename = "apiSurface")]
-    ApiSurface {
-        /// The `api` wire field.
-        api: String,
-        /// The `name` wire field.
-        name: String,
-        /// The `surface` wire field.
-        surface: AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetApiSurfaceSurface,
-    },
-    /// The `operationSignal` variant.
-    #[serde(rename = "operationSignal")]
-    OperationSignal {
-        /// The `api` wire field.
-        api: String,
-        /// The `operation` wire field.
-        operation: String,
-        /// The `signal` wire field.
-        signal: String,
-    },
-    /// The `participantResource` variant.
-    #[serde(rename = "participantResource")]
-    ParticipantResource {
-        /// The `name` wire field.
-        name: String,
-        /// The `participant` wire field.
-        participant: String,
-        /// The `resource` wire field.
-        resource: AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTargetParticipantResourceResource,
-    },
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItem {
-    /// The `action` wire field.
-    pub action: AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemAction,
-    /// The `target` wire field.
-    pub target: AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItemTarget,
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSet`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSet {
-    /// The `format` wire field.
-    pub format: AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetFormat,
-    /// The `permissions` wire field.
-    pub permissions:
-        Vec<AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSetPermissionsItem>,
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponseAuthorityKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityRevokeResponseAuthorityKind {
-    /// The `identity` wire value.
-    #[serde(rename = "identity")]
-    Identity,
-}
-impl AuthIdentityAuthorityRevokeResponseAuthorityKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Identity => "identity",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityRevokeResponseAuthorityKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityAuthorityRevokeResponseAuthorityKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityAuthorityRevokeResponseAuthorityKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityRevokeResponseAuthorityKind> for &str {
-    fn eq(&self, other: &AuthIdentityAuthorityRevokeResponseAuthorityKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponseAuthorityState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityAuthorityRevokeResponseAuthorityState {
-    /// The `pending` wire value.
-    #[serde(rename = "pending")]
-    Pending,
-    /// The `accepted` wire value.
-    #[serde(rename = "accepted")]
-    Accepted,
-    /// The `rejected` wire value.
-    #[serde(rename = "rejected")]
-    Rejected,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-    /// The `stale` wire value.
-    #[serde(rename = "stale")]
-    Stale,
-}
-impl AuthIdentityAuthorityRevokeResponseAuthorityState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Revoked => "revoked",
-            Self::Stale => "stale",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityAuthorityRevokeResponseAuthorityState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityAuthorityRevokeResponseAuthorityState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityAuthorityRevokeResponseAuthorityState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityAuthorityRevokeResponseAuthorityState> for &str {
-    fn eq(&self, other: &AuthIdentityAuthorityRevokeResponseAuthorityState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponseAuthority`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityRevokeResponseAuthority {
-    /// The `acceptedNeedsDigest` wire field.
-    #[serde(rename = "acceptedNeedsDigest")]
-    pub accepted_needs_digest: String,
-    /// The `authorityId` wire field.
-    #[serde(rename = "authorityId")]
-    pub authority_id: String,
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `decision` wire field.
-    pub decision: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `desiredCapabilities` wire field.
-    #[serde(rename = "desiredCapabilities")]
-    pub desired_capabilities: Vec<String>,
-    /// The `desiredGrantSet` wire field.
-    #[serde(rename = "desiredGrantSet")]
-    pub desired_grant_set: AuthIdentityAuthorityRevokeResponseAuthorityDesiredGrantSet,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
-    /// The `kind` wire field.
-    pub kind: AuthIdentityAuthorityRevokeResponseAuthorityKind,
-    /// The `materialization` wire field.
-    pub materialization: Option<BTreeMap<String, serde_json::Value>>,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
-    /// The `participantId` wire field.
-    #[serde(rename = "participantId")]
-    pub participant_id: String,
-    /// The `principalId` wire field.
-    #[serde(rename = "principalId")]
-    pub principal_id: String,
-    /// The `state` wire field.
-    pub state: AuthIdentityAuthorityRevokeResponseAuthorityState,
-    /// The `updatedAt` wire field.
-    #[serde(rename = "updatedAt")]
-    pub updated_at: i64,
-    /// The `version` wire field.
-    pub version: i64,
-}
-/// Generated schema type `AuthIdentityAuthorityRevokeResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityAuthorityRevokeResponse {
-    /// The `authority` wire field.
-    pub authority: AuthIdentityAuthorityRevokeResponseAuthority,
-}
-/// Generated schema type `AuthIdentityGrantsListRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityGrantsListRequest {
-    /// The `limit` wire field.
-    pub limit: i64,
-    /// The `offset` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub offset: Option<i64>,
-    /// The `user` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user: Option<String>,
-}
-/// Generated schema type `AuthIdentityGrantsListResponseEntriesItemContractEvidence`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityGrantsListResponseEntriesItemContractEvidence {
-    /// The `contractDigest` wire field.
-    #[serde(rename = "contractDigest")]
-    pub contract_digest: String,
-    /// The `contractId` wire field.
-    #[serde(rename = "contractId")]
-    pub contract_id: String,
-}
-/// Generated schema type `AuthIdentityGrantsListResponseEntriesItemIdentityAnchor`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind")]
-pub enum AuthIdentityGrantsListResponseEntriesItemIdentityAnchor {
-    /// The `web` variant.
-    #[serde(rename = "web")]
-    Web {
-        /// The `contractId` wire field.
-        #[serde(rename = "contractId")]
-        contract_id: String,
-        /// The `origin` wire field.
-        origin: String,
-    },
-    /// The `cli` variant.
-    #[serde(rename = "cli")]
-    Cli {
-        /// The `contractId` wire field.
-        #[serde(rename = "contractId")]
-        contract_id: String,
-        /// The `sessionPublicKey` wire field.
-        #[serde(rename = "sessionPublicKey")]
-        session_public_key: String,
-    },
-    /// The `native` variant.
-    #[serde(rename = "native")]
-    Native {
-        /// The `contractId` wire field.
-        #[serde(rename = "contractId")]
-        contract_id: String,
-        /// The `sessionPublicKey` wire field.
-        #[serde(rename = "sessionPublicKey")]
-        session_public_key: String,
-    },
-    /// The `device-user` variant.
-    #[serde(rename = "device-user")]
-    DeviceUser {
-        /// The `contractId` wire field.
-        #[serde(rename = "contractId")]
-        contract_id: String,
-        /// The `devicePublicKey` wire field.
-        #[serde(rename = "devicePublicKey")]
-        device_public_key: String,
-    },
-}
-/// Generated schema type `AuthIdentityGrantsListResponseEntriesItemParticipantKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthIdentityGrantsListResponseEntriesItemParticipantKind {
-    /// The `app` wire value.
-    #[serde(rename = "app")]
-    App,
-    /// The `agent` wire value.
-    #[serde(rename = "agent")]
-    Agent,
-}
-impl AuthIdentityGrantsListResponseEntriesItemParticipantKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::App => "app",
-            Self::Agent => "agent",
-        }
-    }
-}
-impl AsRef<str> for AuthIdentityGrantsListResponseEntriesItemParticipantKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthIdentityGrantsListResponseEntriesItemParticipantKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthIdentityGrantsListResponseEntriesItemParticipantKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthIdentityGrantsListResponseEntriesItemParticipantKind> for &str {
-    fn eq(&self, other: &AuthIdentityGrantsListResponseEntriesItemParticipantKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthIdentityGrantsListResponseEntriesItem`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityGrantsListResponseEntriesItem {
-    /// The `capabilities` wire field.
-    pub capabilities: Vec<String>,
-    /// The `contractEvidence` wire field.
-    #[serde(rename = "contractEvidence")]
-    pub contract_evidence: AuthIdentityGrantsListResponseEntriesItemContractEvidence,
-    /// The `description` wire field.
-    pub description: String,
-    /// The `displayName` wire field.
-    #[serde(rename = "displayName")]
-    pub display_name: String,
-    /// The `grantedAt` wire field.
-    #[serde(rename = "grantedAt")]
-    pub granted_at: String,
-    /// The `identityAnchor` wire field.
-    #[serde(rename = "identityAnchor")]
-    pub identity_anchor: AuthIdentityGrantsListResponseEntriesItemIdentityAnchor,
-    /// The `identityGrantId` wire field.
-    #[serde(rename = "identityGrantId")]
-    pub identity_grant_id: String,
-    /// The `participantKind` wire field.
-    #[serde(rename = "participantKind")]
-    pub participant_kind: AuthIdentityGrantsListResponseEntriesItemParticipantKind,
-    /// The `updatedAt` wire field.
-    #[serde(rename = "updatedAt")]
-    pub updated_at: String,
-}
-/// Generated schema type `AuthIdentityGrantsListResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityGrantsListResponse {
-    /// The `count` wire field.
-    pub count: i64,
-    /// The `entries` wire field.
-    pub entries: Vec<AuthIdentityGrantsListResponseEntriesItem>,
-    /// The `limit` wire field.
-    pub limit: i64,
-    /// The `nextOffset` wire field.
-    #[serde(rename = "nextOffset")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_offset: Option<i64>,
-    /// The `offset` wire field.
-    pub offset: i64,
-}
-/// Generated schema type `AuthIdentityGrantsRevokeRequest`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityGrantsRevokeRequest {
-    /// The `identityGrantId` wire field.
-    #[serde(rename = "identityGrantId")]
-    pub identity_grant_id: String,
-    /// The `user` wire field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user: Option<String>,
-}
-/// Generated schema type `AuthIdentityGrantsRevokeResponse`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthIdentityGrantsRevokeResponse {
-    /// The `success` wire field.
-    pub success: bool,
 }
 /// Generated schema type `AuthIssuersRevokeRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -13049,6 +6503,666 @@ pub struct AuthIssuersRevokeResponse {
     /// The `state` wire field.
     pub state: AuthIssuersRevokeResponseState,
 }
+/// Generated schema type `AuthParticipantsGetRequest`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthParticipantsGetRequest {
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    pub participant_id: String,
+    /// The `revision` wire field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision: Option<i64>,
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemAction`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemAction {
+    /// The `call` wire value.
+    #[serde(rename = "call")]
+    Call,
+    /// The `invoke` wire value.
+    #[serde(rename = "invoke")]
+    Invoke,
+    /// The `observe` wire value.
+    #[serde(rename = "observe")]
+    Observe,
+    /// The `cancel` wire value.
+    #[serde(rename = "cancel")]
+    Cancel,
+    /// The `control` wire value.
+    #[serde(rename = "control")]
+    Control,
+    /// The `publish` wire value.
+    #[serde(rename = "publish")]
+    Publish,
+    /// The `subscribe` wire value.
+    #[serde(rename = "subscribe")]
+    Subscribe,
+    /// The `read` wire value.
+    #[serde(rename = "read")]
+    Read,
+    /// The `write` wire value.
+    #[serde(rename = "write")]
+    Write,
+    /// The `delete` wire value.
+    #[serde(rename = "delete")]
+    Delete,
+    /// The `submit` wire value.
+    #[serde(rename = "submit")]
+    Submit,
+    /// The `process` wire value.
+    #[serde(rename = "process")]
+    Process,
+    /// The `consume` wire value.
+    #[serde(rename = "consume")]
+    Consume,
+}
+impl AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemAction {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Call => "call",
+            Self::Invoke => "invoke",
+            Self::Observe => "observe",
+            Self::Cancel => "cancel",
+            Self::Control => "control",
+            Self::Publish => "publish",
+            Self::Subscribe => "subscribe",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Delete => "delete",
+            Self::Submit => "submit",
+            Self::Process => "process",
+            Self::Consume => "consume",
+        }
+    }
+}
+impl AsRef<str> for AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemAction {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display
+    for AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemAction
+{
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str>
+    for AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemAction
+{
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemAction>
+    for &str
+{
+    fn eq(
+        &self,
+        other: &AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemAction,
+    ) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetApiSurfaceSurface`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetApiSurfaceSurface
+{
+    /// The `rpc` wire value.
+    #[serde(rename = "rpc")]
+    Rpc,
+    /// The `operation` wire value.
+    #[serde(rename = "operation")]
+    Operation,
+    /// The `event` wire value.
+    #[serde(rename = "event")]
+    Event,
+    /// The `feed` wire value.
+    #[serde(rename = "feed")]
+    Feed,
+    /// The `state` wire value.
+    #[serde(rename = "state")]
+    State,
+}
+impl
+    AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetApiSurfaceSurface
+{
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Rpc => "rpc",
+            Self::Operation => "operation",
+            Self::Event => "event",
+            Self::Feed => "feed",
+            Self::State => "state",
+        }
+    }
+}
+impl AsRef<str>
+for AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetApiSurfaceSurface {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display
+for AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetApiSurfaceSurface {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str>
+for AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetApiSurfaceSurface {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<
+    AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetApiSurfaceSurface,
+> for &str {
+    fn eq(
+        &self,
+        other: &AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetApiSurfaceSurface,
+    ) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetParticipantResourceResource`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetParticipantResourceResource
+{
+    /// The `state` wire value.
+    #[serde(rename = "state")]
+    State,
+    /// The `jobQueue` wire value.
+    #[serde(rename = "jobQueue")]
+    JobQueue,
+    /// The `eventConsumer` wire value.
+    #[serde(rename = "eventConsumer")]
+    EventConsumer,
+    /// The `kv` wire value.
+    #[serde(rename = "kv")]
+    Kv,
+    /// The `store` wire value.
+    #[serde(rename = "store")]
+    Store,
+}
+impl AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetParticipantResourceResource {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::JobQueue => "jobQueue",
+            Self::EventConsumer => "eventConsumer",
+            Self::Kv => "kv",
+            Self::Store => "store",
+        }
+    }
+}
+impl AsRef<str>
+for AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetParticipantResourceResource {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display
+for AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetParticipantResourceResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str>
+for AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetParticipantResourceResource {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<
+    AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetParticipantResourceResource,
+> for &str {
+    fn eq(
+        &self,
+        other: &AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetParticipantResourceResource,
+    ) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind")]
+pub enum AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTarget {
+    /// The `apiSurface` variant.
+    #[serde(rename = "apiSurface")]
+    ApiSurface {
+        /// The `api` wire field.
+        api: String,
+        /// The `name` wire field.
+        name: String,
+        /// The `surface` wire field.
+        surface: AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetApiSurfaceSurface,
+    },
+    /// The `operationSignal` variant.
+    #[serde(rename = "operationSignal")]
+    OperationSignal {
+        /// The `api` wire field.
+        api: String,
+        /// The `operation` wire field.
+        operation: String,
+        /// The `signal` wire field.
+        signal: String,
+    },
+    /// The `participantResource` variant.
+    #[serde(rename = "participantResource")]
+    ParticipantResource {
+        /// The `name` wire field.
+        name: String,
+        /// The `participant` wire field.
+        participant: String,
+        /// The `resource` wire field.
+        resource: AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTargetParticipantResourceResource,
+    },
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItem {
+    /// The `action` wire field.
+    pub action: AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemAction,
+    /// The `target` wire field.
+    pub target: AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItemTarget,
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantOptionalBundlesItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthParticipantsGetResponseParticipantOptionalBundlesItem {
+    /// The `apiId` wire field.
+    #[serde(rename = "apiId")]
+    pub api_id: String,
+    /// The `id` wire field.
+    pub id: String,
+    /// The `permissions` wire field.
+    pub permissions: Vec<AuthParticipantsGetResponseParticipantOptionalBundlesItemPermissionsItem>,
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantParticipantKind`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthParticipantsGetResponseParticipantParticipantKind {
+    /// The `service` wire value.
+    #[serde(rename = "service")]
+    Service,
+    /// The `device` wire value.
+    #[serde(rename = "device")]
+    Device,
+    /// The `app` wire value.
+    #[serde(rename = "app")]
+    App,
+    /// The `agent` wire value.
+    #[serde(rename = "agent")]
+    Agent,
+}
+impl AuthParticipantsGetResponseParticipantParticipantKind {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Service => "service",
+            Self::Device => "device",
+            Self::App => "app",
+            Self::Agent => "agent",
+        }
+    }
+}
+impl AsRef<str> for AuthParticipantsGetResponseParticipantParticipantKind {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthParticipantsGetResponseParticipantParticipantKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthParticipantsGetResponseParticipantParticipantKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthParticipantsGetResponseParticipantParticipantKind> for &str {
+    fn eq(&self, other: &AuthParticipantsGetResponseParticipantParticipantKind) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantRequiredGrantsFormat`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthParticipantsGetResponseParticipantRequiredGrantsFormat {
+    /// The `trellis.grant-set.v1` wire value.
+    #[serde(rename = "trellis.grant-set.v1")]
+    TrellisGrantSetV1,
+}
+impl AuthParticipantsGetResponseParticipantRequiredGrantsFormat {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
+        }
+    }
+}
+impl AsRef<str> for AuthParticipantsGetResponseParticipantRequiredGrantsFormat {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthParticipantsGetResponseParticipantRequiredGrantsFormat {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthParticipantsGetResponseParticipantRequiredGrantsFormat {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthParticipantsGetResponseParticipantRequiredGrantsFormat> for &str {
+    fn eq(&self, other: &AuthParticipantsGetResponseParticipantRequiredGrantsFormat) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemAction`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemAction {
+    /// The `call` wire value.
+    #[serde(rename = "call")]
+    Call,
+    /// The `invoke` wire value.
+    #[serde(rename = "invoke")]
+    Invoke,
+    /// The `observe` wire value.
+    #[serde(rename = "observe")]
+    Observe,
+    /// The `cancel` wire value.
+    #[serde(rename = "cancel")]
+    Cancel,
+    /// The `control` wire value.
+    #[serde(rename = "control")]
+    Control,
+    /// The `publish` wire value.
+    #[serde(rename = "publish")]
+    Publish,
+    /// The `subscribe` wire value.
+    #[serde(rename = "subscribe")]
+    Subscribe,
+    /// The `read` wire value.
+    #[serde(rename = "read")]
+    Read,
+    /// The `write` wire value.
+    #[serde(rename = "write")]
+    Write,
+    /// The `delete` wire value.
+    #[serde(rename = "delete")]
+    Delete,
+    /// The `submit` wire value.
+    #[serde(rename = "submit")]
+    Submit,
+    /// The `process` wire value.
+    #[serde(rename = "process")]
+    Process,
+    /// The `consume` wire value.
+    #[serde(rename = "consume")]
+    Consume,
+}
+impl AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemAction {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Call => "call",
+            Self::Invoke => "invoke",
+            Self::Observe => "observe",
+            Self::Cancel => "cancel",
+            Self::Control => "control",
+            Self::Publish => "publish",
+            Self::Subscribe => "subscribe",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Delete => "delete",
+            Self::Submit => "submit",
+            Self::Process => "process",
+            Self::Consume => "consume",
+        }
+    }
+}
+impl AsRef<str> for AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemAction {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display
+    for AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemAction
+{
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemAction {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemAction> for &str {
+    fn eq(
+        &self,
+        other: &AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemAction,
+    ) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetApiSurfaceSurface`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetApiSurfaceSurface
+{
+    /// The `rpc` wire value.
+    #[serde(rename = "rpc")]
+    Rpc,
+    /// The `operation` wire value.
+    #[serde(rename = "operation")]
+    Operation,
+    /// The `event` wire value.
+    #[serde(rename = "event")]
+    Event,
+    /// The `feed` wire value.
+    #[serde(rename = "feed")]
+    Feed,
+    /// The `state` wire value.
+    #[serde(rename = "state")]
+    State,
+}
+impl AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetApiSurfaceSurface {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Rpc => "rpc",
+            Self::Operation => "operation",
+            Self::Event => "event",
+            Self::Feed => "feed",
+            Self::State => "state",
+        }
+    }
+}
+impl AsRef<str>
+    for AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetApiSurfaceSurface
+{
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display
+    for AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetApiSurfaceSurface
+{
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str>
+    for AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetApiSurfaceSurface
+{
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl
+    PartialEq<
+        AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetApiSurfaceSurface,
+    > for &str
+{
+    fn eq(
+        &self,
+        other: &AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetApiSurfaceSurface,
+    ) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetParticipantResourceResource`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetParticipantResourceResource
+{
+    /// The `state` wire value.
+    #[serde(rename = "state")]
+    State,
+    /// The `jobQueue` wire value.
+    #[serde(rename = "jobQueue")]
+    JobQueue,
+    /// The `eventConsumer` wire value.
+    #[serde(rename = "eventConsumer")]
+    EventConsumer,
+    /// The `kv` wire value.
+    #[serde(rename = "kv")]
+    Kv,
+    /// The `store` wire value.
+    #[serde(rename = "store")]
+    Store,
+}
+impl AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetParticipantResourceResource {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::JobQueue => "jobQueue",
+            Self::EventConsumer => "eventConsumer",
+            Self::Kv => "kv",
+            Self::Store => "store",
+        }
+    }
+}
+impl AsRef<str>
+for AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetParticipantResourceResource {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display
+for AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetParticipantResourceResource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str>
+for AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetParticipantResourceResource {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<
+    AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetParticipantResourceResource,
+> for &str {
+    fn eq(
+        &self,
+        other: &AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetParticipantResourceResource,
+    ) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind")]
+pub enum AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTarget {
+    /// The `apiSurface` variant.
+    #[serde(rename = "apiSurface")]
+    ApiSurface {
+        /// The `api` wire field.
+        api: String,
+        /// The `name` wire field.
+        name: String,
+        /// The `surface` wire field.
+        surface: AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetApiSurfaceSurface,
+    },
+    /// The `operationSignal` variant.
+    #[serde(rename = "operationSignal")]
+    OperationSignal {
+        /// The `api` wire field.
+        api: String,
+        /// The `operation` wire field.
+        operation: String,
+        /// The `signal` wire field.
+        signal: String,
+    },
+    /// The `participantResource` variant.
+    #[serde(rename = "participantResource")]
+    ParticipantResource {
+        /// The `name` wire field.
+        name: String,
+        /// The `participant` wire field.
+        participant: String,
+        /// The `resource` wire field.
+        resource: AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTargetParticipantResourceResource,
+    },
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItem {
+    /// The `action` wire field.
+    pub action: AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemAction,
+    /// The `target` wire field.
+    pub target: AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItemTarget,
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipantRequiredGrants`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthParticipantsGetResponseParticipantRequiredGrants {
+    /// The `format` wire field.
+    pub format: AuthParticipantsGetResponseParticipantRequiredGrantsFormat,
+    /// The `permissions` wire field.
+    pub permissions: Vec<AuthParticipantsGetResponseParticipantRequiredGrantsPermissionsItem>,
+}
+/// Generated schema type `AuthParticipantsGetResponseParticipant`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthParticipantsGetResponseParticipant {
+    /// The `apiArtifacts` wire field.
+    #[serde(rename = "apiArtifacts")]
+    pub api_artifacts: Vec<BTreeMap<String, serde_json::Value>>,
+    /// The `artifactDigest` wire field.
+    #[serde(rename = "artifactDigest")]
+    pub artifact_digest: String,
+    /// The `installedAt` wire field.
+    #[serde(rename = "installedAt")]
+    pub installed_at: i64,
+    /// The `optionalBundles` wire field.
+    #[serde(rename = "optionalBundles")]
+    pub optional_bundles: Vec<AuthParticipantsGetResponseParticipantOptionalBundlesItem>,
+    /// The `participantArtifact` wire field.
+    #[serde(rename = "participantArtifact")]
+    pub participant_artifact: BTreeMap<String, serde_json::Value>,
+    /// The `participantId` wire field.
+    #[serde(rename = "participantId")]
+    pub participant_id: String,
+    /// The `participantKind` wire field.
+    #[serde(rename = "participantKind")]
+    pub participant_kind: AuthParticipantsGetResponseParticipantParticipantKind,
+    /// The `requiredGrants` wire field.
+    #[serde(rename = "requiredGrants")]
+    pub required_grants: AuthParticipantsGetResponseParticipantRequiredGrants,
+    /// The `revision` wire field.
+    pub revision: i64,
+}
+/// Generated schema type `AuthParticipantsGetResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthParticipantsGetResponse {
+    /// The `participant` wire field.
+    pub participant: AuthParticipantsGetResponseParticipant,
+}
 /// Generated schema type `AuthParticipantsInstallRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthParticipantsInstallRequest {
@@ -13065,16 +7179,76 @@ pub struct AuthParticipantsInstallRequest {
     #[serde(rename = "participantArtifact")]
     pub participant_artifact: BTreeMap<String, serde_json::Value>,
 }
-/// Generated schema type `AuthParticipantsInstallResponse`.
+/// Generated schema type `AuthParticipantsInstallResponseParticipantParticipantKind`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthParticipantsInstallResponseParticipantParticipantKind {
+    /// The `service` wire value.
+    #[serde(rename = "service")]
+    Service,
+    /// The `device` wire value.
+    #[serde(rename = "device")]
+    Device,
+    /// The `app` wire value.
+    #[serde(rename = "app")]
+    App,
+    /// The `agent` wire value.
+    #[serde(rename = "agent")]
+    Agent,
+}
+impl AuthParticipantsInstallResponseParticipantParticipantKind {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Service => "service",
+            Self::Device => "device",
+            Self::App => "app",
+            Self::Agent => "agent",
+        }
+    }
+}
+impl AsRef<str> for AuthParticipantsInstallResponseParticipantParticipantKind {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthParticipantsInstallResponseParticipantParticipantKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthParticipantsInstallResponseParticipantParticipantKind {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthParticipantsInstallResponseParticipantParticipantKind> for &str {
+    fn eq(&self, other: &AuthParticipantsInstallResponseParticipantParticipantKind) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthParticipantsInstallResponseParticipant`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthParticipantsInstallResponse {
-    /// The `digest` wire field.
-    pub digest: String,
+pub struct AuthParticipantsInstallResponseParticipant {
+    /// The `artifactDigest` wire field.
+    #[serde(rename = "artifactDigest")]
+    pub artifact_digest: String,
+    /// The `installedAt` wire field.
+    #[serde(rename = "installedAt")]
+    pub installed_at: i64,
     /// The `participantId` wire field.
     #[serde(rename = "participantId")]
     pub participant_id: String,
+    /// The `participantKind` wire field.
+    #[serde(rename = "participantKind")]
+    pub participant_kind: AuthParticipantsInstallResponseParticipantParticipantKind,
     /// The `revision` wire field.
     pub revision: i64,
+}
+/// Generated schema type `AuthParticipantsInstallResponse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthParticipantsInstallResponse {
+    /// The `participant` wire field.
+    pub participant: AuthParticipantsInstallResponseParticipant,
 }
 /// Generated schema type `AuthPortalsGetRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -14383,10 +8557,6 @@ pub struct AuthSessionsListRequest {
     /// The `cursor` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_id: Option<String>,
     /// The `limit` wire field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<i64>,
@@ -14405,15 +8575,9 @@ pub struct AuthSessionsListRequest {
 /// Generated schema type `AuthSessionsListResponseEntriesItemParticipantKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuthSessionsListResponseEntriesItemParticipantKind {
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
     /// The `app` wire value.
     #[serde(rename = "app")]
     App,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
     /// The `agent` wire value.
     #[serde(rename = "agent")]
     Agent,
@@ -14422,9 +8586,7 @@ impl AuthSessionsListResponseEntriesItemParticipantKind {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::Service => "service",
             Self::App => "app",
-            Self::Device => "device",
             Self::Agent => "agent",
         }
     }
@@ -14446,49 +8608,6 @@ impl PartialEq<&str> for AuthSessionsListResponseEntriesItemParticipantKind {
 }
 impl PartialEq<AuthSessionsListResponseEntriesItemParticipantKind> for &str {
     fn eq(&self, other: &AuthSessionsListResponseEntriesItemParticipantKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthSessionsListResponseEntriesItemPrincipalKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthSessionsListResponseEntriesItemPrincipalKind {
-    /// The `user` wire value.
-    #[serde(rename = "user")]
-    User,
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
-}
-impl AuthSessionsListResponseEntriesItemPrincipalKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::User => "user",
-            Self::Service => "service",
-            Self::Device => "device",
-        }
-    }
-}
-impl AsRef<str> for AuthSessionsListResponseEntriesItemPrincipalKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthSessionsListResponseEntriesItemPrincipalKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthSessionsListResponseEntriesItemPrincipalKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthSessionsListResponseEntriesItemPrincipalKind> for &str {
-    fn eq(&self, other: &AuthSessionsListResponseEntriesItemPrincipalKind) -> bool {
         *self == other.as_str()
     }
 }
@@ -14544,30 +8663,18 @@ pub struct AuthSessionsListResponseEntriesItem {
     /// The `expiresAt` wire field.
     #[serde(rename = "expiresAt")]
     pub expires_at: Option<i64>,
-    /// The `inboxPrefix` wire field.
-    #[serde(rename = "inboxPrefix")]
-    pub inbox_prefix: String,
-    /// The `lastSeenAt` wire field.
-    #[serde(rename = "lastSeenAt")]
-    pub last_seen_at: i64,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
+    /// The `lastAuthenticatedAt` wire field.
+    #[serde(rename = "lastAuthenticatedAt")]
+    pub last_authenticated_at: i64,
     /// The `participantId` wire field.
     #[serde(rename = "participantId")]
     pub participant_id: String,
     /// The `participantKind` wire field.
     #[serde(rename = "participantKind")]
     pub participant_kind: AuthSessionsListResponseEntriesItemParticipantKind,
-    /// The `participantNeedsDigest` wire field.
-    #[serde(rename = "participantNeedsDigest")]
-    pub participant_needs_digest: String,
     /// The `principalId` wire field.
     #[serde(rename = "principalId")]
     pub principal_id: String,
-    /// The `principalKind` wire field.
-    #[serde(rename = "principalKind")]
-    pub principal_kind: AuthSessionsListResponseEntriesItemPrincipalKind,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -14597,15 +8704,9 @@ pub struct AuthSessionsListResponse {
 /// Generated schema type `AuthSessionsLogoutResponseSessionParticipantKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuthSessionsLogoutResponseSessionParticipantKind {
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
     /// The `app` wire value.
     #[serde(rename = "app")]
     App,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
     /// The `agent` wire value.
     #[serde(rename = "agent")]
     Agent,
@@ -14614,9 +8715,7 @@ impl AuthSessionsLogoutResponseSessionParticipantKind {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::Service => "service",
             Self::App => "app",
-            Self::Device => "device",
             Self::Agent => "agent",
         }
     }
@@ -14638,49 +8737,6 @@ impl PartialEq<&str> for AuthSessionsLogoutResponseSessionParticipantKind {
 }
 impl PartialEq<AuthSessionsLogoutResponseSessionParticipantKind> for &str {
     fn eq(&self, other: &AuthSessionsLogoutResponseSessionParticipantKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthSessionsLogoutResponseSessionPrincipalKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthSessionsLogoutResponseSessionPrincipalKind {
-    /// The `user` wire value.
-    #[serde(rename = "user")]
-    User,
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
-}
-impl AuthSessionsLogoutResponseSessionPrincipalKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::User => "user",
-            Self::Service => "service",
-            Self::Device => "device",
-        }
-    }
-}
-impl AsRef<str> for AuthSessionsLogoutResponseSessionPrincipalKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthSessionsLogoutResponseSessionPrincipalKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthSessionsLogoutResponseSessionPrincipalKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthSessionsLogoutResponseSessionPrincipalKind> for &str {
-    fn eq(&self, other: &AuthSessionsLogoutResponseSessionPrincipalKind) -> bool {
         *self == other.as_str()
     }
 }
@@ -14736,30 +8792,18 @@ pub struct AuthSessionsLogoutResponseSession {
     /// The `expiresAt` wire field.
     #[serde(rename = "expiresAt")]
     pub expires_at: Option<i64>,
-    /// The `inboxPrefix` wire field.
-    #[serde(rename = "inboxPrefix")]
-    pub inbox_prefix: String,
-    /// The `lastSeenAt` wire field.
-    #[serde(rename = "lastSeenAt")]
-    pub last_seen_at: i64,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
+    /// The `lastAuthenticatedAt` wire field.
+    #[serde(rename = "lastAuthenticatedAt")]
+    pub last_authenticated_at: i64,
     /// The `participantId` wire field.
     #[serde(rename = "participantId")]
     pub participant_id: String,
     /// The `participantKind` wire field.
     #[serde(rename = "participantKind")]
     pub participant_kind: AuthSessionsLogoutResponseSessionParticipantKind,
-    /// The `participantNeedsDigest` wire field.
-    #[serde(rename = "participantNeedsDigest")]
-    pub participant_needs_digest: String,
     /// The `principalId` wire field.
     #[serde(rename = "principalId")]
     pub principal_id: String,
-    /// The `principalKind` wire field.
-    #[serde(rename = "principalKind")]
-    pub principal_kind: AuthSessionsLogoutResponseSessionPrincipalKind,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -14786,9 +8830,303 @@ pub struct AuthSessionsLogoutResponse {
     /// The `session` wire field.
     pub session: AuthSessionsLogoutResponseSession,
 }
-/// Generated schema type `AuthSessionsMeResponseSessionParticipantKind`.
+/// Generated schema type `AuthSessionsMeResponseConnectionGrantsFormat`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthSessionsMeResponseSessionParticipantKind {
+pub enum AuthSessionsMeResponseConnectionGrantsFormat {
+    /// The `trellis.grant-set.v1` wire value.
+    #[serde(rename = "trellis.grant-set.v1")]
+    TrellisGrantSetV1,
+}
+impl AuthSessionsMeResponseConnectionGrantsFormat {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::TrellisGrantSetV1 => "trellis.grant-set.v1",
+        }
+    }
+}
+impl AsRef<str> for AuthSessionsMeResponseConnectionGrantsFormat {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthSessionsMeResponseConnectionGrantsFormat {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthSessionsMeResponseConnectionGrantsFormat {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthSessionsMeResponseConnectionGrantsFormat> for &str {
+    fn eq(&self, other: &AuthSessionsMeResponseConnectionGrantsFormat) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthSessionsMeResponseConnectionGrantsPermissionsItemAction`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthSessionsMeResponseConnectionGrantsPermissionsItemAction {
+    /// The `call` wire value.
+    #[serde(rename = "call")]
+    Call,
+    /// The `invoke` wire value.
+    #[serde(rename = "invoke")]
+    Invoke,
+    /// The `observe` wire value.
+    #[serde(rename = "observe")]
+    Observe,
+    /// The `cancel` wire value.
+    #[serde(rename = "cancel")]
+    Cancel,
+    /// The `control` wire value.
+    #[serde(rename = "control")]
+    Control,
+    /// The `publish` wire value.
+    #[serde(rename = "publish")]
+    Publish,
+    /// The `subscribe` wire value.
+    #[serde(rename = "subscribe")]
+    Subscribe,
+    /// The `read` wire value.
+    #[serde(rename = "read")]
+    Read,
+    /// The `write` wire value.
+    #[serde(rename = "write")]
+    Write,
+    /// The `delete` wire value.
+    #[serde(rename = "delete")]
+    Delete,
+    /// The `submit` wire value.
+    #[serde(rename = "submit")]
+    Submit,
+    /// The `process` wire value.
+    #[serde(rename = "process")]
+    Process,
+    /// The `consume` wire value.
+    #[serde(rename = "consume")]
+    Consume,
+}
+impl AuthSessionsMeResponseConnectionGrantsPermissionsItemAction {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Call => "call",
+            Self::Invoke => "invoke",
+            Self::Observe => "observe",
+            Self::Cancel => "cancel",
+            Self::Control => "control",
+            Self::Publish => "publish",
+            Self::Subscribe => "subscribe",
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Delete => "delete",
+            Self::Submit => "submit",
+            Self::Process => "process",
+            Self::Consume => "consume",
+        }
+    }
+}
+impl AsRef<str> for AuthSessionsMeResponseConnectionGrantsPermissionsItemAction {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthSessionsMeResponseConnectionGrantsPermissionsItemAction {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthSessionsMeResponseConnectionGrantsPermissionsItemAction {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthSessionsMeResponseConnectionGrantsPermissionsItemAction> for &str {
+    fn eq(&self, other: &AuthSessionsMeResponseConnectionGrantsPermissionsItemAction) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetApiSurfaceSurface`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetApiSurfaceSurface {
+    /// The `rpc` wire value.
+    #[serde(rename = "rpc")]
+    Rpc,
+    /// The `operation` wire value.
+    #[serde(rename = "operation")]
+    Operation,
+    /// The `event` wire value.
+    #[serde(rename = "event")]
+    Event,
+    /// The `feed` wire value.
+    #[serde(rename = "feed")]
+    Feed,
+    /// The `state` wire value.
+    #[serde(rename = "state")]
+    State,
+}
+impl AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetApiSurfaceSurface {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Rpc => "rpc",
+            Self::Operation => "operation",
+            Self::Event => "event",
+            Self::Feed => "feed",
+            Self::State => "state",
+        }
+    }
+}
+impl AsRef<str> for AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetApiSurfaceSurface {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display
+    for AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetApiSurfaceSurface
+{
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str>
+    for AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetApiSurfaceSurface
+{
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetApiSurfaceSurface>
+    for &str
+{
+    fn eq(
+        &self,
+        other: &AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetApiSurfaceSurface,
+    ) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetParticipantResourceResource`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetParticipantResourceResource {
+    /// The `state` wire value.
+    #[serde(rename = "state")]
+    State,
+    /// The `jobQueue` wire value.
+    #[serde(rename = "jobQueue")]
+    JobQueue,
+    /// The `eventConsumer` wire value.
+    #[serde(rename = "eventConsumer")]
+    EventConsumer,
+    /// The `kv` wire value.
+    #[serde(rename = "kv")]
+    Kv,
+    /// The `store` wire value.
+    #[serde(rename = "store")]
+    Store,
+}
+impl AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetParticipantResourceResource {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::JobQueue => "jobQueue",
+            Self::EventConsumer => "eventConsumer",
+            Self::Kv => "kv",
+            Self::Store => "store",
+        }
+    }
+}
+impl AsRef<str>
+    for AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetParticipantResourceResource
+{
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display
+    for AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetParticipantResourceResource
+{
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str>
+    for AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetParticipantResourceResource
+{
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl
+    PartialEq<
+        AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetParticipantResourceResource,
+    > for &str
+{
+    fn eq(
+        &self,
+        other: &AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetParticipantResourceResource,
+    ) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthSessionsMeResponseConnectionGrantsPermissionsItemTarget`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind")]
+pub enum AuthSessionsMeResponseConnectionGrantsPermissionsItemTarget {
+    /// The `apiSurface` variant.
+    #[serde(rename = "apiSurface")]
+    ApiSurface {
+        /// The `api` wire field.
+        api: String,
+        /// The `name` wire field.
+        name: String,
+        /// The `surface` wire field.
+        surface: AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetApiSurfaceSurface,
+    },
+    /// The `operationSignal` variant.
+    #[serde(rename = "operationSignal")]
+    OperationSignal {
+        /// The `api` wire field.
+        api: String,
+        /// The `operation` wire field.
+        operation: String,
+        /// The `signal` wire field.
+        signal: String,
+    },
+    /// The `participantResource` variant.
+    #[serde(rename = "participantResource")]
+    ParticipantResource {
+        /// The `name` wire field.
+        name: String,
+        /// The `participant` wire field.
+        participant: String,
+        /// The `resource` wire field.
+        resource:
+            AuthSessionsMeResponseConnectionGrantsPermissionsItemTargetParticipantResourceResource,
+    },
+}
+/// Generated schema type `AuthSessionsMeResponseConnectionGrantsPermissionsItem`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthSessionsMeResponseConnectionGrantsPermissionsItem {
+    /// The `action` wire field.
+    pub action: AuthSessionsMeResponseConnectionGrantsPermissionsItemAction,
+    /// The `target` wire field.
+    pub target: AuthSessionsMeResponseConnectionGrantsPermissionsItemTarget,
+}
+/// Generated schema type `AuthSessionsMeResponseConnectionGrants`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthSessionsMeResponseConnectionGrants {
+    /// The `format` wire field.
+    pub format: AuthSessionsMeResponseConnectionGrantsFormat,
+    /// The `permissions` wire field.
+    pub permissions: Vec<AuthSessionsMeResponseConnectionGrantsPermissionsItem>,
+}
+/// Generated schema type `AuthSessionsMeResponseConnectionParticipantKind`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthSessionsMeResponseConnectionParticipantKind {
     /// The `service` wire value.
     #[serde(rename = "service")]
     Service,
@@ -14802,7 +9140,7 @@ pub enum AuthSessionsMeResponseSessionParticipantKind {
     #[serde(rename = "agent")]
     Agent,
 }
-impl AuthSessionsMeResponseSessionParticipantKind {
+impl AuthSessionsMeResponseConnectionParticipantKind {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -14813,29 +9151,64 @@ impl AuthSessionsMeResponseSessionParticipantKind {
         }
     }
 }
-impl AsRef<str> for AuthSessionsMeResponseSessionParticipantKind {
+impl AsRef<str> for AuthSessionsMeResponseConnectionParticipantKind {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
 }
-impl std::fmt::Display for AuthSessionsMeResponseSessionParticipantKind {
+impl std::fmt::Display for AuthSessionsMeResponseConnectionParticipantKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
-impl PartialEq<&str> for AuthSessionsMeResponseSessionParticipantKind {
+impl PartialEq<&str> for AuthSessionsMeResponseConnectionParticipantKind {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
     }
 }
-impl PartialEq<AuthSessionsMeResponseSessionParticipantKind> for &str {
-    fn eq(&self, other: &AuthSessionsMeResponseSessionParticipantKind) -> bool {
+impl PartialEq<AuthSessionsMeResponseConnectionParticipantKind> for &str {
+    fn eq(&self, other: &AuthSessionsMeResponseConnectionParticipantKind) -> bool {
         *self == other.as_str()
     }
 }
-/// Generated schema type `AuthSessionsMeResponseSessionPrincipalKind`.
+/// Generated schema type `AuthSessionsMeResponseConnectionPlatformPrivilegesItem`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthSessionsMeResponseSessionPrincipalKind {
+pub enum AuthSessionsMeResponseConnectionPlatformPrivilegesItem {
+    /// The `trellis.auth::admin` wire value.
+    #[serde(rename = "trellis.auth::admin")]
+    TrellisAuthAdmin,
+}
+impl AuthSessionsMeResponseConnectionPlatformPrivilegesItem {
+    /// Return the contract wire value.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::TrellisAuthAdmin => "trellis.auth::admin",
+        }
+    }
+}
+impl AsRef<str> for AuthSessionsMeResponseConnectionPlatformPrivilegesItem {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+impl std::fmt::Display for AuthSessionsMeResponseConnectionPlatformPrivilegesItem {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+impl PartialEq<&str> for AuthSessionsMeResponseConnectionPlatformPrivilegesItem {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+impl PartialEq<AuthSessionsMeResponseConnectionPlatformPrivilegesItem> for &str {
+    fn eq(&self, other: &AuthSessionsMeResponseConnectionPlatformPrivilegesItem) -> bool {
+        *self == other.as_str()
+    }
+}
+/// Generated schema type `AuthSessionsMeResponseConnectionPrincipalKind`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AuthSessionsMeResponseConnectionPrincipalKind {
     /// The `user` wire value.
     #[serde(rename = "user")]
     User,
@@ -14846,7 +9219,7 @@ pub enum AuthSessionsMeResponseSessionPrincipalKind {
     #[serde(rename = "device")]
     Device,
 }
-impl AuthSessionsMeResponseSessionPrincipalKind {
+impl AuthSessionsMeResponseConnectionPrincipalKind {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -14856,130 +9229,79 @@ impl AuthSessionsMeResponseSessionPrincipalKind {
         }
     }
 }
-impl AsRef<str> for AuthSessionsMeResponseSessionPrincipalKind {
+impl AsRef<str> for AuthSessionsMeResponseConnectionPrincipalKind {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
 }
-impl std::fmt::Display for AuthSessionsMeResponseSessionPrincipalKind {
+impl std::fmt::Display for AuthSessionsMeResponseConnectionPrincipalKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(self.as_str())
     }
 }
-impl PartialEq<&str> for AuthSessionsMeResponseSessionPrincipalKind {
+impl PartialEq<&str> for AuthSessionsMeResponseConnectionPrincipalKind {
     fn eq(&self, other: &&str) -> bool {
         self.as_str() == *other
     }
 }
-impl PartialEq<AuthSessionsMeResponseSessionPrincipalKind> for &str {
-    fn eq(&self, other: &AuthSessionsMeResponseSessionPrincipalKind) -> bool {
+impl PartialEq<AuthSessionsMeResponseConnectionPrincipalKind> for &str {
+    fn eq(&self, other: &AuthSessionsMeResponseConnectionPrincipalKind) -> bool {
         *self == other.as_str()
     }
 }
-/// Generated schema type `AuthSessionsMeResponseSessionState`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthSessionsMeResponseSessionState {
-    /// The `active` wire value.
-    #[serde(rename = "active")]
-    Active,
-    /// The `expired` wire value.
-    #[serde(rename = "expired")]
-    Expired,
-    /// The `revoked` wire value.
-    #[serde(rename = "revoked")]
-    Revoked,
-}
-impl AuthSessionsMeResponseSessionState {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Active => "active",
-            Self::Expired => "expired",
-            Self::Revoked => "revoked",
-        }
-    }
-}
-impl AsRef<str> for AuthSessionsMeResponseSessionState {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthSessionsMeResponseSessionState {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthSessionsMeResponseSessionState {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthSessionsMeResponseSessionState> for &str {
-    fn eq(&self, other: &AuthSessionsMeResponseSessionState) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthSessionsMeResponseSession`.
+/// Generated schema type `AuthSessionsMeResponseConnection`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthSessionsMeResponseSession {
-    /// The `createdAt` wire field.
-    #[serde(rename = "createdAt")]
-    pub created_at: i64,
-    /// The `expiresAt` wire field.
-    #[serde(rename = "expiresAt")]
-    pub expires_at: Option<i64>,
+pub struct AuthSessionsMeResponseConnection {
+    /// The `connectionId` wire field.
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    /// The `deploymentId` wire field.
+    #[serde(rename = "deploymentId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_id: Option<String>,
+    /// The `grants` wire field.
+    pub grants: AuthSessionsMeResponseConnectionGrants,
+    /// The `identityKeyId` wire field.
+    #[serde(rename = "identityKeyId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identity_key_id: Option<String>,
     /// The `inboxPrefix` wire field.
     #[serde(rename = "inboxPrefix")]
     pub inbox_prefix: String,
-    /// The `lastSeenAt` wire field.
-    #[serde(rename = "lastSeenAt")]
-    pub last_seen_at: i64,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
+    /// The `instanceId` wire field.
+    #[serde(rename = "instanceId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    /// The `loginSessionId` wire field.
+    #[serde(rename = "loginSessionId")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub login_session_id: Option<String>,
     /// The `participantId` wire field.
     #[serde(rename = "participantId")]
     pub participant_id: String,
     /// The `participantKind` wire field.
     #[serde(rename = "participantKind")]
-    pub participant_kind: AuthSessionsMeResponseSessionParticipantKind,
-    /// The `participantNeedsDigest` wire field.
-    #[serde(rename = "participantNeedsDigest")]
-    pub participant_needs_digest: String,
+    pub participant_kind: AuthSessionsMeResponseConnectionParticipantKind,
+    /// The `platformPrivileges` wire field.
+    #[serde(rename = "platformPrivileges")]
+    pub platform_privileges: Vec<AuthSessionsMeResponseConnectionPlatformPrivilegesItem>,
     /// The `principalId` wire field.
     #[serde(rename = "principalId")]
     pub principal_id: String,
     /// The `principalKind` wire field.
     #[serde(rename = "principalKind")]
-    pub principal_kind: AuthSessionsMeResponseSessionPrincipalKind,
-    /// The `revokedAt` wire field.
-    #[serde(rename = "revokedAt")]
-    pub revoked_at: Option<i64>,
-    /// The `sessionId` wire field.
-    #[serde(rename = "sessionId")]
-    pub session_id: String,
-    /// The `sessionKeyId` wire field.
-    #[serde(rename = "sessionKeyId")]
-    pub session_key_id: String,
-    /// The `sessionPublicKey` wire field.
-    #[serde(rename = "sessionPublicKey")]
-    pub session_public_key: String,
-    /// The `state` wire field.
-    pub state: AuthSessionsMeResponseSessionState,
-    /// The `version` wire field.
-    pub version: i64,
+    pub principal_kind: AuthSessionsMeResponseConnectionPrincipalKind,
+    /// The `sessionKey` wire field.
+    #[serde(rename = "sessionKey")]
+    pub session_key: String,
 }
 /// Generated schema type `AuthSessionsMeResponse`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthSessionsMeResponse {
-    /// The `deploymentId` wire field.
-    #[serde(rename = "deploymentId")]
-    pub deployment_id: Option<String>,
-    /// The `instanceId` wire field.
-    #[serde(rename = "instanceId")]
-    pub instance_id: Option<String>,
+    /// The `connection` wire field.
+    pub connection: AuthSessionsMeResponseConnection,
     /// The `session` wire field.
-    pub session: AuthSessionsMeResponseSession,
+    pub session: Option<BTreeMap<String, serde_json::Value>>,
     /// The `user` wire field.
     pub user: Option<BTreeMap<String, serde_json::Value>>,
 }
@@ -15001,15 +9323,9 @@ pub struct AuthSessionsRevokeRequest {
 /// Generated schema type `AuthSessionsRevokeResponseSessionParticipantKind`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AuthSessionsRevokeResponseSessionParticipantKind {
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
     /// The `app` wire value.
     #[serde(rename = "app")]
     App,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
     /// The `agent` wire value.
     #[serde(rename = "agent")]
     Agent,
@@ -15018,9 +9334,7 @@ impl AuthSessionsRevokeResponseSessionParticipantKind {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::Service => "service",
             Self::App => "app",
-            Self::Device => "device",
             Self::Agent => "agent",
         }
     }
@@ -15042,49 +9356,6 @@ impl PartialEq<&str> for AuthSessionsRevokeResponseSessionParticipantKind {
 }
 impl PartialEq<AuthSessionsRevokeResponseSessionParticipantKind> for &str {
     fn eq(&self, other: &AuthSessionsRevokeResponseSessionParticipantKind) -> bool {
-        *self == other.as_str()
-    }
-}
-/// Generated schema type `AuthSessionsRevokeResponseSessionPrincipalKind`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum AuthSessionsRevokeResponseSessionPrincipalKind {
-    /// The `user` wire value.
-    #[serde(rename = "user")]
-    User,
-    /// The `service` wire value.
-    #[serde(rename = "service")]
-    Service,
-    /// The `device` wire value.
-    #[serde(rename = "device")]
-    Device,
-}
-impl AuthSessionsRevokeResponseSessionPrincipalKind {
-    /// Return the contract wire value.
-    pub const fn as_str(&self) -> &'static str {
-        match self {
-            Self::User => "user",
-            Self::Service => "service",
-            Self::Device => "device",
-        }
-    }
-}
-impl AsRef<str> for AuthSessionsRevokeResponseSessionPrincipalKind {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-impl std::fmt::Display for AuthSessionsRevokeResponseSessionPrincipalKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-impl PartialEq<&str> for AuthSessionsRevokeResponseSessionPrincipalKind {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-impl PartialEq<AuthSessionsRevokeResponseSessionPrincipalKind> for &str {
-    fn eq(&self, other: &AuthSessionsRevokeResponseSessionPrincipalKind) -> bool {
         *self == other.as_str()
     }
 }
@@ -15140,30 +9411,18 @@ pub struct AuthSessionsRevokeResponseSession {
     /// The `expiresAt` wire field.
     #[serde(rename = "expiresAt")]
     pub expires_at: Option<i64>,
-    /// The `inboxPrefix` wire field.
-    #[serde(rename = "inboxPrefix")]
-    pub inbox_prefix: String,
-    /// The `lastSeenAt` wire field.
-    #[serde(rename = "lastSeenAt")]
-    pub last_seen_at: i64,
-    /// The `participantArtifactDigest` wire field.
-    #[serde(rename = "participantArtifactDigest")]
-    pub participant_artifact_digest: String,
+    /// The `lastAuthenticatedAt` wire field.
+    #[serde(rename = "lastAuthenticatedAt")]
+    pub last_authenticated_at: i64,
     /// The `participantId` wire field.
     #[serde(rename = "participantId")]
     pub participant_id: String,
     /// The `participantKind` wire field.
     #[serde(rename = "participantKind")]
     pub participant_kind: AuthSessionsRevokeResponseSessionParticipantKind,
-    /// The `participantNeedsDigest` wire field.
-    #[serde(rename = "participantNeedsDigest")]
-    pub participant_needs_digest: String,
     /// The `principalId` wire field.
     #[serde(rename = "principalId")]
     pub principal_id: String,
-    /// The `principalKind` wire field.
-    #[serde(rename = "principalKind")]
-    pub principal_kind: AuthSessionsRevokeResponseSessionPrincipalKind,
     /// The `revokedAt` wire field.
     #[serde(rename = "revokedAt")]
     pub revoked_at: Option<i64>,
@@ -16286,8 +10545,6 @@ pub struct AuthDeviceUserAuthoritiesResolveOutputReview {
 /// Generated schema type `AuthDeviceUserAuthoritiesResolveOutput`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthDeviceUserAuthoritiesResolveOutput {
-    /// The `authority` wire field.
-    pub authority: Option<BTreeMap<String, serde_json::Value>>,
     /// The `device` wire field.
     pub device: AuthDeviceUserAuthoritiesResolveOutputDevice,
     /// The `review` wire field.
@@ -16777,16 +11034,12 @@ pub enum AuthGrantsChangedEventBindingPlatformPrivilegesItem {
     /// The `trellis.auth::admin` wire value.
     #[serde(rename = "trellis.auth::admin")]
     TrellisAuthAdmin,
-    /// The `trellis.auth::capabilities.delegate` wire value.
-    #[serde(rename = "trellis.auth::capabilities.delegate")]
-    TrellisAuthCapabilitiesDelegate,
 }
 impl AuthGrantsChangedEventBindingPlatformPrivilegesItem {
     /// Return the contract wire value.
     pub const fn as_str(&self) -> &'static str {
         match self {
             Self::TrellisAuthAdmin => "trellis.auth::admin",
-            Self::TrellisAuthCapabilitiesDelegate => "trellis.auth::capabilities.delegate",
         }
     }
 }
@@ -16852,6 +11105,9 @@ impl PartialEq<AuthGrantsChangedEventBindingState> for &str {
 /// Generated schema type `AuthGrantsChangedEventBinding`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AuthGrantsChangedEventBinding {
+    /// The `createdAt` wire field.
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
     /// The `expiresAt` wire field.
     #[serde(rename = "expiresAt")]
     pub expires_at: Option<i64>,
@@ -16878,6 +11134,9 @@ pub struct AuthGrantsChangedEventBinding {
     pub revision: i64,
     /// The `state` wire field.
     pub state: AuthGrantsChangedEventBindingState,
+    /// The `updatedAt` wire field.
+    #[serde(rename = "updatedAt")]
+    pub updated_at: i64,
 }
 /// Generated schema type `AuthGrantsChangedEvent`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

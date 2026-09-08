@@ -16,6 +16,7 @@ const CROCKFORD_ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 struct DeviceActivationAttempt {
     session_key_seed_base64url: String,
     session_auth: crate::client::SessionAuth,
+    connection_id: String,
 }
 
 impl DeviceActivationAttempt {
@@ -30,6 +31,7 @@ impl DeviceActivationAttempt {
         Ok(Self {
             session_key_seed_base64url,
             session_auth,
+            connection_id: ulid::Ulid::new().to_string(),
         })
     }
 }
@@ -38,6 +40,7 @@ impl DeviceActivationAttempt {
 pub struct DeviceActivationOptions<'a, C> {
     connect: DeviceConnectOptions<'a, C>,
     activation_key_base64url: &'a str,
+    provisioning_secret: Option<&'a str>,
     nonce: String,
 }
 
@@ -48,7 +51,14 @@ impl<'a, C> DeviceActivationOptions<'a, C> {
             nonce: URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>()),
             connect,
             activation_key_base64url,
+            provisioning_secret: None,
         }
+    }
+
+    /// Supply the one-use provisioning secret for a not-yet-enrolled identity.
+    pub const fn with_provisioning_secret(mut self, provisioning_secret: &'a str) -> Self {
+        self.provisioning_secret = Some(provisioning_secret);
+        self
     }
 
     /// Replace the generated nonce, primarily for durable local activation state.
@@ -104,6 +114,10 @@ pub struct DeviceActivationPending {
     pub server_now: i64,
     /// Server-suggested polling delay.
     pub retry_after_ms: u64,
+    /// Session signing seed retained across polling attempts.
+    pub session_key_seed_base64url: String,
+    /// Logical runtime connection retained across polling attempts.
+    pub connection_id: String,
 }
 
 /// Evidence that the one-time device enrollment workflow reached ready state.
@@ -185,12 +199,12 @@ pub fn derive_device_confirmation_code(
 pub async fn check_device_activation<C>(
     options: &DeviceActivationOptions<'_, C>,
 ) -> Result<DeviceActivationStatus, DeviceActivationError> {
-    check_device_activation_with_attempt(options, DeviceActivationAttempt::new()?).await
+    check_device_activation_with_attempt(options, &DeviceActivationAttempt::new()?).await
 }
 
 async fn check_device_activation_with_attempt<C>(
     options: &DeviceActivationOptions<'_, C>,
-    attempt: DeviceActivationAttempt,
+    attempt: &DeviceActivationAttempt,
 ) -> Result<DeviceActivationStatus, DeviceActivationError> {
     let confirmation_code = derive_device_confirmation_code(
         options.activation_key_base64url,
@@ -201,6 +215,8 @@ async fn check_device_activation_with_attempt<C>(
     let response = match fetch_device_activation(
         &options.connect,
         &attempt.session_auth,
+        &attempt.connection_id,
+        options.provisioning_secret,
         &challenge_digest,
         &confirmation_code,
     )
@@ -212,33 +228,28 @@ async fn check_device_activation_with_attempt<C>(
         }
         Err(error) => return Err(error.into()),
     };
-    activation_status(
-        options,
-        confirmation_code,
-        response,
-        attempt.session_key_seed_base64url,
-    )
+    activation_status(options, confirmation_code, response, attempt)
 }
 
 fn activation_status<C>(
     options: &DeviceActivationOptions<'_, C>,
     confirmation_code: String,
     response: crate::client::DeviceEnrollmentResponse,
-    session_key_seed_base64url: String,
+    attempt: &DeviceActivationAttempt,
 ) -> Result<DeviceActivationStatus, DeviceActivationError> {
     match response.state.as_str() {
-        "ready" => Ok(DeviceActivationStatus::Ready(DeviceActivationSession {
+        "approved" => Ok(DeviceActivationStatus::Ready(DeviceActivationSession {
             server_now: response.server_now,
             origin_digest: options.connect.activation_origin_digest(
                 options.activation_key_base64url,
                 &options.nonce,
-                &session_key_seed_base64url,
+                &attempt.session_key_seed_base64url,
             ),
-            session_key_seed_base64url,
+            session_key_seed_base64url: attempt.session_key_seed_base64url.clone(),
         })),
-        "activation_pending" => {
+        "pending" => {
             let activation = response.activation.ok_or_else(|| {
-                DeviceActivationError::UnexpectedState("activation_pending without review".into())
+                DeviceActivationError::UnexpectedState("pending without review".into())
             })?;
             if activation.state != "pending" {
                 return Err(DeviceActivationError::UnexpectedState(activation.state));
@@ -251,10 +262,11 @@ fn activation_status<C>(
                 expires_at: activation.expires_at,
                 server_now: response.server_now,
                 retry_after_ms: activation.retry_after_ms,
+                session_key_seed_base64url: attempt.session_key_seed_base64url.clone(),
+                connection_id: attempt.connection_id.clone(),
             }))
         }
-        "disabled" => Err(DeviceActivationError::Disabled),
-        "authority_rejected" => Err(DeviceActivationError::Rejected),
+        "rejected" => Err(DeviceActivationError::Rejected),
         state => Err(DeviceActivationError::UnexpectedState(state.to_owned())),
     }
 }
@@ -275,6 +287,9 @@ pub async fn wait_for_device_activation<C>(
     let review_lifetime_ms = pending.expires_at.saturating_sub(pending.server_now);
     let review_deadline =
         started_at + Duration::from_millis(u64::try_from(review_lifetime_ms).unwrap_or_default());
+    let mut attempt =
+        DeviceActivationAttempt::from_seed(pending.session_key_seed_base64url.clone())?;
+    attempt.connection_id.clone_from(&pending.connection_id);
     loop {
         let now = tokio::time::Instant::now();
         if now >= review_deadline {
@@ -290,7 +305,7 @@ pub async fn wait_for_device_activation<C>(
                 .min(review_deadline.saturating_duration_since(now)),
         )
         .await;
-        match check_device_activation(options).await {
+        match check_device_activation_with_attempt(options, &attempt).await {
             Err(DeviceActivationError::Disabled) => return Err(DeviceActivationError::Disabled),
             Err(DeviceActivationError::Rejected) => return Err(DeviceActivationError::Rejected),
             Err(error) => return Err(error),

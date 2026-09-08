@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use base64::Engine;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use trellis_protocol::{AuthorizationEventPublisher, PermissionAtom, VerifiedAuthorizationContext};
@@ -96,10 +97,16 @@ impl RuntimeAuthVerifier {
         }
         let context = self
             .source
-            .runtime_verified_context_raw(context_digest)
+            .runtime_lease_cached_context(context_digest)
             .map_err(provider_error)?
             .ok_or_else(|| denied("authorization context is not cached"))?;
-        if context.allows(permission) {
+        if context.allows(permission)
+            && self
+                .source
+                .runtime_revocation_time(context_digest)
+                .map_err(provider_error)?
+                .is_none()
+        {
             Ok(())
         } else {
             Err(denied("request is not granted by the active authority"))
@@ -127,7 +134,7 @@ impl RuntimeAuthVerifier {
             required_permission,
         } = input;
         let now = now_seconds()?;
-        if session_key.is_empty() || proof.is_empty() || authorization_context.is_empty() {
+        if proof.is_empty() || authorization_context.is_empty() {
             return Err(denied("request proof headers are missing"));
         }
         let reply = reply
@@ -142,25 +149,17 @@ impl RuntimeAuthVerifier {
         {
             return Err(denied("request is not granted by the active authority"));
         }
-        let context = match self
+        let context = self
             .source
-            .runtime_verified_context_raw(authorization_context)
-            .map_err(provider_error)?
-        {
-            Some(context) => context,
-            None => self
-                .source
-                .resolve_admission_context(authorization_context, now)
-                .await
-                .map_err(provider_error)?,
-        };
+            .resolve_admission_context(authorization_context, now)
+            .await
+            .map_err(provider_error)?;
         let mut policy = self.source.runtime_policy().map_err(provider_error)?;
         policy.now_unix_seconds = now;
         let verified = self
             .verification
             .verify_request(RequestVerificationInput {
                 context: &context,
-                session_key,
                 context_digest: authorization_context,
                 subject,
                 payload,
@@ -176,10 +175,22 @@ impl RuntimeAuthVerifier {
                     "request is not granted by the active authority: {error}"
                 ))
             })?;
-        Ok(VerifiedRequest {
+        if verified.caller().session_key != session_key {
+            return Err(denied("session key does not match authorization context"));
+        }
+        let result = VerifiedRequest {
             caller: verified.caller().clone(),
             context: verified.context().clone(),
-        })
+        };
+        if self
+            .source
+            .runtime_revocation_time(authorization_context)
+            .map_err(provider_error)?
+            .is_some()
+        {
+            return Err(denied("request is not granted by the active authority"));
+        }
+        Ok(result)
     }
 
     ///
@@ -203,8 +214,7 @@ impl RuntimeAuthVerifier {
 
         let now = now_seconds()
             .map_err(|error| EventVerificationFailure::Retryable(error.to_string()))?;
-        if session_key.is_empty()
-            || proof.is_empty()
+        if proof.is_empty()
             || authorization_context.is_empty()
             || event_id.is_empty()
             || event_time.is_empty()
@@ -226,21 +236,18 @@ impl RuntimeAuthVerifier {
             time::OffsetDateTime::parse(event_time, &time::format_description::well_known::Rfc3339)
                 .map_err(|_| EventVerificationFailure::Rejected("event time is invalid".into()))?
                 .unix_timestamp();
-        let context = match self
+        let context = self
             .source
-            .runtime_verified_context_raw(authorization_context)
-            .map_err(|error| EventVerificationFailure::Retryable(error.to_string()))?
+            .runtime_resolve_event_context_for_verification(authorization_context, historical_time)
+            .await?;
+        if session_key
+            != base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(context.session_key().as_bytes())
         {
-            Some(context) => context,
-            None => {
-                self.source
-                    .runtime_resolve_event_context_for_verification(
-                        authorization_context,
-                        historical_time,
-                    )
-                    .await?
-            }
-        };
+            return Err(EventVerificationFailure::Rejected(
+                "session key does not match authorization context".into(),
+            ));
+        }
         let mut policy = self
             .source
             .runtime_policy()
@@ -250,7 +257,6 @@ impl RuntimeAuthVerifier {
             .verification
             .verify_event(EventVerificationInput {
                 context: &context,
-                session_key,
                 context_digest: authorization_context,
                 subject,
                 payload,
@@ -266,7 +272,18 @@ impl RuntimeAuthVerifier {
                     "event is not granted by the active authority: {error}"
                 ))
             })?;
-        Ok(verified_event.publisher().clone())
+        let publisher = verified_event.publisher().clone();
+        if self
+            .source
+            .runtime_revocation_time(authorization_context)
+            .map_err(|error| EventVerificationFailure::Retryable(error.to_string()))?
+            .is_some()
+        {
+            return Err(EventVerificationFailure::Rejected(
+                "event is not granted by the active authority".into(),
+            ));
+        }
+        Ok(publisher)
     }
 
     fn require_healthy(&self) -> Result<(), AuthorizationStateError> {
@@ -382,18 +399,18 @@ impl RequestValidator for RuntimeAuthVerifier {
         context: &'a RequestContext,
     ) -> BoxFuture<'a, Result<RequestValidation, ServerError>> {
         Box::pin(async move {
-            let session_key =
-                context
-                    .session_key
-                    .clone()
-                    .ok_or_else(|| ServerError::MissingSessionKey {
-                        subject: subject.to_string(),
-                    })?;
             let proof = context
                 .proof
                 .clone()
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| ServerError::MissingProof {
+                    subject: subject.to_string(),
+                })?;
+            let session_key = context
+                .session_key
+                .clone()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| ServerError::MissingSessionKey {
                     subject: subject.to_string(),
                 })?;
             let authorization_context = context.authorization_context.clone().ok_or_else(|| {

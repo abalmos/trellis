@@ -2,27 +2,10 @@ use serde::{Deserialize, Serialize};
 
 mod validation;
 use serde_json::Value;
-use trellis_protocol::GrantSet;
 pub(crate) use validation::{validate_provisioned_identity, validate_user_account_replacement};
 
 use super::domain::PrincipalKind;
-use super::{AuthorityKind, AuthorizationStateError};
-
-/// Derive the stable deployment-authority lineage for one deployment and participant.
-pub(crate) fn deployment_authority_id(
-    deployment_id: &str,
-    participant_id: &str,
-) -> Result<String, AuthorizationStateError> {
-    if deployment_id.is_empty() || participant_id.is_empty() {
-        return Err(AuthorizationStateError::InvalidRecord(
-            "deployment and participant IDs must be non-empty".to_owned(),
-        ));
-    }
-    Ok(format!(
-        "dau_v1_{}:{deployment_id}{participant_id}",
-        deployment_id.len()
-    ))
-}
+use super::AuthorizationStateError;
 
 /// Non-authority profile data for one user principal.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -248,102 +231,6 @@ pub struct AccountFlowRecord {
     pub version: u64,
 }
 
-/// Semantic class of an authority proposal.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthorityProposalKind {
-    /// First authority for a participant target.
-    Initial,
-    /// Additive or restrictive compatible update.
-    Update,
-    /// Explicitly accepted breaking migration.
-    Migration,
-}
-
-/// Historical state of an immutable authority proposal.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthorityProposalState {
-    /// Awaiting a decision.
-    Pending,
-    /// Accepted into current desired authority.
-    Accepted,
-    /// Explicitly rejected.
-    Rejected,
-    /// Replaced by a newer proposal for the same target.
-    Superseded,
-    /// Expired without a decision.
-    Expired,
-}
-
-/// Immutable authority proposal plus mutable historical state.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthorityProposalRecord {
-    /// Stable proposal ID.
-    pub proposal_id: String,
-    /// Typed authority namespace.
-    pub authority_kind: AuthorityKind,
-    /// Stable authority ID.
-    pub authority_id: String,
-    /// Deployment owning this lineage; absent for identity authority.
-    pub deployment_id: Option<String>,
-    /// Proposal semantic class.
-    pub proposal_kind: AuthorityProposalKind,
-    /// Exact participant ID.
-    pub participant_id: String,
-    /// Exact participant artifact digest.
-    pub participant_artifact_digest: String,
-    /// Exact participant needs digest.
-    pub participant_needs_digest: String,
-    /// Proposed exact grants.
-    pub proposed_grant_set: GrantSet,
-    /// Proposed user-facing capability labels.
-    pub proposed_capabilities: Vec<String>,
-    /// Digest of the immutable proposal payload.
-    pub proposal_digest: String,
-    /// Immutable plan and consent payload.
-    pub payload: Value,
-    /// Historical proposal state.
-    pub state: AuthorityProposalState,
-    /// Creation time in Unix milliseconds.
-    pub created_at: i64,
-    /// Required-nullable proposal expiry.
-    pub expires_at: Option<i64>,
-    /// Required-nullable supersession time.
-    pub superseded_at: Option<i64>,
-    /// Optimistic state version.
-    pub version: u64,
-}
-
-/// Terminal authority decision outcome.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthorityDecisionOutcome {
-    /// Accept the proposal into desired authority.
-    Accepted,
-    /// Reject the proposal without changing desired authority.
-    Rejected,
-}
-
-/// Immutable decision attached to one authority proposal.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthorityDecisionRecord {
-    /// Decided proposal ID.
-    pub proposal_id: String,
-    /// Terminal outcome.
-    pub outcome: AuthorityDecisionOutcome,
-    /// Stable deciding principal or system identity.
-    pub decided_by: String,
-    /// Required-nullable operator reason.
-    pub reason: Option<String>,
-    /// Decision time in Unix milliseconds.
-    pub decided_at: i64,
-    /// Digest of the immutable decision payload.
-    pub decision_digest: String,
-}
-
 /// Kind of provisioned workload identity.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -533,13 +420,11 @@ pub struct PortalGrantOverrideRecord {
 /// Administrative provenance for one portal-managed identity authority.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PortalAuthorityBindingRecord {
+pub struct PortalGrantBindingRecord {
     /// Stable user principal ID.
     pub principal_id: String,
     /// Exact app or agent participant ID.
     pub participant_id: String,
-    /// Ordinary IdentityAuthority ID.
-    pub authority_id: String,
     /// Portal that last established the authority.
     pub portal_id: String,
     /// Provider observed during the last trusted login.
@@ -548,10 +433,24 @@ pub struct PortalAuthorityBindingRecord {
     pub roles: Vec<String>,
     /// Semantic effective portal-policy digest.
     pub effective_policy_digest: String,
-    /// IdentityAuthority version established by this binding.
-    pub authority_version: u64,
+    /// GrantBinding revision established by this portal decision.
+    pub grant_revision: u64,
     /// Last binding update time in Unix milliseconds.
     pub updated_at: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PortalPolicySnapshot {
+    pub portal_id: String,
+    pub portal_version: u64,
+    pub portal_fingerprint: String,
+    pub login_settings_version: u64,
+    pub login_settings_fingerprint: String,
+    pub participant_id: String,
+    pub policy_version: Option<u64>,
+    pub policy_fingerprint: Option<String>,
+    pub capability_group_versions: Vec<(String, u64)>,
+    pub capability_group_fingerprints: Vec<(String, String)>,
 }
 
 /// Durable result for one authenticated state-changing request ID.

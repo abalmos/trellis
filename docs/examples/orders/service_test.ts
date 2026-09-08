@@ -23,8 +23,7 @@ Deno.test("orders caller invokes the real service", async () => {
       participant: participants.acmeOrdersService.participant,
       name: "orders-service",
       trellisUrl: runtime.trellisUrl,
-      identity,
-      authorizationContextEphemeral: true,
+      seed: identity.seed,
       telemetry: false,
     }).orThrow();
     let exit: Promise<unknown> | undefined;

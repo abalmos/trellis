@@ -122,13 +122,7 @@ where
         payload: Bytes,
         context: RequestContext,
     ) -> Result<Bytes, ServerError> {
-        let session_key =
-            context
-                .session_key
-                .clone()
-                .ok_or_else(|| ServerError::MissingSessionKey {
-                    subject: subject.to_string(),
-                })?;
+        let session_key = String::new();
 
         if context
             .proof
@@ -171,13 +165,7 @@ where
         payload: Bytes,
         context: RequestContext,
     ) -> Result<Vec<Bytes>, ServerError> {
-        let session_key =
-            context
-                .session_key
-                .clone()
-                .ok_or_else(|| ServerError::MissingSessionKey {
-                    subject: subject.to_string(),
-                })?;
+        let session_key = String::new();
 
         if context
             .proof
@@ -222,13 +210,7 @@ where
         payload: Bytes,
         context: RequestContext,
     ) -> Result<HandlerResponse, ServerError> {
-        let session_key =
-            context
-                .session_key
-                .clone()
-                .ok_or_else(|| ServerError::MissingSessionKey {
-                    subject: subject.to_string(),
-                })?;
+        let session_key = String::new();
 
         if context
             .proof

@@ -1,127 +1,111 @@
 import "fake-indexeddb/auto";
-import { assert, assertEquals, assertRejects } from "@std/assert";
-import { ulid } from "ulid";
+import { assert, assertEquals, assertNotEquals } from "@std/assert";
 
-import type { AuthorizationClientState } from "../authorization_context.ts";
-import { BrowserAuthorizationContextStore } from "./storage.ts";
+import { browserInstallationScope, BrowserSessionStore } from "./storage.ts";
 
-function state(
-  generation: number,
-  manifestDigest: string,
-  sessionId = "ses_test",
-): AuthorizationClientState {
-  return {
-    format: "trellis.authorization-client-state.v1",
-    binding: "installation:https://trellis.example.com",
-    trust: {
-      format: "trellis.authorization-client-trust.v1",
-      authority: "trellis-test",
-      rootKeyId: "root-key",
-      rootDigest: "root-digest",
-      minimumManifestGeneration: generation,
-      manifestDigestAtMinimumGeneration: manifestDigest,
-    },
-    session: {
-      sessionId,
-      participantDigest: "participant",
-      needsDigest: "needs",
-    },
-    context: null,
-    contextDigest: null,
-    contextExpiresAt: null,
-    serverClockOffsetMs: 0,
-    routing: null,
-  };
-}
-
-Deno.test("browser trust updates are atomic across concurrent tabs", async () => {
-  const scope = `https://${ulid()}.example.com`;
-  const first = new BrowserAuthorizationContextStore(scope);
-  const second = new BrowserAuthorizationContextStore(scope);
-  await first.commit(state(7, "manifest-7"));
-
-  const results = await Promise.allSettled([
-    first.commit(state(8, "manifest-8-a")),
-    second.commit(state(8, "manifest-8-b")),
-  ]);
+Deno.test("browser installation scope uses only origin and participant", () => {
   assertEquals(
-    results.filter((result) => result.status === "fulfilled").length,
-    1,
+    browserInstallationScope("https://trellis.test/path", "app@v1"),
+    browserInstallationScope("https://trellis.test/other", "app@v1"),
   );
-  assertEquals(
-    results.filter((result) => result.status === "rejected").length,
-    1,
-  );
-  const durable = await first.load();
-  assert(durable);
-  assertEquals(durable.trust.minimumManifestGeneration, 8);
-  await assertRejects(() => first.commit(state(7, "manifest-7")));
-
-  const replacedRoot = state(9, "manifest-9");
-  replacedRoot.trust.rootDigest = "replacement";
-  await assertRejects(() => first.commit(replacedRoot));
-  await first.clearContext();
-  assertEquals((await first.load())?.trust.minimumManifestGeneration, 8);
-  await first.resetTrust();
 });
 
-Deno.test("browser installation is opaque, participant-scoped, and replaces sessions only after end", async () => {
-  const origin = `https://${ulid()}.example.com`;
-  const firstScope = JSON.stringify([
-    "trellis.browser-installation.v1",
-    origin,
-    "participant-a",
-    "digest-a",
-  ]);
-  const secondScope = JSON.stringify([
-    "trellis.browser-installation.v1",
-    origin,
-    "participant-b",
-    "digest-b",
-  ]);
-  const firstTab = new BrowserAuthorizationContextStore(firstScope);
-  const secondTab = new BrowserAuthorizationContextStore(firstScope);
-  const otherParticipant = new BrowserAuthorizationContextStore(secondScope);
+Deno.test("browser installation fences flow, bind, expiry, and clear", async () => {
+  for (const persistence of ["remembered", "temporary"] as const) {
+    const scope = `${persistence}:${crypto.randomUUID()}`;
+    const first = new BrowserSessionStore(scope, persistence);
+    const second = new BrowserSessionStore(scope, persistence);
+    const initial = await first.getOrCreateCredential(100);
+    const winner = await second.getOrCreateCredential(100);
 
-  const seedA = await firstTab.getOrCreateSessionSeed();
-  assertEquals(await secondTab.getOrCreateSessionSeed(), seedA);
-  assert(
-    (await otherParticipant.getOrCreateSessionSeed()).some((value, index) =>
-      value !== seedA[index]
-    ),
-  );
+    assertEquals(initial.generation, 0);
+    assertEquals(initial.seed.length, 32);
+    assertEquals(winner.seed, initial.seed);
+    assertEquals(winner.sessionKey, initial.sessionKey);
+    assertEquals(
+      await first.rememberFlow({ ...initial, generation: 1 }, "flow-stale"),
+      false,
+    );
+    assertEquals(await first.rememberFlow(initial, "flow-current"), true);
+    assertEquals(
+      await second.completeBind({ ...winner, pendingFlowId: "flow-stale" }, {
+        loginSessionId: "login-stale",
+        expiresAt: 500,
+      }),
+      false,
+    );
+    assertEquals(
+      await second.completeBind({ ...winner, pendingFlowId: "flow-current" }, {
+        loginSessionId: "login-current",
+        expiresAt: 500,
+      }),
+      true,
+    );
+    assertEquals((await first.readLogin(499))?.loginSessionId, "login-current");
+    assertEquals(
+      await first.clearLogin({ ...initial, loginSessionId: "login-stale" }),
+      false,
+    );
+    assertEquals(
+      await first.clearLogin({ ...initial, loginSessionId: "login-current" }),
+      true,
+    );
+    assertEquals(await first.readLogin(499), undefined);
 
-  await firstTab.commit(state(7, "manifest-7", "ses_a"));
-  await assertRejects(() => secondTab.commit(state(8, "manifest-8", "ses_b")));
-  await firstTab.endSession();
-  assertEquals((await firstTab.load())?.session, null);
-  assertEquals((await firstTab.load())?.trust.minimumManifestGeneration, 7);
-  const nextSeed = await secondTab.getOrCreateSessionSeed();
-  assert(nextSeed.some((value, index) => value !== seedA[index]));
-  await secondTab.commit(state(8, "manifest-8", "ses_b"));
-  assertEquals(await firstTab.endSession("ses_a"), false);
-  assertEquals((await secondTab.load())?.session?.sessionId, "ses_b");
-
-  await firstTab.resetTrust();
-  await otherParticipant.resetTrust();
+    const replacement = await first.getOrCreateCredential(499);
+    assertEquals(replacement.generation, 1);
+    assertNotEquals(replacement.sessionKey, initial.sessionKey);
+    assertEquals(await first.rememberFlow(replacement, "flow-expiring"), true);
+    assertEquals(
+      await first.completeBind({
+        ...replacement,
+        pendingFlowId: "flow-expiring",
+      }, {
+        loginSessionId: "login-expiring",
+        expiresAt: 600,
+      }),
+      true,
+    );
+    assertEquals(await second.readLogin(600), undefined);
+    const afterExpiry = await second.getOrCreateCredential(600);
+    assertEquals(afterExpiry.generation, 2);
+    assertNotEquals(afterExpiry.sessionKey, replacement.sessionKey);
+  }
 });
 
-Deno.test("temporary browser installations use the same participant scope", async () => {
-  const origin = `https://${ulid()}.example.com`;
-  const first = new BrowserAuthorizationContextStore(
-    JSON.stringify(["trellis.browser-installation.v1", origin, "a", "digest"]),
-    "temporary",
+Deno.test("remembered browser records contain no authorization context", async () => {
+  const scope = `remembered:${crypto.randomUUID()}`;
+  const store = new BrowserSessionStore(scope);
+  const current = await store.getOrCreateCredential();
+  await store.rememberFlow(current, "flow-current");
+  await store.completeBind({ ...current, pendingFlowId: "flow-current" }, {
+    loginSessionId: "login-current",
+    expiresAt: null,
+  });
+
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open("trellis-auth", 3);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+  const records = await new Promise<Record<string, unknown>[]>(
+    (resolve, reject) => {
+      const request = db.transaction("installations").objectStore(
+        "installations",
+      ).getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    },
   );
-  const second = new BrowserAuthorizationContextStore(
-    JSON.stringify(["trellis.browser-installation.v1", origin, "b", "digest"]),
-    "temporary",
-  );
-  const firstSeed = await first.getOrCreateSessionSeed();
-  assert(
-    (await second.getOrCreateSessionSeed()).some((value, index) =>
-      value !== firstSeed[index]
-    ),
-  );
-  await first.resetTrust();
-  await second.resetTrust();
+  db.close();
+  const record = records.find((value) => value.id === scope);
+  assert(record);
+  assertEquals(Object.keys(record).sort(), [
+    "expiresAt",
+    "generation",
+    "id",
+    "loginSessionId",
+    "seed",
+    "sessionKey",
+  ]);
 });

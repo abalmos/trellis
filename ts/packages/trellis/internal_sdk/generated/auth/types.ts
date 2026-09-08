@@ -138,971 +138,20 @@ export type AuthConnectionsListOutput = {
       clientId: string;
       connectedAt: number;
       connectionId: string;
+      contextDigest: string;
+      deploymentId: string | null;
+      instanceId: string | null;
       lastSeenAt: number;
+      loginSessionId: string | null;
+      participantId: string;
+      principalId: string;
       remoteAddress: string | null;
+      runtimeConnectionId: string;
       serverId: string;
-      sessionId: string;
       userNkey: string;
     }
   >;
   nextCursor: string | null;
-};
-
-export type AuthDeploymentAuthorityAcceptMigrationInput = {
-  expectedBaseAuthorityVersion: number | null;
-  idempotencyKey: string;
-  proposalId: string;
-  reason: string | null;
-};
-export type AuthDeploymentAuthorityAcceptMigrationOutput = {
-  authority: {
-    acceptedNeedsDigest: string;
-    authorityId: string;
-    createdAt: number;
-    decision:
-      | { decidedAt: number; decidedBy: string; reason: string | null }
-      | null;
-    deploymentId: string;
-    desiredCapabilities: Array<string>;
-    desiredGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    expiresAt: number | null;
-    kind: "deployment";
-    materialization: {
-      authorityId: string;
-      authorityKind: "identity" | "deployment";
-      authorityVersion: number;
-      effectiveCapabilities: Array<string>;
-      effectiveGrantSet: {
-        format: "trellis.grant-set.v1";
-        permissions: Array<
-          {
-            action:
-              | "call"
-              | "invoke"
-              | "observe"
-              | "cancel"
-              | "control"
-              | "publish"
-              | "subscribe"
-              | "read"
-              | "write"
-              | "delete"
-              | "submit"
-              | "process"
-              | "consume";
-            target: {
-              api: string;
-              kind: "apiSurface";
-              name: string;
-              surface: "rpc" | "operation" | "event" | "feed" | "state";
-            } | {
-              api: string;
-              kind: "operationSignal";
-              operation: string;
-              signal: string;
-            } | {
-              kind: "participantResource";
-              name: string;
-              participant: string;
-              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-            };
-          }
-        >;
-      };
-      error: string | null;
-      expiresAt: number | null;
-      materializationId: string;
-      materializationVersion: number;
-      participantArtifactDigest: string;
-      participantId: string;
-      participantKind: "service" | "app" | "device" | "agent";
-      participantNeedsDigest: string;
-      reconciledAt: number | null;
-      state: "available" | "unavailable" | "error";
-      subjectId: string;
-    } | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    participantKind: "service" | "device";
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: number;
-    version: number;
-  };
-  proposal: {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: number | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: number;
-    decisionAt: number | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: number | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    participantNeedsDigest: string;
-    proposalId: string;
-    proposedCapabilities: Array<string>;
-    proposedGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    reasons: Array<string>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string;
-  };
-};
-
-export type AuthDeploymentAuthorityAcceptUpdateInput = {
-  expectedBaseAuthorityVersion: number | null;
-  idempotencyKey: string;
-  proposalId: string;
-  reason: string | null;
-};
-export type AuthDeploymentAuthorityAcceptUpdateOutput = {
-  authority: {
-    acceptedNeedsDigest: string;
-    authorityId: string;
-    createdAt: number;
-    decision:
-      | { decidedAt: number; decidedBy: string; reason: string | null }
-      | null;
-    deploymentId: string;
-    desiredCapabilities: Array<string>;
-    desiredGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    expiresAt: number | null;
-    kind: "deployment";
-    materialization: {
-      authorityId: string;
-      authorityKind: "identity" | "deployment";
-      authorityVersion: number;
-      effectiveCapabilities: Array<string>;
-      effectiveGrantSet: {
-        format: "trellis.grant-set.v1";
-        permissions: Array<
-          {
-            action:
-              | "call"
-              | "invoke"
-              | "observe"
-              | "cancel"
-              | "control"
-              | "publish"
-              | "subscribe"
-              | "read"
-              | "write"
-              | "delete"
-              | "submit"
-              | "process"
-              | "consume";
-            target: {
-              api: string;
-              kind: "apiSurface";
-              name: string;
-              surface: "rpc" | "operation" | "event" | "feed" | "state";
-            } | {
-              api: string;
-              kind: "operationSignal";
-              operation: string;
-              signal: string;
-            } | {
-              kind: "participantResource";
-              name: string;
-              participant: string;
-              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-            };
-          }
-        >;
-      };
-      error: string | null;
-      expiresAt: number | null;
-      materializationId: string;
-      materializationVersion: number;
-      participantArtifactDigest: string;
-      participantId: string;
-      participantKind: "service" | "app" | "device" | "agent";
-      participantNeedsDigest: string;
-      reconciledAt: number | null;
-      state: "available" | "unavailable" | "error";
-      subjectId: string;
-    } | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    participantKind: "service" | "device";
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: number;
-    version: number;
-  };
-  proposal: {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: number | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: number;
-    decisionAt: number | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: number | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    participantNeedsDigest: string;
-    proposalId: string;
-    proposedCapabilities: Array<string>;
-    proposedGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    reasons: Array<string>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string;
-  };
-};
-
-export type AuthDeploymentAuthorityGetInput = { authorityId: string };
-export type AuthDeploymentAuthorityGetOutput = {
-  authority: {
-    acceptedNeedsDigest: string;
-    authorityId: string;
-    createdAt: number;
-    decision:
-      | { decidedAt: number; decidedBy: string; reason: string | null }
-      | null;
-    deploymentId: string;
-    desiredCapabilities: Array<string>;
-    desiredGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    expiresAt: number | null;
-    kind: "deployment";
-    materialization: {
-      authorityId: string;
-      authorityKind: "identity" | "deployment";
-      authorityVersion: number;
-      effectiveCapabilities: Array<string>;
-      effectiveGrantSet: {
-        format: "trellis.grant-set.v1";
-        permissions: Array<
-          {
-            action:
-              | "call"
-              | "invoke"
-              | "observe"
-              | "cancel"
-              | "control"
-              | "publish"
-              | "subscribe"
-              | "read"
-              | "write"
-              | "delete"
-              | "submit"
-              | "process"
-              | "consume";
-            target: {
-              api: string;
-              kind: "apiSurface";
-              name: string;
-              surface: "rpc" | "operation" | "event" | "feed" | "state";
-            } | {
-              api: string;
-              kind: "operationSignal";
-              operation: string;
-              signal: string;
-            } | {
-              kind: "participantResource";
-              name: string;
-              participant: string;
-              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-            };
-          }
-        >;
-      };
-      error: string | null;
-      expiresAt: number | null;
-      materializationId: string;
-      materializationVersion: number;
-      participantArtifactDigest: string;
-      participantId: string;
-      participantKind: "service" | "app" | "device" | "agent";
-      participantNeedsDigest: string;
-      reconciledAt: number | null;
-      state: "available" | "unavailable" | "error";
-      subjectId: string;
-    } | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    participantKind: "service" | "device";
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: number;
-    version: number;
-  };
-};
-
-export type AuthDeploymentAuthorityListInput = {
-  cursor?: string;
-  deploymentId?: string;
-  limit?: number;
-  participantId?: string;
-  state?: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-};
-export type AuthDeploymentAuthorityListOutput = {
-  entries: Array<
-    {
-      acceptedNeedsDigest: string;
-      authorityId: string;
-      createdAt: number;
-      decision:
-        | { decidedAt: number; decidedBy: string; reason: string | null }
-        | null;
-      deploymentId: string;
-      desiredCapabilities: Array<string>;
-      desiredGrantSet: {
-        format: "trellis.grant-set.v1";
-        permissions: Array<
-          {
-            action:
-              | "call"
-              | "invoke"
-              | "observe"
-              | "cancel"
-              | "control"
-              | "publish"
-              | "subscribe"
-              | "read"
-              | "write"
-              | "delete"
-              | "submit"
-              | "process"
-              | "consume";
-            target: {
-              api: string;
-              kind: "apiSurface";
-              name: string;
-              surface: "rpc" | "operation" | "event" | "feed" | "state";
-            } | {
-              api: string;
-              kind: "operationSignal";
-              operation: string;
-              signal: string;
-            } | {
-              kind: "participantResource";
-              name: string;
-              participant: string;
-              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-            };
-          }
-        >;
-      };
-      expiresAt: number | null;
-      kind: "deployment";
-      materialization: {
-        authorityId: string;
-        authorityKind: "identity" | "deployment";
-        authorityVersion: number;
-        effectiveCapabilities: Array<string>;
-        effectiveGrantSet: {
-          format: "trellis.grant-set.v1";
-          permissions: Array<
-            {
-              action:
-                | "call"
-                | "invoke"
-                | "observe"
-                | "cancel"
-                | "control"
-                | "publish"
-                | "subscribe"
-                | "read"
-                | "write"
-                | "delete"
-                | "submit"
-                | "process"
-                | "consume";
-              target: {
-                api: string;
-                kind: "apiSurface";
-                name: string;
-                surface: "rpc" | "operation" | "event" | "feed" | "state";
-              } | {
-                api: string;
-                kind: "operationSignal";
-                operation: string;
-                signal: string;
-              } | {
-                kind: "participantResource";
-                name: string;
-                participant: string;
-                resource:
-                  | "state"
-                  | "jobQueue"
-                  | "eventConsumer"
-                  | "kv"
-                  | "store";
-              };
-            }
-          >;
-        };
-        error: string | null;
-        expiresAt: number | null;
-        materializationId: string;
-        materializationVersion: number;
-        participantArtifactDigest: string;
-        participantId: string;
-        participantKind: "service" | "app" | "device" | "agent";
-        participantNeedsDigest: string;
-        reconciledAt: number | null;
-        state: "available" | "unavailable" | "error";
-        subjectId: string;
-      } | null;
-      participantArtifactDigest: string;
-      participantId: string;
-      participantKind: "service" | "device";
-      state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-      updatedAt: number;
-      version: number;
-    }
-  >;
-  nextCursor: string | null;
-};
-
-export type AuthDeploymentAuthorityPlanInput = {
-  deploymentId: string;
-  expiresAt: number | null;
-  idempotencyKey: string;
-  participantArtifact: {};
-  referencedApiArtifacts: Array<{}>;
-};
-export type AuthDeploymentAuthorityPlanOutput = {
-  proposal: {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: number | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: number;
-    decisionAt: number | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: number | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    participantNeedsDigest: string;
-    proposalId: string;
-    proposedCapabilities: Array<string>;
-    proposedGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    reasons: Array<string>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string;
-  };
-};
-
-export type AuthDeploymentAuthorityPlansGetInput = { proposalId: string };
-export type AuthDeploymentAuthorityPlansGetOutput = {
-  proposal: {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: number | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: number;
-    decisionAt: number | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: number | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    participantNeedsDigest: string;
-    proposalId: string;
-    proposedCapabilities: Array<string>;
-    proposedGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    reasons: Array<string>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string;
-  };
-};
-
-export type AuthDeploymentAuthorityPlansListInput = {
-  cursor?: string;
-  deploymentId?: string;
-  limit?: number;
-  state?: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-};
-export type AuthDeploymentAuthorityPlansListOutput = {
-  entries: Array<
-    {
-      authorityKind: "identity" | "deployment";
-      baseAuthorityVersion: number | null;
-      classification: "initial" | "update" | "migration";
-      createdAt: number;
-      decisionAt: number | null;
-      decisionBy: string | null;
-      decisionReason: string | null;
-      expiresAt: number | null;
-      participantArtifactDigest: string;
-      participantId: string;
-      participantNeedsDigest: string;
-      proposalId: string;
-      proposedCapabilities: Array<string>;
-      proposedGrantSet: {
-        format: "trellis.grant-set.v1";
-        permissions: Array<
-          {
-            action:
-              | "call"
-              | "invoke"
-              | "observe"
-              | "cancel"
-              | "control"
-              | "publish"
-              | "subscribe"
-              | "read"
-              | "write"
-              | "delete"
-              | "submit"
-              | "process"
-              | "consume";
-            target: {
-              api: string;
-              kind: "apiSurface";
-              name: string;
-              surface: "rpc" | "operation" | "event" | "feed" | "state";
-            } | {
-              api: string;
-              kind: "operationSignal";
-              operation: string;
-              signal: string;
-            } | {
-              kind: "participantResource";
-              name: string;
-              participant: string;
-              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-            };
-          }
-        >;
-      };
-      reasons: Array<string>;
-      state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-      subjectId: string;
-    }
-  >;
-  nextCursor: string | null;
-};
-
-export type AuthDeploymentAuthorityReconcileInput = {
-  authorityId: string;
-  expectedVersion: number | null;
-  idempotencyKey: string;
-};
-export type AuthDeploymentAuthorityReconcileOutput = {
-  authority: {
-    acceptedNeedsDigest: string;
-    authorityId: string;
-    createdAt: number;
-    decision:
-      | { decidedAt: number; decidedBy: string; reason: string | null }
-      | null;
-    deploymentId: string;
-    desiredCapabilities: Array<string>;
-    desiredGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    expiresAt: number | null;
-    kind: "deployment";
-    materialization: {
-      authorityId: string;
-      authorityKind: "identity" | "deployment";
-      authorityVersion: number;
-      effectiveCapabilities: Array<string>;
-      effectiveGrantSet: {
-        format: "trellis.grant-set.v1";
-        permissions: Array<
-          {
-            action:
-              | "call"
-              | "invoke"
-              | "observe"
-              | "cancel"
-              | "control"
-              | "publish"
-              | "subscribe"
-              | "read"
-              | "write"
-              | "delete"
-              | "submit"
-              | "process"
-              | "consume";
-            target: {
-              api: string;
-              kind: "apiSurface";
-              name: string;
-              surface: "rpc" | "operation" | "event" | "feed" | "state";
-            } | {
-              api: string;
-              kind: "operationSignal";
-              operation: string;
-              signal: string;
-            } | {
-              kind: "participantResource";
-              name: string;
-              participant: string;
-              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-            };
-          }
-        >;
-      };
-      error: string | null;
-      expiresAt: number | null;
-      materializationId: string;
-      materializationVersion: number;
-      participantArtifactDigest: string;
-      participantId: string;
-      participantKind: "service" | "app" | "device" | "agent";
-      participantNeedsDigest: string;
-      reconciledAt: number | null;
-      state: "available" | "unavailable" | "error";
-      subjectId: string;
-    } | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    participantKind: "service" | "device";
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: number;
-    version: number;
-  };
-};
-
-export type AuthDeploymentAuthorityRejectInput = {
-  idempotencyKey: string;
-  proposalId: string;
-  reason: string | null;
-};
-export type AuthDeploymentAuthorityRejectOutput = {
-  proposal: {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: number | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: number;
-    decisionAt: number | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: number | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    participantNeedsDigest: string;
-    proposalId: string;
-    proposedCapabilities: Array<string>;
-    proposedGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    reasons: Array<string>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string;
-  };
 };
 
 export type AuthDeploymentsApplyInput = {
@@ -1115,6 +164,7 @@ export type AuthDeploymentsApplyInput = {
 };
 export type AuthDeploymentsApplyOutput = {
   binding: {
+    createdAt: number;
     expiresAt: number | null;
     grants: {
       format: "trellis.grant-set.v1";
@@ -1157,17 +207,16 @@ export type AuthDeploymentsApplyOutput = {
     ownerId: string;
     ownerKind: "deployment" | "user";
     participantId: string;
-    platformPrivileges: Array<
-      ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
-    >;
+    platformPrivileges: Array<"trellis.auth::admin">;
     provenance: {
-      policyDigest: string;
+      effectivePolicyDigest: string;
       portalId: string;
       providerId: string;
       roles: Array<string>;
     } | null;
     revision: number;
     state: "active" | "revoked";
+    updatedAt: number;
   };
   deployment: {
     createdAt: number;
@@ -1278,6 +327,111 @@ export type AuthDeploymentsEnableOutput = {
   };
 };
 
+export type AuthDeploymentsGetInput = { deploymentId: string };
+export type AuthDeploymentsGetOutput = {
+  binding: {
+    createdAt: number;
+    expiresAt: number | null;
+    grants: {
+      format: "trellis.grant-set.v1";
+      permissions: Array<
+        {
+          action:
+            | "call"
+            | "invoke"
+            | "observe"
+            | "cancel"
+            | "control"
+            | "publish"
+            | "subscribe"
+            | "read"
+            | "write"
+            | "delete"
+            | "submit"
+            | "process"
+            | "consume";
+          target: {
+            api: string;
+            kind: "apiSurface";
+            name: string;
+            surface: "rpc" | "operation" | "event" | "feed" | "state";
+          } | {
+            api: string;
+            kind: "operationSignal";
+            operation: string;
+            signal: string;
+          } | {
+            kind: "participantResource";
+            name: string;
+            participant: string;
+            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+          };
+        }
+      >;
+    };
+    installedRevision: number;
+    ownerId: string;
+    ownerKind: "deployment" | "user";
+    participantId: string;
+    platformPrivileges: Array<"trellis.auth::admin">;
+    provenance: {
+      effectivePolicyDigest: string;
+      portalId: string;
+      providerId: string;
+      roles: Array<string>;
+    } | null;
+    revision: number;
+    state: "active" | "revoked";
+    updatedAt: number;
+  } | null;
+  deployment: {
+    createdAt: number;
+    deploymentId: string;
+    disabledAt: number | null;
+    displayName: string;
+    expiresAt: number | null;
+    kind: "service" | "device";
+    participantId: string | null;
+    portalId: string | null;
+    requiresDeviceDelegation: boolean;
+    reviewMode: "none" | "required" | null | "none" | "required" | null;
+    revokedAt: number | null;
+    state: "active" | "disabled" | "revoked";
+    updatedAt: number;
+    version: number;
+  };
+  resources: Array<
+    {
+      bindingId: string;
+      error: string | null;
+      localName: string;
+      materializedAt: number;
+      ownerParticipantId: string;
+      providerIdentity:
+        | { bucket: string; kind: "kv" }
+        | { bucket: string; kind: "store" }
+        | { bucket: string; kind: "state" }
+        | {
+          consumer: string;
+          kind: "jobQueue";
+          namespace: string;
+          publishPrefix: string;
+          updatesPrefix: string | null;
+          workStream: string;
+          workSubject: string;
+        }
+        | {
+          consumer: string;
+          filterSubjects: Array<string>;
+          kind: "eventConsumer";
+          stream: string;
+        };
+      resourceKind: string;
+      state: "available" | "unavailable" | "stale";
+    }
+  >;
+};
+
 export type AuthDeploymentsListInput = {
   cursor?: string;
   kind?: "service" | "device";
@@ -1346,126 +500,6 @@ export type AuthDeviceUserAuthoritiesListInput = {
 export type AuthDeviceUserAuthoritiesListOutput = {
   entries: Array<
     {
-      authority: {
-        acceptedNeedsDigest: string;
-        authorityId: string;
-        createdAt: number;
-        decision: {
-          decidedAt: number;
-          decidedBy: string;
-          reason: string | null;
-        } | null;
-        desiredCapabilities: Array<string>;
-        desiredGrantSet: {
-          format: "trellis.grant-set.v1";
-          permissions: Array<
-            {
-              action:
-                | "call"
-                | "invoke"
-                | "observe"
-                | "cancel"
-                | "control"
-                | "publish"
-                | "subscribe"
-                | "read"
-                | "write"
-                | "delete"
-                | "submit"
-                | "process"
-                | "consume";
-              target: {
-                api: string;
-                kind: "apiSurface";
-                name: string;
-                surface: "rpc" | "operation" | "event" | "feed" | "state";
-              } | {
-                api: string;
-                kind: "operationSignal";
-                operation: string;
-                signal: string;
-              } | {
-                kind: "participantResource";
-                name: string;
-                participant: string;
-                resource:
-                  | "state"
-                  | "jobQueue"
-                  | "eventConsumer"
-                  | "kv"
-                  | "store";
-              };
-            }
-          >;
-        };
-        expiresAt: number | null;
-        kind: "identity";
-        materialization: {
-          authorityId: string;
-          authorityKind: "identity" | "deployment";
-          authorityVersion: number;
-          effectiveCapabilities: Array<string>;
-          effectiveGrantSet: {
-            format: "trellis.grant-set.v1";
-            permissions: Array<
-              {
-                action:
-                  | "call"
-                  | "invoke"
-                  | "observe"
-                  | "cancel"
-                  | "control"
-                  | "publish"
-                  | "subscribe"
-                  | "read"
-                  | "write"
-                  | "delete"
-                  | "submit"
-                  | "process"
-                  | "consume";
-                target: {
-                  api: string;
-                  kind: "apiSurface";
-                  name: string;
-                  surface: "rpc" | "operation" | "event" | "feed" | "state";
-                } | {
-                  api: string;
-                  kind: "operationSignal";
-                  operation: string;
-                  signal: string;
-                } | {
-                  kind: "participantResource";
-                  name: string;
-                  participant: string;
-                  resource:
-                    | "state"
-                    | "jobQueue"
-                    | "eventConsumer"
-                    | "kv"
-                    | "store";
-                };
-              }
-            >;
-          };
-          error: string | null;
-          expiresAt: number | null;
-          materializationId: string;
-          materializationVersion: number;
-          participantArtifactDigest: string;
-          participantId: string;
-          participantKind: "service" | "app" | "device" | "agent";
-          participantNeedsDigest: string;
-          reconciledAt: number | null;
-          state: "available" | "unavailable" | "error";
-          subjectId: string;
-        } | null;
-        participantArtifactDigest: string;
-        participantId: string;
-        principalId: string;
-        state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-        updatedAt: number;
-        version: number;
-      } | null;
       device: {
         administrativeApproval: "pending" | "approved" | "rejected" | "revoked";
         createdAt: number;
@@ -1563,32 +597,6 @@ export type AuthDeviceUserAuthoritiesRevokeOutput = {
     version: number;
   };
   kickedSessionCount: number;
-};
-
-export type AuthDevicesConnectInfoGetInput = {
-  challengeDigest: string | null;
-  deploymentId: string;
-  deviceIdentityKeyId: string;
-  instanceId: string;
-  issuedAt: number;
-  newSessionNkey: string;
-  newSessionPublicKey: string;
-  participantDigest: string;
-  participantId: string;
-  proof: { format: "trellis.session-proof.v1"; signature: string };
-  requestId: string;
-};
-export type AuthDevicesConnectInfoGetOutput = {
-  deploymentId: string;
-  endpoints: {
-    authMode: "session_nkey";
-    authorityMode: "server_issued";
-    maximumClockSkewMs: number;
-    native: Array<string>;
-    websocket: Array<string>;
-  };
-  instanceId: string;
-  participantId: string | null;
 };
 
 export type AuthDevicesDisableInput = {
@@ -1746,6 +754,7 @@ export type AuthGrantsGetInput = {
 };
 export type AuthGrantsGetOutput = {
   binding: {
+    createdAt: number;
     expiresAt: number | null;
     grants: {
       format: "trellis.grant-set.v1";
@@ -1788,18 +797,86 @@ export type AuthGrantsGetOutput = {
     ownerId: string;
     ownerKind: "deployment" | "user";
     participantId: string;
-    platformPrivileges: Array<
-      ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
-    >;
+    platformPrivileges: Array<"trellis.auth::admin">;
     provenance: {
-      policyDigest: string;
+      effectivePolicyDigest: string;
       portalId: string;
       providerId: string;
       roles: Array<string>;
     } | null;
     revision: number;
     state: "active" | "revoked";
+    updatedAt: number;
   } | null;
+};
+
+export type AuthGrantsListInput = {
+  cursor?: string;
+  limit?: number;
+  ownerId?: string;
+  ownerKind?: "deployment" | "user";
+  participantId?: string;
+  state?: "active" | "revoked";
+};
+export type AuthGrantsListOutput = {
+  entries: Array<
+    {
+      createdAt: number;
+      expiresAt: number | null;
+      grants: {
+        format: "trellis.grant-set.v1";
+        permissions: Array<
+          {
+            action:
+              | "call"
+              | "invoke"
+              | "observe"
+              | "cancel"
+              | "control"
+              | "publish"
+              | "subscribe"
+              | "read"
+              | "write"
+              | "delete"
+              | "submit"
+              | "process"
+              | "consume";
+            target: {
+              api: string;
+              kind: "apiSurface";
+              name: string;
+              surface: "rpc" | "operation" | "event" | "feed" | "state";
+            } | {
+              api: string;
+              kind: "operationSignal";
+              operation: string;
+              signal: string;
+            } | {
+              kind: "participantResource";
+              name: string;
+              participant: string;
+              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+            };
+          }
+        >;
+      };
+      installedRevision: number;
+      ownerId: string;
+      ownerKind: "deployment" | "user";
+      participantId: string;
+      platformPrivileges: Array<"trellis.auth::admin">;
+      provenance: {
+        effectivePolicyDigest: string;
+        portalId: string;
+        providerId: string;
+        roles: Array<string>;
+      } | null;
+      revision: number;
+      state: "active" | "revoked";
+      updatedAt: number;
+    }
+  >;
+  nextCursor: string | null;
 };
 
 export type AuthGrantsRevokeInput = {
@@ -1808,9 +885,11 @@ export type AuthGrantsRevokeInput = {
   ownerId: string;
   ownerKind: "deployment" | "user";
   participantId: string;
+  reason?: string;
 };
 export type AuthGrantsRevokeOutput = {
   binding: {
+    createdAt: number;
     expiresAt: number | null;
     grants: {
       format: "trellis.grant-set.v1";
@@ -1853,17 +932,16 @@ export type AuthGrantsRevokeOutput = {
     ownerId: string;
     ownerKind: "deployment" | "user";
     participantId: string;
-    platformPrivileges: Array<
-      ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
-    >;
+    platformPrivileges: Array<"trellis.auth::admin">;
     provenance: {
-      policyDigest: string;
+      effectivePolicyDigest: string;
       portalId: string;
       providerId: string;
       roles: Array<string>;
     } | null;
     revision: number;
     state: "active" | "revoked";
+    updatedAt: number;
   };
 };
 
@@ -1908,15 +986,15 @@ export type AuthGrantsSetInput = {
     >;
   };
   idempotencyKey: string;
+  installedRevision: number;
   ownerId: string;
   ownerKind: "deployment" | "user";
   participantId: string;
-  platformPrivileges: Array<
-    ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
-  >;
+  platformPrivileges: Array<"trellis.auth::admin">;
 };
 export type AuthGrantsSetOutput = {
   binding: {
+    createdAt: number;
     expiresAt: number | null;
     grants: {
       format: "trellis.grant-set.v1";
@@ -1959,409 +1037,18 @@ export type AuthGrantsSetOutput = {
     ownerId: string;
     ownerKind: "deployment" | "user";
     participantId: string;
-    platformPrivileges: Array<
-      ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
-    >;
+    platformPrivileges: Array<"trellis.auth::admin">;
     provenance: {
-      policyDigest: string;
+      effectivePolicyDigest: string;
       portalId: string;
       providerId: string;
       roles: Array<string>;
     } | null;
     revision: number;
     state: "active" | "revoked";
-  };
-};
-
-export type AuthIdentityAuthorityGetInput = { authorityId: string };
-export type AuthIdentityAuthorityGetOutput = {
-  authority: {
-    acceptedNeedsDigest: string;
-    authorityId: string;
-    createdAt: number;
-    decision:
-      | { decidedAt: number; decidedBy: string; reason: string | null }
-      | null;
-    desiredCapabilities: Array<string>;
-    desiredGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    expiresAt: number | null;
-    kind: "identity";
-    materialization: {
-      authorityId: string;
-      authorityKind: "identity" | "deployment";
-      authorityVersion: number;
-      effectiveCapabilities: Array<string>;
-      effectiveGrantSet: {
-        format: "trellis.grant-set.v1";
-        permissions: Array<
-          {
-            action:
-              | "call"
-              | "invoke"
-              | "observe"
-              | "cancel"
-              | "control"
-              | "publish"
-              | "subscribe"
-              | "read"
-              | "write"
-              | "delete"
-              | "submit"
-              | "process"
-              | "consume";
-            target: {
-              api: string;
-              kind: "apiSurface";
-              name: string;
-              surface: "rpc" | "operation" | "event" | "feed" | "state";
-            } | {
-              api: string;
-              kind: "operationSignal";
-              operation: string;
-              signal: string;
-            } | {
-              kind: "participantResource";
-              name: string;
-              participant: string;
-              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-            };
-          }
-        >;
-      };
-      error: string | null;
-      expiresAt: number | null;
-      materializationId: string;
-      materializationVersion: number;
-      participantArtifactDigest: string;
-      participantId: string;
-      participantKind: "service" | "app" | "device" | "agent";
-      participantNeedsDigest: string;
-      reconciledAt: number | null;
-      state: "available" | "unavailable" | "error";
-      subjectId: string;
-    } | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    principalId: string;
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
     updatedAt: number;
-    version: number;
   };
 };
-
-export type AuthIdentityAuthorityListInput = {
-  cursor?: string;
-  limit?: number;
-  participantId?: string;
-  principalId?: string;
-  state?: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-};
-export type AuthIdentityAuthorityListOutput = {
-  entries: Array<
-    {
-      acceptedNeedsDigest: string;
-      authorityId: string;
-      createdAt: number;
-      decision:
-        | { decidedAt: number; decidedBy: string; reason: string | null }
-        | null;
-      desiredCapabilities: Array<string>;
-      desiredGrantSet: {
-        format: "trellis.grant-set.v1";
-        permissions: Array<
-          {
-            action:
-              | "call"
-              | "invoke"
-              | "observe"
-              | "cancel"
-              | "control"
-              | "publish"
-              | "subscribe"
-              | "read"
-              | "write"
-              | "delete"
-              | "submit"
-              | "process"
-              | "consume";
-            target: {
-              api: string;
-              kind: "apiSurface";
-              name: string;
-              surface: "rpc" | "operation" | "event" | "feed" | "state";
-            } | {
-              api: string;
-              kind: "operationSignal";
-              operation: string;
-              signal: string;
-            } | {
-              kind: "participantResource";
-              name: string;
-              participant: string;
-              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-            };
-          }
-        >;
-      };
-      expiresAt: number | null;
-      kind: "identity";
-      materialization: {
-        authorityId: string;
-        authorityKind: "identity" | "deployment";
-        authorityVersion: number;
-        effectiveCapabilities: Array<string>;
-        effectiveGrantSet: {
-          format: "trellis.grant-set.v1";
-          permissions: Array<
-            {
-              action:
-                | "call"
-                | "invoke"
-                | "observe"
-                | "cancel"
-                | "control"
-                | "publish"
-                | "subscribe"
-                | "read"
-                | "write"
-                | "delete"
-                | "submit"
-                | "process"
-                | "consume";
-              target: {
-                api: string;
-                kind: "apiSurface";
-                name: string;
-                surface: "rpc" | "operation" | "event" | "feed" | "state";
-              } | {
-                api: string;
-                kind: "operationSignal";
-                operation: string;
-                signal: string;
-              } | {
-                kind: "participantResource";
-                name: string;
-                participant: string;
-                resource:
-                  | "state"
-                  | "jobQueue"
-                  | "eventConsumer"
-                  | "kv"
-                  | "store";
-              };
-            }
-          >;
-        };
-        error: string | null;
-        expiresAt: number | null;
-        materializationId: string;
-        materializationVersion: number;
-        participantArtifactDigest: string;
-        participantId: string;
-        participantKind: "service" | "app" | "device" | "agent";
-        participantNeedsDigest: string;
-        reconciledAt: number | null;
-        state: "available" | "unavailable" | "error";
-        subjectId: string;
-      } | null;
-      participantArtifactDigest: string;
-      participantId: string;
-      principalId: string;
-      state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-      updatedAt: number;
-      version: number;
-    }
-  >;
-  nextCursor: string | null;
-};
-
-export type AuthIdentityAuthorityRevokeInput = {
-  authorityId: string;
-  expectedVersion: number;
-  idempotencyKey: string;
-  reason: string | null;
-};
-export type AuthIdentityAuthorityRevokeOutput = {
-  authority: {
-    acceptedNeedsDigest: string;
-    authorityId: string;
-    createdAt: number;
-    decision:
-      | { decidedAt: number; decidedBy: string; reason: string | null }
-      | null;
-    desiredCapabilities: Array<string>;
-    desiredGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    expiresAt: number | null;
-    kind: "identity";
-    materialization: {
-      authorityId: string;
-      authorityKind: "identity" | "deployment";
-      authorityVersion: number;
-      effectiveCapabilities: Array<string>;
-      effectiveGrantSet: {
-        format: "trellis.grant-set.v1";
-        permissions: Array<
-          {
-            action:
-              | "call"
-              | "invoke"
-              | "observe"
-              | "cancel"
-              | "control"
-              | "publish"
-              | "subscribe"
-              | "read"
-              | "write"
-              | "delete"
-              | "submit"
-              | "process"
-              | "consume";
-            target: {
-              api: string;
-              kind: "apiSurface";
-              name: string;
-              surface: "rpc" | "operation" | "event" | "feed" | "state";
-            } | {
-              api: string;
-              kind: "operationSignal";
-              operation: string;
-              signal: string;
-            } | {
-              kind: "participantResource";
-              name: string;
-              participant: string;
-              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-            };
-          }
-        >;
-      };
-      error: string | null;
-      expiresAt: number | null;
-      materializationId: string;
-      materializationVersion: number;
-      participantArtifactDigest: string;
-      participantId: string;
-      participantKind: "service" | "app" | "device" | "agent";
-      participantNeedsDigest: string;
-      reconciledAt: number | null;
-      state: "available" | "unavailable" | "error";
-      subjectId: string;
-    } | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    principalId: string;
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: number;
-    version: number;
-  };
-};
-
-export type AuthIdentityGrantsListInput = {
-  limit: number;
-  offset?: number;
-  user?: string;
-};
-export type AuthIdentityGrantsListOutput = {
-  count: number;
-  entries: Array<
-    {
-      capabilities: Array<string>;
-      contractEvidence: { contractDigest: string; contractId: string };
-      description: string;
-      displayName: string;
-      grantedAt: string;
-      identityAnchor:
-        | { contractId: string; kind: "web"; origin: string }
-        | { contractId: string; kind: "cli"; sessionPublicKey: string }
-        | { contractId: string; kind: "native"; sessionPublicKey: string }
-        | { contractId: string; devicePublicKey: string; kind: "device-user" };
-      identityGrantId: string;
-      participantKind: "app" | "agent";
-      updatedAt: string;
-    }
-  >;
-  limit: number;
-  nextOffset?: number;
-  offset: number;
-};
-
-export type AuthIdentityGrantsRevokeInput = {
-  identityGrantId: string;
-  user?: string;
-};
-export type AuthIdentityGrantsRevokeOutput = { success: boolean };
 
 export type AuthIssuersRevokeInput = {
   idempotencyKey: string;
@@ -2370,6 +1057,99 @@ export type AuthIssuersRevokeInput = {
 };
 export type AuthIssuersRevokeOutput = { keyId: string; state: "revoked" };
 
+export type AuthParticipantsGetInput = {
+  participantId: string;
+  revision?: number;
+};
+export type AuthParticipantsGetOutput = {
+  participant: {
+    apiArtifacts: Array<{}>;
+    artifactDigest: string;
+    installedAt: number;
+    optionalBundles: Array<
+      {
+        apiId: string;
+        id: string;
+        permissions: Array<
+          {
+            action:
+              | "call"
+              | "invoke"
+              | "observe"
+              | "cancel"
+              | "control"
+              | "publish"
+              | "subscribe"
+              | "read"
+              | "write"
+              | "delete"
+              | "submit"
+              | "process"
+              | "consume";
+            target: {
+              api: string;
+              kind: "apiSurface";
+              name: string;
+              surface: "rpc" | "operation" | "event" | "feed" | "state";
+            } | {
+              api: string;
+              kind: "operationSignal";
+              operation: string;
+              signal: string;
+            } | {
+              kind: "participantResource";
+              name: string;
+              participant: string;
+              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+            };
+          }
+        >;
+      }
+    >;
+    participantArtifact: {};
+    participantId: string;
+    participantKind: "service" | "device" | "app" | "agent";
+    requiredGrants: {
+      format: "trellis.grant-set.v1";
+      permissions: Array<
+        {
+          action:
+            | "call"
+            | "invoke"
+            | "observe"
+            | "cancel"
+            | "control"
+            | "publish"
+            | "subscribe"
+            | "read"
+            | "write"
+            | "delete"
+            | "submit"
+            | "process"
+            | "consume";
+          target: {
+            api: string;
+            kind: "apiSurface";
+            name: string;
+            surface: "rpc" | "operation" | "event" | "feed" | "state";
+          } | {
+            api: string;
+            kind: "operationSignal";
+            operation: string;
+            signal: string;
+          } | {
+            kind: "participantResource";
+            name: string;
+            participant: string;
+            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+          };
+        }
+      >;
+    };
+    revision: number;
+  };
+};
+
 export type AuthParticipantsInstallInput = {
   apiArtifacts: Array<{}>;
   expectedRevision: number;
@@ -2377,9 +1157,13 @@ export type AuthParticipantsInstallInput = {
   participantArtifact: {};
 };
 export type AuthParticipantsInstallOutput = {
-  digest: string;
-  participantId: string;
-  revision: number;
+  participant: {
+    artifactDigest: string;
+    installedAt: number;
+    participantId: string;
+    participantKind: "service" | "device" | "app" | "agent";
+    revision: number;
+  };
 };
 
 export type AuthPortalsGetInput = { portalId: string };
@@ -2770,7 +1554,6 @@ export type AuthServiceInstancesRemoveOutput = {
 
 export type AuthSessionsListInput = {
   cursor?: string;
-  deploymentId?: string;
   limit?: number;
   participantId?: string;
   principalId?: string;
@@ -2781,14 +1564,10 @@ export type AuthSessionsListOutput = {
     {
       createdAt: number;
       expiresAt: number | null;
-      inboxPrefix: string;
-      lastSeenAt: number;
-      participantArtifactDigest: string;
+      lastAuthenticatedAt: number;
       participantId: string;
-      participantKind: "service" | "app" | "device" | "agent";
-      participantNeedsDigest: string;
+      participantKind: "app" | "agent";
       principalId: string;
-      principalKind: "user" | "service" | "device";
       revokedAt: number | null;
       sessionId: string;
       sessionKeyId: string;
@@ -2806,14 +1585,10 @@ export type AuthSessionsLogoutOutput = {
   session: {
     createdAt: number;
     expiresAt: number | null;
-    inboxPrefix: string;
-    lastSeenAt: number;
-    participantArtifactDigest: string;
+    lastAuthenticatedAt: number;
     participantId: string;
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string;
+    participantKind: "app" | "agent";
     principalId: string;
-    principalKind: "user" | "service" | "device";
     revokedAt: number | null;
     sessionId: string;
     sessionKeyId: string;
@@ -2825,26 +1600,71 @@ export type AuthSessionsLogoutOutput = {
 
 export type AuthSessionsMeInput = {};
 export type AuthSessionsMeOutput = {
-  deploymentId: string | null;
-  instanceId: string | null;
+  connection: {
+    connectionId: string;
+    deploymentId?: string;
+    grants: {
+      format: "trellis.grant-set.v1";
+      permissions: Array<
+        {
+          action:
+            | "call"
+            | "invoke"
+            | "observe"
+            | "cancel"
+            | "control"
+            | "publish"
+            | "subscribe"
+            | "read"
+            | "write"
+            | "delete"
+            | "submit"
+            | "process"
+            | "consume";
+          target: {
+            api: string;
+            kind: "apiSurface";
+            name: string;
+            surface: "rpc" | "operation" | "event" | "feed" | "state";
+          } | {
+            api: string;
+            kind: "operationSignal";
+            operation: string;
+            signal: string;
+          } | {
+            kind: "participantResource";
+            name: string;
+            participant: string;
+            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
+          };
+        }
+      >;
+    };
+    identityKeyId?: string;
+    inboxPrefix: string;
+    instanceId?: string;
+    loginSessionId?: string;
+    participantId: string;
+    participantKind: "service" | "app" | "device" | "agent";
+    platformPrivileges: Array<"trellis.auth::admin">;
+    principalId: string;
+    principalKind: "user" | "service" | "device";
+    sessionKey: string;
+  };
   session: {
     createdAt: number;
     expiresAt: number | null;
-    inboxPrefix: string;
-    lastSeenAt: number;
-    participantArtifactDigest: string;
+    lastAuthenticatedAt: number;
     participantId: string;
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string;
+    participantKind: "app" | "agent";
     principalId: string;
-    principalKind: "user" | "service" | "device";
     revokedAt: number | null;
     sessionId: string;
     sessionKeyId: string;
     sessionPublicKey: string;
     state: "active" | "expired" | "revoked";
     version: number;
-  };
+  } | null;
   user: {
     createdAt: number;
     disabledAt: number | null;
@@ -2871,14 +1691,10 @@ export type AuthSessionsRevokeOutput = {
   session: {
     createdAt: number;
     expiresAt: number | null;
-    inboxPrefix: string;
-    lastSeenAt: number;
-    participantArtifactDigest: string;
+    lastAuthenticatedAt: number;
     participantId: string;
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string;
+    participantKind: "app" | "agent";
     principalId: string;
-    principalKind: "user" | "service" | "device";
     revokedAt: number | null;
     sessionId: string;
     sessionKeyId: string;
@@ -3086,114 +1902,6 @@ export type AuthDeviceUserAuthoritiesResolveProgress = {
   state: "waiting" | "review_pending" | "delegation_pending";
 };
 export type AuthDeviceUserAuthoritiesResolveOutput = {
-  authority: {
-    acceptedNeedsDigest: string;
-    authorityId: string;
-    createdAt: number;
-    decision:
-      | { decidedAt: number; decidedBy: string; reason: string | null }
-      | null;
-    desiredCapabilities: Array<string>;
-    desiredGrantSet: {
-      format: "trellis.grant-set.v1";
-      permissions: Array<
-        {
-          action:
-            | "call"
-            | "invoke"
-            | "observe"
-            | "cancel"
-            | "control"
-            | "publish"
-            | "subscribe"
-            | "read"
-            | "write"
-            | "delete"
-            | "submit"
-            | "process"
-            | "consume";
-          target: {
-            api: string;
-            kind: "apiSurface";
-            name: string;
-            surface: "rpc" | "operation" | "event" | "feed" | "state";
-          } | {
-            api: string;
-            kind: "operationSignal";
-            operation: string;
-            signal: string;
-          } | {
-            kind: "participantResource";
-            name: string;
-            participant: string;
-            resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-          };
-        }
-      >;
-    };
-    expiresAt: number | null;
-    kind: "identity";
-    materialization: {
-      authorityId: string;
-      authorityKind: "identity" | "deployment";
-      authorityVersion: number;
-      effectiveCapabilities: Array<string>;
-      effectiveGrantSet: {
-        format: "trellis.grant-set.v1";
-        permissions: Array<
-          {
-            action:
-              | "call"
-              | "invoke"
-              | "observe"
-              | "cancel"
-              | "control"
-              | "publish"
-              | "subscribe"
-              | "read"
-              | "write"
-              | "delete"
-              | "submit"
-              | "process"
-              | "consume";
-            target: {
-              api: string;
-              kind: "apiSurface";
-              name: string;
-              surface: "rpc" | "operation" | "event" | "feed" | "state";
-            } | {
-              api: string;
-              kind: "operationSignal";
-              operation: string;
-              signal: string;
-            } | {
-              kind: "participantResource";
-              name: string;
-              participant: string;
-              resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-            };
-          }
-        >;
-      };
-      error: string | null;
-      expiresAt: number | null;
-      materializationId: string;
-      materializationVersion: number;
-      participantArtifactDigest: string;
-      participantId: string;
-      participantKind: "service" | "app" | "device" | "agent";
-      participantNeedsDigest: string;
-      reconciledAt: number | null;
-      state: "available" | "unavailable" | "error";
-      subjectId: string;
-    } | null;
-    participantArtifactDigest: string;
-    participantId: string;
-    principalId: string;
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: number;
-    version: number;
-  } | null;
   device: {
     administrativeApproval: "pending" | "approved" | "rejected" | "revoked";
     createdAt: number;
@@ -3291,6 +1999,7 @@ export type AuthDeviceUserAuthoritiesReviewRequestedEvent = {
 
 export type AuthGrantsChangedEvent = {
   binding: {
+    createdAt: number;
     expiresAt: number | null;
     grants: {
       format: "trellis.grant-set.v1";
@@ -3333,17 +2042,16 @@ export type AuthGrantsChangedEvent = {
     ownerId: string;
     ownerKind: "deployment" | "user";
     participantId: string;
-    platformPrivileges: Array<
-      ("trellis.auth::admin" | "trellis.auth::capabilities.delegate")
-    >;
+    platformPrivileges: Array<"trellis.auth::admin">;
     provenance: {
-      policyDigest: string;
+      effectivePolicyDigest: string;
       portalId: string;
       providerId: string;
       roles: Array<string>;
     } | null;
     revision: number;
     state: "active" | "revoked";
+    updatedAt: number;
   };
   eventId: string;
   occurredAt: number;

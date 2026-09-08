@@ -21,7 +21,7 @@ Default to adding or updating integration tests when a change affects:
 - public Trellis HTTP or RPC APIs
 - NATS subjects, auth-callout, proofs, or transport permissions
 - contracts, generated SDKs, manifests, or permission derivation
-- service bootstrap, device activation, app identity authority approval, or deployment authority acceptance
+- service bootstrap, device activation, participant installation, or GrantBinding mutation
 - jobs, operations, events, feeds, state, resources, or transfer behavior
 - Rust/TypeScript cross-runtime behavior
 

@@ -491,7 +491,7 @@ impl CalloutProcessor {
 
         let permissions = self
             .contexts
-            .transport_permissions(&verified_context)
+            .transport_permissions(&verified_context, now_seconds)
             .await
             .map_err(|error| denied(error.to_string()))?;
         tracing::debug!(
@@ -540,7 +540,7 @@ impl CalloutProcessor {
         }
         let jwt = self.keys.authorized_user_jwt(
             &request.user_nkey,
-            verified_context.principal().kind,
+            verified_context.principal_kind(),
             permissions,
             expires_at_seconds,
         )?;
@@ -550,7 +550,21 @@ impl CalloutProcessor {
             .put_connection_presence(AuthConnectionPresence {
                 format: "trellis.auth-connection-presence.v1".to_owned(),
                 connection_id: connection_id.clone(),
-                session_id: verified_context.session_id().to_owned(),
+                runtime_connection_id: verified_context.connection_id().to_owned(),
+                login_session_id: verified_context.login_session_id().map(str::to_owned),
+                principal_id: verified_context.principal_id().to_owned(),
+                principal_kind: verified_context.principal_kind(),
+                participant_id: verified_context.participant_id().to_owned(),
+                deployment_id: verified_context
+                    .signed_context()
+                    .unsigned
+                    .deployment_id
+                    .clone(),
+                instance_id: verified_context
+                    .signed_context()
+                    .unsigned
+                    .instance_id
+                    .clone(),
                 context_digest: verified_context.context_digest().to_owned(),
                 server_id: request.server.id.clone(),
                 client_id,
@@ -574,7 +588,8 @@ impl CalloutProcessor {
             return Err(denied("authorization context is not admissible"));
         }
         tracing::debug!(
-            session_id = %verified_context.session_id(),
+            connection_id = %verified_context.connection_id(),
+            login_session_id = ?verified_context.login_session_id(),
             context_digest = %token.context_digest,
             "NATS authorization callout admitted"
         );
@@ -615,10 +630,13 @@ fn handle_request_completion(
 
 fn callout_denial_code(error: &AuthorizationStateError) -> &'static str {
     match error {
+        AuthorizationStateError::NotAuthorized => "not_authorized",
+        AuthorizationStateError::WrongPrincipalKind => "wrong_principal_kind",
         AuthorizationStateError::SessionMissing => "session_not_found",
         AuthorizationStateError::SessionExpired => "session_expired",
         AuthorizationStateError::SessionRevoked => "session_revoked",
-        AuthorizationStateError::PrincipalMissing
+        AuthorizationStateError::NotFound
+        | AuthorizationStateError::PrincipalMissing
         | AuthorizationStateError::PrincipalInactive
         | AuthorizationStateError::IdentityMissing => "principal_inactive",
         AuthorizationStateError::ParticipantMissing

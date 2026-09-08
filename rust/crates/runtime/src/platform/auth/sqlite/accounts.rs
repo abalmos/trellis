@@ -19,7 +19,6 @@ use super::super::{
     LoginPortalRecord, LoginSettingsRecord, PortalRouteRecord, PrincipalKind, PrincipalRecord,
     PrincipalState, ProviderIdentityLink, UserProfileRecord,
 };
-use super::authority::put_identity_authority;
 use super::common::{
     decode_enum, decode_json, encode_enum, encode_json, from_sql_u32, from_sql_version,
     map_write_error, sql_error, to_sql_version,
@@ -244,6 +243,23 @@ impl AccountRepository for SqliteAuthorizationStore {
     ) -> Result<IdempotentOutcome<usize>, AuthorizationStateError> {
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
+            let active_session = transaction
+                .query_row(
+                    "SELECT 1 FROM auth_sessions
+                     WHERE session_id = ?1 AND principal_id = ?2 AND state = 'active'
+                       AND expires_at > ?3",
+                    params![
+                        command.current_session_id,
+                        command.principal_id,
+                        command.changed_at
+                    ],
+                    |_| Ok(()),
+                )
+                .optional()
+                .map_err(sql_error)?;
+            if active_session.is_none() {
+                return Err(AuthorizationStateError::SessionRevoked);
+            }
             if let Some(value) = sqlite_idempotency_replay(&transaction, &command.idempotency)? {
                 return Ok(IdempotentOutcome::Replayed(value));
             }
@@ -279,7 +295,7 @@ impl AccountRepository for SqliteAuthorizationStore {
             let revoked = transaction
                 .execute(
                     "UPDATE auth_sessions SET state = 'revoked', revoked_at = ?1,
-                     last_seen_at = ?1, version = version + 1
+                     version = version + 1
                      WHERE principal_id = ?2 AND session_id <> ?3 AND state = 'active'",
                     params![
                         command.changed_at,
@@ -291,17 +307,12 @@ impl AccountRepository for SqliteAuthorizationStore {
             let mut statement = transaction
                 .prepare(
                     "SELECT session_id FROM auth_sessions
-                     WHERE principal_id = ?1 AND session_id <> ?2 AND state = 'revoked'
-                       AND revoked_at = ?3",
+                     WHERE principal_id = ?1 AND session_id <> ?2",
                 )
                 .map_err(sql_error)?;
             let revoked_sessions = statement
                 .query_map(
-                    params![
-                        command.principal_id,
-                        command.current_session_id,
-                        command.changed_at
-                    ],
+                    params![command.principal_id, command.current_session_id],
                     |row| row.get::<_, String>(0),
                 )
                 .map_err(sql_error)?
@@ -311,7 +322,7 @@ impl AccountRepository for SqliteAuthorizationStore {
             for session_id in revoked_sessions {
                 revoke_sql_contexts(
                     &transaction,
-                    &AuthorizationContextSelector::Session(session_id),
+                    &AuthorizationContextSelector::Login(session_id),
                     AuthorizationContextRevocationReason::CredentialChanged,
                     command.changed_at.div_euclid(1_000),
                 )?;
@@ -692,11 +703,11 @@ impl AccountRepository for SqliteAuthorizationStore {
                     return Err(AuthorizationStateError::StorageConflict);
                 }
             }
-            if let Some(mut authority) = command.authority {
-                put_identity_authority(
+            for binding in command.bindings {
+                super::grants::replace_grant_binding(
                     &transaction,
-                    &mut authority,
-                    command.expected_authority_version,
+                    binding,
+                    command.consumed_at,
                 )?;
             }
             transaction
@@ -840,8 +851,9 @@ impl AccountRepository for SqliteAuthorizationStore {
                 command.credential.as_ref(),
                 Some(&command.identity),
             )?;
-            let mut authority = command.authority;
-            put_identity_authority(&transaction, &mut authority, None)?;
+            for binding in command.bindings {
+                super::grants::replace_grant_binding(&transaction, binding, command.consumed_at)?;
+            }
             transaction
                 .execute(
                     "INSERT INTO auth_bootstrap_administrator (singleton, principal_id, created_at)
@@ -995,34 +1007,6 @@ impl AccountRepository for SqliteAuthorizationStore {
         self.run_read(move |connection| load_principal(connection, &id))
             .await
     }
-
-    async fn create_principal(
-        &self,
-        record: PrincipalRecord,
-    ) -> Result<PrincipalRecord, AuthorizationStateError> {
-        self.run(move |connection| {
-            connection
-                .execute(
-                    "INSERT INTO auth_principals (
-                        principal_id, kind, state, created_at, updated_at, version,
-                        disabled_at, revoked_at
-                     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    params![
-                        record.principal_id,
-                        encode_enum(record.kind)?,
-                        encode_enum(record.state)?,
-                        record.created_at,
-                        record.updated_at,
-                        to_sql_version(record.version)?,
-                        record.disabled_at,
-                        record.revoked_at,
-                    ],
-                )
-                .map_err(map_write_error)?;
-            Ok(record)
-        })
-        .await
-    }
 }
 
 fn principal_has_accepted_admin_authority(
@@ -1034,12 +1018,13 @@ fn principal_has_accepted_admin_authority(
         .query_row(
             "SELECT EXISTS (
                 SELECT 1
-                FROM auth_identity_authorities AS authority,
-                     json_each(authority.desired_capabilities_json) AS capability
-                WHERE authority.principal_id = ?1
-                  AND authority.state = 'accepted'
-                  AND (authority.expires_at IS NULL OR authority.expires_at > ?2)
-                  AND capability.value = 'trellis.auth::admin'
+                 FROM auth_grant_bindings AS binding,
+                      json_each(binding.platform_privileges_json) AS privilege
+                 WHERE binding.owner_kind = 'user'
+                   AND binding.owner_id = ?1
+                   AND binding.state = 'active'
+                   AND (binding.expires_at IS NULL OR binding.expires_at > ?2)
+                   AND privilege.value = 'trellis.auth::admin'
             )",
             params![principal_id, now],
             |row| row.get(0),
@@ -1339,23 +1324,10 @@ impl PortalRepository for SqliteAuthorizationStore {
         SqliteAuthorizationStore::list_capability_groups(self).await
     }
 
-    async fn list_portal_authority_bindings(
+    async fn list_portal_grant_bindings(
         &self,
-    ) -> Result<Vec<super::super::PortalAuthorityBindingRecord>, AuthorizationStateError> {
-        SqliteAuthorizationStore::list_portal_authority_bindings(self).await
-    }
-
-    async fn remove_portal_authority_binding(
-        &self,
-        principal_id: &str,
-        participant_id: &str,
-    ) -> Result<bool, AuthorizationStateError> {
-        SqliteAuthorizationStore::remove_portal_authority_binding(
-            self,
-            principal_id,
-            participant_id,
-        )
-        .await
+    ) -> Result<Vec<super::super::PortalGrantBindingRecord>, AuthorizationStateError> {
+        SqliteAuthorizationStore::list_portal_grant_bindings(self).await
     }
 }
 

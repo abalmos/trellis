@@ -19,7 +19,7 @@ pub(crate) async fn decide_approval<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -56,7 +56,7 @@ where
         let recorded = state
             .service
             .repository()
-            .get_idempotency_result("browser.authority.accept", &signer_id, &flow_id)
+            .get_idempotency_result("browser.grant.accept", &signer_id, &flow_id)
             .await?;
         if !request.approved
             || request.consent_view_digest != flow.consent.consent_view_digest
@@ -70,10 +70,13 @@ where
         return Err(HttpError::conflict("flow_not_awaiting_approval"));
     }
     let now = now_ms()?;
-    let binding = state
+    let (_, binding) = state
         .service
         .repository()
-        .get_participant_binding(&flow.participant_id, &flow.participant_artifact_digest)
+        .get_installed_participant_record(
+            flow.participant_id.clone(),
+            Some(flow.installed_revision),
+        )
         .await?
         .ok_or_else(|| HttpError::internal("participant_binding_missing"))?;
     let current_consent = browser_consent(&binding)?;
@@ -97,83 +100,60 @@ where
         .principal_id
         .clone()
         .ok_or_else(|| HttpError::conflict("flow_has_no_principal"))?;
-    let (grant_set, capabilities, selected_optional_bundles) =
+    let (grant_set, _, _) =
         select_browser_authority(&flow.consent, &request.selected_optional_bundles)?;
-    if capabilities
-        .iter()
-        .any(|capability| capability == "trellis.auth::admin")
-    {
-        let current = state
-            .service
-            .repository()
-            .get_identity_authority(&principal_id, &flow.participant_id)
-            .await?;
-        if !current.is_some_and(|authority| {
-            authority.state == AuthorityState::Accepted
-                && authority
-                    .expires_at
-                    .is_none_or(|expires_at| expires_at > now)
-                && authority
-                    .desired_capabilities
-                    .iter()
-                    .any(|capability| capability == "trellis.auth::admin")
-        }) {
-            return Err(HttpError::forbidden("administrative_approval_required"));
-        }
-    }
+    let current = state
+        .service
+        .repository()
+        .get_grant_binding(
+            GrantOwnerKind::User,
+            principal_id.clone(),
+            flow.participant_id.clone(),
+        )
+        .await?;
+    let platform_privileges = current
+        .as_ref()
+        .filter(|binding| {
+            binding.state == GrantBindingState::Active
+                && binding.expires_at.is_none_or(|expires_at| expires_at > now)
+        })
+        .map_or_else(Vec::new, |binding| binding.platform_privileges.clone());
     let signer_id = super::super::super::domain::validate_ed25519_public_key(
         "sessionPublicKey",
         &flow.session_public_key,
     )?;
     let durable = state
         .service
-        .apply_identity_authority_selection(ApplyIdentityAuthoritySelectionInput {
-            principal_id: principal_id.clone(),
-            participant_id: flow.participant_id.clone(),
-            participant_artifact_digest: flow.participant_artifact_digest.clone(),
-            participant_needs_digest: flow.participant_needs_digest.clone(),
-            grant_set,
-            capabilities,
-            state: AuthorityState::Accepted,
-            decided_by: flow.session_public_key.clone(),
-            source_payload: json!({
-                "source": "browser_approval", "flowId": flow_id,
-                "consentViewDigest": flow.consent.consent_view_digest,
-                "proposalDigest": flow.consent.proposal_digest,
-                "selectedOptionalBundles": selected_optional_bundles,
-            }),
-            portal_binding: PortalBindingMutation::Clear,
-            portal_policy_snapshot: None,
-            decided_at: now,
-            expires_at: None,
-            proposal_idempotency: idempotency(
+        .repository()
+        .set_grant_binding(
+            GrantBindingReplacement {
+                owner_kind: GrantOwnerKind::User,
+                owner_id: principal_id.clone(),
+                participant_id: flow.participant_id.clone(),
+                installed_revision: flow.installed_revision,
+                grants: grant_set,
+                platform_privileges,
+                expected_revision: flow.target_grant_revision,
+                state: GrantBindingState::Active,
+                expires_at: None,
+                provenance: None,
+            },
+            idempotency(
                 &flow_id,
-                "browser.authority.propose",
+                "browser.grant.accept",
                 &signer_id,
                 &flow_id,
                 &request_digest,
                 now,
             )?,
-            decision_idempotency: idempotency(
-                &flow_id,
-                "browser.authority.accept",
-                &signer_id,
-                &flow_id,
-                &request_digest,
-                now,
-            )?,
-        })
+        )
         .await
         .map_err(|error| match error {
             AuthorizationStateError::StorageConflict => HttpError::conflict("authority_changed"),
             error => error.into(),
         })?;
-    let durable_record = DesiredAuthorityRecord::Identity(durable);
-    let durable_result_digest = trellis_protocol::digest_json(
-        &serde_json::to_value(&durable_record)
-            .map_err(|_| HttpError::internal("authority_encode"))?,
-    )
-    .map_err(|_| HttpError::internal("authority_digest"))?;
+    let durable_result_digest = trellis_protocol::digest_json(&durable)
+        .map_err(|_| HttpError::internal("authority_digest"))?;
     let expected = flow.version;
     flow.state = AuthBrowserFlowState::Approved;
     flow.durable_result_digest = Some(durable_result_digest);
@@ -209,7 +189,7 @@ pub(super) async fn apply_trusted_portal_authority<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -222,10 +202,13 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    let binding = state
+    let (_, binding) = state
         .service
         .repository()
-        .get_participant_binding(&flow.participant_id, &flow.participant_artifact_digest)
+        .get_installed_participant_record(
+            flow.participant_id.clone(),
+            Some(flow.installed_revision),
+        )
         .await?
         .ok_or_else(|| HttpError::internal("participant_binding_missing"))?;
     let consent = browser_consent(&binding)?;
@@ -305,49 +288,44 @@ where
                 "effectivePolicyDigest": selection.effective_policy_digest,
             }))
             .map_err(|_| HttpError::internal("portal_policy_digest"))?;
-            let policy_idempotency_key = format!("{}:{request_digest}", flow.flow_id);
+            let platform_privileges = selection
+                .capabilities
+                .iter()
+                .filter_map(|capability| {
+                    (capability == "trellis.auth::admin").then_some(PlatformPrivilege::Admin)
+                })
+                .collect();
             let result = state
                 .service
-                .apply_identity_authority_selection(ApplyIdentityAuthoritySelectionInput {
-                    principal_id: principal_id.clone(),
-                    participant_id: flow.participant_id.clone(),
-                    participant_artifact_digest: flow.participant_artifact_digest.clone(),
-                    participant_needs_digest: flow.participant_needs_digest.clone(),
-                    grant_set: selection.grant_set,
-                    capabilities: selection.capabilities,
-                    state: AuthorityState::Accepted,
-                    decided_by: flow.session_public_key.clone(),
-                    source_payload: json!({
-                        "source": "trusted_portal", "flowId": flow.flow_id,
-                        "portalId": flow.portal_id, "providerId": attributes.provider_id,
-                        "effectivePolicyDigest": selection.effective_policy_digest,
-                    }),
-                    portal_binding: PortalBindingMutation::Set(PortalAuthoritySource {
-                        portal_id: flow.portal_id.clone(),
-                        provider_id: attributes.provider_id.clone(),
-                        roles: attributes.roles.clone(),
-                        effective_policy_digest: selection.effective_policy_digest,
-                    }),
-                    portal_policy_snapshot: Some(snapshot),
-                    decided_at: now,
-                    expires_at: None,
-                    proposal_idempotency: idempotency(
-                        &policy_idempotency_key,
-                        "portal.authority.propose",
-                        &signer_id,
-                        &policy_idempotency_key,
-                        &request_digest,
-                        now,
-                    )?,
-                    decision_idempotency: idempotency(
+                .repository()
+                .set_portal_grant_binding(
+                    GrantBindingReplacement {
+                        owner_kind: GrantOwnerKind::User,
+                        owner_id: principal_id.clone(),
+                        participant_id: flow.participant_id.clone(),
+                        installed_revision: flow.installed_revision,
+                        grants: selection.grant_set,
+                        platform_privileges,
+                        expected_revision: flow.target_grant_revision,
+                        state: GrantBindingState::Active,
+                        expires_at: None,
+                        provenance: Some(PortalGrantProvenance {
+                            portal_id: flow.portal_id.clone(),
+                            provider_id: attributes.provider_id.clone(),
+                            roles: attributes.roles.clone(),
+                            effective_policy_digest: selection.effective_policy_digest.clone(),
+                        }),
+                    },
+                    snapshot,
+                    idempotency(
                         &flow.flow_id,
-                        "portal.authority.accept",
+                        "portal.grant.accept",
                         &signer_id,
                         &flow.flow_id,
                         &request_digest,
                         now,
                     )?,
-                })
+                )
                 .await;
             match result {
                 Ok(durable) => break 'policy durable,
@@ -363,14 +341,10 @@ where
         }
         unreachable!("bounded portal policy retries return or break")
     };
-    let durable_record = DesiredAuthorityRecord::Identity(durable);
     flow.state = AuthBrowserFlowState::Approved;
     flow.durable_result_digest = Some(
-        trellis_protocol::digest_json(
-            &serde_json::to_value(durable_record)
-                .map_err(|_| HttpError::internal("authority_encode"))?,
-        )
-        .map_err(|_| HttpError::internal("authority_digest"))?,
+        trellis_protocol::digest_json(&durable)
+            .map_err(|_| HttpError::internal("authority_digest"))?,
     );
     flow.completed_at = Some(now);
     Ok(Some(flow))
@@ -388,7 +362,7 @@ pub(super) async fn complete_authenticated_flow<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -402,6 +376,16 @@ where
     E: AuthEphemeralRepository + Clone,
 {
     if flow.state == AuthBrowserFlowState::ChooseProvider {
+        flow.target_grant_revision = state
+            .service
+            .repository()
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                principal_id.clone(),
+                flow.participant_id.clone(),
+            )
+            .await?
+            .map_or(0, |binding| binding.revision);
         let expected = flow.version;
         flow.state = AuthBrowserFlowState::Authenticated;
         flow.principal_id = Some(principal_id.clone());
@@ -450,29 +434,29 @@ where
             .get_portal_grant_override(&flow.portal_id, &flow.participant_id)
             .await?
             .is_some();
-    let existing_authority = if !allow_automatic_approval || policy_governs {
+    let existing_binding = if !allow_automatic_approval || policy_governs {
         None
     } else {
         state
             .service
             .repository()
-            .get_identity_authority(&principal_id, &flow.participant_id)
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                principal_id.clone(),
+                flow.participant_id.clone(),
+            )
             .await?
-            .filter(|authority| {
-                authority.state == AuthorityState::Accepted
-                    && authority.participant_artifact_digest == flow.participant_artifact_digest
-                    && authority.accepted_needs_digest == flow.participant_needs_digest
-                    && authority
-                        .expires_at
-                        .is_none_or(|expires_at| expires_at > now)
+            .filter(|binding| {
+                binding.state == GrantBindingState::Active
+                    && binding.expires_at.is_none_or(|expires_at| expires_at > now)
             })
     };
-    let mut completed = if let Some(authority) = existing_authority {
+    let mut completed = if let Some(binding) = existing_binding {
         flow.state = AuthBrowserFlowState::Approved;
         flow.durable_result_digest = Some(
             trellis_protocol::digest_json(
-                &serde_json::to_value(DesiredAuthorityRecord::Identity(authority))
-                    .map_err(|_| HttpError::internal("authority_encode"))?,
+                &serde_json::to_value(binding)
+                    .map_err(|_| HttpError::internal("binding_encode"))?,
             )
             .map_err(|_| HttpError::internal("authority_digest"))?,
         );
@@ -538,10 +522,11 @@ mod tests {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BindRequest {
     request_id: String,
-    issued_at: i64,
+    #[serde(rename = "issuedAt")]
+    _issued_at: i64,
     proof: Value,
 }
 
@@ -549,9 +534,17 @@ pub(crate) struct BindRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BrowserSessionBundle {
     server_now: i64,
-    session: SessionRecord,
-    nats: NatsBootstrapResponse,
-    authorization_context: super::super::super::AuthorizationContextBundle,
+    session: BrowserLoginSession,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserLoginSession {
+    session_id: String,
+    principal_id: String,
+    participant_id: String,
+    session_key: String,
+    expires_at: Option<i64>,
 }
 
 pub(crate) async fn bind_flow<R, E>(
@@ -563,7 +556,7 @@ pub(crate) async fn bind_flow<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -588,8 +581,11 @@ where
     ) {
         return Err(HttpError::conflict("flow_not_approved"));
     }
-    let request_digest =
-        proof_request_digest(&raw).map_err(|_| HttpError::bad_request("invalid_bind_request"))?;
+    let mut unsigned_request = raw.clone();
+    unsigned_request
+        .as_object_mut()
+        .ok_or_else(|| HttpError::bad_request("invalid_bind_request"))?
+        .remove("proof");
     let request: BindRequest =
         serde_json::from_value(raw).map_err(|_| HttpError::bad_request("invalid_bind_request"))?;
     if ulid::Ulid::from_string(&request.request_id)
@@ -600,11 +596,10 @@ where
     }
     let input =
         SessionProofInput::user_auth_bind(trellis_protocol::UserAuthBindSessionProofInput {
-            request_id: request.request_id,
-            issued_at: request.issued_at,
+            origin: state.public_origin.clone(),
             flow_id,
             session_public_key: flow.session_public_key.clone(),
-            request_digest,
+            unsigned_request,
         })
         .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
     verify_session_proof(
@@ -628,7 +623,7 @@ async fn complete_flow<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -654,8 +649,6 @@ where
             .ok_or_else(|| HttpError::internal("flow_session_missing"))?;
         if session.principal_id != flow.principal_id.as_deref().unwrap_or_default()
             || session.participant_id != flow.participant_id
-            || session.participant_artifact_digest != flow.participant_artifact_digest
-            || session.participant_needs_digest != flow.participant_needs_digest
             || session.session_public_key != flow.session_public_key
         {
             return Err(HttpError::internal("flow_session_mismatch"));
@@ -665,15 +658,15 @@ where
     if flow.state != AuthBrowserFlowState::Approved {
         return Err(HttpError::conflict("flow_not_approved"));
     }
-    let binding = state
+    let (_, binding) = state
         .service
         .repository()
-        .get_participant_binding(&flow.participant_id, &flow.participant_artifact_digest)
+        .get_installed_participant_record(
+            flow.participant_id.clone(),
+            Some(flow.installed_revision),
+        )
         .await?
         .ok_or_else(|| HttpError::conflict("participant_unavailable"))?;
-    if binding.needs_digest != flow.participant_needs_digest {
-        return Err(HttpError::conflict("participant_needs_changed"));
-    }
     let principal_id = flow
         .principal_id
         .clone()
@@ -687,15 +680,9 @@ where
         .service
         .create_session(CreateSessionInput {
             principal_id,
-            principal_kind: PrincipalKind::User,
             participant_id: flow.participant_id.clone(),
             participant_kind: binding.participant_kind,
-            participant_artifact_digest: flow.participant_artifact_digest.clone(),
-            participant_needs_digest: flow.participant_needs_digest.clone(),
             session_public_key: flow.session_public_key.clone(),
-            deployment_id: None,
-            instance_id: None,
-            desired_authority: None,
             created_at: now,
             idempotency: idempotency(
                 &flow.flow_id,
@@ -755,7 +742,7 @@ async fn session_bundle<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -782,44 +769,21 @@ where
         )
         .await?
         .ok_or_else(|| HttpError::internal("flow_session_missing"))?;
-    let issuance = state
-        .service
-        .authorization()
-        .resolve_issuable_state(&session.session_id, now)
-        .await
-        .map_err(map_issuance_error)?;
-    let expires_at = [
-        issuance.session_expires_at,
-        issuance.effective_authority_expires_at,
-    ]
-    .into_iter()
-    .flatten()
-    .min()
-    .ok_or_else(|| HttpError::internal("credential_expiry_missing"))?;
-    let route =
-        state
-            .issuer
-            .deny_all_user_jwt(&flow.session_nkey, expires_at / 1_000, now / 1_000)?;
-    let authorization_context = state
-        .authorization_contexts
-        .issue(
-            super::super::super::AuthorizationContextIssueRequest {
-                session_id: session.session_id.clone(),
-                request_id: flow.flow_id.clone(),
-                request_digest: digest_parts(&["browser.session.bundle", &flow.flow_id]),
-            },
-            now / 1_000,
-        )
-        .await
-        .map_err(map_issuance_error)?;
+    if session.state != crate::platform::auth::SessionState::Active
+        || session
+            .expires_at
+            .is_some_and(|expires_at| expires_at <= now)
+    {
+        return Err(HttpError::unauthorized("session_inactive"));
+    }
     Ok(BrowserSessionBundle {
         server_now: now,
-        session,
-        nats: NatsBootstrapResponse::new(
-            route,
-            state.native_nats_servers.clone(),
-            state.websocket_nats_servers.clone(),
-        ),
-        authorization_context,
+        session: BrowserLoginSession {
+            session_id: session.session_id,
+            principal_id: session.principal_id,
+            participant_id: session.participant_id,
+            session_key: session.session_public_key,
+            expires_at: session.expires_at,
+        },
     })
 }

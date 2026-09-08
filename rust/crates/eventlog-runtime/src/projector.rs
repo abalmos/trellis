@@ -44,8 +44,10 @@ pub struct VerifiedEventPublisher {
     pub deployment_id: Option<String>,
     pub instance_id: Option<String>,
     pub participant_id: String,
-    pub participant_digest: String,
-    pub session_id: String,
+    pub principal_id: String,
+    pub connection_id: String,
+    pub login_session_id: Option<String>,
+    pub context_digest: String,
 }
 
 /// Runtime-owned local event verifier callback.
@@ -283,8 +285,10 @@ async fn project_message_inner(
         publisher_deployment_id: publisher.deployment_id,
         publisher_instance_id: publisher.instance_id,
         publisher_participant_id: Some(publisher.participant_id),
-        publisher_participant_digest: Some(publisher.participant_digest),
-        publisher_session_id: Some(publisher.session_id),
+        publisher_principal_id: Some(publisher.principal_id),
+        publisher_connection_id: Some(publisher.connection_id),
+        publisher_login_session_id: publisher.login_session_id,
+        authorization_context_digest: Some(publisher.context_digest),
         trace_id,
         traceparent,
         payload_bytes: message.payload.to_vec(),

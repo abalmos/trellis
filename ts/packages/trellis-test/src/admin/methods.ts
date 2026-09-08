@@ -3,16 +3,16 @@ import { apis, participants } from "../../trellis/index.js";
 
 import type { Static, TSchema } from "typebox";
 
-export const adminParticipant = participants.testAdmin.participant;
+export const adminParticipant = participants.appCli.participant;
 
 export const ADMIN_USERNAME = "admin";
 export const ADMIN_PARTICIPANT = {
-  id: participants.testAdmin.participant.id,
-  artifactDigest: participants.testAdmin.participant.digest,
+  id: participants.appCli.participant.id,
+  artifactDigest: participants.appCli.participant.digest,
 } as const;
 
 export type AdminClient = CallerRuntime<
-  typeof participants.testAdmin.participant
+  typeof participants.appCli.participant
 >;
 
 function adminMethod<const I extends TSchema, const O extends TSchema>(
@@ -100,52 +100,45 @@ export const adminMethods = {
     apis.auth.AuthDeploymentsCreateResponseSchema,
     (client, input) => client.authDeploymentsCreate(input).orThrow(),
   ),
-  authDeploymentAuthorityPlan: adminMethod(
-    apis.auth.AuthDeploymentAuthorityPlanRequestSchema,
-    apis.auth.AuthDeploymentAuthorityPlanResponseSchema,
-    (client, input) => client.authDeploymentAuthorityPlan(input).orThrow(),
+  authDeploymentsGet: adminMethod(
+    apis.auth.AuthDeploymentsGetRequestSchema,
+    apis.auth.AuthDeploymentsGetResponseSchema,
+    (client, input) => client.authDeploymentsGet(input).orThrow(),
   ),
-  authDeploymentAuthorityAcceptUpdate: adminMethod(
-    apis.auth.AuthDeploymentAuthorityAcceptUpdateRequestSchema,
-    apis.auth.AuthDeploymentAuthorityAcceptUpdateResponseSchema,
-    (client, input) =>
-      client.authDeploymentAuthorityAcceptUpdate(input).orThrow(),
+  authDeploymentsApply: adminMethod(
+    apis.auth.AuthDeploymentsApplyRequestSchema,
+    apis.auth.AuthDeploymentsApplyResponseSchema,
+    (client, input) => client.authDeploymentsApply(input).orThrow(),
   ),
-  authDeploymentAuthorityAcceptMigration: adminMethod(
-    apis.auth.AuthDeploymentAuthorityAcceptMigrationRequestSchema,
-    apis.auth.AuthDeploymentAuthorityAcceptMigrationResponseSchema,
-    (client, input) =>
-      client.authDeploymentAuthorityAcceptMigration(input).orThrow(),
+  authParticipantsInstall: adminMethod(
+    apis.auth.AuthParticipantsInstallRequestSchema,
+    apis.auth.AuthParticipantsInstallResponseSchema,
+    (client, input) => client.authParticipantsInstall(input).orThrow(),
   ),
-  authDeploymentAuthorityList: adminMethod(
-    apis.auth.AuthDeploymentAuthorityListRequestSchema,
-    apis.auth.AuthDeploymentAuthorityListResponseSchema,
-    (client, input) => client.authDeploymentAuthorityList(input).orThrow(),
+  authGrantsGet: adminMethod(
+    apis.auth.AuthGrantsGetRequestSchema,
+    apis.auth.AuthGrantsGetResponseSchema,
+    (client, input) => client.authGrantsGet(input).orThrow(),
   ),
-  authDeploymentAuthorityReconcile: adminMethod(
-    apis.auth.AuthDeploymentAuthorityReconcileRequestSchema,
-    apis.auth.AuthDeploymentAuthorityReconcileResponseSchema,
-    (client, input) => client.authDeploymentAuthorityReconcile(input).orThrow(),
+  authGrantsList: adminMethod(
+    apis.auth.AuthGrantsListRequestSchema,
+    apis.auth.AuthGrantsListResponseSchema,
+    (client, input) => client.authGrantsList(input).orThrow(),
   ),
-  authDeploymentAuthorityGet: adminMethod(
-    apis.auth.AuthDeploymentAuthorityGetRequestSchema,
-    apis.auth.AuthDeploymentAuthorityGetResponseSchema,
-    (client, input) => client.authDeploymentAuthorityGet(input).orThrow(),
+  authGrantsSet: adminMethod(
+    apis.auth.AuthGrantsSetRequestSchema,
+    apis.auth.AuthGrantsMutationResponseSchema,
+    (client, input) => client.authGrantsSet(input).orThrow(),
+  ),
+  authGrantsRevoke: adminMethod(
+    apis.auth.AuthGrantsRevokeRequestSchema,
+    apis.auth.AuthGrantsMutationResponseSchema,
+    (client, input) => client.authGrantsRevoke(input).orThrow(),
   ),
   authServiceInstancesProvision: adminMethod(
     apis.auth.AuthServiceInstancesProvisionRequestSchema,
     apis.auth.AuthServiceInstancesProvisionResponseSchema,
     (client, input) => client.authServiceInstancesProvision(input).orThrow(),
-  ),
-  authDeploymentAuthorityPlansList: adminMethod(
-    apis.auth.AuthDeploymentAuthorityPlansListRequestSchema,
-    apis.auth.AuthDeploymentAuthorityPlansListResponseSchema,
-    (client, input) => client.authDeploymentAuthorityPlansList(input).orThrow(),
-  ),
-  authDeploymentAuthorityReject: adminMethod(
-    apis.auth.AuthDeploymentAuthorityRejectRequestSchema,
-    apis.auth.AuthDeploymentAuthorityRejectResponseSchema,
-    (client, input) => client.authDeploymentAuthorityReject(input).orThrow(),
   ),
   authSessionsRevoke: adminMethod(
     apis.auth.AuthSessionsRevokeRequestSchema,
@@ -161,10 +154,7 @@ export type AdminRpc = {
   };
 };
 
-export type AdminRpcInput<M extends TrellisTestAdminRpcMethod> = M extends
-  "authDeploymentAuthorityPlan" ? AdminRpc[M]["input"] & {
-    referencedApiArtifacts: readonly Record<string, unknown>[];
-  }
-  : AdminRpc[M]["input"];
+export type AdminRpcInput<M extends TrellisTestAdminRpcMethod> =
+  AdminRpc[M]["input"];
 
 export type TrellisTestAdminRpcMethod = keyof typeof adminMethods;

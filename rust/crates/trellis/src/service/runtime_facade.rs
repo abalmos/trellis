@@ -701,13 +701,14 @@ impl ServiceHandlerContext {
         chunk_bytes: u64,
         info: super::FileTransferInfo,
     ) -> Result<DownloadTransferGrantPlan, ServerError> {
-        let session_key =
-            self.request
-                .session_key
-                .as_deref()
-                .ok_or_else(|| ServerError::MissingSessionKey {
-                    subject: self.request.subject.clone(),
-                })?;
+        let session_key = self
+            .request
+            .caller
+            .as_ref()
+            .map(|caller| caller.session_key.as_str())
+            .ok_or_else(|| ServerError::MissingSessionKey {
+                subject: self.request.subject.clone(),
+            })?;
         super::plan_download_transfer_grant(super::TransferDownloadGrantArgs {
             service_name: self.handle.service_name(),
             session_key,

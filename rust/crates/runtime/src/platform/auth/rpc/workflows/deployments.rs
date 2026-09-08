@@ -1,6 +1,6 @@
 use super::super::{
-    AuthRpcProcessor, AuthorizationStateError, DeploymentProfileState, ProvisionedIdentityKind,
-    RuntimeInstanceState, ValidatedRequest, Value,
+    require_admin, AuthRpcProcessor, AuthorizationStateError, DeploymentProfileState,
+    ProvisionedIdentityKind, RuntimeInstanceState, ValidatedRequest, Value,
 };
 
 pub(super) async fn dispatch(
@@ -9,9 +9,11 @@ pub(super) async fn dispatch(
     payload: &[u8],
     caller: ValidatedRequest,
 ) -> Result<Value, AuthorizationStateError> {
+    require_admin(&caller)?;
     match subject {
         "rpc.v1.Auth.Deployments.Create" => processor.deployments_create(payload, &caller).await,
         "rpc.v1.Auth.Deployments.List" => processor.deployments_list(payload).await,
+        "rpc.v1.Auth.Deployments.Get" => processor.deployments_get(payload, &caller).await,
         "rpc.v1.Auth.Deployments.Enable" => {
             processor
                 .deployments_set_state(payload, &caller, DeploymentProfileState::Active)

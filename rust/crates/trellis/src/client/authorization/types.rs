@@ -121,8 +121,10 @@ pub struct AuthorizationNativeTransport {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct AuthorizationRuntimeTransports {
-    /// Native transport required by Rust runtimes.
-    pub native: AuthorizationNativeTransport,
+    /// Native transport endpoints, when offered.
+    pub native: Option<AuthorizationNativeTransport>,
+    /// WebSocket transport endpoints, when offered.
+    pub websocket: Option<AuthorizationNativeTransport>,
 }
 
 /// Proof-bound assignment and transport metadata for one runtime connection.

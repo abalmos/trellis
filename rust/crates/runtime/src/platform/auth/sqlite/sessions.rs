@@ -9,22 +9,18 @@ use super::super::context::{
     revoke_sql_contexts, AuthorizationContextRevocationReason, AuthorizationContextSelector,
 };
 use super::super::{AuthorizationStateError, PrincipalKind, SessionRecord, SessionState};
-use super::authority::put_sql_desired_authority;
 use super::common::{
     decode_enum, encode_enum, from_sql_version, map_write_error, sql_error, to_sql_version,
 };
-use super::evidence::{
-    load_participant_binding, validate_sql_session_runtime_binding_relationships,
-};
+use super::grants::load_installed_participant;
 use super::outbox::{insert_sql_idempotency_and_actions, sqlite_idempotency_replay};
 use super::principals::load_principal;
 use super::validation::next_version;
 use super::SqliteAuthorizationStore;
 
 const SESSION_SELECT: &str = "SELECT
-    session_id, principal_id, principal_kind, participant_id, participant_kind,
-    participant_artifact_digest, participant_needs_digest, session_public_key,
-    session_key_id, inbox_prefix, state, created_at, last_seen_at, expires_at,
+    session_id, principal_id, participant_id, participant_kind, session_public_key,
+    session_key_id, state, created_at, last_authenticated_at, expires_at,
     revoked_at, version
     FROM auth_sessions";
 
@@ -32,114 +28,57 @@ const SESSION_SELECT: &str = "SELECT
 impl SessionRepository for SqliteAuthorizationStore {
     async fn create_session(
         &self,
-        command: SessionCreation,
+        mut command: SessionCreation,
     ) -> Result<IdempotentOutcome<SessionRecord>, AuthorizationStateError> {
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
             if let Some(result) = sqlite_idempotency_replay(&transaction, &command.idempotency)? {
                 return Ok(IdempotentOutcome::Replayed(result));
             }
-            if let Some(previous) = &command.previous_session {
-                if load_session(&transaction, &previous.session_id)?.as_ref() != Some(previous)
-                    || previous.session_public_key != command.session.session_public_key
-                {
-                    return Err(AuthorizationStateError::StorageConflict);
+            super::super::authority::validate_session(&command.session)?;
+            let principal = load_principal(&transaction, &command.session.principal_id)?
+                .ok_or(AuthorizationStateError::PrincipalMissing)?;
+            if principal.kind != PrincipalKind::User || principal.state != super::super::PrincipalState::Active {
+                return Err(AuthorizationStateError::PrincipalInactive);
+            }
+            let previous_id = transaction.query_row(
+                "SELECT session_id FROM auth_sessions WHERE participant_id = ?1 AND session_public_key = ?2",
+                params![command.session.participant_id, command.session.session_public_key],
+                |row| row.get::<_, String>(0),
+            ).optional().map_err(sql_error)?;
+            let session = if let Some(previous_id) = previous_id {
+                let mut previous = load_session(&transaction, &previous_id)?
+                    .ok_or(AuthorizationStateError::SessionMissing)?;
+                if previous.principal_id != command.session.principal_id
+                    || previous.participant_kind != command.session.participant_kind {
+                    return Err(AuthorizationStateError::NotAuthorized);
                 }
-                revoke_sql_contexts(
-                    &transaction,
-                    &AuthorizationContextSelector::Session(previous.session_id.clone()),
-                    AuthorizationContextRevocationReason::SessionRevoked,
-                    command.session.last_seen_at.div_euclid(1_000),
-                )?;
-                if previous.session_id == command.session.session_id {
-                    let changed = transaction
-                        .execute(
-                            "UPDATE auth_sessions SET
-                                participant_kind = ?1,
-                                participant_artifact_digest = ?2,
-                                participant_needs_digest = ?3,
-                                state = ?4,
-                                last_seen_at = ?5,
-                                expires_at = ?6,
-                                revoked_at = ?7,
-                                version = ?8
-                             WHERE session_id = ?9 AND version = ?10",
-                            params![
-                                encode_enum(command.session.participant_kind)?,
-                                command.session.participant_artifact_digest,
-                                command.session.participant_needs_digest,
-                                encode_enum(command.session.state)?,
-                                command.session.last_seen_at,
-                                command.session.expires_at,
-                                command.session.revoked_at,
-                                to_sql_version(command.session.version)?,
-                                previous.session_id,
-                                to_sql_version(previous.version)?,
-                            ],
-                        )
-                        .map_err(map_write_error)?;
-                    if changed != 1 {
-                        return Err(AuthorizationStateError::StorageConflict);
-                    }
-                } else {
-                    let changed = transaction
-                        .execute(
-                            "DELETE FROM auth_sessions WHERE session_id = ?1 AND version = ?2",
-                            params![previous.session_id, to_sql_version(previous.version)?],
-                        )
-                        .map_err(map_write_error)?;
-                    if changed != 1 {
-                        return Err(AuthorizationStateError::StorageConflict);
-                    }
-                    insert_sql_session(&transaction, &command.session)?;
+                if previous.state == SessionState::Revoked {
+                    return Err(AuthorizationStateError::SessionRevoked);
                 }
+                if previous.state == SessionState::Expired
+                    || previous.expires_at.is_some_and(|expires| expires <= command.session.last_authenticated_at) {
+                    return Err(AuthorizationStateError::SessionExpired);
+                }
+                previous.last_authenticated_at = previous.last_authenticated_at.max(command.session.last_authenticated_at);
+                previous.version = next_version(previous.version)?;
+                transaction.execute(
+                    "UPDATE auth_sessions SET last_authenticated_at = ?1, version = ?2 WHERE session_id = ?3",
+                    params![previous.last_authenticated_at, to_sql_version(previous.version)?, previous.session_id],
+                ).map_err(map_write_error)?;
+                previous
             } else {
                 insert_sql_session(&transaction, &command.session)?;
-            }
-            match command.session.principal_kind {
-                PrincipalKind::User => {
-                    if command.runtime_binding.is_some() {
-                        return Err(AuthorizationStateError::InvalidRecord(
-                            "user sessions cannot have runtime bindings".to_owned(),
-                        ));
-                    }
-                    if let Some(desired) = command.desired_authority {
-                        put_sql_desired_authority(&transaction, desired)?;
-                    }
-                }
-                PrincipalKind::Service | PrincipalKind::Device => {
-                    if command.desired_authority.is_some() {
-                        return Err(AuthorizationStateError::InvalidRecord(
-                            "deployed sessions cannot put user desired authority".to_owned(),
-                        ));
-                    }
-                    let binding = command.runtime_binding.ok_or_else(|| {
-                        AuthorizationStateError::InvalidRecord(
-                            "deployed sessions require a runtime binding".to_owned(),
-                        )
-                    })?;
-                    if binding.session_id != command.session.session_id {
-                        return Err(AuthorizationStateError::InvalidRecord(
-                            "runtime binding does not identify the created session".to_owned(),
-                        ));
-                    }
-                    validate_sql_session_runtime_binding_relationships(&transaction, &binding)?;
-                    transaction
-                        .execute(
-                            "INSERT INTO auth_session_runtime_bindings (session_id, deployment_id, instance_id)
-                             VALUES (?1, ?2, ?3)",
-                            params![binding.session_id, binding.deployment_id, binding.instance_id],
-                        )
-                        .map_err(map_write_error)?;
-                }
-            }
+                command.session
+            };
+            command.idempotency.result = serde_json::json!({"sessionId": session.session_id});
             insert_sql_idempotency_and_actions(
                 &transaction,
                 &command.idempotency,
                 &command.actions,
             )?;
             transaction.commit().map_err(sql_error)?;
-            Ok(IdempotentOutcome::Applied(command.session))
+            Ok(IdempotentOutcome::Applied(session))
         })
         .await
     }
@@ -182,7 +121,7 @@ impl SessionRepository for SqliteAuthorizationStore {
                 .ok_or(AuthorizationStateError::SessionMissing)?;
             revoke_sql_contexts(
                 &transaction,
-                &AuthorizationContextSelector::Session(command.session_id.clone()),
+                &AuthorizationContextSelector::Login(command.session_id.clone()),
                 AuthorizationContextRevocationReason::SessionRevoked,
                 command.revoked_at.div_euclid(1_000),
             )?;
@@ -204,28 +143,6 @@ impl SessionRepository for SqliteAuthorizationStore {
         let id = id.to_owned();
         self.run_read(move |connection| load_session(connection, &id))
             .await
-    }
-
-    async fn get_session_by_public_key(
-        &self,
-        public_key: &str,
-    ) -> Result<Option<SessionRecord>, AuthorizationStateError> {
-        let public_key = public_key.to_owned();
-        self.run_read(move |connection| {
-            let session_id = connection
-                .query_row(
-                    "SELECT session_id FROM auth_sessions WHERE session_public_key = ?1",
-                    params![public_key],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()
-                .map_err(sql_error)?;
-            session_id
-                .map(|session_id| load_session(connection, &session_id))
-                .transpose()
-                .map(Option::flatten)
-        })
-        .await
     }
 
     async fn list_sessions(&self) -> Result<Vec<SessionRecord>, AuthorizationStateError> {
@@ -252,50 +169,40 @@ pub(in crate::platform::auth) fn insert_sql_session(
     connection: &Connection,
     session: &SessionRecord,
 ) -> Result<(), AuthorizationStateError> {
+    super::super::authority::validate_session(session)?;
     let principal = load_principal(connection, &session.principal_id)?
         .ok_or(AuthorizationStateError::PrincipalMissing)?;
-    if principal.kind != session.principal_kind {
+    if principal.kind != PrincipalKind::User
+        || principal.state != super::super::PrincipalState::Active
+    {
         return Err(AuthorizationStateError::InvalidRecord(
             "session principal kind does not match principal".to_owned(),
         ));
     }
-    let participant = load_participant_binding(
-        connection,
-        &session.participant_id,
-        &session.participant_artifact_digest,
-    )?
-    .ok_or(AuthorizationStateError::ParticipantMissing)?;
+    let (_, participant) = load_installed_participant(connection, &session.participant_id, None)?
+        .ok_or(AuthorizationStateError::ParticipantMissing)?;
     if participant.participant_kind != session.participant_kind {
         return Err(AuthorizationStateError::InvalidRecord(
             "session participant kind does not match participant binding".to_owned(),
         ));
     }
-    if participant.needs_digest != session.participant_needs_digest {
-        return Err(AuthorizationStateError::NeedsDigestMismatch);
-    }
     connection
         .execute(
             "INSERT INTO auth_sessions (
-            session_id, principal_id, principal_kind, participant_id,
-            participant_kind, participant_artifact_digest,
-            participant_needs_digest, session_public_key, session_key_id,
-            inbox_prefix, state, created_at, last_seen_at, expires_at,
+            session_id, principal_id, participant_id, participant_kind,
+            session_public_key, session_key_id, state, created_at, last_authenticated_at, expires_at,
             revoked_at, version
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 session.session_id,
                 session.principal_id,
-                encode_enum(session.principal_kind)?,
                 session.participant_id,
                 encode_enum(session.participant_kind)?,
-                session.participant_artifact_digest,
-                session.participant_needs_digest,
                 session.session_public_key,
                 session.session_key_id,
-                session.inbox_prefix,
                 encode_enum(session.state)?,
                 session.created_at,
-                session.last_seen_at,
+                session.last_authenticated_at,
                 session.expires_at,
                 session.revoked_at,
                 to_sql_version(session.version)?
@@ -329,19 +236,15 @@ pub(in crate::platform::auth) fn decode_session(row: &Row<'_>) -> rusqlite::Resu
     Ok(SessionRecord {
         session_id: row.get(0)?,
         principal_id: row.get(1)?,
-        principal_kind: decode_enum(row.get::<_, String>(2)?)?,
-        participant_id: row.get(3)?,
-        participant_kind: decode_enum(row.get::<_, String>(4)?)?,
-        participant_artifact_digest: row.get(5)?,
-        participant_needs_digest: row.get(6)?,
-        session_public_key: row.get(7)?,
-        session_key_id: row.get(8)?,
-        inbox_prefix: row.get(9)?,
-        state: decode_enum(row.get::<_, String>(10)?)?,
-        created_at: row.get(11)?,
-        last_seen_at: row.get(12)?,
-        expires_at: row.get(13)?,
-        revoked_at: row.get(14)?,
-        version: from_sql_version(row.get(15)?)?,
+        participant_id: row.get(2)?,
+        participant_kind: decode_enum(row.get::<_, String>(3)?)?,
+        session_public_key: row.get(4)?,
+        session_key_id: row.get(5)?,
+        state: decode_enum(row.get::<_, String>(6)?)?,
+        created_at: row.get(7)?,
+        last_authenticated_at: row.get(8)?,
+        expires_at: row.get(9)?,
+        revoked_at: row.get(10)?,
+        version: from_sql_version(row.get(11)?)?,
     })
 }

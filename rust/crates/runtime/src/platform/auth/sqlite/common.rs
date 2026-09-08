@@ -45,16 +45,6 @@ impl SqliteAuthorizationStore {
         Ok(Self::from_connections(vec![connection]))
     }
 
-    #[cfg(test)]
-    pub(crate) fn open_path(path: &std::path::Path) -> Result<Self, AuthorizationStateError> {
-        let connection = Connection::open(path).map_err(sql_error)?;
-        connection
-            .pragma_update(None, "foreign_keys", true)
-            .map_err(sql_error)?;
-        migrate_test_schema(&connection)?;
-        Ok(Self::from_connections(vec![connection]))
-    }
-
     fn from_connections(connections: Vec<Connection>) -> Self {
         let mut connections = connections.into_iter();
         let writer = Arc::new(Mutex::new(
@@ -218,6 +208,22 @@ fn migrate_test_schema(connection: &Connection) -> Result<(), AuthorizationState
         if !migrated {
             connection.execute_batch(migration).map_err(sql_error)?;
         }
+    }
+    let has_event_delivery = connection
+        .prepare("PRAGMA table_info(auth_post_commit_actions)")
+        .map_err(sql_error)?
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(sql_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sql_error)?
+        .into_iter()
+        .any(|column| column == "event_delivery_json");
+    if !has_event_delivery {
+        connection
+            .execute_batch(include_str!(
+                "../../../storage/sqlite/platform/V1006__auth_event_delivery.sql"
+            ))
+            .map_err(sql_error)?;
     }
     Ok(())
 }

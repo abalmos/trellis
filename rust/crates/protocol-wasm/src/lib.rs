@@ -39,21 +39,14 @@ struct RequiredNullable<T>(Option<T>);
 )]
 enum WireSessionProofInput {
     UserAuthBind {
-        request_id: String,
-        issued_at: i64,
+        origin: String,
         flow_id: String,
         session_public_key: String,
-        request_digest: String,
+        unsigned_request: Value,
     },
     UserAuthRequest {
-        request_id: String,
-        issued_at: i64,
-        session_public_key: String,
-        session_nkey: String,
-        participant_id: String,
-        participant_digest: String,
-        redirect_target: String,
-        request_digest: String,
+        origin: String,
+        unsigned_request: Value,
     },
     ServiceBootstrap {
         origin: String,
@@ -80,36 +73,22 @@ impl TryFrom<WireSessionProofInput> for SessionProofInput {
     fn try_from(value: WireSessionProofInput) -> Result<Self, Self::Error> {
         match value {
             WireSessionProofInput::UserAuthBind {
-                request_id,
-                issued_at,
+                origin,
                 flow_id,
                 session_public_key,
-                request_digest,
+                unsigned_request,
             } => Self::user_auth_bind(UserAuthBindSessionProofInput {
-                request_id,
-                issued_at,
+                origin,
                 flow_id,
                 session_public_key,
-                request_digest,
+                unsigned_request,
             }),
             WireSessionProofInput::UserAuthRequest {
-                request_id,
-                issued_at,
-                session_public_key,
-                session_nkey,
-                participant_id,
-                participant_digest,
-                redirect_target,
-                request_digest,
+                origin,
+                unsigned_request,
             } => Self::user_auth_request(UserAuthRequestSessionProofInput {
-                request_id,
-                issued_at,
-                session_public_key,
-                session_nkey,
-                participant_id,
-                participant_digest,
-                redirect_target,
-                request_digest,
+                origin,
+                unsigned_request,
             }),
             WireSessionProofInput::ServiceBootstrap {
                 origin,
@@ -401,35 +380,6 @@ impl VerifiedAuthorizationContextHandle {
     }
 }
 
-fn verified_context_projection(
-    context: &VerifiedAuthorizationContext,
-) -> Result<Value, ProtocolError> {
-    Ok(json!({
-        "ownerKind": context.signed_context().unsigned.owner_kind,
-        "ownerId": context.signed_context().unsigned.owner_id,
-        "grantRevision": context.signed_context().unsigned.grant_revision,
-        "principalId": context.principal_id(),
-        "principalKind": context.principal_kind(),
-        "participantId": context.participant_id(),
-        "identityKeyId": context.signed_context().unsigned.identity_key_id,
-        "loginSessionId": context.signed_context().unsigned.login_session_id,
-        "deploymentId": context.deployment_id(),
-        "instanceId": context.instance_id(),
-        "issuerKeyId": context.signed_context().unsigned.issuer_key_id,
-        "connectionId": context.connection_id(),
-        "sessionKey": context.signed_context().unsigned.session_key,
-        "inboxPrefix": context.inbox_prefix(),
-        "issuedAt": context.issued_at(),
-        "notBefore": context.not_before(),
-        "expiresAt": context.expires_at(),
-        "grants": context.grant_set(),
-        "grantDigest": context.grant_set().digest()?,
-        "platformPrivileges": context.platform_privileges(),
-        "extensions": context.signed_context().unsigned.extensions,
-        "contextDigest": context.context_digest(),
-    }))
-}
-
 fn protocol_error_result(error: &ProtocolError) -> String {
     let (code, path) = match error {
         ProtocolError::Authorization { code, path, .. } => (format!("{code:?}"), path.to_string()),
@@ -460,11 +410,6 @@ fn json_result(value: Value) -> String {
     })
 }
 
-fn verified_result(mut projection: Value) -> String {
-    projection["ok"] = Value::Bool(true);
-    json_result(projection)
-}
-
 fn request_result(
     context: &VerifiedAuthorizationContext,
     input: WireAuthorizationRequest,
@@ -493,11 +438,10 @@ fn request_result(
             Ok(verified) => verified,
             Err(error) => return protocol_error_result(&error),
         };
-    let projection = match verified_context_projection(verified.context()) {
-        Ok(projection) => projection,
-        Err(error) => return protocol_error_result(&error),
-    };
-    verified_result(projection)
+    json_result(json!({
+        "ok": true,
+        "contextDigest": verified.context().context_digest(),
+    }))
 }
 
 fn event_publisher_projection(publisher: &AuthorizationEventPublisher) -> Value {
@@ -538,18 +482,17 @@ fn event_result(
         Ok(verified) => verified,
         Err(error) => return protocol_error_result(&error),
     };
-    let mut projection = match verified_context_projection(verified.context()) {
-        Ok(projection) => projection,
-        Err(error) => return protocol_error_result(&error),
-    };
-    projection["publisher"] = event_publisher_projection(verified.publisher());
-    verified_result(projection)
+    json_result(json!({
+        "ok": true,
+        "contextDigest": verified.context().context_digest(),
+        "publisher": event_publisher_projection(verified.publisher()),
+    }))
 }
 
 /// Verify one context-bound authorization request proof from a JSON argument.
 ///
 /// The result is always a JSON object. Successful results have `ok: true` and
-/// contain verified caller/context metadata; rejected inputs have `ok: false`
+/// contain the verified context digest; rejected inputs have `ok: false`
 /// and a stable authorization error code and path.
 #[wasm_bindgen]
 pub fn verify_authorization_request(

@@ -1,82 +1,41 @@
 The Rust libraries give services, apps, CLIs, devices, and agents a typed async
-interface to Trellis. Native generation emits one ordinary crate with two module
-namespaces:
+interface to Trellis. Native generation emits one ordinary crate with:
 
-- `apis::<api>` containing each API's types, schemas, descriptors, and thin
-  inbound/outbound adapters
-- `participants::<participant>` containing exactly the owned and used surfaces selected
-  by one local participant
+- `apis::<api>` types, schemas, descriptors, and adapters; and
+- `participants::<participant>` facades exposing only selected surfaces.
 
-Application code connects through the participant facade. Owner SDKs are typed
-vocabulary, not runnable clients or services.
-
-Use this page as a practical map. Verify exact generated names and signatures in
-the generated crate source and the Rustdoc links on the [API Reference](/api).
+Verify exact generated names and signatures in the generated crate and the
+[Rust API reference](/api).
 
 ## Generated package
 
-Set `format = 1` and a local package `name`, such as `orders-trellis`, in
-`trellis.toml`. A Rust-only project generates one crate at `trellis/`, optionally
-overridden by `[generate].output`. Mixed-language projects require explicit
-`[generate.rust].output` and `[generate.typescript].output` destinations.
-
-The package version is always `0.0.0`. Add the crate as an ordinary path
-dependency in the consumer's `Cargo.toml`:
+Set `format = 1` and a package `name` in `trellis.toml`, then run
+`trellis generate`. A Rust-only project writes one crate under `trellis/` unless
+overridden by `[generate].output`.
 
 ```toml
 [dependencies]
 orders-trellis = { path = "trellis" }
 ```
 
-It declares the published Trellis runtime dependency matching the CLI version.
-There are no separate API or participant crates, repository-relative runtime
-paths, or generator `build.rs` steps. Commit the output when clones should build
-with Cargo alone, without the Trellis CLI or API cache. Local runtime development
-uses ordinary Cargo overrides supplied by the consumer or test harness, not
-runtime-path settings in `trellis.toml`.
-
-A participant facade normally exposes:
-
-- `connect(...)` and one participant-kind-specific `ConnectOptions`
-- `ConnectedService` for services or `ConnectedClient` for apps, CLIs, devices,
-  and agents
-- `client()` for participant-filtered outbound calls
-- `service()` for a service's participant-filtered outbound calls
-- `handle()` for owned RPC, feed, and operation provider registration
-- generated modules for owned APIs, dependency aliases, state, resources, jobs,
-  and event-consumer groups when declared
-
-The facade embeds the participant contract id, digest, and canonical native API
-artifact. Callers do not supply those values.
+The generated package embeds exact participant/API artifacts. Callers never
+supply participant IDs, artifact digests, needs digests, deployments, instances,
+grants, resources, or transport endpoints as bootstrap assertions.
 
 ## Connect a service
 
-Service facades expose authenticated service bootstrap only. This connection
-fragment assumes an existing generated participant and application
-`register_handlers` function; the environment variable names and `anyhow` return
-type are example choices, not Trellis requirements:
-
 ```rust
-use std::sync::Arc;
-
-use orders_trellis::participants::acme_orders_service::{connect, ServiceConnectOptions};
-use trellis_rs::client::FileAuthorizationContextStore;
+use orders_trellis::participants::acme_orders_service::{
+    connect, ServiceConnectOptions,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let deployment_id = std::env::var("TRELLIS_DEPLOYMENT_ID")?;
     let identity_seed = std::env::var("ORDERS_SERVICE_IDENTITY_SEED")?;
-    let session_seed = std::env::var("ORDERS_SERVICE_SESSION_KEY_SEED")?;
     let mut service = connect(
-        ServiceConnectOptions::new(
-            "http://localhost:3000",
-            "orders-service",
-            &deployment_id,
-            &identity_seed,
-            &session_seed,
-            Arc::new(FileAuthorizationContextStore::new("./trellis-context.json")),
-        )
-        .with_timeout_ms(10_000),
+        ServiceConnectOptions::new("http://localhost:3000", &identity_seed)
+            .with_name("orders-service")
+            .with_timeout_ms(10_000),
     )
     .await?;
 
@@ -86,79 +45,64 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-Bootstrap authenticates the service, presents the generated facade's embedded
-contract as the sole contract evidence, waits for deployment authority, resolves
-resource bindings, and owns the RPC/feed/worker lifecycle. Pending authority
-waits indefinitely by default. Use
-`with_authority_pending_timeout_ms(Some(...))` only when process startup needs
-an overall deadline; `with_timeout_ms(...)` bounds each request.
+Bootstrap proves the provisioned identity and a fresh session key. Trellis
+returns the server-owned assignment, exact installed participant/API evidence,
+current `GrantBinding`, resources, signed context, route JWT, and transports.
+The runtime verifies them before NATS CONNECT. Authorization state remains in
+process memory and refreshes on reconnect; there is no authorization-context
+file or pending-authority wait.
 
 ## Connect an app or agent
 
-Apps, CLIs, and agents use the generated user-session option type:
+Browser/CLI login produces a login session ID and session signing seed. A
+generated user participant wraps the public `UserConnectOptions` boundary:
 
 ```rust
-use orders_trellis::participants::acme_orders_caller::{connect, ConnectOptions};
+use trellis_rs::client::{UserConnectOptions, UserSessionCredentials};
 
-let connected = connect(ConnectOptions::new(
+let options = UserConnectOptions::new(
     "http://127.0.0.1:8080",
-    session_key_seed,
-    authorization_installation,
     30_000,
-    authorization_context_store,
-))
-.await?;
-
-let response = connected
-    .client()
-    .orders()
-    .orders_get(&orders_trellis::apis::acme_orders::OrdersGetRequest {
-        order_id: "ord_123".into(),
-    })
-    .await?;
+    UserSessionCredentials {
+        login_session_id,
+        session_key_seed_base64url: session_seed,
+    },
+    "acme.orders-caller",
+);
 ```
 
-Here `authorization_installation` is the initial `AuthorizationInstallation`
-from the user-session flow and `authorization_context_store` is an
-`Arc<dyn AuthorizationContextStore>` that retains its trust state. This is a
-connection fragment, not a replacement for browser/user authentication. Do not
-manually assemble NATS credentials or participant digests.
-
-The dependency alias (`orders`) comes from the participant contract. If an alias
-or remote surface is absent from that contract, its accessor or method does not
-exist.
+Connection performs context refresh before the first physical CONNECT. Do not
+assemble route credentials, NATS permissions, or participant digests manually.
 
 ## Connect a device
 
-Activated devices use the generated device option type:
+Activated devices retain only their durable identity material. Generated device
+facades use the public `DeviceConnectOptions` shape:
 
 ```rust
-use std::sync::Arc;
+use orders_trellis::participants::inspection_device::{
+    connect, DeviceConnectOptions,
+};
 
-use orders_trellis::participants::inspection_device::{connect, ConnectOptions};
-use trellis_rs::client::FileAuthorizationContextStore;
-
-let connected = connect(ConnectOptions::new(
-    "http://127.0.0.1:8080",
-    deployment_id,
-    instance_id,
-    public_identity_key,
-    identity_seed_base64url,
-    10_000,
-    Arc::new(FileAuthorizationContextStore::new("./device-context.json")),
-))
+let connected = connect(
+    DeviceConnectOptions::new(
+        "http://127.0.0.1:8080",
+        identity_seed_base64url,
+    )
+    .with_timeout_ms(10_000),
+)
 .await?;
 ```
 
-The connected client exposes only APIs selected by the device contract. Device
-activation and identity persistence happen before this connection step. Device
-bootstrap generates a fresh session key for every attempt and carries only the
-successful ready attempt's private seed into connection.
+Use `DeviceActivationOptions` with `check_device_activation` or
+`wait_for_device_activation` before connecting when review is required. The
+helper reuses one attempt identity/session key while polling. Approved devices
+bootstrap through `/bootstrap/device`; deployment and instance IDs are resolved
+server-side.
 
 ## Call RPCs
 
-Dependency aliases are the first facade boundary. Contract surface groups remain
-inside each alias:
+Dependency aliases are the first facade boundary:
 
 ```rust
 let order = connected
@@ -170,184 +114,20 @@ let order = connected
     .await?;
 ```
 
-Generated declared errors are typed variants. Match them directly rather than
-decoding a generic JSON error payload. Unknown remote and transport failures
-remain distinct call-error variants.
+Generated declared errors are typed variants. Unknown remote and transport
+failures remain distinct call-error variants.
 
-## Start operations
+## Services and resources
 
-Selected operations return typed invokers:
+Generated service facades expose handler registration plus typed `kv`, `store`,
+`jobs`, state, transfer, and event-consumer surfaces declared by the
+participant. Resources come from the connected runtime. Service code does not
+import the core SDK for bootstrap, call `Trellis.Bindings.Get`, construct raw
+resource handles, or pass binding payloads into constructors.
 
-```rust
-let operation = connected
-    .client()
-    .orders()
-    .orders_process()
-    .start(&orders_trellis::apis::acme_orders::OrdersProcessInput {
-        order_id: "ord_123".into(),
-    })
-    .await?;
+## Proof and authorization behavior
 
-let terminal = operation.wait().await?;
-```
-
-Use `watch()` for durable progress and terminal snapshots. If an operation
-declares live updates, subscribe before starting when the earliest at-most-once
-updates matter. Transfer-capable operations expose transfer helpers from the
-typed operation reference; applications do not construct transfer subjects.
-
-## Register service providers
-
-Register owned providers before `run()`:
-
-```rust
-use orders_trellis::participants::acme_orders_service::ServiceHandlerContext;
-use orders_trellis::apis::acme_orders::{OrdersCreateRequest, OrdersCreateResponse};
-
-service.handle().rpc().orders().create(
-    |_context: ServiceHandlerContext, input: OrdersCreateRequest| async move {
-        Ok(OrdersCreateResponse {
-            order_id: input.order_id,
-            status: "pending".into(),
-        })
-    },
-);
-```
-
-Feed providers return typed streams. Operation providers implement the generated
-operation provider trait and own start/get/watch/cancel behavior. Used remote
-surfaces never appear under `handle()`.
-
-## Publish owned events
-
-Services clone a typed publisher for request handlers, workers, or background
-tasks:
-
-```rust
-let publisher = service.publisher();
-
-publisher
-    .publish_orders_shipped(&orders_trellis::apis::acme_orders::OrdersShippedEvent {
-        order_id: "ord_123".into(),
-        customer_id: "cust_456".into(),
-        shipped_at: now_iso(),
-    })
-    .await?;
-```
-
-Templated subjects are derived from the typed event payload. Subject parameters
-must resolve to strings, numbers, or bounded safe integers in every schema union
-branch. Do not build event subjects manually.
-
-## Consume durable events
-
-Durable service consumption is declared as an `eventConsumers` resource. The
-generated group handle resolves the Trellis-provisioned durable and registers
-typed handlers:
-
-```rust
-let _orders_listener = service
-    .event_consumers()
-    .orders()
-    .on_order_created(|event, context| async move {
-        tracing::info!(event_id = ?context.id, order_id = %event.order_id);
-        Ok(())
-    })
-    .await?;
-
-service.run().await?;
-```
-
-Keep the returned guard alive while delivery is needed. Dropping it or calling
-`abort()` removes that registration; other registrations in the same group
-continue. The service lifecycle owns shared pull tasks and reports their
-failures. Listeners use the generated wildcard pattern for parameterized events.
-Each matching registration supplies its own verification metadata, independently
-of registration order. Messages without a registration are not acknowledged as
-completed work.
-
-Trellis chooses durable names. `ServiceEventListenOptions` exposes delivery
-`mode`, declared `group`, and `concurrency`.
-Durable delivery does not require `num_waiting > 0` before publication.
-
-## Use resources and state
-
-Service resource methods are generated from declared aliases:
-
-```rust
-let cache = service.kv().orders_cache().await?;
-let documents = service.store().documents().await?;
-```
-
-These handles already contain resolved bootstrap bindings. Services do not call
-binding discovery or import a raw NATS client. Generated state stores similarly
-expose typed reads and compare-and-set operations through the participant
-facade.
-
-## Submit and handle jobs
-
-Each declared queue has a cloneable generated queue client:
-
-```rust
-let refresh = service.jobs().refresh_summary();
-let job = refresh
-    .submit(orders_trellis::apis::acme_orders::RefreshSummaryJobPayload {
-        order_id: "ord_123".into(),
-    })
-    .await?;
-
-refresh
-    .handle(|active_job| async move {
-        let payload = active_job.payload().clone();
-        active_job.progress(10, Some("loading".into())).await?;
-        Ok(orders_trellis::apis::acme_orders::RefreshSummaryJobResult {
-            order_id: payload.order_id,
-        })
-    })
-    .await?;
-```
-
-`JobRef` provides get, wait, and cancel behavior backed by lifecycle events.
-Worker hosts are supervised by `ConnectedService::run()`; unexpected worker exit
-fails the service instead of leaving an apparently healthy process.
-
-## Runtime boundary
-
-Raw NATS connections, credentials, bootstrap bindings, subjects, and generic
-request/publish/subscribe methods are Trellis internals. `trellis_rs::generated`
-exists for generated code, not application code. If a generated facade lacks a
-declared capability, fix the contract or generator rather than importing a
-lower-level transport type.
-
-HTTP is limited to browser flows, initial bootstrap, proof-bound restart
-recovery, and public immutable trust. Connected control uses generated RPC,
-operation, and event APIs over NATS; service code must not call HTTP context,
-revocation, logout, or client-bootstrap endpoints. Provider authorization
-evidence is read from the internal NATS KV registry with readiness and bounded
-watch staleness; registry handles and subjects are not service APIs, and
-ordinary request/event cache hits perform no external I/O.
-
-Trust rotation is generation-exact: accepted manifest generation and digest,
-issuer key, and certificate digest stay bound together; historical evidence is
-not rebound to a current certificate by issuer key alone. Context refresh is
-restart recovery and returns the route, session, NATS, and context material
-needed to reconnect.
-
-## Outbox Claims
-
-SQL outbox claims expire after 30 seconds and can be recovered by another
-dispatch attempt. Pass the claimed record to `mark_published` or `mark_failed`;
-their boolean result is false if a newer claim superseded it.
-`dispatch_outbox_once` reports `ClaimLost` rather than successful completion in
-that case. Publication can repeat after interruption, so consumers still need an
-appropriate duplicate-handling strategy.
-
-SQLite and PostgreSQL schema helpers create the current helper tables. They do
-not migrate older pre-release layouts; the application owns any required
-migration and must not treat schema creation as an upgrade operation.
-
-## Rustdoc
-
-Use the [API Reference](/api) for runtime Rustdoc. Generated crate source is the
-authority for participant-specific method names and types. The guides explain
-normal workflows; Rustdoc and generated source define exact signatures.
+Requests and events carry context digest, matching redundant session key, and a
+message-specific proof. Provider runtimes resolve and cache immutable signed
+contexts, recheck explicit revocation, and authorize the exact selected action.
+Reconnect performs proof-bound refresh once per disconnected episode.

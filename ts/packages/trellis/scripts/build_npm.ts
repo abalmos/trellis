@@ -16,7 +16,6 @@ await buildTypeScriptPackage({
       types: "./auth/browser.d.ts",
       import: "./auth/browser.js",
     },
-    "./auth/file": { types: "./auth/file.d.ts", import: "./auth/file.js" },
     "./device": { types: "./device.d.ts", import: "./device.js" },
     "./errors": { types: "./errors/index.d.ts", import: "./errors/index.js" },
     "./service": { types: "./service/mod.d.ts", import: "./service/mod.js" },

@@ -10,15 +10,20 @@ import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromPrivateKey,
 } from "./keys.ts";
-import type {
+import {
+  AuthDeviceUserAuthoritiesListRequestSchema
+    as AuthDeviceUserAuthoritiesListSchema,
   AuthDeviceUserAuthoritiesListResponseSchema,
-  AuthDeviceUserAuthoritiesListSchema,
+  AuthDeviceUserAuthoritiesResolveProgressSchema
+    as AuthResolveDeviceUserAuthoritiesProgressSchema,
+  AuthDeviceUserAuthoritiesResolveRequestSchema
+    as AuthResolveDeviceUserAuthoritiesSchema,
+  AuthDeviceUserAuthoritiesResolveResponseSchema
+    as AuthResolveDeviceUserAuthoritiesResponseSchema,
+  AuthDeviceUserAuthoritiesRevokeRequestSchema
+    as AuthDeviceUserAuthoritiesRevokeSchema,
   AuthDeviceUserAuthoritiesRevokeResponseSchema,
-  AuthDeviceUserAuthoritiesRevokeSchema,
-  AuthResolveDeviceUserAuthoritiesProgressSchema,
-  AuthResolveDeviceUserAuthoritiesResponseSchema,
-  AuthResolveDeviceUserAuthoritiesSchema,
-} from "./protocol.ts";
+} from "../internal_sdk/generated/auth/schemas.ts";
 import {
   base64urlDecode,
   base64urlEncode,
@@ -326,6 +331,64 @@ export async function verifyDeviceConfirmationCode(input: {
     normalizeCrockford(input.confirmationCode);
 }
 
+/** Submit one proof-bound device enrollment request. */
+export async function requestDeviceEnrollment(args: {
+  trellisUrl: string;
+  publicIdentityKey: string;
+  identitySeed: Uint8Array | string;
+  sessionIdentity: Awaited<ReturnType<typeof createAuth>>;
+  connectionId: string;
+  participantId: string;
+  challengeDigest: string;
+  confirmationCode: string;
+  provisioningSecret?: string;
+  signal?: AbortSignal;
+}): Promise<Record<string, unknown>> {
+  const identityAuth = await createAuth({
+    sessionKeySeed: base64urlEncode(
+      normalizeSecretBytes(args.identitySeed, "identitySeed"),
+    ),
+  });
+  const unsignedRequest = {
+    identityKeyId: base64urlEncode(
+      await sha256(base64urlDecode(identityAuth.sessionKey)),
+    ),
+    identityPublicKey: args.publicIdentityKey,
+    sessionKey: args.sessionIdentity.sessionKey,
+    connectionId: args.connectionId,
+    requestId: ulid(),
+    iat: Date.now(),
+    participantId: args.participantId,
+    challengeDigest: args.challengeDigest,
+    confirmationCode: args.confirmationCode,
+    ...(args.provisioningSecret === undefined ? {} : {
+      provisioningSecret: args.provisioningSecret,
+    }),
+  };
+  const response = await fetch(
+    new URL("/auth/device/enroll", args.trellisUrl),
+    {
+      method: "POST",
+      signal: args.signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...unsignedRequest,
+        proof: await identityAuth.signSessionProof({
+          purpose: "deviceEnrollment",
+          origin: new URL(args.trellisUrl).origin,
+          unsignedRequest,
+        }),
+      }),
+    },
+  );
+  if (!response.ok) throw await decodeTrellisHttpError(response);
+  const body: unknown = await response.json();
+  if (typeof body !== "object" || body === null) {
+    throw new Error("Invalid device enrollment response");
+  }
+  return body as Record<string, unknown>;
+}
+
 /**
  * Retry the proof-bound device bootstrap operation until activation completes.
  *
@@ -338,15 +401,13 @@ export async function waitForDeviceActivation(args: {
   publicIdentityKey: string;
   identitySeed: Uint8Array | string;
   activationKey: Uint8Array | string;
-  deploymentId: string;
-  instanceId: string;
-  principalId: string;
   participantId: string;
-  participantArtifactDigest: string;
-  participantNeedsDigest: string;
+  provisioningSecret?: string;
   nonce?: string;
   signal?: AbortSignal;
   pollIntervalMs?: number;
+  sessionIdentity?: Awaited<ReturnType<typeof createAuth>>;
+  connectionId?: string;
 }): Promise<{
   state: "ready";
   sessionIdentity: Awaited<ReturnType<typeof createAuth>>;
@@ -356,99 +417,86 @@ export async function waitForDeviceActivation(args: {
   const nonce = args.nonce ??
     base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
   const identitySeed = normalizeSecretBytes(args.identitySeed, "identitySeed");
-  const sessionIdentity = await createAuth({
+  const sessionIdentity = args.sessionIdentity ?? await createAuth({
     sessionKeySeed: base64urlEncode(
       crypto.getRandomValues(new Uint8Array(32)),
     ),
   });
+  const identityAuth = await createAuth({
+    sessionKeySeed: base64urlEncode(identitySeed),
+  });
+  const identityKeyId = base64urlEncode(
+    await sha256(base64urlDecode(identityAuth.sessionKey)),
+  );
   const challengeDigest = base64urlEncode(await sha256(utf8(nonce)));
   const confirmationCode = await deriveDeviceConfirmationCode({
     activationKey: args.activationKey,
     publicIdentityKey: args.publicIdentityKey,
     nonce,
   });
+  const connectionId = args.connectionId ?? ulid();
   let reviewId: string | undefined;
   let reviewDeadline: number | undefined;
   while (true) {
     if (reviewDeadline !== undefined && performance.now() >= reviewDeadline) {
       throw new Error("device activation review expired");
     }
-    const requestId = ulid();
-    const issuedAt = Date.now();
-    const identityAuth = await createAuth({
-      sessionKeySeed: base64urlEncode(identitySeed),
-    });
-    const deviceIdentityKeyId = base64urlEncode(
-      await sha256(base64urlDecode(identityAuth.sessionKey)),
-    );
-    const unsigned = {
-      requestId,
-      issuedAt,
-      deploymentId: args.deploymentId,
-      instanceId: args.instanceId,
-      deviceIdentityKeyId,
-      principalId: args.principalId,
-      identityPublicKey: identityAuth.sessionKey,
-      provisioningSecret: null,
-      expectedSecretVersion: null,
-      newSessionPublicKey: sessionIdentity.sessionKey,
-      newSessionNkey: sessionIdentity.sessionNkey,
-      participantId: args.participantId,
-      participantArtifactDigest: args.participantArtifactDigest,
-      participantNeedsDigest: args.participantNeedsDigest,
-      challengeDigest,
-      confirmationCode,
-      proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
-    };
-    const requestDigest = await sessionProofRequestDigest(unsigned);
-    let response: Response;
+    let body: Record<string, unknown>;
     try {
-      response = await fetch(
+      body = await requestDeviceEnrollment({
+        ...args,
+        identitySeed,
+        sessionIdentity,
+        connectionId,
+        challengeDigest,
+        confirmationCode,
+      });
+    } catch (error) {
+      if (args.signal?.aborted) {
+        throw error;
+      }
+      if (!(error instanceof TypeError)) {
+        throw error;
+      }
+      await sleep(pollIntervalMs, args.signal);
+      continue;
+    }
+    const state = Reflect.get(body, "state") as unknown;
+    if (state === "approved") {
+      const bootstrapRequest = {
+        identityKeyId,
+        sessionKey: sessionIdentity.sessionKey,
+        connectionId,
+        requestId: ulid(),
+        iat: Date.now(),
+      };
+      const bootstrapResponse = await fetch(
         new URL("/bootstrap/device", args.trellisUrl),
         {
           method: "POST",
           signal: args.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            ...unsigned,
+            ...bootstrapRequest,
             proof: await identityAuth.signSessionProof({
               purpose: "deviceBootstrap",
-              requestId,
-              issuedAt,
-              deploymentId: args.deploymentId,
-              instanceId: args.instanceId,
-              deviceIdentityKeyId,
-              newSessionPublicKey: sessionIdentity.sessionKey,
-              newSessionNkey: sessionIdentity.sessionNkey,
-              participantId: args.participantId,
-              participantDigest: args.participantArtifactDigest,
-              challengeDigest,
-              requestDigest,
+              origin: new URL(args.trellisUrl).origin,
+              unsignedRequest: bootstrapRequest,
             }),
           }),
         },
       );
-    } catch (error) {
-      if (args.signal?.aborted) {
-        throw error;
+      if (!bootstrapResponse.ok) {
+        throw await decodeTrellisHttpError(bootstrapResponse);
       }
-      await sleep(pollIntervalMs, args.signal);
-      continue;
-    }
-    if (!response.ok) {
-      throw await decodeTrellisHttpError(response);
-    }
-    const body: unknown = await response.json();
-    if (typeof body !== "object" || body === null) {
-      throw new Error("Invalid device activation bootstrap response");
-    }
-    const state = Reflect.get(body, "state") as unknown;
-    if (state === "ready") {
       return {
-        state,
+        state: "ready",
         sessionIdentity,
-        bundle: body as Record<string, unknown>,
+        bundle: await bootstrapResponse.json() as Record<string, unknown>,
       };
+    }
+    if (state === "rejected") {
+      throw new Error("device activation rejected");
     }
     const activation = Reflect.get(body, "activation") as
       | Record<

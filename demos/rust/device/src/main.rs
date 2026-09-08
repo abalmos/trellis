@@ -1,5 +1,4 @@
 use std::io::{self, Write};
-use std::sync::Arc;
 use std::time::Duration;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -13,7 +12,7 @@ use trellis_rs::{
         check_device_activation, derive_device_identity, wait_for_device_activation,
         DeviceActivationOptions, DeviceActivationStatus,
     },
-    client::{download_transfer_grant_from_value, MemoryAuthorizationContextStore},
+    client::download_transfer_grant_from_value,
 };
 use device_trellis::apis::demo_service::types::{
     AssignmentsListRequest, EvidenceDownloadRequest, EvidenceListRequest, EvidenceUploadInput,
@@ -33,14 +32,6 @@ struct Args {
     /// Use demo-local activated-device persistence and connect flow.
     #[arg(long, env = "TRELLIS_DEMO_DEVICE")]
     device: bool,
-
-    /// Provisioned device deployment id.
-    #[arg(long, env = "TRELLIS_DEVICE_DEPLOYMENT_ID")]
-    device_deployment_id: Option<String>,
-
-    /// Provisioned device instance id.
-    #[arg(long, env = "TRELLIS_DEVICE_INSTANCE_ID")]
-    device_instance_id: Option<String>,
 
     /// Base64url device root secret printed by `trellis deploy provision`.
     #[arg(long, env = "TRELLIS_DEVICE_ROOT_SECRET")]
@@ -76,14 +67,6 @@ async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<Conn
         .trellis_url
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("--device requires --trellis-url"))?;
-    let deployment_id = args
-        .device_deployment_id
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("--device requires --device-deployment-id"))?;
-    let instance_id = args
-        .device_instance_id
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("--device requires --device-instance-id"))?;
     let root_secret = URL_SAFE_NO_PAD.decode(
         args.device_root_secret
             .as_deref()
@@ -93,15 +76,15 @@ async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<Conn
     let activation = DeviceActivationOptions::new(
         trellis_rs::client::DeviceConnectOptions::<device_trellis::participants::demo_device::Participant>::new(
             trellis_url,
-            deployment_id,
-            instance_id,
-            &identity.public_identity_key,
             &identity.identity_seed_base64url,
-            Arc::new(MemoryAuthorizationContextStore::default()),
         )
         .with_timeout_ms(10_000),
         &identity.activation_key_base64url,
     );
+    let activation = match args.provisioning_secret.as_deref() {
+        Some(secret) => activation.with_provisioning_secret(secret),
+        None => activation,
+    };
     let session = match check_device_activation(&activation).await? {
         DeviceActivationStatus::Ready(session) => session,
         DeviceActivationStatus::Pending(pending) => {

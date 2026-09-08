@@ -1,130 +1,102 @@
-Trellis separates authentication, desired authority, materialized authority, and
-transport permissions. The Rust platform runtime owns all four boundaries. A
-service or client never reads auth storage or derives NATS subjects itself.
+Trellis separates authentication, participant-scoped grants, signed
+authorization contexts, and transport permissions. The Rust platform runtime
+owns these boundaries. Services and clients never read Auth storage or derive
+NATS subjects themselves.
 
 ## Principals
 
-| Principal | Authentication                                                             |
-| --------- | -------------------------------------------------------------------------- |
-| User      | Browser or CLI session established through an auth portal                  |
-| Service   | Immutable provisioned Ed25519 identity bound to one deployment instance    |
-| Device    | Provisioned or activated Ed25519 identity bound to one deployment instance |
+| Principal | Authentication |
+| --- | --- |
+| User | Browser or CLI login established through an Auth portal |
+| Service | Immutable provisioned Ed25519 identity for a service instance |
+| Device | Provisioned/activated Ed25519 identity for a device instance |
 
-External OAuth/OIDC identities and a local password are sign-in methods for a
-Trellis user account. They are not separate authorization containers.
+OIDC identities and local passwords are sign-in methods for a Trellis user.
+They are not separate authorization containers. Durable Auth sessions represent
+user logins only; services and devices authenticate without a login row.
 
-## Participant artifacts
+## Installed participants
 
-Every runtime presents an exact `trellis.participant.v1` artifact binding. The
-artifact identifies the APIs the participant implements or uses and its resource
-needs. API definitions use `trellis.api.v1`. Native Trellis IDL is compiled to
-those protocol artifacts before bootstrap; TypeScript and Rust consume the
-generated types and descriptors rather than authoring executable contracts.
+Every participant is installed in Auth before it can be granted access. An
+installed revision contains the exact canonical `trellis.participant.v1`
+artifact and all resolved `trellis.api.v1` artifacts. Revisions are immutable,
+so Auth can always explain the exact API surface behind an issued context.
 
-Authority decisions bind the participant id, artifact digest, and accepted needs
-digest. Changing that boundary requires a new proposal and decision rather than
-silently expanding an existing session.
+The CLI (`trellis-app.cli@v1`), Console (`trellis-app.console@v1`), activation
+Portal (`trellis-app.portal@v1`), and Auth runtime are installed built-ins.
+Their IDs do not grant access by themselves.
 
-Built-in clients follow the same model: the CLI is `trellis-app.cli@v1`, Console
-is `trellis-app.console@v1`, and the login portal is `trellis-app.portal@v1`.
-They are ordinary app participants; privileged platform surfaces remain the
-Trellis-owned `trellis.*` APIs. A `trellis-app.*` ID grants no authority by
-itself; the app must present its exact participant artifact and have accepted
-authority like any other client.
+## GrantBinding
 
-## Session keys
+A `GrantBinding` is the only current authority record. It is scoped to one
+identity and one participant and contains:
 
-Every connection uses a local Ed25519 session key. Bootstrap or browser bind
-returns a deny-all Auth-account JWT whose subject is that key encoded as a NATS
-User NKey. There is no shared sentinel credential.
+- the installed participant revision;
+- exact permission atoms; and
+- finite platform privileges such as `Admin`.
 
-On every connect and reconnect, the client:
+Grant writes use an expected revision and reject atoms absent from the installed
+participant. `Admin` authorizes administrative APIs but does not imply arbitrary
+application permissions. There are no authority proposals, desired/materialized
+states, or reconciliation workers.
 
-1. signs the standard NATS server nonce with the session key
-2. creates a separate `trellis.session-proof.v1` proof bound to that nonce,
-   session id, participant digest, request id, and issue time
-3. sends both through NATS Auth Callout
+## Authorization contexts
 
-The Rust callout verifies the bootstrap JWT, both signatures, replay state,
-current session, exact participant binding, deployment/device eligibility, and
-current materialized authority. It then issues a short-lived target-account JWT
-whose publish and subscribe permissions are compiled from structured grants, API
-descriptors, and resource bindings. Subjects never create authority.
+When a principal bootstraps or refreshes, Auth rereads the current credential,
+binding, installed participant, resource evidence, and online issuer in one
+transaction. It signs an authorization context containing that exact snapshot
+and stores it permanently by digest before use.
 
-Clients with an inaccurate clock use the HTTP bootstrap response's `serverNow`
-to correct proof timestamps. Reconnect creates a fresh nonce-bound proof; it
-does not renew or reuse a bearer binding token.
+Applications carry only the context digest, a message proof, message-specific
+metadata, and a small `session-key` header that must equal the key inside the
+signed context. The header is redundant checked metadata, never independent
+authority.
 
-## Browser login and the portal
+Providers resolve an unknown context by digest, verify the issuer signature and
+explicit revocation state, verify the message proof, and authorize the exact
+action from the grant. Their bounded in-memory caches do not call Auth on a
+cache hit.
 
-Browser login routes through an auth-owned portal:
+## Bootstrap and NATS
 
-1. The app creates a proof-bound request with its session key and exact
-   participant artifact.
-2. Trellis creates a CAS-backed flow and selects an auth-owned portal route.
-3. The portal performs local-password or OIDC authentication.
-4. Any required participant authority proposal is decided through the same
-   authority workflow used by other principals.
-5. Bind creates the session through the shared session transaction and returns
-   session metadata, NATS endpoints, and the session-bound deny-all JWT.
-6. `TrellisClient.connect(...)` owns NATS proof creation and reconnect.
+Services and devices send identity/proof inputs only. Auth resolves assignment,
+participant/API artifacts, grants, resources, route JWT, inbox, and exact NATS
+endpoints server-side. The runtime verifies that complete response before its
+first CONNECT.
 
-The built-in Portal and Console live in the unified `web/` SvelteKit project.
-Its reproducible static build is embedded in the Rust runtime, so first-admin
-login and device activation do not depend on another deployed service. A
-deployment can replace the shared source or independently override either
-surface with `[http].web_source`, `[http].portal_source`, and
-`[http].console_source`.
+NATS Auth Callout verifies the route token, nonce-bound connect proof, signed
+context, redundant fields, and current issuable state. It derives short-lived
+publish/subscribe permissions from structured grants and exact evidence.
+Subjects never create authority.
 
-## Capabilities
+## Browser login
 
-Desired authority records an accepted administrative decision. Reconciliation
-resolves that decision against the exact participant needs and available
-dependency/resource evidence, then atomically replaces materialized authority.
-Issuance fails closed when required evidence is missing or stale.
+Browser authentication starts with a proof-bound request for an installed app
+participant. The portal performs local-password or OIDC authentication and
+approval under the browser-binding/CSRF controls. Bind proves session-key
+possession and creates a user login, but returns no authorization context. The
+client commits the login under its IndexedDB generation fence, then calls
+context refresh.
 
-Effective grants are the intersection of:
-
-- accepted desired authority
-- resolved participant needs
-- available dependency and resource evidence
-
-Mutable capability groups, grant overrides, authored NATS ACLs, and
-session-owned authority were retired. Administrative bootstrap derives its
-mandatory grants from the exact built-in CLI participant artifact.
+Only the browser session seed, minimal login metadata, pending flow, and
+generation tombstone are durable. Contexts, route JWTs, issuer keys, grants, and
+transport endpoints remain in process memory.
 
 ## Devices
 
-Device provisioning binds an immutable identity key to a deployment and
-principal. A one-time provisioning secret is stored only as a hash and consumed
-atomically. Devices requiring activation remain pending and receive no usable
-credential until the durable review is unexpired, administratively approved when
-required, and any required user delegation is active.
+Device enrollment uses `/auth/device/enroll` to create or resume a review.
+Approval does not install runtime credentials. Once approved, the device calls
+`/bootstrap/device`, proves its durable identity plus fresh session key, and
+receives the same shared installation shape as a service.
 
-`POST /bootstrap/device` is the shared initial and reconnect boundary. The
-`Auth.DeviceUserAuthorities.Resolve` operation owns the caller-visible
-activation workflow; private execution remains a job concern, not an operation.
-Resolve start proof-binds one claiming user. Get is read-only, wait is
-event-driven, and cancellation is unsupported. Devices observe readiness by
-repeating fresh proof-bound `/bootstrap/device` requests until the server
-returns the retained session and runtime evidence.
+## Revocation and history
 
-## Revocation and connections
+Authorization-changing transactions commit state, affected-context
+revocations, typed events, and connection-kick intents together. Explicit
+revocation invalidates proofs. Ordinary expiry, connection closure, login
+revocation, grant replacement, and issuer rotation retain signed contexts for
+historical event validation.
 
-Session revocation commits the durable state change, auth event, and kick intent
-in one transaction. Connection presence is short-lived operational KV state.
-Kick delivery is retried after commit, and short JWT expiry provides a second
-reauthorization bound if a connection cannot be kicked immediately.
-
-Ordinary requests and retained events are authorized locally from the presented
-context digest. Providers resolve an unknown immutable context and its exact
-descriptor evidence once, then verify the actual subject, reply subject, raw
-payload, request or event identity, signed time, exact permission atom,
-capabilities, revocation timestamp, and replay key from memory. Cache hits
-perform no Auth RPC, HTTP, SQLite, or NATS registry reads.
-
-Delayed events are checked at their signed event time. An event remains eligible
-after delivery delay or context expiry only when its event time is inside the
-context validity window and strictly before any revocation. Context, trust,
-descriptor, and revocation evidence is retained through the Event Log stream
-retention window.
+Event Log stores context-digest references rather than duplicate contexts or
+grant sets. Events signed inside their validity window may remain historically
+valid after ordinary expiry, but never after an applicable explicit revocation.

@@ -29,7 +29,7 @@ pub(super) async fn portal_flow_response<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -85,7 +85,7 @@ pub(crate) async fn get_flow<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -131,7 +131,7 @@ pub(crate) async fn get_portal_flow<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -204,7 +204,7 @@ pub(crate) async fn get_account_flow<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -359,7 +359,7 @@ pub(crate) async fn complete_admin_account<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -405,7 +405,7 @@ where
                 token: flow_token,
                 expected_flow_version: flow.version,
                 username: request.username,
-                authority: None,
+                bindings: Vec::new(),
                 profile: None,
                 password: request.password,
                 consumed_at: now,
@@ -500,22 +500,34 @@ where
         .username
         .clone()
         .ok_or_else(|| HttpError::bad_request("username_required"))?;
-    let participant_id = flow.payload["participantId"]
-        .as_str()
+    let targets = flow.payload["bindings"]
+        .as_array()
         .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-    let participant_artifact_digest = flow.payload["participantArtifactDigest"]
-        .as_str()
-        .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-    let participant_needs_digest = flow.payload["participantNeedsDigest"]
-        .as_str()
-        .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-    let binding = state
-        .service
-        .repository()
-        .get_participant_binding(participant_id, participant_artifact_digest)
-        .await?
-        .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-    let (grant_set, capabilities) = super::complete_participant_authority(&binding)?;
+    let mut bindings = Vec::with_capacity(targets.len());
+    for target in targets {
+        let participant_id = target["participantId"]
+            .as_str()
+            .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
+        let installed_revision = target["installedRevision"]
+            .as_u64()
+            .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
+        let (_, installed) = state
+            .service
+            .repository()
+            .get_installed_participant_record(participant_id.to_owned(), Some(installed_revision))
+            .await?
+            .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
+        bindings.push(FirstAdminBinding {
+            participant_id: participant_id.to_owned(),
+            installed_revision,
+            grant_set: super::complete_participant_grants(&installed)?,
+            platform_privileges: (participant_id
+                != crate::platform::auth::builtins::PORTAL_PARTICIPANT_ID)
+                .then_some(trellis_protocol::PlatformPrivilege::Admin)
+                .into_iter()
+                .collect(),
+        });
+    }
     let browser_flow_id = request.browser_flow_id.clone();
     let browser_flow = if let Some(browser_flow_id) = browser_flow_id.as_deref() {
         let portal_binding_digest = request
@@ -545,11 +557,7 @@ where
             display_name: request.name.filter(|value| !value.trim().is_empty()),
             email: request.email,
             image_url: None,
-            participant_id: participant_id.to_owned(),
-            participant_artifact_digest: participant_artifact_digest.to_owned(),
-            participant_needs_digest: participant_needs_digest.to_owned(),
-            grant_set,
-            capabilities,
+            bindings,
             authority_expires_at: None,
             completed_at: now,
             idempotency: idempotency(
@@ -608,7 +616,7 @@ pub(crate) async fn local_login<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -692,7 +700,7 @@ pub(crate) async fn register_local<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository

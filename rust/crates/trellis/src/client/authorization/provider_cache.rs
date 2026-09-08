@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::ops::Deref;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
 
@@ -7,7 +8,7 @@ use futures_util::StreamExt;
 use trellis_protocol::{
     parse_authorization_context, verify_authorization_context, AuthorizationContextPurpose,
     AuthorizationIssuerKey, AuthorizationIssuerState, AuthorizationVerificationPolicy,
-    VerifiedAuthorizationContext,
+    SignedAuthorizationContext, VerifiedAuthorizationContext,
 };
 
 use super::super::TrellisClientError;
@@ -40,11 +41,23 @@ pub struct RuntimeAuthorizationIoCounters {
     pub context_resolves: u64,
 }
 
+const MAX_CACHED_CONTEXTS: usize = 256;
+
+#[derive(Default)]
+struct CachedVerifications {
+    live: Option<VerifiedAuthorizationContext>,
+    historical: Option<VerifiedAuthorizationContext>,
+}
+
 struct CachedContext {
-    context: VerifiedAuthorizationContext,
+    signed: SignedAuthorizationContext,
+    issuer: AuthorizationIssuerKey,
+    verified: Mutex<CachedVerifications>,
     epoch: u64,
     covered: Arc<AtomicBool>,
     watch: tokio::task::AbortHandle,
+    leases: AtomicUsize,
+    last_used: AtomicU64,
 }
 
 impl Drop for CachedContext {
@@ -54,18 +67,76 @@ impl Drop for CachedContext {
     }
 }
 
+/// Lease keeping a cached authorization context and its revocation watch alive.
+#[doc(hidden)]
+pub struct AuthorizationContextLease {
+    entry: Arc<CachedContext>,
+    context: VerifiedAuthorizationContext,
+}
+
+impl Deref for AuthorizationContextLease {
+    type Target = VerifiedAuthorizationContext;
+
+    fn deref(&self) -> &Self::Target {
+        &self.context
+    }
+}
+
+impl Drop for AuthorizationContextLease {
+    fn drop(&mut self) {
+        self.entry.leases.fetch_sub(1, Ordering::Release);
+    }
+}
+
 #[derive(Default)]
 struct ProviderState {
-    contexts: HashMap<String, CachedContext>,
+    contexts: HashMap<String, Arc<CachedContext>>,
     issuers: HashMap<String, AuthorizationIssuerKey>,
     // Negative evidence is retained no longer than a possible live context lease.
     revocations: HashMap<String, (i64, i64)>,
 }
 
+impl ProviderState {
+    fn revocation_time(&self, digest: &str) -> Result<Option<i64>, ()> {
+        if let Some((revoked_at, _)) = self.revocations.get(digest) {
+            return Ok(Some(*revoked_at));
+        }
+        if self
+            .contexts
+            .get(digest)
+            .is_some_and(|entry| !entry.covered.load(Ordering::Acquire))
+        {
+            return Err(());
+        }
+        Ok(None)
+    }
+
+    fn insert_context(
+        &mut self,
+        digest: String,
+        entry: Arc<CachedContext>,
+    ) -> Result<(), Arc<CachedContext>> {
+        if self.contexts.len() >= MAX_CACHED_CONTEXTS && !self.contexts.contains_key(&digest) {
+            let Some(oldest) = self
+                .contexts
+                .iter()
+                .filter(|(_, entry)| entry.leases.load(Ordering::Acquire) == 0)
+                .min_by_key(|(_, entry)| entry.last_used.load(Ordering::Acquire))
+                .map(|(digest, _)| digest.clone())
+            else {
+                return Err(entry);
+            };
+            self.contexts.remove(&oldest);
+        }
+        self.contexts.insert(digest, entry);
+        Ok(())
+    }
+}
+
 /// Connection-scoped caller-context verification using online issuer keys.
 ///
-/// Live cache entries require an exact revocation watch on the same NATS
-/// connection epoch. Expired contexts are resolved afresh for historical events.
+/// Cached digests retain separate live and historical verification results and
+/// require an exact revocation watch on the same NATS connection epoch.
 #[derive(Clone)]
 pub struct AuthorizationProviderCache {
     nats: async_nats::Client,
@@ -78,6 +149,7 @@ pub struct AuthorizationProviderCache {
     issuer_resolution: Arc<tokio::sync::Mutex<()>>,
     closed: Arc<AtomicBool>,
     context_resolves: Arc<AtomicU64>,
+    access_clock: Arc<AtomicU64>,
 }
 
 impl AuthorizationProviderCache {
@@ -155,6 +227,7 @@ impl AuthorizationProviderCache {
             issuer_resolution: Arc::new(tokio::sync::Mutex::new(())),
             closed: Arc::new(AtomicBool::new(false)),
             context_resolves: Arc::new(AtomicU64::new(0)),
+            access_clock: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -171,13 +244,15 @@ impl AuthorizationProviderCache {
                     let epoch = self.epoch();
                     let connected = self.health()?.healthy;
                     let mut state = self.write_state()?;
-                    state.contexts.retain(|_, entry| connected && entry.epoch == epoch && entry.context.expires_at() > now);
+                    state.contexts.retain(|_, entry| {
+                        entry.leases.load(Ordering::Acquire) > 0
+                            || (connected && entry.epoch == epoch && entry.covered.load(Ordering::Acquire))
+                    });
                     state.revocations.retain(|_, (_, expires_at)| *expires_at > now);
                 }
             }
         }
         self.closed.store(true, Ordering::Release);
-        self.write_state()?.contexts.clear();
         Ok(())
     }
 
@@ -239,43 +314,21 @@ impl AuthorizationProviderCache {
         self.nats.statistics().connects.load(Ordering::Acquire)
     }
 
-    pub(crate) fn verified_context_raw(
-        &self,
-        digest: &str,
-    ) -> Result<Option<VerifiedAuthorizationContext>, TrellisClientError> {
-        if !self.health()?.healthy {
-            return Ok(None);
-        }
-        let now = self.now_seconds()?;
-        let epoch = self.epoch();
-        Ok(self
-            .read_state()?
-            .contexts
-            .get(digest)
-            .filter(|entry| {
-                entry.epoch == epoch
-                    && entry.covered.load(Ordering::Acquire)
-                    && entry.context.not_before() <= now
-                    && entry.context.expires_at() > now
-            })
-            .map(|entry| entry.context.clone()))
-    }
-
     #[cfg(feature = "runtime-internals")]
     #[doc(hidden)]
-    pub fn runtime_verified_context_raw(
+    pub fn runtime_lease_cached_context(
         &self,
         digest: &str,
-    ) -> Result<Option<VerifiedAuthorizationContext>, TrellisClientError> {
-        self.verified_context_raw(digest)
+    ) -> Result<Option<AuthorizationContextLease>, TrellisClientError> {
+        self.lease_cached_context(digest, false)
     }
 
     pub(crate) fn revocation_time(&self, digest: &str) -> Result<Option<i64>, TrellisClientError> {
-        Ok(self
-            .read_state()?
-            .revocations
-            .get(digest)
-            .map(|(at, _)| *at))
+        self.read_state()?.revocation_time(digest).map_err(|()| {
+            TrellisClientError::AuthorizationUnavailable(
+                "exact context revocation watch is unavailable".into(),
+            )
+        })
     }
 
     #[cfg(feature = "runtime-internals")]
@@ -354,7 +407,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         now: i64,
-    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
+    ) -> Result<AuthorizationContextLease, TrellisClientError> {
         self.resolve_context_for(digest, now, false).await
     }
 
@@ -364,7 +417,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         now: i64,
-    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
+    ) -> Result<AuthorizationContextLease, TrellisClientError> {
         self.resolve_context(digest, now).await
     }
 
@@ -372,7 +425,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         event_time: i64,
-    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
+    ) -> Result<AuthorizationContextLease, TrellisClientError> {
         self.resolve_context_for(digest, event_time, true).await
     }
 
@@ -380,7 +433,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         event_time: i64,
-    ) -> Result<VerifiedAuthorizationContext, crate::service::EventVerificationFailure> {
+    ) -> Result<AuthorizationContextLease, crate::service::EventVerificationFailure> {
         self.resolve_event_context(digest, event_time)
             .await
             .map_err(classify_event_resolution_failure)
@@ -392,7 +445,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         event_time: i64,
-    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
+    ) -> Result<AuthorizationContextLease, TrellisClientError> {
         self.resolve_event_context(digest, event_time).await
     }
 
@@ -402,7 +455,7 @@ impl AuthorizationProviderCache {
         &self,
         digest: &str,
         event_time: i64,
-    ) -> Result<VerifiedAuthorizationContext, crate::service::EventVerificationFailure> {
+    ) -> Result<AuthorizationContextLease, crate::service::EventVerificationFailure> {
         self.resolve_event_context_for_verification(digest, event_time)
             .await
     }
@@ -412,7 +465,7 @@ impl AuthorizationProviderCache {
         digest: &str,
         verification_time: i64,
         historical: bool,
-    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
+    ) -> Result<AuthorizationContextLease, TrellisClientError> {
         validate_digest_key(digest)?;
         if !self.health()?.healthy {
             return Err(TrellisClientError::AuthorizationUnavailable(
@@ -424,7 +477,7 @@ impl AuthorizationProviderCache {
                 "authorization context is revoked".into(),
             ));
         }
-        if let Some(context) = self.verified_context_raw(digest)? {
+        if let Some(context) = self.lease_cached_context(digest, historical)? {
             return Ok(context);
         }
         let pending = {
@@ -453,9 +506,10 @@ impl AuthorizationProviderCache {
                 "authorization context is revoked".into(),
             ));
         }
-        if let Some(context) = self.verified_context_raw(digest)? {
+        if let Some(context) = self.lease_cached_context(digest, historical)? {
             return Ok(context);
         }
+        self.discard_unusable_context(digest)?;
         tokio::time::timeout(
             Duration::from_secs(30),
             self.resolve_context_once(digest, verification_time, historical),
@@ -469,7 +523,7 @@ impl AuthorizationProviderCache {
         digest: &str,
         verification_time: i64,
         historical: bool,
-    ) -> Result<VerifiedAuthorizationContext, TrellisClientError> {
+    ) -> Result<AuthorizationContextLease, TrellisClientError> {
         let epoch = self.epoch();
         self.context_resolves.fetch_add(1, Ordering::Relaxed);
         let value = self.registry.get_context(digest).await?.ok_or_else(|| {
@@ -513,27 +567,23 @@ impl AuthorizationProviderCache {
             }
         };
         let now = self.now_seconds()?;
-        let cacheable = issuer.state == AuthorizationIssuerState::Active
+        let live = issuer.state == AuthorizationIssuerState::Active
             && signed.unsigned.not_before <= now
             && signed.unsigned.expires_at > now;
-        let purpose = if historical && !cacheable {
+        let purpose = if historical {
             AuthorizationContextPurpose::HistoricalEvent
         } else {
             AuthorizationContextPurpose::Live
         };
-        policy.now_unix_seconds = if cacheable { now } else { verification_time };
+        policy.now_unix_seconds = if historical { verification_time } else { now };
         let verified = verify_authorization_context(&issuer, &signed, &policy, purpose)
             .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        if !historical && !cacheable {
+        if !historical && !live {
             return Err(TrellisClientError::Bootstrap(
                 "authorization context is not current".into(),
             ));
         }
-        let watch = if cacheable {
-            Some(self.registry.watch_revocation(digest).await?)
-        } else {
-            None
-        };
+        let mut watch = self.registry.watch_revocation(digest).await?;
         if let Some(value) = self.registry.get_revocation(digest).await? {
             self.observe_revocation(digest, parse_revocation_record(&value)?)?;
         }
@@ -547,85 +597,184 @@ impl AuthorizationProviderCache {
                 "connection changed during context resolution".into(),
             ));
         }
-        if let Some(mut watch) = watch {
-            let now = self.now_seconds()?;
-            let lifetime = verified
-                .expires_at()
-                .checked_sub(now)
-                .filter(|seconds| *seconds > 0)
-                .ok_or_else(|| {
-                    TrellisClientError::AuthorizationUnavailable(
-                        "context expired during resolution".into(),
-                    )
-                })?;
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(lifetime as u64);
-            let covered = Arc::new(AtomicBool::new(true));
-            let weak_state = Arc::downgrade(&self.state);
-            let own = self.own.as_ref().map(Arc::downgrade);
-            let watch_covered = covered.clone();
-            let watch_digest = digest.to_owned();
-            let expires_at = verified.expires_at();
-            // The task owns only weak cache references; dropping the entry aborts it.
-            let task = tokio::spawn(async move {
-                let entry = tokio::select! {
-                    _ = tokio::time::sleep_until(deadline) => None,
-                    entry = watch.next() => entry,
-                };
-                watch_covered.store(false, Ordering::Release);
-                let revoked_at = match entry {
-                    Some(Ok(entry))
-                        if !entry.removed
-                            && entry.key == format!("{REVOCATION_PREFIX}{watch_digest}") =>
-                    {
-                        parse_revocation_record(&entry.value).ok()
-                    }
-                    _ => None,
-                };
-                if let Some(state) = weak_state.upgrade() {
-                    if let Ok(mut state) = state.write() {
-                        if let Some(at) = revoked_at {
-                            state
-                                .revocations
-                                .insert(watch_digest.clone(), (at, expires_at));
-                        }
-                        if state
-                            .contexts
-                            .get(&watch_digest)
-                            .is_some_and(|entry| Arc::ptr_eq(&entry.covered, &watch_covered))
-                        {
-                            state.contexts.remove(&watch_digest);
-                        }
-                    }
+        let covered = Arc::new(AtomicBool::new(true));
+        let weak_state = Arc::downgrade(&self.state);
+        let own = self.own.as_ref().map(Arc::downgrade);
+        let watch_covered = covered.clone();
+        let watch_digest = digest.to_owned();
+        let revocation_deadline = now
+            .saturating_add(i64::from(
+                self.verification_policy.maximum_context_lifetime_seconds,
+            ))
+            .saturating_add(i64::from(
+                self.verification_policy.allowed_clock_skew_seconds,
+            ));
+        // The task owns only weak cache references; dropping the entry aborts it.
+        let task = tokio::spawn(async move {
+            let entry = watch.next().await;
+            watch_covered.store(false, Ordering::Release);
+            let revoked_at = match entry {
+                Some(Ok(entry))
+                    if !entry.removed
+                        && entry.key == format!("{REVOCATION_PREFIX}{watch_digest}") =>
+                {
+                    parse_revocation_record(&entry.value).ok()
                 }
-                if revoked_at.is_some() {
-                    if let Some(own) = own.and_then(|own| own.upgrade()) {
-                        if own
-                            .context_digest()
-                            .is_ok_and(|digest| digest == watch_digest)
-                        {
-                            if let Err(error) = own.clear() {
-                                tracing::warn!(%error, "cannot discard revoked own context");
-                            }
-                            own.request_refresh();
-                        }
-                    }
-                }
-            });
-            let entry = CachedContext {
-                context: verified.clone(),
-                epoch,
-                covered,
-                watch: task.abort_handle(),
+                _ => None,
             };
-            let mut state = self.write_state()?;
-            if state.revocations.contains_key(digest) || !entry.covered.load(Ordering::Acquire) {
-                return Err(TrellisClientError::AuthorizationUnavailable(
-                    "revocation coverage changed during resolution".into(),
-                ));
+            if let Some(state) = weak_state.upgrade() {
+                if let Ok(mut state) = state.write() {
+                    if let Some(at) = revoked_at {
+                        state
+                            .revocations
+                            .insert(watch_digest.clone(), (at, revocation_deadline));
+                    }
+                    if state.contexts.get(&watch_digest).is_some_and(|entry| {
+                        Arc::ptr_eq(&entry.covered, &watch_covered)
+                            && entry.leases.load(Ordering::Acquire) == 0
+                    }) {
+                        state.contexts.remove(&watch_digest);
+                    }
+                }
             }
-            state.contexts.insert(digest.to_owned(), entry);
+            if revoked_at.is_some() {
+                if let Some(own) = own.and_then(|own| own.upgrade()) {
+                    if own
+                        .context_digest()
+                        .is_ok_and(|digest| digest == watch_digest)
+                    {
+                        if let Err(error) = own.clear() {
+                            tracing::warn!(%error, "cannot discard revoked own context");
+                        }
+                        own.request_refresh();
+                    }
+                }
+            }
+        });
+        let mut verifications = CachedVerifications::default();
+        if historical {
+            verifications.historical = Some(verified.clone());
+        } else {
+            verifications.live = Some(verified.clone());
         }
-        Ok(verified)
+        let entry = Arc::new(CachedContext {
+            signed,
+            issuer,
+            verified: Mutex::new(verifications),
+            epoch,
+            covered,
+            watch: task.abort_handle(),
+            leases: AtomicUsize::new(1),
+            last_used: AtomicU64::new(self.next_access()),
+        });
+        let mut state = self.write_state()?;
+        if state.revocations.contains_key(digest) || !entry.covered.load(Ordering::Acquire) {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "revocation coverage changed during resolution".into(),
+            ));
+        }
+        if state
+            .contexts
+            .get(digest)
+            .is_some_and(|existing| existing.leases.load(Ordering::Acquire) > 0)
+        {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "provider context is still leased".into(),
+            ));
+        }
+        state
+            .insert_context(digest.to_owned(), entry.clone())
+            .map_err(|_| {
+                TrellisClientError::AuthorizationUnavailable(
+                    "provider context cache capacity reached".into(),
+                )
+            })?;
+        Ok(AuthorizationContextLease {
+            entry,
+            context: verified,
+        })
+    }
+
+    fn lease_cached_context(
+        &self,
+        digest: &str,
+        historical: bool,
+    ) -> Result<Option<AuthorizationContextLease>, TrellisClientError> {
+        if !self.health()?.healthy {
+            return Ok(None);
+        }
+        let now = self.now_seconds()?;
+        let epoch = self.epoch();
+        let state = self.write_state()?;
+        let Some(entry) = state.contexts.get(digest) else {
+            return Ok(None);
+        };
+        if entry.epoch != epoch || !entry.covered.load(Ordering::Acquire) {
+            return Ok(None);
+        }
+        let mut verifications = entry.verified.lock().map_err(|_| {
+            TrellisClientError::AuthorizationUnavailable(
+                "provider verification cache lock poisoned".into(),
+            )
+        })?;
+        let cached = if historical {
+            &mut verifications.historical
+        } else {
+            &mut verifications.live
+        };
+        if cached.is_none() {
+            let mut policy = self.policy()?;
+            policy.now_unix_seconds = if historical {
+                policy.now_unix_seconds
+            } else {
+                now
+            };
+            *cached = Some(
+                verify_authorization_context(
+                    &entry.issuer,
+                    &entry.signed,
+                    &policy,
+                    if historical {
+                        AuthorizationContextPurpose::HistoricalEvent
+                    } else {
+                        AuthorizationContextPurpose::Live
+                    },
+                )
+                .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?,
+            );
+        }
+        let context = cached.clone().ok_or_else(|| {
+            TrellisClientError::AuthorizationUnavailable(
+                "provider verification result is unavailable".into(),
+            )
+        })?;
+        if !historical && (context.not_before() > now || context.expires_at() <= now) {
+            return Ok(None);
+        }
+        entry.leases.fetch_add(1, Ordering::AcqRel);
+        entry.last_used.store(self.next_access(), Ordering::Release);
+        Ok(Some(AuthorizationContextLease {
+            entry: entry.clone(),
+            context,
+        }))
+    }
+
+    fn next_access(&self) -> u64 {
+        self.access_clock.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn discard_unusable_context(&self, digest: &str) -> Result<(), TrellisClientError> {
+        let mut state = self.write_state()?;
+        let Some(entry) = state.contexts.get(digest) else {
+            return Ok(());
+        };
+        if entry.leases.load(Ordering::Acquire) > 0 {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "provider context is still leased".into(),
+            ));
+        }
+        state.contexts.remove(digest);
+        Ok(())
     }
 
     fn read_state(
@@ -684,6 +833,70 @@ fn parse_revocation_record(value: &[u8]) -> Result<i64, TrellisClientError> {
 mod wire_tests {
     use super::*;
 
+    fn test_context() -> (
+        SignedAuthorizationContext,
+        AuthorizationIssuerKey,
+        VerifiedAuthorizationContext,
+    ) {
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../../conformance/authorization-context/vectors.json"
+        ))
+        .unwrap();
+        let complete = &vectors["completeChain"];
+        let value: serde_json::Value =
+            serde_json::from_str(complete["contextCanonicalJson"].as_str().unwrap()).unwrap();
+        let signed = parse_authorization_context(&value).unwrap();
+        let issuer = AuthorizationIssuerKey {
+            key_id: complete["issuerKeyId"].as_str().unwrap().to_owned(),
+            public_key: complete["issuerPublicKey"].as_str().unwrap().to_owned(),
+            state: AuthorizationIssuerState::Active,
+        };
+        let policy = AuthorizationVerificationPolicy::new(1_200, 30, 1_000, 100_000, 100).unwrap();
+        let verified = verify_authorization_context(
+            &issuer,
+            &signed,
+            &policy,
+            AuthorizationContextPurpose::Live,
+        )
+        .unwrap();
+        (signed, issuer, verified)
+    }
+
+    fn test_entry(
+        signed: &SignedAuthorizationContext,
+        issuer: &AuthorizationIssuerKey,
+        verified: &VerifiedAuthorizationContext,
+        last_used: u64,
+        cancelled: Arc<AtomicBool>,
+    ) -> Arc<CachedContext> {
+        struct Cancellation(Arc<AtomicBool>);
+
+        impl Drop for Cancellation {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+
+        let cancellation = Cancellation(cancelled);
+        let task = tokio::spawn(async move {
+            let _cancellation = cancellation;
+            std::future::pending::<()>().await;
+        });
+        Arc::new(CachedContext {
+            signed: signed.clone(),
+            issuer: issuer.clone(),
+            verified: Mutex::new(CachedVerifications {
+                live: Some(verified.clone()),
+                historical: None,
+            }),
+            epoch: 1,
+            covered: Arc::new(AtomicBool::new(true)),
+            watch: task.abort_handle(),
+            leases: AtomicUsize::new(0),
+            last_used: AtomicU64::new(last_used),
+        })
+    }
+
     #[test]
     fn revocation_is_additively_tolerant() {
         assert_eq!(
@@ -719,5 +932,70 @@ mod wire_tests {
             classify_event_resolution_failure(validate_digest_key("invalid").unwrap_err()),
             crate::service::EventVerificationFailure::Rejected(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn bounded_lru_retains_leased_revoked_context_until_release() {
+        let (signed, issuer, verified) = test_context();
+        let cancellations = (0..=MAX_CACHED_CONTEXTS)
+            .map(|_| Arc::new(AtomicBool::new(false)))
+            .collect::<Vec<_>>();
+        let mut state = ProviderState::default();
+        let first = test_entry(&signed, &issuer, &verified, 0, cancellations[0].clone());
+        first.leases.store(1, Ordering::Release);
+        assert!(state.insert_context("0".into(), first.clone()).is_ok());
+        let lease = AuthorizationContextLease {
+            entry: first.clone(),
+            context: verified.clone(),
+        };
+        for index in 1..MAX_CACHED_CONTEXTS {
+            assert!(state
+                .insert_context(
+                    index.to_string(),
+                    test_entry(
+                        &signed,
+                        &issuer,
+                        &verified,
+                        index as u64,
+                        cancellations[index].clone(),
+                    ),
+                )
+                .is_ok());
+        }
+
+        assert!(state
+            .insert_context(
+                MAX_CACHED_CONTEXTS.to_string(),
+                test_entry(
+                    &signed,
+                    &issuer,
+                    &verified,
+                    MAX_CACHED_CONTEXTS as u64,
+                    cancellations[MAX_CACHED_CONTEXTS].clone(),
+                ),
+            )
+            .is_ok());
+        assert_eq!(state.contexts.len(), MAX_CACHED_CONTEXTS);
+        assert!(state.contexts.contains_key("0"));
+        assert!(!state.contexts.contains_key("1"));
+        assert!(!cancellations[0].load(Ordering::Acquire));
+
+        state.revocations.insert("0".into(), (1_201, 2_000));
+        first.covered.store(false, Ordering::Release);
+        assert_eq!(state.revocation_time("0"), Ok(Some(1_201)));
+        assert!(state.contexts.contains_key("0"));
+
+        drop(lease);
+        drop(first);
+        assert!(state
+            .insert_context(
+                "next".into(),
+                test_entry(&signed, &issuer, &verified, 257, Arc::default()),
+            )
+            .is_ok());
+        assert!(!state.contexts.contains_key("0"));
+        tokio::task::yield_now().await;
+        assert!(cancellations[0].load(Ordering::Acquire));
+        assert!(cancellations[1].load(Ordering::Acquire));
     }
 }

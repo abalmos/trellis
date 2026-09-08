@@ -177,36 +177,6 @@ pub(crate) fn compile_transport_permissions(
     })
 }
 
-#[cfg(test)]
-pub(crate) fn compile_test_transport_permissions(
-    state: &super::IssuableAuthorizationState,
-    binding: &ParticipantBindingRecord,
-    registry: &AuthorizationRegistryBinding,
-) -> Result<TransportPermissions, AuthorizationStateError> {
-    let context = UnsignedAuthorizationContext {
-        format: trellis_protocol::AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
-        authority: "test".to_owned(),
-        issuer_key_id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-        issuer_manifest_generation: 1,
-        session_id: state.session_id.clone(),
-        session_key: state.session_public_key.clone(),
-        principal: state.principal.clone(),
-        participant: state.participant.clone(),
-        authority_ref: state.authority_ref.clone(),
-        deployment_id: state.deployment_id.clone(),
-        instance_id: state.instance_id.clone(),
-        inbox_prefix: state.inbox_prefix.clone(),
-        issued_at: 1,
-        not_before: 1,
-        expires_at: 2,
-        grant_set: state.grant_set.clone(),
-        capabilities: state.capabilities.clone(),
-        extensions: serde_json::Map::new(),
-        critical: Vec::new(),
-    };
-    compile_transport_permissions(&context, binding, &state.resource_bindings, registry)
-}
-
 fn compile_api_surface(
     api: &ApiArtifact,
     surface: ApiSurfaceKind,
@@ -353,6 +323,7 @@ fn compile_resource(
             publish.insert(format!("$JS.API.STREAM.MSG.GET.{stream}"));
             publish.insert(format!("$JS.API.CONSUMER.CREATE.{stream}"));
             publish.insert(format!("$JS.API.CONSUMER.CREATE.{stream}.>"));
+            publish.insert(format!("$JS.API.CONSUMER.INFO.{stream}.>"));
             publish.insert(format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.>"));
             publish.insert(format!("$JS.API.CONSUMER.DELETE.{stream}.>"));
             publish.insert(format!("$JS.FC.{stream}.>"));
@@ -435,6 +406,7 @@ fn kv_read(bucket: &str, publish: &mut BTreeSet<String>) {
     publish.insert(format!("$JS.API.DIRECT.GET.{stream}"));
     publish.insert(format!("$JS.API.DIRECT.GET.{stream}.>"));
     publish.insert(format!("$JS.API.CONSUMER.CREATE.{stream}.>"));
+    publish.insert(format!("$JS.API.CONSUMER.INFO.{stream}.>"));
     publish.insert(format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.>"));
     publish.insert(format!("$JS.ACK.{stream}.>"));
 }
@@ -449,81 +421,12 @@ fn invalid_error(message: impl Into<String>) -> AuthorizationStateError {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile_resource, compile_test_transport_permissions};
+    use super::compile_resource;
     use crate::platform::auth::{
-        IssuableAuthorizationState, ResourceBindingEvidence, ResourceBindingState,
-        ResourceProviderIdentity,
+        ResourceBindingEvidence, ResourceBindingState, ResourceProviderIdentity,
     };
     use std::collections::BTreeSet;
-    use trellis_protocol::{
-        AuthorizationAuthorityKind, AuthorizationAuthorityRef, AuthorizationParticipant,
-        AuthorizationPrincipal, AuthorizationPrincipalKind, GrantSet, PermissionAction,
-    };
-
-    fn test_registry_binding() -> super::super::context::AuthorizationRegistryBinding {
-        super::super::context::AuthorizationRegistryBinding::from_config(
-            &crate::config::AuthorizationConfig::default(),
-        )
-    }
-
-    #[test]
-    fn canonical_administrator_compiles_all_console_transport_subjects() {
-        let binding = super::super::cli_participant_binding(1).expect("CLI participant binding");
-        let resolved = binding.resolve().expect("resolved CLI participant");
-        let state = IssuableAuthorizationState {
-            principal: AuthorizationPrincipal {
-                kind: AuthorizationPrincipalKind::User,
-                id: "usr_admin".to_owned(),
-            },
-            session_id: "ses_admin".to_owned(),
-            session_public_key: "session-key".to_owned(),
-            session_key_id: "session-key-id".to_owned(),
-            inbox_prefix: "_INBOX.admin".to_owned(),
-            participant: AuthorizationParticipant {
-                kind: binding.participant_kind,
-                id: binding.participant_id.clone(),
-                artifact_digest: binding.artifact_digest.clone(),
-                needs_digest: binding.needs_digest.clone(),
-            },
-            authority_ref: AuthorizationAuthorityRef {
-                kind: AuthorizationAuthorityKind::Identity,
-                id: "auth_admin".to_owned(),
-                version: 1,
-            },
-            deployment_id: None,
-            instance_id: None,
-            grant_set: GrantSet::new(
-                resolved
-                    .proposal()
-                    .required()
-                    .grant_set()
-                    .permissions()
-                    .iter()
-                    .chain(resolved.proposal().optional().grant_set().permissions())
-                    .cloned()
-                    .collect(),
-            ),
-            resource_bindings: Vec::new(),
-            capabilities: vec!["trellis.jobs::read".to_owned()],
-            session_expires_at: None,
-            effective_authority_expires_at: None,
-            delegation_expires_at: None,
-            materialization_version: 1,
-        };
-
-        let permissions =
-            compile_test_transport_permissions(&state, &binding, &test_registry_binding())
-                .expect("administrator transport permissions");
-
-        for subject in [
-            "rpc.v1.Jobs.ListServices",
-            "rpc.v1.Jobs.Metrics",
-            "rpc.v1.EventLog.Query",
-            "feed.v1.Health.Watch",
-        ] {
-            assert!(permissions.publish.iter().any(|allowed| allowed == subject));
-        }
-    }
+    use trellis_protocol::PermissionAction;
 
     #[test]
     fn job_process_update_subscription_is_resource_exact() {

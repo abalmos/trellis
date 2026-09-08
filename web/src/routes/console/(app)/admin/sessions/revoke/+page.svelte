@@ -35,7 +35,7 @@
     loading = true;
     error = null;
     try {
-      currentSessionId = (await trellis.authSessionsMe({}).orThrow()).session.sessionId;
+      currentSessionId = (await trellis.authSessionsMe({}).orThrow()).session?.sessionId ?? null;
       const response = await trellis.authSessionsList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       sessions = response.entries ?? [];
@@ -146,7 +146,7 @@
             </div>
             <div class="text-base-content/60">{participantKindLabel(selectedSession.participantKind)}</div>
             <div class="trellis-identifier text-base-content/60">{selectedSession.sessionKeyId}</div>
-            <div class="text-xs text-base-content/60">Last auth {formatDate(selectedSession.lastSeenAt)}</div>
+            <div class="text-xs text-base-content/60">Last auth {formatDate(selectedSession.lastAuthenticatedAt)}</div>
           </div>
         {/if}
 

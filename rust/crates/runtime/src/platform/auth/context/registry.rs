@@ -55,7 +55,6 @@ impl AuthorizationContextRegistry {
         config: &AuthorizationConfig,
     ) -> Result<(), AuthorizationStateError> {
         let jetstream = jetstream::new(client);
-        let context_age = context_registry_retention_seconds(config)?;
         let context_value_bytes = context_registry_value_bytes(config.maximum_context_bytes)?;
         let contexts = open_existing(&jetstream, &config.context_bucket)
             .await?
@@ -63,7 +62,7 @@ impl AuthorizationContextRegistry {
         check_policy(
             &contexts,
             &config.context_bucket,
-            Duration::from_secs(context_age),
+            Duration::ZERO,
             context_value_bytes,
             config.registry_replicas,
         )
@@ -75,12 +74,11 @@ impl AuthorizationContextRegistry {
         config: &AuthorizationConfig,
     ) -> Result<Self, AuthorizationStateError> {
         let jetstream = jetstream::new(client);
-        let context_age = context_registry_retention_seconds(config)?;
         let context_value_bytes = context_registry_value_bytes(config.maximum_context_bytes)?;
         let contexts = open_or_create(
             &jetstream,
             &config.context_bucket,
-            Duration::from_secs(context_age),
+            Duration::ZERO,
             context_value_bytes,
             config.registry_replicas,
         )
@@ -134,21 +132,6 @@ impl AuthorizationContextRegistry {
         )
         .await
     }
-}
-
-fn context_registry_retention_seconds(
-    config: &AuthorizationConfig,
-) -> Result<u64, AuthorizationStateError> {
-    let cleanup_retention = config
-        .context_lifetime_seconds
-        .checked_add(config.cleanup_grace_seconds)
-        .ok_or_else(|| storage("context registry retention overflow"))?;
-    let event_retention = crate::resources::EVENT_STREAM_RETENTION
-        .as_secs()
-        .checked_add(config.context_lifetime_seconds)
-        .and_then(|value| value.checked_add(config.allowed_clock_skew_seconds))
-        .ok_or_else(|| storage("event authorization evidence retention overflow"))?;
-    Ok(cleanup_retention.max(event_retention))
 }
 
 fn context_registry_value_bytes(
@@ -226,6 +209,7 @@ async fn check_policy(
         .map_err(|error| storage(format!("cannot inspect {bucket}: {error}")))?;
     if status.max_age() != max_age
         || status.info.config.max_message_size != max_value_size
+        || status.info.config.max_bytes != -1
         || status.history() != 1
         || status.info.config.num_replicas != replicas
     {
@@ -299,9 +283,9 @@ mod tests {
 
     #[test]
     fn registry_binding_matches_published_key_layout() {
-        let binding = AuthorizationRegistryBinding::from_runtime_parts(
-            AuthorizationConfig::default().context_bucket,
-        );
+        let binding = AuthorizationRegistryBinding {
+            context_bucket: "trellis_authorization_contexts".to_owned(),
+        };
         assert_eq!(
             serde_json::to_value(binding).unwrap(),
             json!({
@@ -310,7 +294,6 @@ mod tests {
         );
     }
 
-    #[test]
     #[test]
     fn revocations_are_additively_tolerant() {
         assert_eq!(

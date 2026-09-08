@@ -646,8 +646,11 @@ where
 fn transfer_request_context(message: &async_nats::Message) -> RequestContext {
     RequestContext {
         subject: message.subject.to_string(),
-        session_key: optional_header(message.headers.as_ref(), "session-key")
-            .map(ToString::to_string),
+        session_key: message
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("session-key"))
+            .map(|value| value.as_str().to_owned()),
         proof: optional_header(message.headers.as_ref(), "proof").map(ToString::to_string),
         authorization_context: optional_header(message.headers.as_ref(), "authorization-context")
             .map(ToString::to_string),
@@ -675,18 +678,19 @@ async fn validate_transfer_request<V>(
 where
     V: RequestValidator,
 {
-    let actual_session_key =
-        context
-            .session_key
-            .clone()
-            .ok_or_else(|| ServerError::MissingSessionKey {
-                subject: subject.to_string(),
-            })?;
     if context.proof.as_deref().is_none_or(str::is_empty) {
         return Err(ServerError::MissingProof {
             subject: subject.to_string(),
         });
     }
+    let validation = validator
+        .validate_possession(subject, payload, context)
+        .await?;
+    let actual_session_key = validation
+        .caller
+        .as_ref()
+        .map(|caller| caller.session_key.clone())
+        .unwrap_or_default();
     if actual_session_key != expected_session_key {
         return Err(ServerError::TransferSessionMismatch {
             subject: subject.to_string(),
@@ -694,11 +698,7 @@ where
         });
     }
 
-    if validator
-        .validate_possession(subject, payload, context)
-        .await?
-        .allowed
-    {
+    if validation.allowed {
         Ok(())
     } else {
         Err(ServerError::RequestDenied {
@@ -992,7 +992,7 @@ mod tests {
     use sha2::{Digest, Sha256};
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
-    use crate::service::{RequestValidation, StoreObjectInfo};
+    use crate::service::{RequestValidation, StoreObjectInfo, VerifiedCaller};
 
     use super::*;
 
@@ -1000,6 +1000,7 @@ mod tests {
     struct CountingValidator {
         calls: Arc<AtomicUsize>,
         allowed: bool,
+        session_key: &'static str,
     }
 
     #[derive(Debug, Clone, Default)]
@@ -1269,25 +1270,38 @@ mod tests {
         ) -> BoxFuture<'a, Result<RequestValidation, ServerError>> {
             Box::pin(async move {
                 self.calls.fetch_add(1, Ordering::SeqCst);
-                Ok(if self.allowed {
-                    RequestValidation::allowed()
-                } else {
-                    RequestValidation::denied()
+                Ok(RequestValidation {
+                    allowed: self.allowed,
+                    caller: Some(VerifiedCaller {
+                        session_key: self.session_key.to_owned(),
+                        inbox_prefix: "_INBOX.test".to_owned(),
+                        context_digest: "context".to_owned(),
+                        connection_id: "con_test".to_owned(),
+                        login_session_id: None,
+                        principal_id: "usr_test".to_owned(),
+                        principal_kind: trellis_protocol::AuthorizationPrincipalKind::User,
+                        participant_id: "test@v1".to_owned(),
+                        platform_privileges: Vec::new(),
+                        deployment_id: None,
+                        instance_id: None,
+                    }),
+                    inbox_prefix: Some("_INBOX.test".to_owned()),
                 })
             })
         }
     }
 
     #[tokio::test]
-    async fn transfer_validation_rejects_session_mismatch_before_validator() {
+    async fn transfer_validation_rejects_verified_context_session_mismatch() {
         let calls = Arc::new(AtomicUsize::new(0));
         let validator = CountingValidator {
             calls: Arc::clone(&calls),
             allowed: true,
+            session_key: "wrong-session",
         };
         let context = RequestContext {
             subject: "transfer.v1.upload.session.transfer-1".to_string(),
-            session_key: Some("wrong-session".to_string()),
+            session_key: Some("expected-session".to_string()),
             proof: Some("proof".to_string()),
             authorization_context: None,
             iat: None,
@@ -1315,7 +1329,7 @@ mod tests {
             ServerError::TransferSessionMismatch { actual_session_key, .. }
                 if actual_session_key == "wrong-session"
         ));
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -1324,10 +1338,11 @@ mod tests {
         let validator = CountingValidator {
             calls: Arc::clone(&calls),
             allowed: true,
+            session_key: "wrong-session",
         };
         let context = RequestContext {
             subject: "transfer.v1.upload.session.transfer-1".to_string(),
-            session_key: Some("wrong-session".to_string()),
+            session_key: None,
             proof: None,
             authorization_context: None,
             iat: None,
@@ -1360,6 +1375,7 @@ mod tests {
         let validator = CountingValidator {
             calls: Arc::clone(&calls),
             allowed: false,
+            session_key: "expected-session",
         };
         let context = RequestContext {
             subject: "transfer.v1.download.session.transfer-1".to_string(),

@@ -384,14 +384,14 @@ async function createActivationRequiredStatus<
     ? await resumeDeviceActivationWithDeps({
       trellisUrl: args.checkArgs.trellisUrl,
       participant: args.checkArgs.participant,
-      identity: args.checkArgs.identity,
+      provisioningSecret: args.checkArgs.provisioningSecret,
       rootSecret: args.checkArgs.rootSecret,
       localState: args.localState,
     }, { now: () => Date.now() })
     : await startDeviceActivationWithDeps({
       trellisUrl: args.checkArgs.trellisUrl,
       participant: args.checkArgs.participant,
-      identity: args.checkArgs.identity,
+      provisioningSecret: args.checkArgs.provisioningSecret,
       rootSecret: args.checkArgs.rootSecret,
     }, { now: () => Date.now() });
 

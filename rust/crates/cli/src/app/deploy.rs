@@ -5,6 +5,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use miette::IntoDiagnostic;
 use serde_json::{json, Value};
+use trellis_idl::project::read_manifest;
 use trellis_rs::auth as authlib;
 use trellis_rs::generated::Caller;
 use trellis_runtime_apis::auth::AuthClient;
@@ -51,7 +52,9 @@ async fn run_svc_resource(format: OutputFormat, command: SvcResourceCommand) -> 
     match command.action {
         SvcResourceAction::Show => show_service(format, &command.id).await,
         SvcResourceAction::Create(args) => create_service(format, &command.id, &args).await,
-        SvcResourceAction::Apply(args) => apply_contract(format, &command.id, &args).await,
+        SvcResourceAction::Apply(args) => {
+            apply_contract(format, DeploymentKind::Service, &command.id, &args).await
+        }
         SvcResourceAction::Disable => toggle_service(format, &command.id, false).await,
         SvcResourceAction::Enable => toggle_service(format, &command.id, true).await,
         SvcResourceAction::Remove(args) => {
@@ -59,9 +62,6 @@ async fn run_svc_resource(format: OutputFormat, command: SvcResourceCommand) -> 
         }
         SvcResourceAction::Instances(args) => service_instances(format, &command.id, &args).await,
         SvcResourceAction::Provision(args) => provision_service(format, &command.id, &args).await,
-        SvcResourceAction::Authority(authority) => {
-            deployment_authority(format, &command.id, authority).await
-        }
     }
 }
 
@@ -70,7 +70,9 @@ async fn run_dev_resource(format: OutputFormat, command: DevResourceCommand) -> 
     match command.action {
         DevResourceAction::Show => show_device(format, &id).await,
         DevResourceAction::Create(args) => create_device(format, &id, &args).await,
-        DevResourceAction::Apply(args) => apply_contract(format, &id, &args).await,
+        DevResourceAction::Apply(args) => {
+            apply_contract(format, DeploymentKind::Device, &id, &args).await
+        }
         DevResourceAction::Disable => toggle_device(format, &id, false).await,
         DevResourceAction::Enable => toggle_device(format, &id, true).await,
         DevResourceAction::Remove(args) => {
@@ -78,7 +80,6 @@ async fn run_dev_resource(format: OutputFormat, command: DevResourceCommand) -> 
         }
         DevResourceAction::Instances(args) => device_instances(format, &id, &args).await,
         DevResourceAction::Provision(args) => provision_device(format, &id, &args).await,
-        DevResourceAction::Authority(command) => deployment_authority(format, &id, command).await,
         DevResourceAction::Activations(command) => dev_activations(format, &id, command).await,
         DevResourceAction::Reviews(command) => dev_reviews(format, &id, command).await,
     }
@@ -88,6 +89,76 @@ async fn run_dev_resource(format: OutputFormat, command: DevResourceCommand) -> 
 enum DeploymentKind {
     Service,
     Device,
+}
+
+pub(super) struct CompiledParticipantInput {
+    pub(super) participant_id: String,
+    pub(super) participant_digest: String,
+    pub(super) participant_artifact: BTreeMap<String, Value>,
+    pub(super) api_artifacts: Vec<BTreeMap<String, Value>>,
+}
+
+pub(super) fn compile_participant_input(
+    source: &std::path::Path,
+    selected_participant: Option<&str>,
+    expected_kind: Option<trellis_protocol::ParticipantKind>,
+) -> miette::Result<CompiledParticipantInput> {
+    let root = source.canonicalize().into_diagnostic()?;
+    let manifest = read_manifest(&root.join("trellis.toml"))?;
+    let compiled = crate::package::compile_project(&root, &manifest)?;
+    let candidates = compiled
+        .participants
+        .iter()
+        .filter(|participant| expected_kind.is_none_or(|kind| participant.kind() == kind))
+        .collect::<Vec<_>>();
+    let participant = match selected_participant {
+        Some(id) => candidates
+            .iter()
+            .find(|participant| participant.id() == id)
+            .copied()
+            .ok_or_else(|| {
+                miette::miette!(
+                    "participant '{id}' does not match; candidates: {}",
+                    candidates
+                        .iter()
+                        .map(|candidate| candidate.id())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?,
+        None if candidates.len() == 1 => candidates[0],
+        None => {
+            return Err(miette::miette!(
+                "select one participant with --participant; candidates: {}",
+                candidates
+                    .iter()
+                    .map(|candidate| candidate.id())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        }
+    };
+    let Value::Object(participant_artifact) = participant.normalized_value().into_diagnostic()?
+    else {
+        return Err(miette::miette!("participant artifact must be an object"));
+    };
+    let api_artifacts = compiled
+        .apis
+        .values()
+        .chain(compiled.referenced_apis.values())
+        .map(|api| {
+            let Value::Object(value) = api.normalized_value().into_diagnostic()? else {
+                return Err(miette::miette!("API artifact must be an object"));
+            };
+            Ok(value.into_iter().collect())
+        })
+        .collect::<miette::Result<Vec<_>>>()?;
+    Ok(CompiledParticipantInput {
+        participant_id: participant.id().to_owned(),
+        participant_digest: participant.digest().into_diagnostic()?,
+        participant_artifact: participant_artifact.into_iter().collect(),
+        api_artifacts,
+    })
 }
 
 async fn list_services(format: OutputFormat, args: &SvcListArgs) -> miette::Result<()> {
@@ -221,73 +292,93 @@ async fn create_device(format: OutputFormat, id: &str, args: &DevCreateArgs) -> 
 
 async fn apply_contract(
     format: OutputFormat,
+    kind: DeploymentKind,
     deployment_id: &str,
     args: &ApplyArgs,
 ) -> miette::Result<()> {
-    let api_value: Value =
-        serde_json::from_slice(&std::fs::read(&args.api).into_diagnostic()?).into_diagnostic()?;
-    let api = trellis_protocol::parse_api(&api_value).into_diagnostic()?;
-    let participant_value: Value =
-        serde_json::from_slice(&std::fs::read(&args.participant).into_diagnostic()?)
-            .into_diagnostic()?;
-    let participant = trellis_protocol::parse_participant(&participant_value).into_diagnostic()?;
-    let mut referenced_api_artifacts = vec![api.normalized_value().into_diagnostic()?];
-    for path in &args.referenced_api {
-        let value: Value =
-            serde_json::from_slice(&std::fs::read(path).into_diagnostic()?).into_diagnostic()?;
-        referenced_api_artifacts.push(
-            trellis_protocol::parse_api(&value)
-                .into_diagnostic()?
-                .normalized_value()
-                .into_diagnostic()?,
-        );
-    }
-    let (_state, connected) = connect_authenticated_cli_client().await?;
-    let Value::Object(participant_artifact) = participant.normalized_value().into_diagnostic()?
-    else {
-        return Err(miette::miette!("participant artifact must be an object"));
+    let expected_kind = match kind {
+        DeploymentKind::Service => trellis_protocol::ParticipantKind::Service,
+        DeploymentKind::Device => trellis_protocol::ParticipantKind::Device,
     };
-    let response = AuthClient::new(&connected)
+    let participant = compile_participant_input(
+        &args.source,
+        args.participant.as_deref(),
+        Some(expected_kind),
+    )?;
+    let (_state, connected) = connect_authenticated_cli_client().await?;
+    let current = AuthClient::new(&connected)
         .rpc()
         .auth()
-        .deployment_authority_plan(
-            &trellis_runtime_apis::auth::types::AuthDeploymentAuthorityPlanRequest {
-                deployment_id: deployment_id.to_string(),
-                participant_artifact: participant_artifact.into_iter().collect(),
-                referenced_api_artifacts: referenced_api_artifacts
-                    .into_iter()
-                    .map(|api| {
-                        api.as_object()
-                            .expect("validated API artifact is an object")
-                            .clone()
-                            .into_iter()
-                            .collect()
-                    })
-                    .collect(),
-                expires_at: None,
-                idempotency_key: cli_idempotency_key(),
+        .deployments_get(
+            &trellis_runtime_apis::auth::types::AuthDeploymentsGetRequest {
+                deployment_id: deployment_id.to_owned(),
             },
         )
         .await
         .into_diagnostic()?;
-    let response = serde_json::to_value(response).into_diagnostic()?;
+    if !matches!(
+        (kind, current.deployment.kind),
+        (
+            DeploymentKind::Service,
+            trellis_runtime_apis::auth::types::AuthDeploymentsGetResponseDeploymentKind::Service
+        ) | (
+            DeploymentKind::Device,
+            trellis_runtime_apis::auth::types::AuthDeploymentsGetResponseDeploymentKind::Device
+        )
+    ) {
+        return Err(miette::miette!("deployment kind does not match command"));
+    }
+    if current
+        .deployment
+        .participant_id
+        .as_deref()
+        .is_some_and(|id| id != participant.participant_id)
+    {
+        return Err(miette::miette!(
+            "deployment is assigned to participant '{}', not '{}'",
+            current
+                .deployment
+                .participant_id
+                .as_deref()
+                .unwrap_or_default(),
+            participant.participant_id
+        ));
+    }
+    let expected_revision = args.expected_revision.unwrap_or_else(|| {
+        current
+            .binding
+            .as_ref()
+            .and_then(|binding| binding.get("revision"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    });
+    let response = AuthClient::new(&connected)
+        .rpc()
+        .auth()
+        .deployments_apply(
+            &trellis_runtime_apis::auth::types::AuthDeploymentsApplyRequest {
+                api_artifacts: participant.api_artifacts,
+                deployment_id: deployment_id.to_owned(),
+                expected_revision: i64::try_from(expected_revision).into_diagnostic()?,
+                idempotency_key: cli_idempotency_key(),
+                optional_capabilities: (!args.optional_capability.is_empty())
+                    .then(|| args.optional_capability.clone()),
+                participant_artifact: participant.participant_artifact,
+            },
+        )
+        .await
+        .into_diagnostic()?;
     if output::is_json(format) {
-        output::print_json(&response)?;
+        output::print_json(&serde_json::to_value(response).into_diagnostic()?)?;
     } else {
-        output::print_success("deployment authority plan created");
+        output::print_success("deployment participant applied");
         output::print_info(&format!("deploymentId={deployment_id}"));
+        output::print_info(&format!("participantId={}", participant.participant_id));
         output::print_info(&format!(
             "participantDigest={}",
-            participant.digest().into_diagnostic()?
+            participant.participant_digest
         ));
-        if let Some(plan) = response.get("proposal") {
-            if let Some(plan_id) = plan.get("proposalId").and_then(Value::as_str) {
-                output::print_info(&format!("proposalId={plan_id}"));
-            }
-            if let Some(classification) = plan.get("classification").and_then(Value::as_str) {
-                output::print_info(&format!("classification={classification}"));
-            }
-        }
+        output::print_json(&response.binding)?;
     }
     Ok(())
 }
@@ -680,245 +771,6 @@ async fn review_decide(
     Ok(())
 }
 
-async fn deployment_authority(
-    format: OutputFormat,
-    deployment_id: &str,
-    command: DeploymentAuthorityCommand,
-) -> miette::Result<()> {
-    let (_state, connected) = connect_authenticated_cli_client().await?;
-    let auth = AuthClient::new(&connected);
-    match command {
-        DeploymentAuthorityCommand::Show => {
-            let authority_id = deployment_authority_id(&connected, deployment_id).await?;
-            let response = auth
-                .rpc()
-                .auth()
-                .deployment_authority_get(
-                    &trellis_runtime_apis::auth::types::AuthDeploymentAuthorityGetRequest {
-                        authority_id,
-                    },
-                )
-                .await
-                .into_diagnostic()?;
-            let response = serde_json::to_value(response).into_diagnostic()?;
-            print_deployment_authority_result(format, &response)
-        }
-        DeploymentAuthorityCommand::Plan(command) => {
-            deployment_authority_plan(format, &connected, deployment_id, command).await
-        }
-        DeploymentAuthorityCommand::AcceptUpdate(args) => {
-            let response = auth
-                .rpc()
-                .auth()
-                .deployment_authority_accept_update(
-                    &trellis_runtime_apis::auth::types::AuthDeploymentAuthorityAcceptUpdateRequest {
-                        proposal_id: args.plan_id,
-                        expected_base_authority_version: parse_optional_version(
-                            args.expected_desired_version.as_deref(),
-                        )?,
-                        reason: None,
-                        idempotency_key: cli_idempotency_key(),
-                    },
-                )
-                .await
-                .into_diagnostic()?;
-            let response = serde_json::to_value(response).into_diagnostic()?;
-            print_authority_decision_result(
-                format,
-                &response,
-                "accepted desired authority update",
-                true,
-            )
-        }
-        DeploymentAuthorityCommand::AcceptMigration(args) => {
-            let response = auth
-                .rpc()
-                .auth()
-                .deployment_authority_accept_migration(
-                    &trellis_runtime_apis::auth::types::AuthDeploymentAuthorityAcceptMigrationRequest {
-                        proposal_id: args.plan_id,
-                        expected_base_authority_version: parse_optional_version(
-                            args.expected_desired_version.as_deref(),
-                        )?,
-                        reason: Some(args.acknowledgement),
-                        idempotency_key: cli_idempotency_key(),
-                    },
-                )
-                .await
-                .into_diagnostic()?;
-            let response = serde_json::to_value(response).into_diagnostic()?;
-            print_authority_decision_result(
-                format,
-                &response,
-                "accepted desired authority migration",
-                true,
-            )
-        }
-        DeploymentAuthorityCommand::Reject(args) => {
-            let response = auth
-                .rpc()
-                .auth()
-                .deployment_authority_reject(
-                    &trellis_runtime_apis::auth::types::AuthDeploymentAuthorityRejectRequest {
-                        proposal_id: args.plan_id,
-                        reason: args.reason,
-                        idempotency_key: cli_idempotency_key(),
-                    },
-                )
-                .await
-                .into_diagnostic()?;
-            let response = serde_json::to_value(response).into_diagnostic()?;
-            print_authority_decision_result(format, &response, "rejected authority plan", false)
-        }
-        DeploymentAuthorityCommand::Reconcile(args) => {
-            let authority_id = deployment_authority_id(&connected, deployment_id).await?;
-            let response = auth
-                .rpc()
-                .auth()
-                .deployment_authority_reconcile(
-                    &trellis_runtime_apis::auth::types::AuthDeploymentAuthorityReconcileRequest {
-                        authority_id,
-                        expected_version: parse_optional_version(args.desired_version.as_deref())?,
-                        idempotency_key: cli_idempotency_key(),
-                    },
-                )
-                .await
-                .into_diagnostic()?;
-            let response = serde_json::to_value(response).into_diagnostic()?;
-            print_authority_decision_result(
-                format,
-                &response,
-                "requested authority reconciliation",
-                false,
-            )
-        }
-    }
-}
-
-async fn deployment_authority_plan(
-    format: OutputFormat,
-    connected: &Caller,
-    deployment_id: &str,
-    command: AuthorityPlanCommand,
-) -> miette::Result<()> {
-    match command {
-        AuthorityPlanCommand::List(args) => {
-            if args.classification.is_some() {
-                return Err(miette::miette!(
-                    "classification filtering was removed; filter proposals by state"
-                ));
-            }
-            let response = AuthClient::new(connected)
-                .rpc()
-                .auth()
-                .deployment_authority_plans_list(&trellis_runtime_apis::auth::types::AuthDeploymentAuthorityPlansListRequest {
-                    deployment_id: Some(deployment_id.to_string()),
-                    limit: Some(100),
-                    cursor: None,
-                    state: args.state.map(|state| match state {
-                        DeploymentAuthorityPlanState::Pending => trellis_runtime_apis::auth::types::AuthDeploymentAuthorityPlansListRequestState::Pending,
-                        DeploymentAuthorityPlanState::Accepted => trellis_runtime_apis::auth::types::AuthDeploymentAuthorityPlansListRequestState::Accepted,
-                        DeploymentAuthorityPlanState::Rejected => trellis_runtime_apis::auth::types::AuthDeploymentAuthorityPlansListRequestState::Rejected,
-                        DeploymentAuthorityPlanState::Expired => trellis_runtime_apis::auth::types::AuthDeploymentAuthorityPlansListRequestState::Expired,
-                    }),
-                })
-                .await
-                .into_diagnostic()?;
-            let response = serde_json::to_value(response).into_diagnostic()?;
-            print_deployment_authority_plans_result(format, &response)
-        }
-        AuthorityPlanCommand::Show(args) => {
-            let response = AuthClient::new(connected)
-                .rpc()
-                .auth()
-                .deployment_authority_plans_get(
-                    &trellis_runtime_apis::auth::types::AuthDeploymentAuthorityPlansGetRequest {
-                        proposal_id: args.plan_id,
-                    },
-                )
-                .await
-                .into_diagnostic()?;
-            let response = serde_json::to_value(response).into_diagnostic()?;
-            print_deployment_authority_result(format, &response)
-        }
-    }
-}
-
-fn print_deployment_authority_result(format: OutputFormat, response: &Value) -> miette::Result<()> {
-    if output::is_json(format) {
-        output::print_json(&response)?;
-    } else {
-        output::print_json(response)?;
-    }
-    Ok(())
-}
-
-fn print_deployment_authority_plans_result(
-    format: OutputFormat,
-    response: &Value,
-) -> miette::Result<()> {
-    if output::is_json(format) {
-        output::print_json(response)?;
-    } else {
-        let entries = response.get("entries").unwrap_or(&Value::Null);
-        print_value_table(
-            entries,
-            &[
-                "planId",
-                "deploymentId",
-                "classification",
-                "state",
-                "createdAt",
-                "expiresAt",
-            ],
-        )?;
-    }
-    Ok(())
-}
-
-fn print_authority_decision_result(
-    format: OutputFormat,
-    response: &Value,
-    message: &str,
-    reconciliation_queued: bool,
-) -> miette::Result<()> {
-    if output::is_json(format) {
-        output::print_json(response)?;
-    } else {
-        output::print_success(message);
-        if let Some(authority) = response.get("authority") {
-            if let Some(deployment_id) = authority.get("deploymentId").and_then(Value::as_str) {
-                output::print_info(&format!("deploymentId={deployment_id}"));
-            }
-            if let Some(version) = authority_desired_version(response) {
-                output::print_info(&format!("desiredVersion={version}"));
-            }
-        }
-        if reconciliation_queued {
-            output::print_info("reconciliation=triggered");
-        }
-    }
-    Ok(())
-}
-
-fn authority_desired_version(response: &Value) -> Option<&str> {
-    response
-        .get("desiredVersion")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            response
-                .get("authority")
-                .and_then(|authority| authority.get("desiredVersion"))
-                .and_then(Value::as_str)
-        })
-        .or_else(|| {
-            response
-                .get("authority")
-                .and_then(|authority| authority.get("version"))
-                .and_then(Value::as_str)
-        })
-}
-
 fn print_deployment_show_result<T: serde::Serialize>(
     format: OutputFormat,
     kind: DeploymentKind,
@@ -1225,10 +1077,6 @@ fn cli_idempotency_key() -> String {
     ulid::Ulid::new().to_string()
 }
 
-fn parse_optional_version(value: Option<&str>) -> miette::Result<Option<i64>> {
-    value.map(str::parse::<i64>).transpose().into_diagnostic()
-}
-
 async fn find_deployment(
     connected: &Caller,
     deployment_id: &str,
@@ -1264,65 +1112,4 @@ async fn find_deployment(
         .into_iter()
         .find(|entry| entry.get("deploymentId").and_then(Value::as_str) == Some(deployment_id))
         .ok_or_else(|| miette::miette!("deployment not found: {deployment_id}"))
-}
-
-async fn deployment_authority_id(
-    connected: &Caller,
-    deployment_id: &str,
-) -> miette::Result<String> {
-    let entries = AuthClient::new(connected)
-        .rpc()
-        .auth()
-        .deployment_authority_list(
-            &trellis_runtime_apis::auth::types::AuthDeploymentAuthorityListRequest {
-                deployment_id: Some(deployment_id.to_owned()),
-                participant_id: None,
-                state: None,
-                cursor: None,
-                limit: Some(100),
-            },
-        )
-        .await
-        .into_diagnostic()?
-        .entries;
-    let entries = serde_json::to_value(entries).into_diagnostic()?;
-    entries
-        .as_array()
-        .and_then(|entries| entries.first())
-        .and_then(|entry| entry.get("authorityId"))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| miette::miette!("deployment has no authority: {deployment_id}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn authority_desired_version_prefers_explicit_response_value() {
-        let response = json!({
-            "desiredVersion": "desired-new",
-            "authority": {
-                "version": "authority-version",
-                "desiredVersion": "authority-desired"
-            }
-        });
-
-        assert_eq!(authority_desired_version(&response), Some("desired-new"));
-    }
-
-    #[test]
-    fn authority_desired_version_falls_back_to_authority_version() {
-        let response = json!({
-            "authority": {
-                "version": "authority-version"
-            }
-        });
-
-        assert_eq!(
-            authority_desired_version(&response),
-            Some("authority-version")
-        );
-    }
 }

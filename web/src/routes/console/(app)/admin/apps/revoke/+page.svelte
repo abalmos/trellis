@@ -15,7 +15,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type IdentityGrantEntry = apis.auth.AuthIdentityAuthorityListOutput["entries"][number];
+  type IdentityGrantEntry = apis.auth.AuthGrantsListOutput["entries"][number];
 
   const trellis = getTrellis();
   const notifications = getNotifications();
@@ -27,18 +27,18 @@
   let selectedKey = $state("");
   let confirmationModal: ConfirmationModal | undefined = $state();
 
-  const selectedGrant = $derived(identityGrants.find((entry) => entry.authorityId === selectedKey) ?? null);
+  const selectedGrant = $derived(identityGrants.find((entry) => `${entry.ownerId}:${entry.participantId}` === selectedKey) ?? null);
 
   async function load() {
     loading = true;
     error = null;
     try {
       const requestedGrant = page.url.searchParams.get("grant");
-      const response = await trellis.authIdentityAuthorityList({ limit: 100 }).take();
+      const response = await trellis.authGrantsList({ limit: 100, ownerKind: "user" }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       identityGrants = response.entries ?? [];
-      const match = identityGrants.find((entry) => entry.authorityId === requestedGrant) ?? identityGrants[0] ?? null;
-      selectedKey = match?.authorityId ?? "";
+      const match = identityGrants.find((entry) => `${entry.ownerId}:${entry.participantId}` === requestedGrant) ?? identityGrants[0] ?? null;
+      selectedKey = match ? `${match.ownerId}:${match.participantId}` : "";
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -51,11 +51,12 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authIdentityAuthorityRevoke({
-        authorityId: selectedGrant.authorityId,
-        expectedVersion: selectedGrant.version,
+      const response = await trellis.authGrantsRevoke({
+        ownerId: selectedGrant.ownerId,
+        ownerKind: selectedGrant.ownerKind,
+        participantId: selectedGrant.participantId,
+        expectedRevision: selectedGrant.revision,
         idempotencyKey: ulid(),
-        reason: null,
       }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success("Delegated grant revoked.", "Revoked");
@@ -74,8 +75,8 @@
       message: "This removes the selected delegated app or agent grant.",
       confirmLabel: "Revoke grant",
       targetLabel: selectedGrant.participantId,
-      targetName: selectedGrant.authorityId,
-      expectedValue: selectedGrant.authorityId,
+      targetName: selectedGrant.participantId,
+      expectedValue: selectedGrant.participantId,
     });
     if (confirmed) await revokeGrant();
   }
@@ -106,8 +107,8 @@
         <label class="form-control gap-1">
           <span class="label-text text-xs">Delegated grant</span>
           <select class="select select-bordered select-sm" bind:value={selectedKey} required>
-            {#each identityGrants as entry (entry.authorityId)}
-              <option value={entry.authorityId}>{entry.participantId}</option>
+            {#each identityGrants as entry (`${entry.ownerId}:${entry.participantId}`)}
+              <option value={`${entry.ownerId}:${entry.participantId}`}>{entry.ownerId} · {entry.participantId}</option>
             {/each}
           </select>
         </label>
@@ -116,8 +117,8 @@
           <div class="rounded-box border border-base-300 p-3 text-sm">
             <div class="font-medium">{selectedGrant.participantId}</div>
             <div class="text-base-content/60">{selectedGrant.state}</div>
-            <div class="trellis-identifier text-base-content/60">{selectedGrant.authorityId}</div>
-            <div class="trellis-identifier text-base-content/60">{selectedGrant.participantArtifactDigest}</div>
+            <div class="trellis-identifier text-base-content/60">{selectedGrant.ownerId}</div>
+            <div class="trellis-identifier text-base-content/60">installed revision {selectedGrant.installedRevision}</div>
             <div class="text-xs text-base-content/60">Granted {formatDate(selectedGrant.createdAt)}</div>
           </div>
         {/if}

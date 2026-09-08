@@ -35,38 +35,30 @@ digests to service bootstrap.
 ## Connection
 
 Service facades export `connect` and `ServiceConnectOptions`. The current
-constructor takes Trellis URL, service name, deployment ID, provisioned identity
-seed, session seed, and an authorization-context store:
+constructor takes only Trellis URL and the provisioned identity seed; name and
+timeout are optional builders:
 
 ```rust
-let mut service = connect(ServiceConnectOptions::new(
-    &trellis_url,
-    "orders-service",
-    &deployment_id,
-    &identity_seed,
-    &session_seed,
-    authorization_context_store,
-)).await?;
+let mut service = connect(
+    ServiceConnectOptions::new(&trellis_url, &identity_seed)
+        .with_name("orders-service")
+        .with_timeout_ms(10_000),
+).await?;
 ```
 
-Obtain these runtime values through the application's preferred configuration
-mechanism. A durable store retains authorization trust across process restarts;
-ephemeral memory storage is an explicit choice for ephemeral processes/tests.
-The current `FileAuthorizationContextStore` is exposed under
-`trellis_rs::client`, including in the runtime's own Rustdoc examples. That
-import is not permission to construct low-level transport clients.
+Trellis resolves deployment/instance assignment, installed participant/APIs,
+`GrantBinding`, resources, signed context, route JWT, and transport endpoints
+server-side. Authorization state is process-memory-only and refreshes on
+reconnect; there is no context-store parameter.
 
 Register generated providers before `service.run().await`. The service lifecycle
-supervises its request host and workers. Service bootstrap waits for pending
-deployment authority by default; `with_authority_pending_timeout_ms(...)` bounds
-that wait and `with_timeout_ms(...)` bounds individual requests.
+supervises its request host and workers. `with_timeout_ms(...)` bounds bootstrap,
+connect, and request operations.
 
-Apps/agents have a different generated `ConnectOptions`: Trellis URL, session
-seed, an initial `AuthorizationInstallation`, timeout, and durable context
-store. Devices use their generated activation options. Do not substitute a raw
-NATS URL and JWT for either bootstrap lifecycle. Native endpoint rotation
-updates the existing connection in place, preserving subscriptions and
-authorization watches.
+Apps/agents use user-login credentials (login session ID plus session seed) and
+perform context refresh before CONNECT. Devices retain their provisioned
+identity seed and use generated activation/connect options. Do not substitute a
+raw NATS URL/JWT or client-authored assignment for either lifecycle.
 
 ## Typed Surfaces
 

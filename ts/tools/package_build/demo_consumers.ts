@@ -3,7 +3,6 @@ import { dirname, fromFileUrl, join } from "@std/path";
 import { z } from "zod";
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { TrellisTestRuntime } from "@qlever-llc/trellis-test";
-import { deriveDeviceIdentity } from "@qlever-llc/trellis/auth";
 import { ulid } from "ulid";
 import { participants as serviceParticipants } from "../../../demos/ts/service/trellis/index.js";
 import { participants as deviceParticipants } from "../../../demos/ts/device/trellis/index.js";
@@ -112,31 +111,35 @@ try {
         });
         const admin = await runtime.connectClient({
           name: "device-reviewer",
-          contract: testParticipants.testAdmin.participant,
+          contract: testParticipants.appCli.participant,
         });
         await runtime.deployments.create({
           id: "device",
           kind: "device",
           reviewMode: "required",
         });
-        const approval = await runtime.contracts.approve({
+        const approval = await runtime.contracts.apply({
           deployment: "device",
           contract: deviceParticipants.demoDevice.participant,
         });
-        const secret = crypto.getRandomValues(new Uint8Array(32));
-        const rootSecret = btoa(String.fromCharCode(...secret))
-          .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-        const deviceIdentity = await deriveDeviceIdentity(secret);
-        const provisioned = await runtime.devices.provision({
-          deploymentId: approval.deploymentId,
-          idempotencyKey: ulid(),
-          identityPublicKey: deviceIdentity.publicIdentityKey,
-          instanceId: null,
-          participantId: approval.participantId,
-        });
-        await runtime.deployments.reconcile("device");
-        await runtime.deployments.waitReady("device");
         for (const engine of ["node", "deno"]) {
+          const secret = crypto.getRandomValues(new Uint8Array(32));
+          const rootSecret = btoa(String.fromCharCode(...secret))
+            .replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+          const provisioned = await runtime.devices.provision({
+            deploymentId: "device",
+            idempotencyKey: ulid(),
+            identityPublicKey: null,
+            instanceId: null,
+            participantId: deviceParticipants.demoDevice.participant.id,
+          });
+          const { instanceId, principalId } = provisioned.device;
+          const provisioningSecret = provisioned.provisioningSecret;
+          if (!instanceId || !principalId || !provisioningSecret) {
+            throw new Error(
+              "Device provisioning returned incomplete credentials",
+            );
+          }
           const command = join(isolated, "bin", engine);
           const prefix = engine === "deno" ? ["run", "-A"] : [];
           const env = {
@@ -152,11 +155,6 @@ try {
               "service/build/main.mjs",
               runtime.trellisUrl,
               identity.seed,
-              identity.deploymentId,
-              identity.instanceId,
-              identity.participantId,
-              identity.participantArtifactDigest,
-              identity.participantNeedsDigest,
             ],
             cwd: destination,
             env,
@@ -198,12 +196,7 @@ try {
                 "device/build/main.mjs",
                 runtime.trellisUrl,
                 rootSecret,
-                approval.deploymentId,
-                provisioned.device.instanceId,
-                provisioned.device.principalId,
-                approval.participantId,
-                approval.participantDigest,
-                approval.participantNeedsDigest,
+                provisioningSecret,
               ],
               cwd: destination,
               env,

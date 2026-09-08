@@ -4,7 +4,7 @@ manifest-digest = "J9quVhEuj50A1aBaWF3E4r9AsBXvXFqRZHVBnJ7JbVg"
 [[api]]
 id = "trellis.auth@v1"
 version = "1.0.0"
-api-digest = "6k2TZ2r6d0H2y9qB-6y2PsCvJ9kq5KFlGvVOqM0nAEw"
+api-digest = "2SIHWPDpaMZDtLkeROx_n12RMcraO2dUcqk-GVstWgQ"
 path = "../rust/crates/runtime"
 
 [[api]]

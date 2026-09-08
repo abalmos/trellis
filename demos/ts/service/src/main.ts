@@ -8,39 +8,17 @@ import type { FieldOpsDeps } from "./deps.ts";
 import * as features from "./features/index.ts";
 
 async function main(): Promise<void> {
-  const [
-    trellisUrl,
-    seed,
-    deploymentId,
-    instanceId,
-    participantId,
-    participantArtifactDigest,
-    participantNeedsDigest,
-  ] = process.argv.slice(2);
-  if (
-    !trellisUrl || !seed || !deploymentId || !instanceId || !participantId ||
-    !participantArtifactDigest || !participantNeedsDigest ||
-    process.argv.length !== 9
-  ) {
-    console.error(
-      "Usage: demo-service <trellisUrl> <seed> <deploymentId> <instanceId> <participantId> <participantArtifactDigest> <participantNeedsDigest>",
-    );
+  const [trellisUrl, seed] = process.argv.slice(2);
+  if (!trellisUrl || !seed || process.argv.length !== 4) {
+    console.error("Usage: demo-service <trellisUrl> <seed>");
     process.exit(1);
   }
 
   const service = await TrellisService.connect({
-    authorizationContextEphemeral: true,
     trellisUrl,
     participant: participants.demoService.participant,
     name: "field-ops-demo-service",
-    identity: {
-      seed,
-      deploymentId,
-      instanceId,
-      participantId,
-      participantArtifactDigest,
-      participantNeedsDigest,
-    },
+    identity: { seed },
   }).orThrow();
   const deps: FieldOpsDeps = {
     transferIssuer: service,

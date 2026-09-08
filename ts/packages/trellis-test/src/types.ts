@@ -14,12 +14,6 @@ import type {
 /** Native contract artifacts accepted by Trellis test admin automation. */
 export type TrellisTestParticipantLike = CallerParticipant;
 
-/** Authority plan classifications the test runtime may approve automatically. */
-export type TrellisTestAuthorityPlanClassification =
-  | "initial"
-  | "update"
-  | "migration";
-
 /** Polling options for `waitFor` and runtime readiness helpers. */
 export type WaitForOptions = {
   timeoutMs?: number;
@@ -46,13 +40,6 @@ export type TrellisTestRuntimeStartOptions = {
   /** Existing or desired local test-admin password. */
   adminPassword?: string;
   trellis: TrellisTestRuntimeTrellisOptions;
-  authority?: {
-    /**
-     * Authority plan classifications the runtime admin automation may accept.
-     * Defaults to `["update"]`; include `"migration"` only for isolated mutable-dev tests.
-     */
-    autoAccept?: readonly TrellisTestAuthorityPlanClassification[];
-  };
   /** OAuth/OIDC providers injected into the isolated test control-plane config. */
   oauthProviders?: Record<string, TrellisControlPlaneOAuthProvider>;
   /** Additional exact browser origins allowed by the test runtime. */
@@ -67,7 +54,6 @@ export type TrellisTestRuntimeStartOptions = {
   rotatableWebsocketProxy?: boolean;
   timeouts?: {
     startupMs?: number;
-    reconciliationMs?: number;
     waitForMs?: number;
     shutdownMs?: number;
   };
@@ -76,22 +62,15 @@ export type TrellisTestRuntimeStartOptions = {
 /** Session-key material returned for a registered service. */
 export type TrellisTestServiceKey = {
   seed: string;
-  sessionSeed: string;
-  sessionKey: string;
   deploymentId: string;
   instanceId: string;
   participantId: string;
-  participantArtifactDigest: string;
-  participantNeedsDigest: string;
 };
 
 /** Session-key material returned for a registered app/client participant. */
 export type TrellisTestClientKey = {
   seed: string;
-  sessionKey: string;
   participantId: string;
-  participantArtifactDigest: string;
-  participantNeedsDigest: string;
 };
 
 /** Authentication options for connecting a test app/client participant. */
@@ -102,14 +81,12 @@ export type TrellisTestClientAuth = {
   ): Promise<ClientAuthContinuation>;
 };
 
-/** Result returned when a contract authority plan is approved by the test runtime. */
+/** Result returned when a participant is installed for a test deployment. */
 export type TrellisTestParticipantApproval = {
-  planId: string;
-  classification: TrellisTestAuthorityPlanClassification;
   participantId: string;
-  participantDigest: string;
-  participantNeedsDigest: string;
-  deploymentId: string;
+  installedRevision: number;
+  deploymentId?: string;
+  binding?: Record<string, unknown> | null;
 };
 
 /** Contract value accepted by the Trellis test runtime. */

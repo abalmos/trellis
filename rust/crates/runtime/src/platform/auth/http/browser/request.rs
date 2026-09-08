@@ -7,17 +7,13 @@ use tower::ServiceExt as _;
 const PROXY_CONTENT_SECURITY_POLICY: &str = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:";
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(in crate::platform::auth::http) struct AuthStartRequest {
     request_id: String,
-    issued_at: i64,
+    #[serde(rename = "issuedAt")]
+    _issued_at: i64,
     session_public_key: String,
-    session_nkey: String,
     participant_id: String,
-    participant_artifact_digest: String,
-    participant_artifact: Option<Value>,
-    #[serde(default)]
-    referenced_api_artifacts: Vec<Value>,
     redirect_target: String,
     proof: Value,
 }
@@ -36,7 +32,7 @@ pub(crate) async fn start_auth<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -64,15 +60,14 @@ where
         tracing::warn!(%error, "invalid auth request proof envelope");
         HttpError::bad_request("invalid_auth_request")
     })?;
+    let mut unsigned_request = raw.clone();
+    unsigned_request
+        .as_object_mut()
+        .ok_or_else(|| HttpError::bad_request("invalid_auth_request"))?
+        .remove("proof");
     let input = SessionProofInput::user_auth_request(UserAuthRequestSessionProofInput {
-        request_id: request.request_id.clone(),
-        issued_at: request.issued_at,
-        session_public_key: request.session_public_key.clone(),
-        session_nkey: request.session_nkey.clone(),
-        participant_id: request.participant_id.clone(),
-        participant_digest: request.participant_artifact_digest.clone(),
-        redirect_target: request.redirect_target.clone(),
-        request_digest: request_digest.clone(),
+        origin: state.public_origin.clone(),
+        unsigned_request,
     })
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
     let proof = parse_session_proof(&request.proof)
@@ -92,82 +87,14 @@ where
         state.proof_policy,
     )
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
-    if let Some(participant_value) = &request.participant_artifact {
-        let participant = parse_participant(participant_value)
-            .map_err(|_| HttpError::bad_request("invalid_participant_artifact"))?;
-        super::super::super::builtins::validate_participant_namespace(participant.id())
-            .map_err(|_| HttpError::bad_request("reserved_participant"))?;
-        let mut apis = BTreeMap::new();
-        let mut api_values = BTreeMap::new();
-        for value in &request.referenced_api_artifacts {
-            let api =
-                parse_api(value).map_err(|_| HttpError::bad_request("invalid_api_artifact"))?;
-            let api_digest = api
-                .digest()
-                .map_err(|_| HttpError::bad_request("invalid_api_artifact"))?;
-            if api.id().starts_with("trellis.")
-                && !super::super::super::builtins::is_platform_api(api.id(), &api_digest)
-            {
-                return Err(HttpError::bad_request("reserved_api_namespace"));
-            }
-            api_values.insert(
-                api.id().to_owned(),
-                api.normalized_value()
-                    .map_err(|_| HttpError::bad_request("invalid_api_artifact"))?,
-            );
-            apis.insert(api.id().to_owned(), api);
-        }
-        let resolved = resolve_participant(&participant, &apis)
-            .map_err(|_| HttpError::bad_request("participant_resolution_failed"))?;
-        let needs_digest = resolved
-            .needs()
-            .digest()
-            .map_err(|_| HttpError::bad_request("participant_resolution_failed"))?;
-        if resolved.participant_id() != request.participant_id
-            || resolved.participant_digest() != request.participant_artifact_digest
-        {
-            tracing::warn!(
-                participant_id = %request.participant_id,
-                "auth request participant presentation does not match its declared digests"
-            );
-            return Err(HttpError::bad_request("participant_binding_mismatch"));
-        }
-        let binding = ParticipantBindingRecord {
-            participant_id: resolved.participant_id().to_owned(),
-            participant_kind: resolved.participant_kind(),
-            artifact_digest: resolved.participant_digest().to_owned(),
-            needs_digest,
-            participant_json: participant
-                .canonical_json()
-                .map_err(|_| HttpError::bad_request("invalid_participant_artifact"))?,
-            api_artifacts_json: canonicalize_json(
-                &serde_json::to_value(api_values)
-                    .map_err(|_| HttpError::bad_request("invalid_api_artifact"))?,
-            )
-            .map_err(|_| HttpError::bad_request("invalid_api_artifact"))?,
-            resolved_at: now,
-            state: ParticipantBindingState::Resolved,
-            error: None,
-        };
-        super::super::super::builtins::validate_binding_namespace(&binding)
-            .map_err(|_| HttpError::bad_request("reserved_artifact_namespace"))?;
-        state
-            .service
-            .repository()
-            .put_participant_binding(binding)
-            .await?;
-    }
-    let binding = state
+    let (installed_revision, binding) = state
         .service
         .repository()
-        .get_participant_binding(
-            &request.participant_id,
-            &request.participant_artifact_digest,
-        )
+        .get_installed_participant_record(request.participant_id.clone(), None)
         .await?
         .ok_or_else(|| {
-            tracing::warn!(participant_id = %request.participant_id, "auth request participant binding is unknown");
-            HttpError::bad_request("participant_binding_unknown")
+            tracing::warn!(participant_id = %request.participant_id, "auth request participant is not installed");
+            HttpError::not_found("participant_not_found")
         })?;
     if binding.state != ParticipantBindingState::Resolved {
         tracing::warn!(participant_id = %request.participant_id, "auth request participant binding is unresolved");
@@ -183,11 +110,10 @@ where
         request_id: request.request_id,
         request_digest,
         participant_id: request.participant_id,
-        participant_artifact_digest: request.participant_artifact_digest,
-        participant_needs_digest: binding.needs_digest,
+        installed_revision,
+        target_grant_revision: 0,
         consent,
         session_public_key: request.session_public_key,
-        session_nkey: request.session_nkey,
         portal_id: portal.portal_id.clone(),
         redirect_target: Some(request.redirect_target),
         principal_id: None,
@@ -307,7 +233,6 @@ pub(crate) async fn portal_index<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -331,7 +256,6 @@ pub(crate) async fn portal_page<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -366,7 +290,6 @@ pub(crate) async fn portal_asset<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -395,7 +318,6 @@ pub(crate) async fn console_index<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -425,7 +347,6 @@ pub(crate) async fn console_page<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository

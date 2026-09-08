@@ -103,8 +103,8 @@
       const lastAuthByUser: Record<string, string> = {};
       for (const session of sessionsResponse.entries ?? []) {
         const key = session.principalId;
-        if (!lastAuthByUser[key] || session.lastSeenAt > Number(lastAuthByUser[key])) {
-          lastAuthByUser[key] = String(session.lastSeenAt);
+        if (!lastAuthByUser[key] || session.lastAuthenticatedAt > Number(lastAuthByUser[key])) {
+          lastAuthByUser[key] = String(session.lastAuthenticatedAt);
         }
       }
       userLastAuth = lastAuthByUser;

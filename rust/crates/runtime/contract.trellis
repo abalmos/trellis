@@ -687,11 +687,11 @@ api "trellis.auth@v1" {
     resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
     name: string(min_length=1);
   }
-  model AuthGrantProvenance {
+  model PortalGrantProvenance {
     portalId: string(min_length=1);
     providerId: string(min_length=1);
     roles: list<string(min_length=1)>;
-    policyDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
+    effectivePolicyDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
   }
   model AuthGrantBinding {
     ownerKind: "deployment" | "user";
@@ -699,11 +699,43 @@ api "trellis.auth@v1" {
     participantId: string(min_length=1);
     installedRevision: int(minimum=1, maximum=9007199254740991);
     grants: AuthGrantSet;
-    platformPrivileges: list<"trellis.auth::admin" | "trellis.auth::capabilities.delegate">;
+    platformPrivileges: list<"trellis.auth::admin">;
     revision: int(minimum=1, maximum=9007199254740991);
     state: "active" | "revoked";
     expiresAt: uint(maximum=9007199254740991) | null;
-    provenance: AuthGrantProvenance | null;
+    provenance: PortalGrantProvenance | null;
+    createdAt: uint(maximum=9007199254740991);
+    updatedAt: uint(maximum=9007199254740991);
+  }
+  model InstalledParticipantSummary {
+    participantId: string(min_length=1);
+    participantKind: "service" | "device" | "app" | "agent";
+    revision: int(minimum=1, maximum=9007199254740991);
+    artifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
+    installedAt: uint(maximum=9007199254740991);
+  }
+  model InstalledParticipantDetail {
+    participantId: string(min_length=1);
+    participantKind: "service" | "device" | "app" | "agent";
+    revision: int(minimum=1, maximum=9007199254740991);
+    artifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
+    installedAt: uint(maximum=9007199254740991);
+    participantArtifact: AuthArtifact;
+    apiArtifacts: list<AuthArtifact>;
+    requiredGrants: AuthGrantSet;
+    optionalBundles: list<AuthOptionalBundle>;
+  }
+  model AuthOptionalBundle {
+    id: string(min_length=1);
+    apiId: string(min_length=1);
+    permissions: list<AuthPermissionAtom>;
+  }
+  model AuthParticipantsGetRequest {
+    participantId: string(min_length=1);
+    revision?: int(minimum=1, maximum=9007199254740991);
+  }
+  model AuthParticipantsGetResponse {
+    participant: InstalledParticipantDetail;
   }
   model AuthParticipantsInstallRequest {
     participantArtifact: AuthArtifact;
@@ -712,9 +744,7 @@ api "trellis.auth@v1" {
     idempotencyKey: string(min_length=1);
   }
   model AuthParticipantsInstallResponse {
-    participantId: string(min_length=1);
-    revision: int(minimum=1, maximum=9007199254740991);
-    digest: string(pattern="^[A-Za-z0-9_-]{43}$");
+    participant: InstalledParticipantSummary;
   }
   model AuthDeploymentsApplyRequest {
     deploymentId: string(min_length=1);
@@ -728,6 +758,51 @@ api "trellis.auth@v1" {
     deployment: AuthDeploymentsCreateResponsedeployment;
     binding: AuthGrantBinding;
   }
+  model AuthDeploymentsGetRequest {
+    deploymentId: string(min_length=1);
+  }
+  model AuthResourceKvProvider {
+    kind: "kv";
+    bucket: string(min_length=1);
+  }
+  model AuthResourceStoreProvider {
+    kind: "store";
+    bucket: string(min_length=1);
+  }
+  model AuthResourceStateProvider {
+    kind: "state";
+    bucket: string(min_length=1);
+  }
+  model AuthResourceJobQueueProvider {
+    kind: "jobQueue";
+    namespace: string(min_length=1);
+    workStream: string(min_length=1);
+    publishPrefix: string(min_length=1);
+    updatesPrefix: string(min_length=1) | null;
+    workSubject: string(min_length=1);
+    consumer: string(min_length=1);
+  }
+  model AuthResourceEventConsumerProvider {
+    kind: "eventConsumer";
+    stream: string(min_length=1);
+    consumer: string(min_length=1);
+    filterSubjects: list<string(min_length=1)>;
+  }
+  model AuthResourceBinding {
+    resourceKind: string(min_length=1);
+    localName: string(min_length=1);
+    bindingId: string(min_length=1);
+    ownerParticipantId: string(min_length=1);
+    providerIdentity: AuthResourceKvProvider | AuthResourceStoreProvider | AuthResourceStateProvider | AuthResourceJobQueueProvider | AuthResourceEventConsumerProvider;
+    state: "available" | "unavailable" | "stale";
+    materializedAt: uint(maximum=9007199254740991);
+    error: string | null;
+  }
+  model AuthDeploymentsGetResponse {
+    deployment: AuthDeploymentsCreateResponsedeployment;
+    binding: AuthGrantBinding | null;
+    resources: list<AuthResourceBinding>;
+  }
   model AuthGrantsGetRequest {
     ownerKind: "deployment" | "user";
     ownerId: string(min_length=1);
@@ -736,12 +811,25 @@ api "trellis.auth@v1" {
   model AuthGrantsGetResponse {
     binding: AuthGrantBinding | null;
   }
+  model AuthGrantsListRequest {
+    ownerKind?: "deployment" | "user";
+    ownerId?: string(min_length=1);
+    participantId?: string(min_length=1);
+    state?: "active" | "revoked";
+    cursor?: string(min_length=1);
+    limit?: int(minimum=1, maximum=500);
+  }
+  model AuthGrantsListResponse {
+    entries: list<AuthGrantBinding>;
+    nextCursor: string | null;
+  }
   model AuthGrantsSetRequest {
     ownerKind: "deployment" | "user";
     ownerId: string(min_length=1);
     participantId: string(min_length=1);
+    installedRevision: int(minimum=1, maximum=9007199254740991);
     grants: AuthGrantSet;
-    platformPrivileges: list<"trellis.auth::admin" | "trellis.auth::capabilities.delegate">;
+    platformPrivileges: list<"trellis.auth::admin">;
     expiresAt: uint(maximum=9007199254740991) | null;
     expectedRevision: uint(maximum=9007199254740991);
     idempotencyKey: string(min_length=1);
@@ -752,6 +840,7 @@ api "trellis.auth@v1" {
     participantId: string(min_length=1);
     expectedRevision: uint(maximum=9007199254740991);
     idempotencyKey: string(min_length=1);
+    reason?: string;
   }
   model AuthGrantsMutationResponse {
     binding: AuthGrantBinding;
@@ -782,6 +871,9 @@ api "trellis.auth@v1" {
     input AuthIssuersRevokeRequest;
     output AuthIssuersRevokeResponse;
     errors [AuthError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.auth::authorities.mutate"];
+    }
   }
   event "Auth.Issuers.Revoked" {
     version "v1";
@@ -792,30 +884,72 @@ api "trellis.auth@v1" {
     input AuthParticipantsInstallRequest;
     output AuthParticipantsInstallResponse;
     errors [AuthError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.auth::authorities.mutate"];
+    }
+  }
+  rpc "Auth.Participants.Get" {
+    version "v1";
+    input AuthParticipantsGetRequest;
+    output AuthParticipantsGetResponse;
+    errors [AuthError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.auth::authorities.read"];
+    }
   }
   rpc "Auth.Deployments.Apply" {
     version "v1";
     input AuthDeploymentsApplyRequest;
     output AuthDeploymentsApplyResponse;
     errors [AuthError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.auth::authorities.mutate"];
+    }
+  }
+  rpc "Auth.Deployments.Get" {
+    version "v1";
+    input AuthDeploymentsGetRequest;
+    output AuthDeploymentsGetResponse;
+    errors [AuthError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.auth::deployments.read"];
+    }
   }
   rpc "Auth.Grants.Get" {
     version "v1";
     input AuthGrantsGetRequest;
     output AuthGrantsGetResponse;
     errors [AuthError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.auth::authorities.read"];
+    }
+  }
+  rpc "Auth.Grants.List" {
+    version "v1";
+    input AuthGrantsListRequest;
+    output AuthGrantsListResponse;
+    errors [AuthError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.auth::authorities.read"];
+    }
   }
   rpc "Auth.Grants.Set" {
     version "v1";
     input AuthGrantsSetRequest;
     output AuthGrantsMutationResponse;
     errors [AuthError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.auth::authorities.mutate"];
+    }
   }
   rpc "Auth.Grants.Revoke" {
     version "v1";
     input AuthGrantsRevokeRequest;
     output AuthGrantsMutationResponse;
     errors [AuthError, UnexpectedError, ValidationError];
+    capabilities {
+      call ["trellis.auth::authorities.mutate"];
+    }
   }
   event "Auth.Grants.Changed" {
     version "v1";
@@ -913,85 +1047,6 @@ api "trellis.auth@v1" {
     serverId: string(min_length=1);
     sessionId: string(min_length=1);
   }
-  model AuthDeploymentAuthorityAcceptMigrationRequest {
-    expectedBaseAuthorityVersion: int(minimum=1, maximum=9007199254740991) | null;
-    idempotencyKey: string(min_length=1);
-    proposalId: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponse {
-    authority: AuthDeploymentAuthorityAcceptMigrationResponseauthority;
-    proposal: AuthDeploymentAuthorityAcceptMigrationResponseproposal;
-  }
-  model AuthDeploymentAuthorityAcceptUpdateRequest {
-    expectedBaseAuthorityVersion: int(minimum=1, maximum=9007199254740991) | null;
-    idempotencyKey: string(min_length=1);
-    proposalId: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponse {
-    authority: AuthDeploymentAuthorityAcceptUpdateResponseauthority;
-    proposal: AuthDeploymentAuthorityAcceptUpdateResponseproposal;
-  }
-  model AuthDeploymentAuthorityGetRequest {
-    authorityId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityGetResponse {
-    authority: AuthDeploymentAuthorityGetResponseauthority;
-  }
-  model AuthDeploymentAuthorityListRequest {
-    cursor?: string(min_length=1);
-    deploymentId?: string(min_length=1);
-    limit?: int(minimum=1, maximum=100);
-    participantId?: string(min_length=1);
-    state?: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-  }
-  model AuthDeploymentAuthorityListResponse {
-    entries: list<AuthDeploymentAuthorityListResponseentriesItem>;
-    nextCursor: string | null;
-  }
-  model AuthDeploymentAuthorityPlanRequest {
-    deploymentId: string(min_length=1);
-    expiresAt: uint(maximum=9007199254740991) | null;
-    idempotencyKey: string(min_length=1);
-    participantArtifact: AuthDeploymentAuthorityPlanRequestparticipantArtifact;
-    referencedApiArtifacts: list<AuthDeploymentAuthorityPlanRequestreferencedApiArtifactsItem>;
-  }
-  model AuthDeploymentAuthorityPlanResponse {
-    proposal: AuthDeploymentAuthorityPlanResponseproposal;
-  }
-  model AuthDeploymentAuthorityPlansGetRequest {
-    proposalId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityPlansGetResponse {
-    proposal: AuthDeploymentAuthorityPlansGetResponseproposal;
-  }
-  model AuthDeploymentAuthorityPlansListRequest {
-    cursor?: string(min_length=1);
-    deploymentId?: string(min_length=1);
-    limit?: int(minimum=1, maximum=100);
-    state?: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-  }
-  model AuthDeploymentAuthorityPlansListResponse {
-    entries: list<AuthDeploymentAuthorityPlansListResponseentriesItem>;
-    nextCursor: string | null;
-  }
-  model AuthDeploymentAuthorityReconcileRequest {
-    authorityId: string(min_length=1);
-    expectedVersion: int(minimum=1, maximum=9007199254740991) | null;
-    idempotencyKey: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityReconcileResponse {
-    authority: AuthDeploymentAuthorityReconcileResponseauthority;
-  }
-  model AuthDeploymentAuthorityRejectRequest {
-    idempotencyKey: string(min_length=1);
-    proposalId: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthDeploymentAuthorityRejectResponse {
-    proposal: AuthDeploymentAuthorityRejectResponseproposal;
-  }
   model AuthDeploymentsCreateRequest {
     displayName: string(min_length=1);
     expiresAt: uint(maximum=9007199254740991) | null;
@@ -1078,7 +1133,6 @@ api "trellis.auth@v1" {
     flowId: string(min_length=1);
   }
   model AuthDeviceUserAuthoritiesResolveResponse {
-    authority: AuthDeviceUserAuthoritiesResolveResponseauthority1 | null;
     device: AuthDeviceUserAuthoritiesResolveResponsedevice;
     review: AuthDeviceUserAuthoritiesResolveResponsereview;
   }
@@ -1125,25 +1179,6 @@ api "trellis.auth@v1" {
   model AuthDeviceUserAuthoritiesRevokeResponse {
     device: AuthDeviceUserAuthoritiesRevokeResponsedevice;
     kickedSessionCount: uint;
-  }
-  model AuthDevicesConnectInfoGetRequest {
-    challengeDigest: string(pattern="^[A-Za-z0-9_-]{43}$") | null;
-    deploymentId: string(min_length=1);
-    deviceIdentityKeyId: string(pattern="^[A-Za-z0-9_-]{43}$");
-    instanceId: string(min_length=1);
-    issuedAt: uint(maximum=9007199254740991);
-    newSessionNkey: string(min_length=1);
-    newSessionPublicKey: string(min_length=1);
-    participantDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    proof: AuthDevicesConnectInfoGetRequestproof;
-    requestId: string(min_length=1);
-  }
-  model AuthDevicesConnectInfoGetResponse {
-    deploymentId: string(min_length=1);
-    endpoints: AuthDevicesConnectInfoGetResponseendpoints;
-    instanceId: string(min_length=1);
-    participantId: string | null;
   }
   model AuthDevicesDisableRequest {
     expectedVersion: int(minimum=1, maximum=9007199254740991);
@@ -1201,51 +1236,6 @@ api "trellis.auth@v1" {
     field: string | null;
     message: string(min_length=1);
     retryable: bool;
-  }
-  model AuthIdentityAuthorityGetRequest {
-    authorityId: string(min_length=1);
-  }
-  model AuthIdentityAuthorityGetResponse {
-    authority: AuthIdentityAuthorityGetResponseauthority;
-  }
-  model AuthIdentityAuthorityListRequest {
-    cursor?: string(min_length=1);
-    limit?: int(minimum=1, maximum=100);
-    participantId?: string(min_length=1);
-    principalId?: string(min_length=1);
-    state?: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-  }
-  model AuthIdentityAuthorityListResponse {
-    entries: list<AuthIdentityAuthorityListResponseentriesItem>;
-    nextCursor: string | null;
-  }
-  model AuthIdentityAuthorityRevokeRequest {
-    authorityId: string(min_length=1);
-    expectedVersion: int(minimum=1, maximum=9007199254740991);
-    idempotencyKey: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthIdentityAuthorityRevokeResponse {
-    authority: AuthIdentityAuthorityRevokeResponseauthority;
-  }
-  model AuthIdentityGrantsListRequest {
-    limit: uint(maximum=500);
-    offset?: uint;
-    user?: string(min_length=1);
-  }
-  model AuthIdentityGrantsListResponse {
-    count: uint;
-    entries: list<AuthIdentityGrantsListResponseentriesItem>;
-    limit: uint;
-    nextOffset?: uint;
-    offset: uint;
-  }
-  model AuthIdentityGrantsRevokeRequest {
-    identityGrantId: string(min_length=1);
-    user?: string(min_length=1);
-  }
-  model AuthIdentityGrantsRevokeResponse {
-    success: bool;
   }
   model AuthPortalsGetRequest {
     portalId: string(min_length=1);
@@ -1409,29 +1399,27 @@ api "trellis.auth@v1" {
   }
   model AuthSessionsListRequest {
     cursor?: string(min_length=1);
-    deploymentId?: string(min_length=1);
     limit?: int(minimum=1, maximum=100);
     participantId?: string(min_length=1);
     principalId?: string(min_length=1);
     state?: "active" | "expired" | "revoked";
   }
   model AuthSessionsListResponse {
-    entries: list<AuthSessionsListResponseentriesItem>;
+    entries: list<AuthLoginSession>;
     nextCursor: string | null;
   }
   model AuthSessionsLogoutRequest {
   }
   model AuthSessionsLogoutResponse {
     kickedConnections: uint;
-    session: AuthSessionsLogoutResponsesession;
+    session: AuthLoginSession;
   }
   model AuthSessionsMeRequest {
   }
   model AuthSessionsMeResponse {
-    deploymentId: string | null;
-    instanceId: string | null;
-    session: AuthSessionsMeResponsesession;
-    user: AuthSessionsMeResponseuser1 | null;
+    connection: AuthRuntimeConnection;
+    session: AuthLoginSession | null;
+    user: AuthUsersGetResponseuser | null;
   }
   model AuthSessionsRevokeRequest {
     expectedVersion: int(minimum=1, maximum=9007199254740991) | null;
@@ -1441,7 +1429,7 @@ api "trellis.auth@v1" {
   }
   model AuthSessionsRevokeResponse {
     kickedConnections: uint;
-    session: AuthSessionsRevokeResponsesession;
+    session: AuthLoginSession;
   }
   model AuthSessionsRevokedEvent {
     eventId: string(min_length=1);
@@ -1580,216 +1568,14 @@ api "trellis.auth@v1" {
     lastSeenAt: uint(maximum=9007199254740991);
     remoteAddress: string | null;
     serverId: string(min_length=1);
-    sessionId: string(min_length=1);
+    runtimeConnectionId: string(min_length=1);
+    loginSessionId: string(min_length=1) | null;
+    contextDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
+    principalId: string(min_length=1);
+    participantId: string(min_length=1);
+    deploymentId: string(min_length=1) | null;
+    instanceId: string(min_length=1) | null;
     userNkey: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthority {
-    acceptedNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    authorityId: string(min_length=1);
-    createdAt: uint(maximum=9007199254740991);
-    decision: AuthDeploymentAuthorityAcceptMigrationResponseauthoritydecision1 | null;
-    deploymentId: string(min_length=1);
-    desiredCapabilities: list<string(min_length=1)>;
-    desiredGrantSet: AuthDeploymentAuthorityAcceptMigrationResponseauthoritydesiredGrantSet;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    kind: "deployment";
-    materialization: AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1 | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "device";
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: uint(maximum=9007199254740991);
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseproposal {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: int(minimum=1, maximum=9007199254740991) | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: uint(maximum=9007199254740991);
-    decisionAt: uint(maximum=9007199254740991) | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    proposalId: string(min_length=1);
-    proposedCapabilities: list<string(min_length=1)>;
-    proposedGrantSet: AuthDeploymentAuthorityAcceptMigrationResponseproposalproposedGrantSet;
-    reasons: list<string(min_length=1)>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthority {
-    acceptedNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    authorityId: string(min_length=1);
-    createdAt: uint(maximum=9007199254740991);
-    decision: AuthDeploymentAuthorityAcceptUpdateResponseauthoritydecision1 | null;
-    deploymentId: string(min_length=1);
-    desiredCapabilities: list<string(min_length=1)>;
-    desiredGrantSet: AuthDeploymentAuthorityAcceptUpdateResponseauthoritydesiredGrantSet;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    kind: "deployment";
-    materialization: AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1 | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "device";
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: uint(maximum=9007199254740991);
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseproposal {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: int(minimum=1, maximum=9007199254740991) | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: uint(maximum=9007199254740991);
-    decisionAt: uint(maximum=9007199254740991) | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    proposalId: string(min_length=1);
-    proposedCapabilities: list<string(min_length=1)>;
-    proposedGrantSet: AuthDeploymentAuthorityAcceptUpdateResponseproposalproposedGrantSet;
-    reasons: list<string(min_length=1)>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityGetResponseauthority {
-    acceptedNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    authorityId: string(min_length=1);
-    createdAt: uint(maximum=9007199254740991);
-    decision: AuthDeploymentAuthorityGetResponseauthoritydecision1 | null;
-    deploymentId: string(min_length=1);
-    desiredCapabilities: list<string(min_length=1)>;
-    desiredGrantSet: AuthDeploymentAuthorityGetResponseauthoritydesiredGrantSet;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    kind: "deployment";
-    materialization: AuthDeploymentAuthorityGetResponseauthoritymaterialization1 | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "device";
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: uint(maximum=9007199254740991);
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthDeploymentAuthorityListResponseentriesItem {
-    acceptedNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    authorityId: string(min_length=1);
-    createdAt: uint(maximum=9007199254740991);
-    decision: AuthDeploymentAuthorityListResponseentriesItemdecision1 | null;
-    deploymentId: string(min_length=1);
-    desiredCapabilities: list<string(min_length=1)>;
-    desiredGrantSet: AuthDeploymentAuthorityListResponseentriesItemdesiredGrantSet;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    kind: "deployment";
-    materialization: AuthDeploymentAuthorityListResponseentriesItemmaterialization1 | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "device";
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: uint(maximum=9007199254740991);
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthDeploymentAuthorityPlanRequestparticipantArtifact {
-  }
-  model AuthDeploymentAuthorityPlanRequestreferencedApiArtifactsItem {
-  }
-  model AuthDeploymentAuthorityPlanResponseproposal {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: int(minimum=1, maximum=9007199254740991) | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: uint(maximum=9007199254740991);
-    decisionAt: uint(maximum=9007199254740991) | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    proposalId: string(min_length=1);
-    proposedCapabilities: list<string(min_length=1)>;
-    proposedGrantSet: AuthDeploymentAuthorityPlanResponseproposalproposedGrantSet;
-    reasons: list<string(min_length=1)>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityPlansGetResponseproposal {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: int(minimum=1, maximum=9007199254740991) | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: uint(maximum=9007199254740991);
-    decisionAt: uint(maximum=9007199254740991) | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    proposalId: string(min_length=1);
-    proposedCapabilities: list<string(min_length=1)>;
-    proposedGrantSet: AuthDeploymentAuthorityPlansGetResponseproposalproposedGrantSet;
-    reasons: list<string(min_length=1)>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityPlansListResponseentriesItem {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: int(minimum=1, maximum=9007199254740991) | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: uint(maximum=9007199254740991);
-    decisionAt: uint(maximum=9007199254740991) | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    proposalId: string(min_length=1);
-    proposedCapabilities: list<string(min_length=1)>;
-    proposedGrantSet: AuthDeploymentAuthorityPlansListResponseentriesItemproposedGrantSet;
-    reasons: list<string(min_length=1)>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthority {
-    acceptedNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    authorityId: string(min_length=1);
-    createdAt: uint(maximum=9007199254740991);
-    decision: AuthDeploymentAuthorityReconcileResponseauthoritydecision1 | null;
-    deploymentId: string(min_length=1);
-    desiredCapabilities: list<string(min_length=1)>;
-    desiredGrantSet: AuthDeploymentAuthorityReconcileResponseauthoritydesiredGrantSet;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    kind: "deployment";
-    materialization: AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1 | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "device";
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: uint(maximum=9007199254740991);
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthDeploymentAuthorityRejectResponseproposal {
-    authorityKind: "identity" | "deployment";
-    baseAuthorityVersion: int(minimum=1, maximum=9007199254740991) | null;
-    classification: "initial" | "update" | "migration";
-    createdAt: uint(maximum=9007199254740991);
-    decisionAt: uint(maximum=9007199254740991) | null;
-    decisionBy: string | null;
-    decisionReason: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    proposalId: string(min_length=1);
-    proposedCapabilities: list<string(min_length=1)>;
-    proposedGrantSet: AuthDeploymentAuthorityRejectResponseproposalproposedGrantSet;
-    reasons: list<string(min_length=1)>;
-    state: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    subjectId: string(min_length=1);
   }
   model AuthDeploymentsCreateResponsedeployment {
     createdAt: uint(maximum=9007199254740991);
@@ -1890,25 +1676,7 @@ api "trellis.auth@v1" {
     version: int(minimum=1, maximum=9007199254740991);
   }
   model AuthDeviceUserAuthoritiesListResponseentriesItem {
-    authority: AuthDeviceUserAuthoritiesListResponseentriesItemauthority1 | null;
     device: AuthDeviceUserAuthoritiesListResponseentriesItemdevice;
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1 {
-    acceptedNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    authorityId: string(min_length=1);
-    createdAt: uint(maximum=9007199254740991);
-    decision: AuthDeviceUserAuthoritiesResolveResponseauthority1decision1 | null;
-    desiredCapabilities: list<string(min_length=1)>;
-    desiredGrantSet: AuthDeviceUserAuthoritiesResolveResponseauthority1desiredGrantSet;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    kind: "identity";
-    materialization: AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1 | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    principalId: string(min_length=1);
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: uint(maximum=9007199254740991);
-    version: int(minimum=1, maximum=9007199254740991);
   }
   model AuthDeviceUserAuthoritiesResolveResponsedevice {
     administrativeApproval: "pending" | "approved" | "rejected" | "revoked";
@@ -1985,17 +1753,6 @@ api "trellis.auth@v1" {
     state: "pending" | "active" | "disabled" | "revoked";
     updatedAt: uint(maximum=9007199254740991);
     version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthDevicesConnectInfoGetRequestproof {
-    format: "trellis.session-proof.v1";
-    signature: string(min_length=1);
-  }
-  model AuthDevicesConnectInfoGetResponseendpoints {
-    authMode: "session_nkey";
-    authorityMode: "server_issued";
-    maximumClockSkewMs: uint(maximum=300000);
-    native: list<string(min_length=1)>;
-    websocket: list<string(min_length=1)>;
   }
   model AuthDevicesDisableResponsedevice {
     administrativeApproval: "pending" | "approved" | "rejected" | "revoked";
@@ -2094,68 +1851,6 @@ api "trellis.auth@v1" {
     resourceId: string(min_length=1);
     state: string(min_length=1);
     version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthIdentityAuthorityGetResponseauthority {
-    acceptedNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    authorityId: string(min_length=1);
-    createdAt: uint(maximum=9007199254740991);
-    decision: AuthIdentityAuthorityGetResponseauthoritydecision1 | null;
-    desiredCapabilities: list<string(min_length=1)>;
-    desiredGrantSet: AuthIdentityAuthorityGetResponseauthoritydesiredGrantSet;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    kind: "identity";
-    materialization: AuthIdentityAuthorityGetResponseauthoritymaterialization1 | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    principalId: string(min_length=1);
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: uint(maximum=9007199254740991);
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthIdentityAuthorityListResponseentriesItem {
-    acceptedNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    authorityId: string(min_length=1);
-    createdAt: uint(maximum=9007199254740991);
-    decision: AuthIdentityAuthorityListResponseentriesItemdecision1 | null;
-    desiredCapabilities: list<string(min_length=1)>;
-    desiredGrantSet: AuthIdentityAuthorityListResponseentriesItemdesiredGrantSet;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    kind: "identity";
-    materialization: AuthIdentityAuthorityListResponseentriesItemmaterialization1 | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    principalId: string(min_length=1);
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: uint(maximum=9007199254740991);
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthIdentityAuthorityRevokeResponseauthority {
-    acceptedNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    authorityId: string(min_length=1);
-    createdAt: uint(maximum=9007199254740991);
-    decision: AuthIdentityAuthorityRevokeResponseauthoritydecision1 | null;
-    desiredCapabilities: list<string(min_length=1)>;
-    desiredGrantSet: AuthIdentityAuthorityRevokeResponseauthoritydesiredGrantSet;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    kind: "identity";
-    materialization: AuthIdentityAuthorityRevokeResponseauthoritymaterialization1 | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    principalId: string(min_length=1);
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: uint(maximum=9007199254740991);
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthIdentityGrantsListResponseentriesItem {
-    capabilities: list<string>;
-    contractEvidence: AuthIdentityGrantsListResponseentriesItemcontractEvidence;
-    description: string(min_length=1);
-    displayName: string(min_length=1);
-    grantedAt: string(format="date-time");
-    identityAnchor: AuthIdentityGrantsListResponseentriesItemidentityAnchor1 | AuthIdentityGrantsListResponseentriesItemidentityAnchor2 | AuthIdentityGrantsListResponseentriesItemidentityAnchor3 | AuthIdentityGrantsListResponseentriesItemidentityAnchor4;
-    identityGrantId: string(min_length=1);
-    participantKind: "app" | "agent";
-    updatedAt: string(format="date-time");
   }
   model AuthPortalsGetResponseportal {
     builtIn: bool;
@@ -2350,17 +2045,13 @@ api "trellis.auth@v1" {
     state: string(min_length=1);
     version: int(minimum=1, maximum=9007199254740991);
   }
-  model AuthSessionsListResponseentriesItem {
+  model AuthLoginSession {
     createdAt: uint(maximum=9007199254740991);
     expiresAt: uint(maximum=9007199254740991) | null;
-    inboxPrefix: string(min_length=1);
-    lastSeenAt: uint(maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
+    lastAuthenticatedAt: uint(maximum=9007199254740991);
     participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
+    participantKind: "app" | "agent";
     principalId: string(min_length=1);
-    principalKind: "user" | "service" | "device";
     revokedAt: uint(maximum=9007199254740991) | null;
     sessionId: string(min_length=1);
     sessionKeyId: string(pattern="^[A-Za-z0-9_-]{43}$");
@@ -2368,72 +2059,20 @@ api "trellis.auth@v1" {
     state: "active" | "expired" | "revoked";
     version: int(minimum=1, maximum=9007199254740991);
   }
-  model AuthSessionsLogoutResponsesession {
-    createdAt: uint(maximum=9007199254740991);
-    expiresAt: uint(maximum=9007199254740991) | null;
+  model AuthRuntimeConnection {
+    connectionId: string(min_length=1);
+    loginSessionId?: string(min_length=1);
+    identityKeyId?: string(min_length=1);
+    deploymentId?: string(min_length=1);
+    instanceId?: string(min_length=1);
+    sessionKey: string(pattern="^[A-Za-z0-9_-]{43}$");
     inboxPrefix: string(min_length=1);
-    lastSeenAt: uint(maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
     participantId: string(min_length=1);
     participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
     principalId: string(min_length=1);
     principalKind: "user" | "service" | "device";
-    revokedAt: uint(maximum=9007199254740991) | null;
-    sessionId: string(min_length=1);
-    sessionKeyId: string(pattern="^[A-Za-z0-9_-]{43}$");
-    sessionPublicKey: string(min_length=1);
-    state: "active" | "expired" | "revoked";
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthSessionsMeResponsesession {
-    createdAt: uint(maximum=9007199254740991);
-    expiresAt: uint(maximum=9007199254740991) | null;
-    inboxPrefix: string(min_length=1);
-    lastSeenAt: uint(maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    principalId: string(min_length=1);
-    principalKind: "user" | "service" | "device";
-    revokedAt: uint(maximum=9007199254740991) | null;
-    sessionId: string(min_length=1);
-    sessionKeyId: string(pattern="^[A-Za-z0-9_-]{43}$");
-    sessionPublicKey: string(min_length=1);
-    state: "active" | "expired" | "revoked";
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthSessionsMeResponseuser1 {
-    createdAt: uint(maximum=9007199254740991);
-    disabledAt: uint(maximum=9007199254740991) | null;
-    email: string | null;
-    image: string | null;
-    name: string | null;
-    principalId: string(min_length=1);
-    revokedAt: uint(maximum=9007199254740991) | null;
-    state: "active" | "disabled" | "revoked";
-    updatedAt: uint(maximum=9007199254740991);
-    userId: string(min_length=1);
-    version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthSessionsRevokeResponsesession {
-    createdAt: uint(maximum=9007199254740991);
-    expiresAt: uint(maximum=9007199254740991) | null;
-    inboxPrefix: string(min_length=1);
-    lastSeenAt: uint(maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    principalId: string(min_length=1);
-    principalKind: "user" | "service" | "device";
-    revokedAt: uint(maximum=9007199254740991) | null;
-    sessionId: string(min_length=1);
-    sessionKeyId: string(pattern="^[A-Za-z0-9_-]{43}$");
-    sessionPublicKey: string(min_length=1);
-    state: "active" | "expired" | "revoked";
-    version: int(minimum=1, maximum=9007199254740991);
+    grants: AuthGrantSet;
+    platformPrivileges: list<"trellis.auth::admin">;
   }
   model AuthUserIdentitiesListResponseentriesItem {
     createdAt: uint(maximum=9007199254740991);
@@ -2547,182 +2186,6 @@ api "trellis.auth@v1" {
     action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
     target: AuthCapabilitiesListResponseentriesItemallowsItemtarget1 | AuthCapabilitiesListResponseentriesItemallowsItemtarget2 | AuthCapabilitiesListResponseentriesItemallowsItemtarget3;
   }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritydecision1 {
-    decidedAt: uint(maximum=9007199254740991);
-    decidedBy: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritydesiredGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityAcceptMigrationResponseauthoritydesiredGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1 {
-    authorityId: string(min_length=1);
-    authorityKind: "identity" | "deployment";
-    authorityVersion: int(minimum=1, maximum=9007199254740991);
-    effectiveCapabilities: list<string(min_length=1)>;
-    effectiveGrantSet: AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1effectiveGrantSet;
-    error: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    materializationId: string(min_length=1);
-    materializationVersion: int(minimum=1, maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    reconciledAt: uint(maximum=9007199254740991) | null;
-    state: "available" | "unavailable" | "error";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseproposalproposedGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityAcceptMigrationResponseproposalproposedGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritydecision1 {
-    decidedAt: uint(maximum=9007199254740991);
-    decidedBy: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritydesiredGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityAcceptUpdateResponseauthoritydesiredGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1 {
-    authorityId: string(min_length=1);
-    authorityKind: "identity" | "deployment";
-    authorityVersion: int(minimum=1, maximum=9007199254740991);
-    effectiveCapabilities: list<string(min_length=1)>;
-    effectiveGrantSet: AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1effectiveGrantSet;
-    error: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    materializationId: string(min_length=1);
-    materializationVersion: int(minimum=1, maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    reconciledAt: uint(maximum=9007199254740991) | null;
-    state: "available" | "unavailable" | "error";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseproposalproposedGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityAcceptUpdateResponseproposalproposedGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritydecision1 {
-    decidedAt: uint(maximum=9007199254740991);
-    decidedBy: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritydesiredGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityGetResponseauthoritydesiredGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritymaterialization1 {
-    authorityId: string(min_length=1);
-    authorityKind: "identity" | "deployment";
-    authorityVersion: int(minimum=1, maximum=9007199254740991);
-    effectiveCapabilities: list<string(min_length=1)>;
-    effectiveGrantSet: AuthDeploymentAuthorityGetResponseauthoritymaterialization1effectiveGrantSet;
-    error: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    materializationId: string(min_length=1);
-    materializationVersion: int(minimum=1, maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    reconciledAt: uint(maximum=9007199254740991) | null;
-    state: "available" | "unavailable" | "error";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemdecision1 {
-    decidedAt: uint(maximum=9007199254740991);
-    decidedBy: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemdesiredGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityListResponseentriesItemdesiredGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemmaterialization1 {
-    authorityId: string(min_length=1);
-    authorityKind: "identity" | "deployment";
-    authorityVersion: int(minimum=1, maximum=9007199254740991);
-    effectiveCapabilities: list<string(min_length=1)>;
-    effectiveGrantSet: AuthDeploymentAuthorityListResponseentriesItemmaterialization1effectiveGrantSet;
-    error: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    materializationId: string(min_length=1);
-    materializationVersion: int(minimum=1, maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    reconciledAt: uint(maximum=9007199254740991) | null;
-    state: "available" | "unavailable" | "error";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityPlanResponseproposalproposedGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityPlanResponseproposalproposedGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityPlansGetResponseproposalproposedGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityPlansGetResponseproposalproposedGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityPlansListResponseentriesItemproposedGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityPlansListResponseentriesItemproposedGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritydecision1 {
-    decidedAt: uint(maximum=9007199254740991);
-    decidedBy: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritydesiredGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityReconcileResponseauthoritydesiredGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1 {
-    authorityId: string(min_length=1);
-    authorityKind: "identity" | "deployment";
-    authorityVersion: int(minimum=1, maximum=9007199254740991);
-    effectiveCapabilities: list<string(min_length=1)>;
-    effectiveGrantSet: AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1effectiveGrantSet;
-    error: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    materializationId: string(min_length=1);
-    materializationVersion: int(minimum=1, maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    reconciledAt: uint(maximum=9007199254740991) | null;
-    state: "available" | "unavailable" | "error";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityRejectResponseproposalproposedGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityRejectResponseproposalproposedGrantSetpermissionsItem>;
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1 {
-    acceptedNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    authorityId: string(min_length=1);
-    createdAt: uint(maximum=9007199254740991);
-    decision: AuthDeviceUserAuthoritiesListResponseentriesItemauthority1decision1 | null;
-    desiredCapabilities: list<string(min_length=1)>;
-    desiredGrantSet: AuthDeviceUserAuthoritiesListResponseentriesItemauthority1desiredGrantSet;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    kind: "identity";
-    materialization: AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1 | null;
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    principalId: string(min_length=1);
-    state: "pending" | "accepted" | "rejected" | "revoked" | "stale";
-    updatedAt: uint(maximum=9007199254740991);
-    version: int(minimum=1, maximum=9007199254740991);
-  }
   model AuthDeviceUserAuthoritiesListResponseentriesItemdevice {
     administrativeApproval: "pending" | "approved" | "rejected" | "revoked";
     createdAt: uint(maximum=9007199254740991);
@@ -2738,138 +2201,6 @@ api "trellis.auth@v1" {
     state: "pending" | "active" | "disabled" | "revoked";
     updatedAt: uint(maximum=9007199254740991);
     version: int(minimum=1, maximum=9007199254740991);
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1decision1 {
-    decidedAt: uint(maximum=9007199254740991);
-    decidedBy: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1desiredGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeviceUserAuthoritiesResolveResponseauthority1desiredGrantSetpermissionsItem>;
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1 {
-    authorityId: string(min_length=1);
-    authorityKind: "identity" | "deployment";
-    authorityVersion: int(minimum=1, maximum=9007199254740991);
-    effectiveCapabilities: list<string(min_length=1)>;
-    effectiveGrantSet: AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1effectiveGrantSet;
-    error: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    materializationId: string(min_length=1);
-    materializationVersion: int(minimum=1, maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    reconciledAt: uint(maximum=9007199254740991) | null;
-    state: "available" | "unavailable" | "error";
-    subjectId: string(min_length=1);
-  }
-  model AuthIdentityAuthorityGetResponseauthoritydecision1 {
-    decidedAt: uint(maximum=9007199254740991);
-    decidedBy: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthIdentityAuthorityGetResponseauthoritydesiredGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthIdentityAuthorityGetResponseauthoritydesiredGrantSetpermissionsItem>;
-  }
-  model AuthIdentityAuthorityGetResponseauthoritymaterialization1 {
-    authorityId: string(min_length=1);
-    authorityKind: "identity" | "deployment";
-    authorityVersion: int(minimum=1, maximum=9007199254740991);
-    effectiveCapabilities: list<string(min_length=1)>;
-    effectiveGrantSet: AuthIdentityAuthorityGetResponseauthoritymaterialization1effectiveGrantSet;
-    error: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    materializationId: string(min_length=1);
-    materializationVersion: int(minimum=1, maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    reconciledAt: uint(maximum=9007199254740991) | null;
-    state: "available" | "unavailable" | "error";
-    subjectId: string(min_length=1);
-  }
-  model AuthIdentityAuthorityListResponseentriesItemdecision1 {
-    decidedAt: uint(maximum=9007199254740991);
-    decidedBy: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthIdentityAuthorityListResponseentriesItemdesiredGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthIdentityAuthorityListResponseentriesItemdesiredGrantSetpermissionsItem>;
-  }
-  model AuthIdentityAuthorityListResponseentriesItemmaterialization1 {
-    authorityId: string(min_length=1);
-    authorityKind: "identity" | "deployment";
-    authorityVersion: int(minimum=1, maximum=9007199254740991);
-    effectiveCapabilities: list<string(min_length=1)>;
-    effectiveGrantSet: AuthIdentityAuthorityListResponseentriesItemmaterialization1effectiveGrantSet;
-    error: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    materializationId: string(min_length=1);
-    materializationVersion: int(minimum=1, maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    reconciledAt: uint(maximum=9007199254740991) | null;
-    state: "available" | "unavailable" | "error";
-    subjectId: string(min_length=1);
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritydecision1 {
-    decidedAt: uint(maximum=9007199254740991);
-    decidedBy: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritydesiredGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthIdentityAuthorityRevokeResponseauthoritydesiredGrantSetpermissionsItem>;
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritymaterialization1 {
-    authorityId: string(min_length=1);
-    authorityKind: "identity" | "deployment";
-    authorityVersion: int(minimum=1, maximum=9007199254740991);
-    effectiveCapabilities: list<string(min_length=1)>;
-    effectiveGrantSet: AuthIdentityAuthorityRevokeResponseauthoritymaterialization1effectiveGrantSet;
-    error: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    materializationId: string(min_length=1);
-    materializationVersion: int(minimum=1, maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    reconciledAt: uint(maximum=9007199254740991) | null;
-    state: "available" | "unavailable" | "error";
-    subjectId: string(min_length=1);
-  }
-  model AuthIdentityGrantsListResponseentriesItemcontractEvidence {
-    contractDigest: string(pattern="^[A-Za-z0-9_-]+$");
-    contractId: string(min_length=1);
-  }
-  model AuthIdentityGrantsListResponseentriesItemidentityAnchor1 {
-    contractId: string(min_length=1);
-    kind: "web";
-    origin: string(min_length=1);
-  }
-  model AuthIdentityGrantsListResponseentriesItemidentityAnchor2 {
-    contractId: string(min_length=1);
-    kind: "cli";
-    sessionPublicKey: string(min_length=1);
-  }
-  model AuthIdentityGrantsListResponseentriesItemidentityAnchor3 {
-    contractId: string(min_length=1);
-    kind: "native";
-    sessionPublicKey: string(min_length=1);
-  }
-  model AuthIdentityGrantsListResponseentriesItemidentityAnchor4 {
-    contractId: string(min_length=1);
-    devicePublicKey: string(min_length=1);
-    kind: "device-user";
   }
   model AuthPortalsGetResponseportalloginSettings {
     federatedRegistration: bool;
@@ -2925,645 +2256,6 @@ api "trellis.auth@v1" {
     participant: string(min_length=1);
     resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
   }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritydesiredGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityAcceptMigrationResponseauthoritydesiredGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityAcceptMigrationResponseauthoritydesiredGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityAcceptMigrationResponseauthoritydesiredGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1effectiveGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1effectiveGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseproposalproposedGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityAcceptMigrationResponseproposalproposedGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityAcceptMigrationResponseproposalproposedGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityAcceptMigrationResponseproposalproposedGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritydesiredGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityAcceptUpdateResponseauthoritydesiredGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityAcceptUpdateResponseauthoritydesiredGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityAcceptUpdateResponseauthoritydesiredGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1effectiveGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1effectiveGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseproposalproposedGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityAcceptUpdateResponseproposalproposedGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityAcceptUpdateResponseproposalproposedGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityAcceptUpdateResponseproposalproposedGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritydesiredGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritymaterialization1effectiveGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemdesiredGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemmaterialization1effectiveGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityPlanResponseproposalproposedGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityPlanResponseproposalproposedGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityPlanResponseproposalproposedGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityPlanResponseproposalproposedGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityPlansGetResponseproposalproposedGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityPlansGetResponseproposalproposedGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityPlansGetResponseproposalproposedGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityPlansGetResponseproposalproposedGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityPlansListResponseentriesItemproposedGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityPlansListResponseentriesItemproposedGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityPlansListResponseentriesItemproposedGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityPlansListResponseentriesItemproposedGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritydesiredGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityReconcileResponseauthoritydesiredGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityReconcileResponseauthoritydesiredGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityReconcileResponseauthoritydesiredGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1effectiveGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1effectiveGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityRejectResponseproposalproposedGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityRejectResponseproposalproposedGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityRejectResponseproposalproposedGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityRejectResponseproposalproposedGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1decision1 {
-    decidedAt: uint(maximum=9007199254740991);
-    decidedBy: string(min_length=1);
-    reason: string | null;
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1desiredGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeviceUserAuthoritiesListResponseentriesItemauthority1desiredGrantSetpermissionsItem>;
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1 {
-    authorityId: string(min_length=1);
-    authorityKind: "identity" | "deployment";
-    authorityVersion: int(minimum=1, maximum=9007199254740991);
-    effectiveCapabilities: list<string(min_length=1)>;
-    effectiveGrantSet: AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1effectiveGrantSet;
-    error: string | null;
-    expiresAt: uint(maximum=9007199254740991) | null;
-    materializationId: string(min_length=1);
-    materializationVersion: int(minimum=1, maximum=9007199254740991);
-    participantArtifactDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    participantId: string(min_length=1);
-    participantKind: "service" | "app" | "device" | "agent";
-    participantNeedsDigest: string(pattern="^[A-Za-z0-9_-]{43}$");
-    reconciledAt: uint(maximum=9007199254740991) | null;
-    state: "available" | "unavailable" | "error";
-    subjectId: string(min_length=1);
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1desiredGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeviceUserAuthoritiesResolveResponseauthority1desiredGrantSetpermissionsItemtarget1 | AuthDeviceUserAuthoritiesResolveResponseauthority1desiredGrantSetpermissionsItemtarget2 | AuthDeviceUserAuthoritiesResolveResponseauthority1desiredGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1effectiveGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1effectiveGrantSetpermissionsItem>;
-  }
-  model AuthIdentityAuthorityGetResponseauthoritydesiredGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthIdentityAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget1 | AuthIdentityAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget2 | AuthIdentityAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget3;
-  }
-  model AuthIdentityAuthorityGetResponseauthoritymaterialization1effectiveGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthIdentityAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItem>;
-  }
-  model AuthIdentityAuthorityListResponseentriesItemdesiredGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthIdentityAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget1 | AuthIdentityAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget2 | AuthIdentityAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget3;
-  }
-  model AuthIdentityAuthorityListResponseentriesItemmaterialization1effectiveGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthIdentityAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItem>;
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritydesiredGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthIdentityAuthorityRevokeResponseauthoritydesiredGrantSetpermissionsItemtarget1 | AuthIdentityAuthorityRevokeResponseauthoritydesiredGrantSetpermissionsItemtarget2 | AuthIdentityAuthorityRevokeResponseauthoritydesiredGrantSetpermissionsItemtarget3;
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritymaterialization1effectiveGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthIdentityAuthorityRevokeResponseauthoritymaterialization1effectiveGrantSetpermissionsItem>;
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritydesiredGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritydesiredGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritydesiredGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1effectiveGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseproposalproposedGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseproposalproposedGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseproposalproposedGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritydesiredGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritydesiredGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritydesiredGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1effectiveGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseproposalproposedGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseproposalproposedGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseproposalproposedGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityPlanResponseproposalproposedGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityPlanResponseproposalproposedGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityPlanResponseproposalproposedGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityPlansGetResponseproposalproposedGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityPlansGetResponseproposalproposedGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityPlansGetResponseproposalproposedGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityPlansListResponseentriesItemproposedGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityPlansListResponseentriesItemproposedGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityPlansListResponseentriesItemproposedGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritydesiredGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritydesiredGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritydesiredGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1effectiveGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 | AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 | AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityRejectResponseproposalproposedGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityRejectResponseproposalproposedGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityRejectResponseproposalproposedGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1desiredGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeviceUserAuthoritiesListResponseentriesItemauthority1desiredGrantSetpermissionsItemtarget1 | AuthDeviceUserAuthoritiesListResponseentriesItemauthority1desiredGrantSetpermissionsItemtarget2 | AuthDeviceUserAuthoritiesListResponseentriesItemauthority1desiredGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1effectiveGrantSet {
-    format: "trellis.grant-set.v1";
-    permissions: list<AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1effectiveGrantSetpermissionsItem>;
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1desiredGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1desiredGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1desiredGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1effectiveGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1effectiveGrantSetpermissionsItemtarget1 | AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1effectiveGrantSetpermissionsItemtarget2 | AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1effectiveGrantSetpermissionsItemtarget3;
-  }
-  model AuthIdentityAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthIdentityAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthIdentityAuthorityGetResponseauthoritydesiredGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthIdentityAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthIdentityAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 | AuthIdentityAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 | AuthIdentityAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3;
-  }
-  model AuthIdentityAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthIdentityAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthIdentityAuthorityListResponseentriesItemdesiredGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthIdentityAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthIdentityAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget1 | AuthIdentityAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget2 | AuthIdentityAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget3;
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritydesiredGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritydesiredGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritydesiredGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritymaterialization1effectiveGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthIdentityAuthorityRevokeResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 | AuthIdentityAuthorityRevokeResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 | AuthIdentityAuthorityRevokeResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityAcceptMigrationResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityAcceptUpdateResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeploymentAuthorityReconcileResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1desiredGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1desiredGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1desiredGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1effectiveGrantSetpermissionsItem {
-    action: "call" | "invoke" | "observe" | "cancel" | "control" | "publish" | "subscribe" | "read" | "write" | "delete" | "submit" | "process" | "consume";
-    target: AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1effectiveGrantSetpermissionsItemtarget1 | AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1effectiveGrantSetpermissionsItemtarget2 | AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1effectiveGrantSetpermissionsItemtarget3;
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1effectiveGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1effectiveGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeviceUserAuthoritiesResolveResponseauthority1materialization1effectiveGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthIdentityAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthIdentityAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthIdentityAuthorityGetResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthIdentityAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthIdentityAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthIdentityAuthorityListResponseentriesItemmaterialization1effectiveGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthIdentityAuthorityRevokeResponseauthoritymaterialization1effectiveGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1effectiveGrantSetpermissionsItemtarget1 {
-    api: string(min_length=1);
-    kind: "apiSurface";
-    name: string(min_length=1);
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1effectiveGrantSetpermissionsItemtarget2 {
-    api: string(min_length=1);
-    kind: "operationSignal";
-    operation: string(min_length=1);
-    signal: string(min_length=1);
-  }
-  model AuthDeviceUserAuthoritiesListResponseentriesItemauthority1materialization1effectiveGrantSetpermissionsItemtarget3 {
-    kind: "participantResource";
-    name: string(min_length=1);
-    participant: string(min_length=1);
-    resource: "state" | "jobQueue" | "eventConsumer" | "kv" | "store";
-  }
   error AuthError {
     schema AuthErrorDetails;
   }
@@ -3576,8 +2268,6 @@ api "trellis.auth@v1" {
   capability "trellis.auth::authorities.mutate" {
   }
   capability "trellis.auth::authorities.read" {
-  }
-  capability "trellis.auth::capabilities.delegate" {
   }
   capability "trellis.auth::capabilities.read" {
   }
@@ -3628,7 +2318,7 @@ api "trellis.auth@v1" {
     output AuthCapabilityGroupsDeleteResponse;
     errors [AuthError, UnexpectedError, ValidationError];
     capabilities {
-      call ["trellis.auth::capabilities.delegate"];
+      call ["trellis.auth::authorities.mutate"];
     }
   }
   rpc "Auth.CapabilityGroups.Get" {
@@ -3655,7 +2345,7 @@ api "trellis.auth@v1" {
     output AuthCapabilityGroupsPutResponse;
     errors [AuthError, UnexpectedError, ValidationError];
     capabilities {
-      call ["trellis.auth::capabilities.delegate"];
+      call ["trellis.auth::authorities.mutate"];
     }
   }
   rpc "Auth.Connections.Kick" {
@@ -3674,87 +2364,6 @@ api "trellis.auth@v1" {
     errors [AuthError, UnexpectedError, ValidationError];
     capabilities {
       call ["trellis.auth::connections.read"];
-    }
-  }
-  rpc "Auth.DeploymentAuthority.AcceptMigration" {
-    version "v1";
-    input AuthDeploymentAuthorityAcceptMigrationRequest;
-    output AuthDeploymentAuthorityAcceptMigrationResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.mutate", "trellis.auth::capabilities.delegate"];
-    }
-  }
-  rpc "Auth.DeploymentAuthority.AcceptUpdate" {
-    version "v1";
-    input AuthDeploymentAuthorityAcceptUpdateRequest;
-    output AuthDeploymentAuthorityAcceptUpdateResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.mutate", "trellis.auth::capabilities.delegate"];
-    }
-  }
-  rpc "Auth.DeploymentAuthority.Get" {
-    version "v1";
-    input AuthDeploymentAuthorityGetRequest;
-    output AuthDeploymentAuthorityGetResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.read"];
-    }
-  }
-  rpc "Auth.DeploymentAuthority.List" {
-    version "v1";
-    input AuthDeploymentAuthorityListRequest;
-    output AuthDeploymentAuthorityListResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.read"];
-    }
-  }
-  rpc "Auth.DeploymentAuthority.Plan" {
-    version "v1";
-    input AuthDeploymentAuthorityPlanRequest;
-    output AuthDeploymentAuthorityPlanResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.mutate"];
-    }
-  }
-  rpc "Auth.DeploymentAuthority.Plans.Get" {
-    version "v1";
-    input AuthDeploymentAuthorityPlansGetRequest;
-    output AuthDeploymentAuthorityPlansGetResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.read"];
-    }
-  }
-  rpc "Auth.DeploymentAuthority.Plans.List" {
-    version "v1";
-    input AuthDeploymentAuthorityPlansListRequest;
-    output AuthDeploymentAuthorityPlansListResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.read"];
-    }
-  }
-  rpc "Auth.DeploymentAuthority.Reconcile" {
-    version "v1";
-    input AuthDeploymentAuthorityReconcileRequest;
-    output AuthDeploymentAuthorityReconcileResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.mutate"];
-    }
-  }
-  rpc "Auth.DeploymentAuthority.Reject" {
-    version "v1";
-    input AuthDeploymentAuthorityRejectRequest;
-    output AuthDeploymentAuthorityRejectResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.mutate"];
     }
   }
   rpc "Auth.Deployments.Create" {
@@ -3838,15 +2447,6 @@ api "trellis.auth@v1" {
       call ["trellis.auth::devices.mutate"];
     }
   }
-  rpc "Auth.Devices.ConnectInfo.Get" {
-    version "v1";
-    input AuthDevicesConnectInfoGetRequest;
-    output AuthDevicesConnectInfoGetResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::devices.read"];
-    }
-  }
   rpc "Auth.Devices.Disable" {
     version "v1";
     input AuthDevicesDisableRequest;
@@ -3892,45 +2492,6 @@ api "trellis.auth@v1" {
       call ["trellis.auth::devices.mutate"];
     }
   }
-  rpc "Auth.IdentityAuthority.Get" {
-    version "v1";
-    input AuthIdentityAuthorityGetRequest;
-    output AuthIdentityAuthorityGetResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.read"];
-    }
-  }
-  rpc "Auth.IdentityAuthority.List" {
-    version "v1";
-    input AuthIdentityAuthorityListRequest;
-    output AuthIdentityAuthorityListResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.read"];
-    }
-  }
-  rpc "Auth.IdentityAuthority.Revoke" {
-    version "v1";
-    input AuthIdentityAuthorityRevokeRequest;
-    output AuthIdentityAuthorityRevokeResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-    capabilities {
-      call ["trellis.auth::authorities.mutate"];
-    }
-  }
-  rpc "Auth.IdentityGrants.List" {
-    version "v1";
-    input AuthIdentityGrantsListRequest;
-    output AuthIdentityGrantsListResponse;
-    errors [AuthError, UnexpectedError];
-  }
-  rpc "Auth.IdentityGrants.Revoke" {
-    version "v1";
-    input AuthIdentityGrantsRevokeRequest;
-    output AuthIdentityGrantsRevokeResponse;
-    errors [AuthError, UnexpectedError, ValidationError];
-  }
   rpc "Auth.Portals.Get" {
     version "v1";
     input AuthPortalsGetRequest;
@@ -3955,7 +2516,7 @@ api "trellis.auth@v1" {
     output AuthPortalsGrantOverridesPutResponse;
     errors [AuthError, UnexpectedError, ValidationError];
     capabilities {
-      call ["trellis.auth::capabilities.delegate", "trellis.auth::portals.mutate"];
+      call ["trellis.auth::portals.mutate"];
     }
   }
   rpc "Auth.Portals.GrantOverrides.Remove" {
@@ -3964,7 +2525,7 @@ api "trellis.auth@v1" {
     output AuthPortalsGrantOverridesRemoveResponse;
     errors [AuthError, UnexpectedError, ValidationError];
     capabilities {
-      call ["trellis.auth::capabilities.delegate", "trellis.auth::portals.mutate"];
+      call ["trellis.auth::portals.mutate"];
     }
   }
   rpc "Auth.Portals.List" {

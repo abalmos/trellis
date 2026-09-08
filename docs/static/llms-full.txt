@@ -93,31 +93,33 @@ Rust participants expose typed methods through generated facades.
 
 ## Connect And Authorize
 
-Service bootstrap takes a provisioned identity and the generated participant.
-Device bootstrap follows device activation. Browser apps use Trellis browser
-authentication helpers. These are different identity lifecycles, not
-interchangeable connection shortcuts.
+Service/device bootstrap sends only provisioned identity and proof inputs.
+Browser bind creates a user-login session and then performs context refresh.
+These are different identity lifecycles, not interchangeable shortcuts.
 
-Generated artifacts supply participant/API identity, digests, and requested
-authority. Bootstrap can wait for an administrator to approve deployment
-authority. Adding an action to IDL does not itself authorize a running client.
-Optional dependency actions remain unavailable without the corresponding
-authority. Capability names are API-scoped; transport subjects and physical
-resource bindings are not grants.
+An administrator installs immutable participant revisions containing exact API
+artifacts and writes one `GrantBinding` per identity and participant. Deployment
+apply records exact resource evidence. Adding an action to IDL or installing a
+package grants nothing by itself. Optional actions remain unavailable unless the
+binding and current optional evidence both permit them. Capability names are
+API-scoped; subjects and physical resource names are not grants.
 
-The libraries own session proofs, context verification, refresh, and reconnect.
-Services and devices that survive restarts need durable authorization-context
-storage; browser clients use their participant-scoped IndexedDB installation.
-Explicit ephemeral storage is available for tests and ephemeral processes. Keep
-a file-backed installation private to one active process. Clearing a session
-retains the trust rollback floor.
+The server resolves assignment, installed artifacts, grants, resources, online
+issuer, route JWT, inbox, and exact transports. Clients verify that response.
+The libraries own proofs, context verification, refresh, and reconnect.
+Authorization contexts, route JWTs, transport endpoints, grants, clock offset,
+and issuer keys are process-memory-only. Browser IndexedDB version 3 persists
+only the session seed, nullable login metadata, pending flow, and generation
+fence, keyed by canonical origin plus stable participant ID.
 
 Trellis HTTP endpoints serve bootstrap, browser/account flows, recovery, and
 browser assets. Connected Trellis control uses generated APIs over NATS. Use the
 browser client's `logout()` for normal sign-out so local installation and
 connection state are updated together.
 
-Request and event proofs are verified before application handlers run. Ordinary
+Requests/events carry context digest, matching redundant `session-key`, and the
+message proof; complete contexts and GrantSets are not message metadata. Proofs
+are verified before application handlers run. Ordinary
 context expiry allows eligible historical events to be verified; explicit
 context revocation invalidates all proofs from that context. Applications do not
 implement their own verifier or inspect Trellis's internal authorization KV
@@ -203,9 +205,10 @@ Provide the `trellis-server` and `trellis` executables as described in
 `/guides/testing-trellis-services`.
 
 A missing generated method usually means the action was not selected or SDKs
-need regeneration. Pending service startup may require deployment authority
-approval. Authorization failures require inspecting that authority, not
-constructing a raw subject or granting access in application code.
+need regeneration. Authorization failures require inspecting the installed
+participant revision, current participant-scoped `GrantBinding`, required
+resource evidence, principal/login state, and online issuer, not constructing a
+raw subject or granting access in application code.
 
 For runtime operation, see `/guides/starting-trellis`. For a complete service,
 see `/guides/write-a-service`. Use `/api` for public language APIs and generated

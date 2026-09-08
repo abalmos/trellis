@@ -22,7 +22,7 @@ pub(crate) async fn start_oidc<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -69,7 +69,7 @@ pub(crate) async fn start_account_flow_oidc<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -159,7 +159,7 @@ async fn begin_oidc<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -265,7 +265,7 @@ pub(crate) async fn oidc_callback<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -315,7 +315,7 @@ async fn oidc_callback_inner<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -739,7 +739,7 @@ async fn complete_browser_oauth<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -816,7 +816,7 @@ async fn complete_first_admin_oauth<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
@@ -846,26 +846,35 @@ where
     {
         return Err(HttpError::conflict("account_flow_not_eligible"));
     }
-    let participant_id = flow.payload["participantId"]
-        .as_str()
+    let targets = flow.payload["bindings"]
+        .as_array()
         .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-    let participant_artifact_digest = flow.payload["participantArtifactDigest"]
-        .as_str()
-        .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-    let participant_needs_digest = flow.payload["participantNeedsDigest"]
-        .as_str()
-        .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-    let binding = state
-        .service
-        .repository()
-        .get_participant_binding(participant_id, participant_artifact_digest)
-        .await?
-        .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
-    if binding.needs_digest != participant_needs_digest {
-        return Err(HttpError::conflict("first_admin_target_changed"));
+    let mut bindings = Vec::with_capacity(targets.len());
+    for target in targets {
+        let participant_id = target["participantId"]
+            .as_str()
+            .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
+        let installed_revision = target["installedRevision"]
+            .as_u64()
+            .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
+        let (_, installed) = state
+            .service
+            .repository()
+            .get_installed_participant_record(participant_id.to_owned(), Some(installed_revision))
+            .await?
+            .ok_or_else(|| HttpError::internal("first_admin_target_missing"))?;
+        bindings.push(FirstAdminBinding {
+            participant_id: participant_id.to_owned(),
+            installed_revision,
+            grant_set: super::complete_participant_grants(&installed)?,
+            platform_privileges: (participant_id
+                != crate::platform::auth::builtins::PORTAL_PARTICIPANT_ID)
+                .then_some(trellis_protocol::PlatformPrivilege::Admin)
+                .into_iter()
+                .collect(),
+        });
     }
     let digest = digest_parts(&[&oauth.provider_id, &subject, &oauth.state_id]);
-    let (grant_set, capabilities) = super::complete_participant_authority(&binding)?;
     let outcome = state
         .service
         .complete_first_admin_federated(FirstAdminFederatedRegistration {
@@ -876,11 +885,7 @@ where
             display_name: None,
             email: oauth.authenticated_email.clone(),
             image_url: None,
-            participant_id: participant_id.to_owned(),
-            participant_artifact_digest: participant_artifact_digest.to_owned(),
-            participant_needs_digest: participant_needs_digest.to_owned(),
-            grant_set,
-            capabilities,
+            bindings,
             authority_expires_at: None,
             completed_at: now,
             idempotency: idempotency(

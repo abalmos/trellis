@@ -1,4 +1,3 @@
-import { FileAuthorizationContextStore } from "@qlever-llc/trellis/auth/file";
 import { TrellisService } from "@qlever-llc/trellis/service";
 import { participants } from "orders-trellis";
 import { createOrder } from "./service.ts";
@@ -14,19 +13,7 @@ const service = await TrellisService.connect({
   participant: participants.acmeOrdersService.participant,
   name: "orders-service",
   trellisUrl: requiredEnv("TRELLIS_URL"),
-  identity: {
-    seed: requiredEnv("TRELLIS_IDENTITY_SEED"),
-    deploymentId: requiredEnv("TRELLIS_DEPLOYMENT"),
-    instanceId: requiredEnv("TRELLIS_INSTANCE"),
-    participantId: requiredEnv("TRELLIS_PARTICIPANT_ID"),
-    participantArtifactDigest: requiredEnv(
-      "TRELLIS_PARTICIPANT_ARTIFACT_DIGEST",
-    ),
-    participantNeedsDigest: requiredEnv("TRELLIS_PARTICIPANT_NEEDS_DIGEST"),
-  },
-  authorizationContextStore: new FileAuthorizationContextStore(
-    "./trellis-context.json",
-  ),
+  seed: requiredEnv("TRELLIS_IDENTITY_SEED"),
 }).orThrow();
 
 const stop = () => {

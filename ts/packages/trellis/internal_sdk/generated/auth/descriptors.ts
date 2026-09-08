@@ -25,24 +25,6 @@ import {
   AuthConnectionsListRequestSchema,
   AuthConnectionsListResponseSchema,
   AuthConnectionsOpenedEventSchema,
-  AuthDeploymentAuthorityAcceptMigrationRequestSchema,
-  AuthDeploymentAuthorityAcceptMigrationResponseSchema,
-  AuthDeploymentAuthorityAcceptUpdateRequestSchema,
-  AuthDeploymentAuthorityAcceptUpdateResponseSchema,
-  AuthDeploymentAuthorityGetRequestSchema,
-  AuthDeploymentAuthorityGetResponseSchema,
-  AuthDeploymentAuthorityListRequestSchema,
-  AuthDeploymentAuthorityListResponseSchema,
-  AuthDeploymentAuthorityPlanRequestSchema,
-  AuthDeploymentAuthorityPlanResponseSchema,
-  AuthDeploymentAuthorityPlansGetRequestSchema,
-  AuthDeploymentAuthorityPlansGetResponseSchema,
-  AuthDeploymentAuthorityPlansListRequestSchema,
-  AuthDeploymentAuthorityPlansListResponseSchema,
-  AuthDeploymentAuthorityReconcileRequestSchema,
-  AuthDeploymentAuthorityReconcileResponseSchema,
-  AuthDeploymentAuthorityRejectRequestSchema,
-  AuthDeploymentAuthorityRejectResponseSchema,
   AuthDeploymentsApplyRequestSchema,
   AuthDeploymentsApplyResponseSchema,
   AuthDeploymentsCreateRequestSchema,
@@ -51,12 +33,12 @@ import {
   AuthDeploymentsDisableResponseSchema,
   AuthDeploymentsEnableRequestSchema,
   AuthDeploymentsEnableResponseSchema,
+  AuthDeploymentsGetRequestSchema,
+  AuthDeploymentsGetResponseSchema,
   AuthDeploymentsListRequestSchema,
   AuthDeploymentsListResponseSchema,
   AuthDeploymentsRemoveRequestSchema,
   AuthDeploymentsRemoveResponseSchema,
-  AuthDevicesConnectInfoGetRequestSchema,
-  AuthDevicesConnectInfoGetResponseSchema,
   AuthDevicesDisableRequestSchema,
   AuthDevicesDisableResponseSchema,
   AuthDevicesEnableRequestSchema,
@@ -86,22 +68,16 @@ import {
   AuthGrantsChangedEventSchema,
   AuthGrantsGetRequestSchema,
   AuthGrantsGetResponseSchema,
+  AuthGrantsListRequestSchema,
+  AuthGrantsListResponseSchema,
   AuthGrantsMutationResponseSchema,
   AuthGrantsRevokeRequestSchema,
   AuthGrantsSetRequestSchema,
-  AuthIdentityAuthorityGetRequestSchema,
-  AuthIdentityAuthorityGetResponseSchema,
-  AuthIdentityAuthorityListRequestSchema,
-  AuthIdentityAuthorityListResponseSchema,
-  AuthIdentityAuthorityRevokeRequestSchema,
-  AuthIdentityAuthorityRevokeResponseSchema,
-  AuthIdentityGrantsListRequestSchema,
-  AuthIdentityGrantsListResponseSchema,
-  AuthIdentityGrantsRevokeRequestSchema,
-  AuthIdentityGrantsRevokeResponseSchema,
   AuthIssuersRevokedEventSchema,
   AuthIssuersRevokeRequestSchema,
   AuthIssuersRevokeResponseSchema,
+  AuthParticipantsGetRequestSchema,
+  AuthParticipantsGetResponseSchema,
   AuthParticipantsInstallRequestSchema,
   AuthParticipantsInstallResponseSchema,
   AuthPortalsGetRequestSchema,
@@ -265,7 +241,7 @@ const __AuthCapabilityGroupsDeleteDescriptor = {
   output: schema<Types.AuthCapabilityGroupsDeleteOutput>(
     AuthCapabilityGroupsDeleteResponseSchema,
   ) as ReturnType<typeof schema<Types.AuthCapabilityGroupsDeleteOutput>>,
-  callerCapabilities: ["trellis.auth::capabilities.delegate"] as const,
+  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
   errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
   declaredErrorTypes: [
     "AuthError",
@@ -472,7 +448,7 @@ const __AuthCapabilityGroupsPutDescriptor = {
   output: schema<Types.AuthCapabilityGroupsPutOutput>(
     AuthCapabilityGroupsPutResponseSchema,
   ) as ReturnType<typeof schema<Types.AuthCapabilityGroupsPutOutput>>,
-  callerCapabilities: ["trellis.auth::capabilities.delegate"] as const,
+  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
   errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
   declaredErrorTypes: [
     "AuthError",
@@ -658,641 +634,6 @@ export const AuthConnectionsList: ReturnType<
   ACTION_SOURCE,
 );
 
-const __AuthDeploymentAuthorityAcceptMigrationDescriptor = {
-  subject: "rpc.v1.Auth.DeploymentAuthority.AcceptMigration",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.DeploymentAuthority.AcceptMigration",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.DeploymentAuthority.AcceptMigration";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthDeploymentAuthorityAcceptMigrationInput>(
-    AuthDeploymentAuthorityAcceptMigrationRequestSchema,
-  ) as ReturnType<
-    typeof schema<Types.AuthDeploymentAuthorityAcceptMigrationInput>
-  >,
-  output: schema<Types.AuthDeploymentAuthorityAcceptMigrationOutput>(
-    AuthDeploymentAuthorityAcceptMigrationResponseSchema,
-  ) as ReturnType<
-    typeof schema<Types.AuthDeploymentAuthorityAcceptMigrationOutput>
-  >,
-  callerCapabilities: [
-    "trellis.auth::authorities.mutate",
-    "trellis.auth::capabilities.delegate",
-  ] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthDeploymentAuthorityAcceptMigration: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.DeploymentAuthority.AcceptMigration",
-    typeof __AuthDeploymentAuthorityAcceptMigrationDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.DeploymentAuthority.AcceptMigration",
-  __AuthDeploymentAuthorityAcceptMigrationDescriptor,
-  "AuthDeploymentAuthorityAcceptMigration",
-  ACTION_SOURCE,
-);
-
-const __AuthDeploymentAuthorityAcceptUpdateDescriptor = {
-  subject: "rpc.v1.Auth.DeploymentAuthority.AcceptUpdate",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.DeploymentAuthority.AcceptUpdate",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.DeploymentAuthority.AcceptUpdate";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthDeploymentAuthorityAcceptUpdateInput>(
-    AuthDeploymentAuthorityAcceptUpdateRequestSchema,
-  ) as ReturnType<
-    typeof schema<Types.AuthDeploymentAuthorityAcceptUpdateInput>
-  >,
-  output: schema<Types.AuthDeploymentAuthorityAcceptUpdateOutput>(
-    AuthDeploymentAuthorityAcceptUpdateResponseSchema,
-  ) as ReturnType<
-    typeof schema<Types.AuthDeploymentAuthorityAcceptUpdateOutput>
-  >,
-  callerCapabilities: [
-    "trellis.auth::authorities.mutate",
-    "trellis.auth::capabilities.delegate",
-  ] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthDeploymentAuthorityAcceptUpdate: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.DeploymentAuthority.AcceptUpdate",
-    typeof __AuthDeploymentAuthorityAcceptUpdateDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.DeploymentAuthority.AcceptUpdate",
-  __AuthDeploymentAuthorityAcceptUpdateDescriptor,
-  "AuthDeploymentAuthorityAcceptUpdate",
-  ACTION_SOURCE,
-);
-
-const __AuthDeploymentAuthorityGetDescriptor = {
-  subject: "rpc.v1.Auth.DeploymentAuthority.Get",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.DeploymentAuthority.Get",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.DeploymentAuthority.Get";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthDeploymentAuthorityGetInput>(
-    AuthDeploymentAuthorityGetRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityGetInput>>,
-  output: schema<Types.AuthDeploymentAuthorityGetOutput>(
-    AuthDeploymentAuthorityGetResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityGetOutput>>,
-  callerCapabilities: ["trellis.auth::authorities.read"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthDeploymentAuthorityGet: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.DeploymentAuthority.Get",
-    typeof __AuthDeploymentAuthorityGetDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.DeploymentAuthority.Get",
-  __AuthDeploymentAuthorityGetDescriptor,
-  "AuthDeploymentAuthorityGet",
-  ACTION_SOURCE,
-);
-
-const __AuthDeploymentAuthorityListDescriptor = {
-  subject: "rpc.v1.Auth.DeploymentAuthority.List",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.DeploymentAuthority.List",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.DeploymentAuthority.List";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthDeploymentAuthorityListInput>(
-    AuthDeploymentAuthorityListRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityListInput>>,
-  output: schema<Types.AuthDeploymentAuthorityListOutput>(
-    AuthDeploymentAuthorityListResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityListOutput>>,
-  callerCapabilities: ["trellis.auth::authorities.read"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthDeploymentAuthorityList: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.DeploymentAuthority.List",
-    typeof __AuthDeploymentAuthorityListDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.DeploymentAuthority.List",
-  __AuthDeploymentAuthorityListDescriptor,
-  "AuthDeploymentAuthorityList",
-  ACTION_SOURCE,
-);
-
-const __AuthDeploymentAuthorityPlanDescriptor = {
-  subject: "rpc.v1.Auth.DeploymentAuthority.Plan",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.DeploymentAuthority.Plan",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.DeploymentAuthority.Plan";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthDeploymentAuthorityPlanInput>(
-    AuthDeploymentAuthorityPlanRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityPlanInput>>,
-  output: schema<Types.AuthDeploymentAuthorityPlanOutput>(
-    AuthDeploymentAuthorityPlanResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityPlanOutput>>,
-  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthDeploymentAuthorityPlan: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.DeploymentAuthority.Plan",
-    typeof __AuthDeploymentAuthorityPlanDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.DeploymentAuthority.Plan",
-  __AuthDeploymentAuthorityPlanDescriptor,
-  "AuthDeploymentAuthorityPlan",
-  ACTION_SOURCE,
-);
-
-const __AuthDeploymentAuthorityPlansGetDescriptor = {
-  subject: "rpc.v1.Auth.DeploymentAuthority.Plans.Get",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.DeploymentAuthority.Plans.Get",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.DeploymentAuthority.Plans.Get";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthDeploymentAuthorityPlansGetInput>(
-    AuthDeploymentAuthorityPlansGetRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityPlansGetInput>>,
-  output: schema<Types.AuthDeploymentAuthorityPlansGetOutput>(
-    AuthDeploymentAuthorityPlansGetResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityPlansGetOutput>>,
-  callerCapabilities: ["trellis.auth::authorities.read"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthDeploymentAuthorityPlansGet: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.DeploymentAuthority.Plans.Get",
-    typeof __AuthDeploymentAuthorityPlansGetDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.DeploymentAuthority.Plans.Get",
-  __AuthDeploymentAuthorityPlansGetDescriptor,
-  "AuthDeploymentAuthorityPlansGet",
-  ACTION_SOURCE,
-);
-
-const __AuthDeploymentAuthorityPlansListDescriptor = {
-  subject: "rpc.v1.Auth.DeploymentAuthority.Plans.List",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.DeploymentAuthority.Plans.List",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.DeploymentAuthority.Plans.List";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthDeploymentAuthorityPlansListInput>(
-    AuthDeploymentAuthorityPlansListRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityPlansListInput>>,
-  output: schema<Types.AuthDeploymentAuthorityPlansListOutput>(
-    AuthDeploymentAuthorityPlansListResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityPlansListOutput>>,
-  callerCapabilities: ["trellis.auth::authorities.read"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthDeploymentAuthorityPlansList: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.DeploymentAuthority.Plans.List",
-    typeof __AuthDeploymentAuthorityPlansListDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.DeploymentAuthority.Plans.List",
-  __AuthDeploymentAuthorityPlansListDescriptor,
-  "AuthDeploymentAuthorityPlansList",
-  ACTION_SOURCE,
-);
-
-const __AuthDeploymentAuthorityReconcileDescriptor = {
-  subject: "rpc.v1.Auth.DeploymentAuthority.Reconcile",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.DeploymentAuthority.Reconcile",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.DeploymentAuthority.Reconcile";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthDeploymentAuthorityReconcileInput>(
-    AuthDeploymentAuthorityReconcileRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityReconcileInput>>,
-  output: schema<Types.AuthDeploymentAuthorityReconcileOutput>(
-    AuthDeploymentAuthorityReconcileResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityReconcileOutput>>,
-  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthDeploymentAuthorityReconcile: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.DeploymentAuthority.Reconcile",
-    typeof __AuthDeploymentAuthorityReconcileDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.DeploymentAuthority.Reconcile",
-  __AuthDeploymentAuthorityReconcileDescriptor,
-  "AuthDeploymentAuthorityReconcile",
-  ACTION_SOURCE,
-);
-
-const __AuthDeploymentAuthorityRejectDescriptor = {
-  subject: "rpc.v1.Auth.DeploymentAuthority.Reject",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.DeploymentAuthority.Reject",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.DeploymentAuthority.Reject";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthDeploymentAuthorityRejectInput>(
-    AuthDeploymentAuthorityRejectRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityRejectInput>>,
-  output: schema<Types.AuthDeploymentAuthorityRejectOutput>(
-    AuthDeploymentAuthorityRejectResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthDeploymentAuthorityRejectOutput>>,
-  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthDeploymentAuthorityReject: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.DeploymentAuthority.Reject",
-    typeof __AuthDeploymentAuthorityRejectDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.DeploymentAuthority.Reject",
-  __AuthDeploymentAuthorityRejectDescriptor,
-  "AuthDeploymentAuthorityReject",
-  ACTION_SOURCE,
-);
-
 const __AuthDeploymentsApplyDescriptor = {
   subject: "rpc.v1.Auth.Deployments.Apply",
   permission: Object.freeze({
@@ -1314,7 +655,7 @@ const __AuthDeploymentsApplyDescriptor = {
   output: schema<Types.AuthDeploymentsApplyOutput>(
     AuthDeploymentsApplyResponseSchema,
   ) as ReturnType<typeof schema<Types.AuthDeploymentsApplyOutput>>,
-  callerCapabilities: [] as const,
+  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
   errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
   declaredErrorTypes: [
     "AuthError",
@@ -1566,6 +907,75 @@ export const AuthDeploymentsEnable: ReturnType<
   "Auth.Deployments.Enable",
   __AuthDeploymentsEnableDescriptor,
   "AuthDeploymentsEnable",
+  ACTION_SOURCE,
+);
+
+const __AuthDeploymentsGetDescriptor = {
+  subject: "rpc.v1.Auth.Deployments.Get",
+  permission: Object.freeze({
+    apiId: "trellis.auth@v1",
+    apiVersion: "v1",
+    surfaceKind: "rpc",
+    surfaceName: "Auth.Deployments.Get",
+    action: "call",
+  }) as {
+    readonly apiId: "trellis.auth@v1";
+    readonly apiVersion: "v1";
+    readonly surfaceKind: "rpc";
+    readonly surfaceName: "Auth.Deployments.Get";
+    readonly action: "call";
+  },
+  input: schema<Types.AuthDeploymentsGetInput>(
+    AuthDeploymentsGetRequestSchema,
+  ) as ReturnType<typeof schema<Types.AuthDeploymentsGetInput>>,
+  output: schema<Types.AuthDeploymentsGetOutput>(
+    AuthDeploymentsGetResponseSchema,
+  ) as ReturnType<typeof schema<Types.AuthDeploymentsGetOutput>>,
+  callerCapabilities: ["trellis.auth::deployments.read"] as const,
+  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+  declaredErrorTypes: [
+    "AuthError",
+    "UnexpectedError",
+    "ValidationError",
+  ] as const,
+  runtimeErrors: [
+    {
+      type: "AuthError",
+      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
+        typeof schema<Types.AuthErrorData>
+      >,
+      fromSerializable: Types.AuthError
+        .fromSerializable as typeof Types.AuthError.fromSerializable,
+    },
+    {
+      type: "UnexpectedError",
+      schema: schema<Types.UnexpectedErrorData>(
+        AuthErrorDetailsSchema,
+      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
+      fromSerializable: Types.UnexpectedError
+        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
+    },
+    {
+      type: "ValidationError",
+      schema: schema<Types.ValidationErrorData>(
+        AuthErrorDetailsSchema,
+      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
+      fromSerializable: Types.ValidationError
+        .fromSerializable as typeof Types.ValidationError.fromSerializable,
+    },
+  ] as const,
+} as const;
+export const AuthDeploymentsGet: ReturnType<
+  typeof rpcAction<
+    typeof API_ID,
+    "Auth.Deployments.Get",
+    typeof __AuthDeploymentsGetDescriptor
+  >
+> = rpcAction(
+  API_ID,
+  "Auth.Deployments.Get",
+  __AuthDeploymentsGetDescriptor,
+  "AuthDeploymentsGet",
   ACTION_SOURCE,
 );
 
@@ -1991,75 +1401,6 @@ export const AuthDeviceUserAuthoritiesRevoke: ReturnType<
   ACTION_SOURCE,
 );
 
-const __AuthDevicesConnectInfoGetDescriptor = {
-  subject: "rpc.v1.Auth.Devices.ConnectInfo.Get",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.Devices.ConnectInfo.Get",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.Devices.ConnectInfo.Get";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthDevicesConnectInfoGetInput>(
-    AuthDevicesConnectInfoGetRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthDevicesConnectInfoGetInput>>,
-  output: schema<Types.AuthDevicesConnectInfoGetOutput>(
-    AuthDevicesConnectInfoGetResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthDevicesConnectInfoGetOutput>>,
-  callerCapabilities: ["trellis.auth::devices.read"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthDevicesConnectInfoGet: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.Devices.ConnectInfo.Get",
-    typeof __AuthDevicesConnectInfoGetDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.Devices.ConnectInfo.Get",
-  __AuthDevicesConnectInfoGetDescriptor,
-  "AuthDevicesConnectInfoGet",
-  ACTION_SOURCE,
-);
-
 const __AuthDevicesDisableDescriptor = {
   subject: "rpc.v1.Auth.Devices.Disable",
   permission: Object.freeze({
@@ -2426,7 +1767,7 @@ const __AuthGrantsGetDescriptor = {
   output: schema<Types.AuthGrantsGetOutput>(
     AuthGrantsGetResponseSchema,
   ) as ReturnType<typeof schema<Types.AuthGrantsGetOutput>>,
-  callerCapabilities: [] as const,
+  callerCapabilities: ["trellis.auth::authorities.read"] as const,
   errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
   declaredErrorTypes: [
     "AuthError",
@@ -2474,6 +1815,75 @@ export const AuthGrantsGet: ReturnType<
   ACTION_SOURCE,
 );
 
+const __AuthGrantsListDescriptor = {
+  subject: "rpc.v1.Auth.Grants.List",
+  permission: Object.freeze({
+    apiId: "trellis.auth@v1",
+    apiVersion: "v1",
+    surfaceKind: "rpc",
+    surfaceName: "Auth.Grants.List",
+    action: "call",
+  }) as {
+    readonly apiId: "trellis.auth@v1";
+    readonly apiVersion: "v1";
+    readonly surfaceKind: "rpc";
+    readonly surfaceName: "Auth.Grants.List";
+    readonly action: "call";
+  },
+  input: schema<Types.AuthGrantsListInput>(
+    AuthGrantsListRequestSchema,
+  ) as ReturnType<typeof schema<Types.AuthGrantsListInput>>,
+  output: schema<Types.AuthGrantsListOutput>(
+    AuthGrantsListResponseSchema,
+  ) as ReturnType<typeof schema<Types.AuthGrantsListOutput>>,
+  callerCapabilities: ["trellis.auth::authorities.read"] as const,
+  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+  declaredErrorTypes: [
+    "AuthError",
+    "UnexpectedError",
+    "ValidationError",
+  ] as const,
+  runtimeErrors: [
+    {
+      type: "AuthError",
+      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
+        typeof schema<Types.AuthErrorData>
+      >,
+      fromSerializable: Types.AuthError
+        .fromSerializable as typeof Types.AuthError.fromSerializable,
+    },
+    {
+      type: "UnexpectedError",
+      schema: schema<Types.UnexpectedErrorData>(
+        AuthErrorDetailsSchema,
+      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
+      fromSerializable: Types.UnexpectedError
+        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
+    },
+    {
+      type: "ValidationError",
+      schema: schema<Types.ValidationErrorData>(
+        AuthErrorDetailsSchema,
+      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
+      fromSerializable: Types.ValidationError
+        .fromSerializable as typeof Types.ValidationError.fromSerializable,
+    },
+  ] as const,
+} as const;
+export const AuthGrantsList: ReturnType<
+  typeof rpcAction<
+    typeof API_ID,
+    "Auth.Grants.List",
+    typeof __AuthGrantsListDescriptor
+  >
+> = rpcAction(
+  API_ID,
+  "Auth.Grants.List",
+  __AuthGrantsListDescriptor,
+  "AuthGrantsList",
+  ACTION_SOURCE,
+);
+
 const __AuthGrantsRevokeDescriptor = {
   subject: "rpc.v1.Auth.Grants.Revoke",
   permission: Object.freeze({
@@ -2495,7 +1905,7 @@ const __AuthGrantsRevokeDescriptor = {
   output: schema<Types.AuthGrantsRevokeOutput>(
     AuthGrantsMutationResponseSchema,
   ) as ReturnType<typeof schema<Types.AuthGrantsRevokeOutput>>,
-  callerCapabilities: [] as const,
+  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
   errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
   declaredErrorTypes: [
     "AuthError",
@@ -2564,7 +1974,7 @@ const __AuthGrantsSetDescriptor = {
   output: schema<Types.AuthGrantsSetOutput>(
     AuthGrantsMutationResponseSchema,
   ) as ReturnType<typeof schema<Types.AuthGrantsSetOutput>>,
-  callerCapabilities: [] as const,
+  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
   errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
   declaredErrorTypes: [
     "AuthError",
@@ -2612,339 +2022,6 @@ export const AuthGrantsSet: ReturnType<
   ACTION_SOURCE,
 );
 
-const __AuthIdentityAuthorityGetDescriptor = {
-  subject: "rpc.v1.Auth.IdentityAuthority.Get",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.IdentityAuthority.Get",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.IdentityAuthority.Get";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthIdentityAuthorityGetInput>(
-    AuthIdentityAuthorityGetRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthIdentityAuthorityGetInput>>,
-  output: schema<Types.AuthIdentityAuthorityGetOutput>(
-    AuthIdentityAuthorityGetResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthIdentityAuthorityGetOutput>>,
-  callerCapabilities: ["trellis.auth::authorities.read"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthIdentityAuthorityGet: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.IdentityAuthority.Get",
-    typeof __AuthIdentityAuthorityGetDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.IdentityAuthority.Get",
-  __AuthIdentityAuthorityGetDescriptor,
-  "AuthIdentityAuthorityGet",
-  ACTION_SOURCE,
-);
-
-const __AuthIdentityAuthorityListDescriptor = {
-  subject: "rpc.v1.Auth.IdentityAuthority.List",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.IdentityAuthority.List",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.IdentityAuthority.List";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthIdentityAuthorityListInput>(
-    AuthIdentityAuthorityListRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthIdentityAuthorityListInput>>,
-  output: schema<Types.AuthIdentityAuthorityListOutput>(
-    AuthIdentityAuthorityListResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthIdentityAuthorityListOutput>>,
-  callerCapabilities: ["trellis.auth::authorities.read"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthIdentityAuthorityList: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.IdentityAuthority.List",
-    typeof __AuthIdentityAuthorityListDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.IdentityAuthority.List",
-  __AuthIdentityAuthorityListDescriptor,
-  "AuthIdentityAuthorityList",
-  ACTION_SOURCE,
-);
-
-const __AuthIdentityAuthorityRevokeDescriptor = {
-  subject: "rpc.v1.Auth.IdentityAuthority.Revoke",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.IdentityAuthority.Revoke",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.IdentityAuthority.Revoke";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthIdentityAuthorityRevokeInput>(
-    AuthIdentityAuthorityRevokeRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthIdentityAuthorityRevokeInput>>,
-  output: schema<Types.AuthIdentityAuthorityRevokeOutput>(
-    AuthIdentityAuthorityRevokeResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthIdentityAuthorityRevokeOutput>>,
-  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthIdentityAuthorityRevoke: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.IdentityAuthority.Revoke",
-    typeof __AuthIdentityAuthorityRevokeDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.IdentityAuthority.Revoke",
-  __AuthIdentityAuthorityRevokeDescriptor,
-  "AuthIdentityAuthorityRevoke",
-  ACTION_SOURCE,
-);
-
-const __AuthIdentityGrantsListDescriptor = {
-  subject: "rpc.v1.Auth.IdentityGrants.List",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.IdentityGrants.List",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.IdentityGrants.List";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthIdentityGrantsListInput>(
-    AuthIdentityGrantsListRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthIdentityGrantsListInput>>,
-  output: schema<Types.AuthIdentityGrantsListOutput>(
-    AuthIdentityGrantsListResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthIdentityGrantsListOutput>>,
-  callerCapabilities: [] as const,
-  errors: ["AuthError", "UnexpectedError"] as const,
-  declaredErrorTypes: ["AuthError", "UnexpectedError"] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthIdentityGrantsList: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.IdentityGrants.List",
-    typeof __AuthIdentityGrantsListDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.IdentityGrants.List",
-  __AuthIdentityGrantsListDescriptor,
-  "AuthIdentityGrantsList",
-  ACTION_SOURCE,
-);
-
-const __AuthIdentityGrantsRevokeDescriptor = {
-  subject: "rpc.v1.Auth.IdentityGrants.Revoke",
-  permission: Object.freeze({
-    apiId: "trellis.auth@v1",
-    apiVersion: "v1",
-    surfaceKind: "rpc",
-    surfaceName: "Auth.IdentityGrants.Revoke",
-    action: "call",
-  }) as {
-    readonly apiId: "trellis.auth@v1";
-    readonly apiVersion: "v1";
-    readonly surfaceKind: "rpc";
-    readonly surfaceName: "Auth.IdentityGrants.Revoke";
-    readonly action: "call";
-  },
-  input: schema<Types.AuthIdentityGrantsRevokeInput>(
-    AuthIdentityGrantsRevokeRequestSchema,
-  ) as ReturnType<typeof schema<Types.AuthIdentityGrantsRevokeInput>>,
-  output: schema<Types.AuthIdentityGrantsRevokeOutput>(
-    AuthIdentityGrantsRevokeResponseSchema,
-  ) as ReturnType<typeof schema<Types.AuthIdentityGrantsRevokeOutput>>,
-  callerCapabilities: [] as const,
-  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
-  declaredErrorTypes: [
-    "AuthError",
-    "UnexpectedError",
-    "ValidationError",
-  ] as const,
-  runtimeErrors: [
-    {
-      type: "AuthError",
-      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
-        typeof schema<Types.AuthErrorData>
-      >,
-      fromSerializable: Types.AuthError
-        .fromSerializable as typeof Types.AuthError.fromSerializable,
-    },
-    {
-      type: "UnexpectedError",
-      schema: schema<Types.UnexpectedErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
-      fromSerializable: Types.UnexpectedError
-        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
-    },
-    {
-      type: "ValidationError",
-      schema: schema<Types.ValidationErrorData>(
-        AuthErrorDetailsSchema,
-      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
-      fromSerializable: Types.ValidationError
-        .fromSerializable as typeof Types.ValidationError.fromSerializable,
-    },
-  ] as const,
-} as const;
-export const AuthIdentityGrantsRevoke: ReturnType<
-  typeof rpcAction<
-    typeof API_ID,
-    "Auth.IdentityGrants.Revoke",
-    typeof __AuthIdentityGrantsRevokeDescriptor
-  >
-> = rpcAction(
-  API_ID,
-  "Auth.IdentityGrants.Revoke",
-  __AuthIdentityGrantsRevokeDescriptor,
-  "AuthIdentityGrantsRevoke",
-  ACTION_SOURCE,
-);
-
 const __AuthIssuersRevokeDescriptor = {
   subject: "rpc.v1.Auth.Issuers.Revoke",
   permission: Object.freeze({
@@ -2966,7 +2043,7 @@ const __AuthIssuersRevokeDescriptor = {
   output: schema<Types.AuthIssuersRevokeOutput>(
     AuthIssuersRevokeResponseSchema,
   ) as ReturnType<typeof schema<Types.AuthIssuersRevokeOutput>>,
-  callerCapabilities: [] as const,
+  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
   errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
   declaredErrorTypes: [
     "AuthError",
@@ -3014,6 +2091,75 @@ export const AuthIssuersRevoke: ReturnType<
   ACTION_SOURCE,
 );
 
+const __AuthParticipantsGetDescriptor = {
+  subject: "rpc.v1.Auth.Participants.Get",
+  permission: Object.freeze({
+    apiId: "trellis.auth@v1",
+    apiVersion: "v1",
+    surfaceKind: "rpc",
+    surfaceName: "Auth.Participants.Get",
+    action: "call",
+  }) as {
+    readonly apiId: "trellis.auth@v1";
+    readonly apiVersion: "v1";
+    readonly surfaceKind: "rpc";
+    readonly surfaceName: "Auth.Participants.Get";
+    readonly action: "call";
+  },
+  input: schema<Types.AuthParticipantsGetInput>(
+    AuthParticipantsGetRequestSchema,
+  ) as ReturnType<typeof schema<Types.AuthParticipantsGetInput>>,
+  output: schema<Types.AuthParticipantsGetOutput>(
+    AuthParticipantsGetResponseSchema,
+  ) as ReturnType<typeof schema<Types.AuthParticipantsGetOutput>>,
+  callerCapabilities: ["trellis.auth::authorities.read"] as const,
+  errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
+  declaredErrorTypes: [
+    "AuthError",
+    "UnexpectedError",
+    "ValidationError",
+  ] as const,
+  runtimeErrors: [
+    {
+      type: "AuthError",
+      schema: schema<Types.AuthErrorData>(AuthErrorDetailsSchema) as ReturnType<
+        typeof schema<Types.AuthErrorData>
+      >,
+      fromSerializable: Types.AuthError
+        .fromSerializable as typeof Types.AuthError.fromSerializable,
+    },
+    {
+      type: "UnexpectedError",
+      schema: schema<Types.UnexpectedErrorData>(
+        AuthErrorDetailsSchema,
+      ) as ReturnType<typeof schema<Types.UnexpectedErrorData>>,
+      fromSerializable: Types.UnexpectedError
+        .fromSerializable as typeof Types.UnexpectedError.fromSerializable,
+    },
+    {
+      type: "ValidationError",
+      schema: schema<Types.ValidationErrorData>(
+        AuthErrorDetailsSchema,
+      ) as ReturnType<typeof schema<Types.ValidationErrorData>>,
+      fromSerializable: Types.ValidationError
+        .fromSerializable as typeof Types.ValidationError.fromSerializable,
+    },
+  ] as const,
+} as const;
+export const AuthParticipantsGet: ReturnType<
+  typeof rpcAction<
+    typeof API_ID,
+    "Auth.Participants.Get",
+    typeof __AuthParticipantsGetDescriptor
+  >
+> = rpcAction(
+  API_ID,
+  "Auth.Participants.Get",
+  __AuthParticipantsGetDescriptor,
+  "AuthParticipantsGet",
+  ACTION_SOURCE,
+);
+
 const __AuthParticipantsInstallDescriptor = {
   subject: "rpc.v1.Auth.Participants.Install",
   permission: Object.freeze({
@@ -3035,7 +2181,7 @@ const __AuthParticipantsInstallDescriptor = {
   output: schema<Types.AuthParticipantsInstallOutput>(
     AuthParticipantsInstallResponseSchema,
   ) as ReturnType<typeof schema<Types.AuthParticipantsInstallOutput>>,
-  callerCapabilities: [] as const,
+  callerCapabilities: ["trellis.auth::authorities.mutate"] as const,
   errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
   declaredErrorTypes: [
     "AuthError",
@@ -3242,10 +2388,7 @@ const __AuthPortalsGrantOverridesPutDescriptor = {
   output: schema<Types.AuthPortalsGrantOverridesPutOutput>(
     AuthPortalsGrantOverridesPutResponseSchema,
   ) as ReturnType<typeof schema<Types.AuthPortalsGrantOverridesPutOutput>>,
-  callerCapabilities: [
-    "trellis.auth::capabilities.delegate",
-    "trellis.auth::portals.mutate",
-  ] as const,
+  callerCapabilities: ["trellis.auth::portals.mutate"] as const,
   errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
   declaredErrorTypes: [
     "AuthError",
@@ -3314,10 +2457,7 @@ const __AuthPortalsGrantOverridesRemoveDescriptor = {
   output: schema<Types.AuthPortalsGrantOverridesRemoveOutput>(
     AuthPortalsGrantOverridesRemoveResponseSchema,
   ) as ReturnType<typeof schema<Types.AuthPortalsGrantOverridesRemoveOutput>>,
-  callerCapabilities: [
-    "trellis.auth::capabilities.delegate",
-    "trellis.auth::portals.mutate",
-  ] as const,
+  callerCapabilities: ["trellis.auth::portals.mutate"] as const,
   errors: ["AuthError", "UnexpectedError", "ValidationError"] as const,
   declaredErrorTypes: [
     "AuthError",
@@ -5786,24 +4926,6 @@ export const ACTIONS = {
     AuthCapabilityGroupsPut as typeof AuthCapabilityGroupsPut,
   "Auth.Connections.Kick": AuthConnectionsKick as typeof AuthConnectionsKick,
   "Auth.Connections.List": AuthConnectionsList as typeof AuthConnectionsList,
-  "Auth.DeploymentAuthority.AcceptMigration":
-    AuthDeploymentAuthorityAcceptMigration as typeof AuthDeploymentAuthorityAcceptMigration,
-  "Auth.DeploymentAuthority.AcceptUpdate":
-    AuthDeploymentAuthorityAcceptUpdate as typeof AuthDeploymentAuthorityAcceptUpdate,
-  "Auth.DeploymentAuthority.Get":
-    AuthDeploymentAuthorityGet as typeof AuthDeploymentAuthorityGet,
-  "Auth.DeploymentAuthority.List":
-    AuthDeploymentAuthorityList as typeof AuthDeploymentAuthorityList,
-  "Auth.DeploymentAuthority.Plan":
-    AuthDeploymentAuthorityPlan as typeof AuthDeploymentAuthorityPlan,
-  "Auth.DeploymentAuthority.Plans.Get":
-    AuthDeploymentAuthorityPlansGet as typeof AuthDeploymentAuthorityPlansGet,
-  "Auth.DeploymentAuthority.Plans.List":
-    AuthDeploymentAuthorityPlansList as typeof AuthDeploymentAuthorityPlansList,
-  "Auth.DeploymentAuthority.Reconcile":
-    AuthDeploymentAuthorityReconcile as typeof AuthDeploymentAuthorityReconcile,
-  "Auth.DeploymentAuthority.Reject":
-    AuthDeploymentAuthorityReject as typeof AuthDeploymentAuthorityReject,
   "Auth.Deployments.Apply": AuthDeploymentsApply as typeof AuthDeploymentsApply,
   "Auth.Deployments.Create":
     AuthDeploymentsCreate as typeof AuthDeploymentsCreate,
@@ -5811,6 +4933,7 @@ export const ACTIONS = {
     AuthDeploymentsDisable as typeof AuthDeploymentsDisable,
   "Auth.Deployments.Enable":
     AuthDeploymentsEnable as typeof AuthDeploymentsEnable,
+  "Auth.Deployments.Get": AuthDeploymentsGet as typeof AuthDeploymentsGet,
   "Auth.Deployments.List": AuthDeploymentsList as typeof AuthDeploymentsList,
   "Auth.Deployments.Remove":
     AuthDeploymentsRemove as typeof AuthDeploymentsRemove,
@@ -5822,27 +4945,17 @@ export const ACTIONS = {
     AuthDeviceUserAuthoritiesReviewsList as typeof AuthDeviceUserAuthoritiesReviewsList,
   "Auth.DeviceUserAuthorities.Revoke":
     AuthDeviceUserAuthoritiesRevoke as typeof AuthDeviceUserAuthoritiesRevoke,
-  "Auth.Devices.ConnectInfo.Get":
-    AuthDevicesConnectInfoGet as typeof AuthDevicesConnectInfoGet,
   "Auth.Devices.Disable": AuthDevicesDisable as typeof AuthDevicesDisable,
   "Auth.Devices.Enable": AuthDevicesEnable as typeof AuthDevicesEnable,
   "Auth.Devices.List": AuthDevicesList as typeof AuthDevicesList,
   "Auth.Devices.Provision": AuthDevicesProvision as typeof AuthDevicesProvision,
   "Auth.Devices.Remove": AuthDevicesRemove as typeof AuthDevicesRemove,
   "Auth.Grants.Get": AuthGrantsGet as typeof AuthGrantsGet,
+  "Auth.Grants.List": AuthGrantsList as typeof AuthGrantsList,
   "Auth.Grants.Revoke": AuthGrantsRevoke as typeof AuthGrantsRevoke,
   "Auth.Grants.Set": AuthGrantsSet as typeof AuthGrantsSet,
-  "Auth.IdentityAuthority.Get":
-    AuthIdentityAuthorityGet as typeof AuthIdentityAuthorityGet,
-  "Auth.IdentityAuthority.List":
-    AuthIdentityAuthorityList as typeof AuthIdentityAuthorityList,
-  "Auth.IdentityAuthority.Revoke":
-    AuthIdentityAuthorityRevoke as typeof AuthIdentityAuthorityRevoke,
-  "Auth.IdentityGrants.List":
-    AuthIdentityGrantsList as typeof AuthIdentityGrantsList,
-  "Auth.IdentityGrants.Revoke":
-    AuthIdentityGrantsRevoke as typeof AuthIdentityGrantsRevoke,
   "Auth.Issuers.Revoke": AuthIssuersRevoke as typeof AuthIssuersRevoke,
+  "Auth.Participants.Get": AuthParticipantsGet as typeof AuthParticipantsGet,
   "Auth.Participants.Install":
     AuthParticipantsInstall as typeof AuthParticipantsInstall,
   "Auth.Portals.Get": AuthPortalsGet as typeof AuthPortalsGet,

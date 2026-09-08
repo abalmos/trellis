@@ -72,42 +72,6 @@ impl DeviceReviewState {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
-/// Allowed deployment authority plan state filters.
-pub enum DeploymentAuthorityPlanState {
-    Pending,
-    Accepted,
-    Rejected,
-    Expired,
-}
-
-impl DeploymentAuthorityPlanState {
-    pub fn as_wire_value(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Expired => "expired",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq, ValueEnum)]
-/// Allowed deployment authority plan classification filters.
-pub enum DeploymentAuthorityPlanClassification {
-    Update,
-    Migration,
-}
-
-impl DeploymentAuthorityPlanClassification {
-    pub fn as_wire_value(self) -> &'static str {
-        match self {
-            Self::Update => "update",
-            Self::Migration => "migration",
-        }
-    }
-}
-
 #[derive(Debug, Args)]
 /// Manage service deployments.
 #[command(
@@ -185,9 +149,7 @@ pub enum SvcResourceAction {
     Show,
     #[command(override_usage = "trellis svc <ID> create [OPTIONS]")]
     Create(SvcCreateArgs),
-    #[command(
-        override_usage = "trellis svc <ID> apply (--source <SOURCE>|--api <PATH> --participant <PATH>|--image <IMAGE>)"
-    )]
+    #[command(override_usage = "trellis svc <ID> apply --source <PROJECT_ROOT> [OPTIONS]")]
     Apply(ApplyArgs),
     /// Disable one service deployment.
     #[command(override_usage = "trellis svc <ID> disable")]
@@ -201,9 +163,6 @@ pub enum SvcResourceAction {
     Instances(SvcInstancesArgs),
     #[command(override_usage = "trellis svc <ID> provision [OPTIONS]")]
     Provision(SvcProvisionArgs),
-    #[command(override_usage = "trellis svc <ID> authority <COMMAND>")]
-    #[command(subcommand)]
-    Authority(DeploymentAuthorityCommand),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -221,9 +180,7 @@ pub enum DevResourceAction {
     Show,
     #[command(override_usage = "trellis dev <ID> create [OPTIONS]")]
     Create(DevCreateArgs),
-    #[command(
-        override_usage = "trellis dev <ID> apply (--source <SOURCE>|--api <PATH> --participant <PATH>|--image <IMAGE>)"
-    )]
+    #[command(override_usage = "trellis dev <ID> apply --source <PROJECT_ROOT> [OPTIONS]")]
     Apply(ApplyArgs),
     /// Disable one device deployment.
     #[command(override_usage = "trellis dev <ID> disable")]
@@ -237,9 +194,6 @@ pub enum DevResourceAction {
     Instances(DevInstancesArgs),
     #[command(override_usage = "trellis dev <ID> provision [OPTIONS]")]
     Provision(DevProvisionArgs),
-    #[command(override_usage = "trellis dev <ID> authority <COMMAND>")]
-    #[command(subcommand)]
-    Authority(DeploymentAuthorityCommand),
     #[command(override_usage = "trellis dev <ID> activations <COMMAND>")]
     #[command(subcommand)]
     Activations(DevActivationsCommand),
@@ -266,19 +220,23 @@ pub struct DevCreateArgs {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Args)]
-/// Apply canonical API and participant artifacts.
+/// Compile and apply one participant definition from a project.
 pub struct ApplyArgs {
-    /// Canonical API artifact path.
+    /// Trellis project root containing contract.trellis and trellis.lock.
     #[arg(long)]
-    pub api: PathBuf,
+    pub source: PathBuf,
 
-    /// Canonical participant artifact path.
+    /// Participant ID when the project declares more than one matching candidate.
     #[arg(long)]
-    pub participant: PathBuf,
+    pub participant: Option<String>,
 
-    /// Canonical artifacts for every referenced API.
+    /// Optional capability selection passed unchanged to Auth.
+    #[arg(long = "optional-capability")]
+    pub optional_capability: Vec<String>,
+
+    /// Expected current GrantBinding revision; omitted reads it once.
     #[arg(long)]
-    pub referenced_api: Vec<PathBuf>,
+    pub expected_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Args)]
@@ -326,94 +284,6 @@ pub struct DevInstancesArgs {
 pub struct SvcProvisionArgs {
     #[arg(long = "instance-seed")]
     pub instance_seed: Option<String>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Subcommand)]
-/// Manage deployment authority plans and reconciliation.
-pub enum DeploymentAuthorityCommand {
-    #[command(override_usage = "trellis <svc|dev> <ID> authority show")]
-    Show,
-    #[command(override_usage = "trellis <svc|dev> <ID> authority plan <COMMAND>")]
-    #[command(subcommand)]
-    Plan(AuthorityPlanCommand),
-    #[command(
-        override_usage = "trellis <svc|dev> <ID> authority accept-update <PLAN_ID> [OPTIONS]"
-    )]
-    AcceptUpdate(AuthorityAcceptUpdateArgs),
-    #[command(
-        override_usage = "trellis <svc|dev> <ID> authority accept-migration <PLAN_ID> --acknowledgement <TEXT> [OPTIONS]"
-    )]
-    AcceptMigration(AuthorityAcceptMigrationArgs),
-    #[command(override_usage = "trellis <svc|dev> <ID> authority reject <PLAN_ID> [OPTIONS]")]
-    Reject(AuthorityRejectArgs),
-    #[command(override_usage = "trellis <svc|dev> <ID> authority reconcile [OPTIONS]")]
-    Reconcile(AuthorityReconcileArgs),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Subcommand)]
-/// Discover deployment authority plans.
-pub enum AuthorityPlanCommand {
-    #[command(override_usage = "trellis <svc|dev> <ID> authority plan list [OPTIONS]")]
-    List(AuthorityPlanListArgs),
-    #[command(override_usage = "trellis <svc|dev> <ID> authority plan show <PLAN_ID>")]
-    Show(AuthorityPlanShowArgs),
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Args)]
-/// List deployment authority plans for this deployment.
-pub struct AuthorityPlanListArgs {
-    #[arg(long)]
-    pub state: Option<DeploymentAuthorityPlanState>,
-
-    #[arg(long)]
-    pub classification: Option<DeploymentAuthorityPlanClassification>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Args)]
-/// Show one deployment authority plan.
-pub struct AuthorityPlanShowArgs {
-    #[arg(value_name = "PLAN_ID")]
-    pub plan_id: String,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Args)]
-/// Accept one pending deployment authority update plan.
-pub struct AuthorityAcceptUpdateArgs {
-    #[arg(value_name = "PLAN_ID")]
-    pub plan_id: String,
-
-    #[arg(long = "expected-desired-version")]
-    pub expected_desired_version: Option<String>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Args)]
-/// Accept one pending deployment authority migration plan.
-pub struct AuthorityAcceptMigrationArgs {
-    #[arg(value_name = "PLAN_ID")]
-    pub plan_id: String,
-
-    #[arg(long)]
-    pub acknowledgement: String,
-
-    #[arg(long = "expected-desired-version")]
-    pub expected_desired_version: Option<String>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Args)]
-/// Reject one pending deployment authority plan.
-pub struct AuthorityRejectArgs {
-    #[arg(value_name = "PLAN_ID")]
-    pub plan_id: String,
-
-    #[arg(long)]
-    pub reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Args)]
-/// Request deployment authority reconciliation.
-pub struct AuthorityReconcileArgs {
-    #[arg(long = "desired-version")]
-    pub desired_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Args)]

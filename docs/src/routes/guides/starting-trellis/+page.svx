@@ -33,7 +33,7 @@ This creates a movable init bundle under `~/trellis`:
 | --- | --- |
 | `nats/` | NATS config, resolver data, service credentials, and signing seeds |
 | `config.toml` | Trellis runtime config using relative file paths |
-| `auth/` | Pinned root, issuer manifest/certificate, and online issuer seed |
+| `auth/` | Online issuer seed and Auth runtime state |
 | `session.seed` | Private 32-byte event-session seed referenced from `config.toml` |
 | `trust/authorization-root.seed` | Offline root seed for issuer rotation; never mount this into the runtime |
 

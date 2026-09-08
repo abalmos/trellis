@@ -35,39 +35,20 @@ async function main(): Promise<void> {
   const [
     trellisUrl,
     rootSecret,
-    deploymentId,
-    instanceId,
-    principalId,
-    participantId,
-    participantArtifactDigest,
-    participantNeedsDigest,
     provisioningSecret,
   ] = process.argv.slice(2);
-  if (
-    !trellisUrl || !rootSecret || !deploymentId || !instanceId ||
-    !principalId || !participantId || !participantArtifactDigest ||
-    !participantNeedsDigest
-  ) {
+  if (!trellisUrl || !rootSecret) {
     console.error(
-      "Usage: deno task start <trellisUrl> <rootSecret> <deploymentId> <instanceId> <principalId> <participantId> <participantArtifactDigest> <participantNeedsDigest> [provisioningSecret]",
+      "Usage: deno task start <trellisUrl> <rootSecret> [provisioningSecret]",
     );
     process.exit(1);
   }
-  const identity = {
-    deploymentId,
-    instanceId,
-    principalId,
-    participantId,
-    participantArtifactDigest,
-    participantNeedsDigest,
-    provisioningSecret,
-  };
 
   const activation = await checkDeviceActivation({
     participant: participants.demoDevice.participant,
-    identity,
     trellisUrl,
     rootSecret,
+    ...(provisioningSecret === undefined ? {} : { provisioningSecret }),
   });
 
   if (activation.status === "not_ready") {
@@ -80,9 +61,7 @@ async function main(): Promise<void> {
   }
 
   const device = await TrellisDevice.connect({
-    authorizationContextEphemeral: true,
     participant: participants.demoDevice.participant,
-    identity,
     trellisUrl,
     rootSecret,
   }).orThrow();
@@ -141,16 +120,7 @@ type Device = Awaited<ReturnType<typeof connectForTypes>>;
 
 async function connectForTypes() {
   return await TrellisDevice.connect({
-    authorizationContextEphemeral: true,
     participant: participants.demoDevice.participant,
-    identity: {
-      deploymentId: "types-only",
-      instanceId: "types-only",
-      principalId: "types-only",
-      participantId: participants.demoDevice.participant.id,
-      participantArtifactDigest: participants.demoDevice.participant.digest,
-      participantNeedsDigest: "types-only",
-    },
     trellisUrl: "http://localhost:0",
     rootSecret: "types-only",
   }).orThrow();

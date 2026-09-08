@@ -40,10 +40,14 @@ pub struct ProjectedEvent {
     pub publisher_instance_id: Option<String>,
     /// Publisher participant id proven by the authorization context.
     pub publisher_participant_id: Option<String>,
-    /// Publisher participant artifact digest proven by the authorization context.
-    pub publisher_participant_digest: Option<String>,
-    /// Publisher session id proven by the authorization context.
-    pub publisher_session_id: Option<String>,
+    /// Stable principal proven by the authorization context.
+    pub publisher_principal_id: Option<String>,
+    /// Logical runtime connection that owns the proof key.
+    pub publisher_connection_id: Option<String>,
+    /// Durable user login, when the publisher is a user.
+    pub publisher_login_session_id: Option<String>,
+    /// Permanent Auth SQL context record referenced by this event.
+    pub authorization_context_digest: Option<String>,
     /// W3C trace id, when traceparent is present.
     pub trace_id: Option<String>,
     /// W3C traceparent header.
@@ -174,8 +178,10 @@ impl EventLogStore {
                 publisher_deployment_id TEXT,
                 publisher_instance_id TEXT,
                 publisher_participant_id TEXT,
-                publisher_participant_digest TEXT,
-                publisher_session_id TEXT,
+                publisher_principal_id TEXT,
+                publisher_connection_id TEXT,
+                publisher_login_session_id TEXT,
+                authorization_context_digest TEXT,
                 trace_id TEXT,
                 traceparent TEXT,
                 payload_size_bytes INTEGER NOT NULL,
@@ -210,6 +216,26 @@ impl EventLogStore {
                 PRIMARY KEY (sampled_at, consumer_name)
             );
             "#,
+        )?;
+        for column in [
+            "publisher_principal_id",
+            "publisher_connection_id",
+            "publisher_login_session_id",
+            "authorization_context_digest",
+        ] {
+            if !connection
+                .prepare("SELECT name FROM pragma_table_info('eventlog_events') WHERE name = ?1")?
+                .exists([column])?
+            {
+                connection.execute(
+                    &format!("ALTER TABLE eventlog_events ADD COLUMN {column} TEXT"),
+                    [],
+                )?;
+            }
+        }
+        connection.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_eventlog_events_authorization_context ON eventlog_events (authorization_context_digest);
+             CREATE INDEX IF NOT EXISTS idx_eventlog_events_publisher_connection ON eventlog_events (publisher_connection_id);",
         )?;
         let projection_id = format!("{}-{}", std::process::id(), now_timestamp_string());
         connection.execute(
@@ -269,12 +295,13 @@ impl EventLogStore {
                 stream_sequence, event_id, event_time, subject, owner_contract_id,
                 owner_event_name, resolution, verification_status, publisher_kind,
                 publisher_deployment_id, publisher_instance_id, publisher_participant_id,
-                publisher_participant_digest, publisher_session_id, trace_id, traceparent,
+                publisher_principal_id, publisher_connection_id, publisher_login_session_id,
+                authorization_context_digest, trace_id, traceparent,
                 payload_size_bytes, payload_bytes, headers_json, payload_json, payload_text,
                 decode_error, projected_at
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
+                ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
             )
             "#,
             params![
@@ -290,8 +317,10 @@ impl EventLogStore {
                 event.publisher_deployment_id,
                 event.publisher_instance_id,
                 event.publisher_participant_id,
-                event.publisher_participant_digest,
-                event.publisher_session_id,
+                event.publisher_principal_id,
+                event.publisher_connection_id,
+                event.publisher_login_session_id,
+                event.authorization_context_digest,
                 event.trace_id,
                 event.traceparent,
                 event.payload_bytes.len() as u64,
@@ -347,7 +376,7 @@ impl EventLogStore {
         query_params.push(SqlValue::from(filter.limit as i64));
         query_params.push(SqlValue::from(filter.offset as i64));
         let mut statement = connection.prepare(&format!(
-            "SELECT stream_sequence, event_id, event_time, subject, owner_contract_id, owner_event_name, resolution, verification_status, publisher_kind, publisher_deployment_id, publisher_instance_id, publisher_participant_id, publisher_participant_digest, trace_id, payload_size_bytes, headers_json FROM eventlog_events {where_sql} ORDER BY {order_field} {order_direction}, stream_sequence DESC LIMIT ? OFFSET ?"
+            "SELECT stream_sequence, event_id, event_time, subject, owner_contract_id, owner_event_name, resolution, verification_status, publisher_kind, publisher_deployment_id, publisher_instance_id, publisher_participant_id, publisher_principal_id, publisher_connection_id, publisher_login_session_id, authorization_context_digest, trace_id, payload_size_bytes, headers_json FROM eventlog_events {where_sql} ORDER BY {order_field} {order_direction}, stream_sequence DESC LIMIT ? OFFSET ?"
         ))?;
         let rows = statement
             .query_map(params_from_iter(query_params), row_to_summary_value)?
@@ -665,8 +694,8 @@ fn add_in_clause(
 
 fn row_to_summary_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let stream_sequence: u64 = row.get(0)?;
-    let payload_size_bytes: u64 = row.get(14)?;
-    let headers_json: String = row.get(15)?;
+    let payload_size_bytes: u64 = row.get(17)?;
+    let headers_json: String = row.get(18)?;
     let header_count = serde_json::from_str::<Value>(&headers_json)
         .ok()
         .and_then(|value| value.as_object().map(serde_json::Map::len))
@@ -684,8 +713,11 @@ fn row_to_summary_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "publisherDeploymentId": row.get::<_, Option<String>>(9)?,
         "publisherInstanceId": row.get::<_, Option<String>>(10)?,
         "publisherParticipantId": row.get::<_, Option<String>>(11)?,
-        "publisherParticipantDigest": row.get::<_, Option<String>>(12)?,
-        "traceId": row.get::<_, Option<String>>(13)?,
+        "publisherPrincipalId": row.get::<_, Option<String>>(12)?,
+        "publisherConnectionId": row.get::<_, Option<String>>(13)?,
+        "publisherLoginSessionId": row.get::<_, Option<String>>(14)?,
+        "authorizationContextDigest": row.get::<_, Option<String>>(15)?,
+        "traceId": row.get::<_, Option<String>>(16)?,
         "payloadSizeBytes": payload_size_bytes,
         "headerCount": header_count,
     }))
@@ -693,16 +725,16 @@ fn row_to_summary_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 
 fn inspect_sql(predicate: &str) -> String {
     format!(
-        "SELECT stream_sequence, event_id, event_time, subject, owner_contract_id, owner_event_name, resolution, verification_status, publisher_kind, publisher_deployment_id, publisher_instance_id, publisher_participant_id, publisher_participant_digest, publisher_session_id, trace_id, traceparent, payload_size_bytes, headers_json, payload_json, payload_text, decode_error, projected_at FROM eventlog_events WHERE {predicate} ORDER BY stream_sequence DESC LIMIT 1"
+        "SELECT stream_sequence, event_id, event_time, subject, owner_contract_id, owner_event_name, resolution, verification_status, publisher_kind, publisher_deployment_id, publisher_instance_id, publisher_participant_id, publisher_principal_id, publisher_connection_id, publisher_login_session_id, authorization_context_digest, trace_id, traceparent, payload_size_bytes, headers_json, payload_json, payload_text, decode_error, projected_at FROM eventlog_events WHERE {predicate} ORDER BY stream_sequence DESC LIMIT 1"
     )
 }
 
 fn row_to_inspect_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let event = row_to_summary_from_inspect_row(row)?;
-    let headers_json: String = row.get(17)?;
-    let payload_json: Option<String> = row.get(18)?;
-    let payload_text: Option<String> = row.get(19)?;
-    let decode_error: Option<String> = row.get(20)?;
+    let headers_json: String = row.get(19)?;
+    let payload_json: Option<String> = row.get(20)?;
+    let payload_text: Option<String> = row.get(21)?;
+    let decode_error: Option<String> = row.get(22)?;
     let headers = serde_json::from_str::<Value>(&headers_json).unwrap_or_else(|_| json!({}));
     let payload = payload_json
         .as_deref()
@@ -715,7 +747,7 @@ fn row_to_inspect_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "decodeError": decode_error,
         "proof": {
             "status": row.get::<_, String>(7)?,
-            "checkedAt": row.get::<_, String>(21)?,
+            "checkedAt": row.get::<_, String>(23)?,
         },
         "owner": {
             "contractId": row.get::<_, Option<String>>(4)?,
@@ -726,16 +758,18 @@ fn row_to_inspect_value(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
             "deploymentId": row.get::<_, Option<String>>(9)?,
             "instanceId": row.get::<_, Option<String>>(10)?,
             "participantId": row.get::<_, Option<String>>(11)?,
-            "participantDigest": row.get::<_, Option<String>>(12)?,
-            "sessionId": row.get::<_, Option<String>>(13)?,
+            "principalId": row.get::<_, Option<String>>(12)?,
+            "connectionId": row.get::<_, Option<String>>(13)?,
+            "loginSessionId": row.get::<_, Option<String>>(14)?,
+            "authorizationContextDigest": row.get::<_, Option<String>>(15)?,
         },
         "related": []
     }))
 }
 
 fn row_to_summary_from_inspect_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    let payload_size_bytes: u64 = row.get(16)?;
-    let headers_json: String = row.get(17)?;
+    let payload_size_bytes: u64 = row.get(18)?;
+    let headers_json: String = row.get(19)?;
     let header_count = serde_json::from_str::<Value>(&headers_json)
         .ok()
         .and_then(|value| value.as_object().map(serde_json::Map::len))
@@ -753,8 +787,11 @@ fn row_to_summary_from_inspect_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<
         "publisherDeploymentId": row.get::<_, Option<String>>(9)?,
         "publisherInstanceId": row.get::<_, Option<String>>(10)?,
         "publisherParticipantId": row.get::<_, Option<String>>(11)?,
-        "publisherParticipantDigest": row.get::<_, Option<String>>(12)?,
-        "traceId": row.get::<_, Option<String>>(14)?,
+        "publisherPrincipalId": row.get::<_, Option<String>>(12)?,
+        "publisherConnectionId": row.get::<_, Option<String>>(13)?,
+        "publisherLoginSessionId": row.get::<_, Option<String>>(14)?,
+        "authorizationContextDigest": row.get::<_, Option<String>>(15)?,
+        "traceId": row.get::<_, Option<String>>(16)?,
         "payloadSizeBytes": payload_size_bytes,
         "headerCount": header_count,
     }))
@@ -863,8 +900,10 @@ mod tests {
             publisher_deployment_id: None,
             publisher_instance_id: None,
             publisher_participant_id: None,
-            publisher_participant_digest: None,
-            publisher_session_id: None,
+            publisher_principal_id: None,
+            publisher_connection_id: None,
+            publisher_login_session_id: None,
+            authorization_context_digest: None,
             trace_id: None,
             traceparent: None,
             payload_bytes: b"{}".to_vec(),

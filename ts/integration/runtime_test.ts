@@ -36,10 +36,7 @@ Deno.test("generated TypeScript caller reaches Rust provider", async () => {
       ],
       env: {
         TRELLIS_URL: runtime.trellisUrl,
-        TRELLIS_DEPLOYMENT: identity.deploymentId,
         TRELLIS_IDENTITY_SEED: identity.seed,
-        TRELLIS_SESSION_SEED: identity.sessionSeed,
-        TRELLIS_INSTANCE: identity.instanceId,
         CARGO_TARGET_DIR: fromFileUrl(
           new URL("../../rust/target", import.meta.url),
         ),
@@ -83,7 +80,6 @@ Deno.test("generated runtime workflows", async (t) => {
       contract: participants.testProvider.participant,
     });
     const service = await TrellisService.connect({
-      authorizationContextEphemeral: true,
       trellisUrl: runtime.trellisUrl,
       participant: participants.testProvider.participant,
       name: "provider",

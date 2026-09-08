@@ -99,7 +99,12 @@ impl AuthorizationContextCache {
         {
             return Err(TrellisClientError::Bootstrap("bootstrap assignment does not match the credential, participant, and runtime connection".into()));
         }
-        if runtime.transports.native.nats_servers.is_empty()
+        let native = runtime.transports.native.as_ref().ok_or_else(|| {
+            TrellisClientError::AuthorizationUnavailable(
+                "bootstrap did not offer a native NATS transport".into(),
+            )
+        })?;
+        if native.nats_servers.is_empty()
             || routing.bootstrap_jwt.is_empty()
             || routing.bootstrap_jwt_expires_at <= now
         {
@@ -107,7 +112,7 @@ impl AuthorizationContextCache {
                 "bootstrap transport or route credential is unavailable".into(),
             ));
         }
-        for endpoint in &runtime.transports.native.nats_servers {
+        for endpoint in &native.nats_servers {
             endpoint
                 .parse::<async_nats::ServerAddr>()
                 .map_err(|error| {

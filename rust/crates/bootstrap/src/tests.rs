@@ -224,7 +224,7 @@ fn nats_bootstrap_names_trellis_user_claim() {
 }
 
 #[test]
-fn trellis_bootstrap_generates_bundle_without_manifest_files() {
+fn trellis_bootstrap_generates_online_authorization_issuer_only() {
     let temp = tempfile::tempdir().expect("temp dir");
 
     generate_trellis_bootstrap(&trellis_options(temp.path())).expect("generate Trellis");
@@ -234,10 +234,10 @@ fn trellis_bootstrap_generates_bundle_without_manifest_files() {
     assert!(temp.path().join("nats/nats.conf").is_file());
     assert!(temp.path().join("config.toml").is_file());
     assert!(!temp.path().join("data").exists());
-    assert!(temp.path().join("auth/authorization-root.json").is_file());
     assert!(temp.path().join("auth/authorization-issuer.seed").is_file());
+    assert!(!temp.path().join("auth/authorization-root.json").exists());
     assert!(!temp.path().join("auth/authorization-root.seed").exists());
-    assert!(temp.path().join("trust/authorization-root.seed").is_file());
+    assert!(!temp.path().join("trust/authorization-root.seed").exists());
 }
 
 #[test]
@@ -283,7 +283,9 @@ fn trellis_config_uses_expected_paths_urls_and_name() {
     assert!(config.contains("enabled = true"));
     assert!(config.contains("password_min_length = 8"));
     assert!(config.contains("[auth.authorization]"));
-    assert!(config.contains("trust_root_file = \"./auth/authorization-root.json\""));
+    assert!(config.contains("issuer_signing_seed_file = \"./auth/authorization-issuer.seed\""));
+    assert!(!config.contains("trust_root_file"));
+    assert!(!config.contains("issuer_manifest_file"));
     assert!(!config.contains("authorization-root.seed"));
     assert!(config.contains("[leases]"));
     assert!(config.contains("replicas = 1"));

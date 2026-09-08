@@ -1,7 +1,9 @@
 # Final Rust runtime authentication HTTP surface.
+GET /auth/keys/{key_id}
 POST /auth/requests
 POST /bootstrap/service
 POST /bootstrap/device
+POST /auth/device/enroll
 POST /auth/context/refresh
 GET /auth/flow/{flow_id}
 POST /auth/flow/{flow_id}/portal

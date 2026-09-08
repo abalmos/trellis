@@ -20,10 +20,11 @@ fn new_top_level_help_is_available() {
         &["whoami", "--help"],
         &["identity", "--help"],
         &["identity", "grants", "--help"],
+        &["participants", "--help"],
+        &["issuers", "--help"],
         &["users", "--help"],
         &["svc", "--help"],
         &["dev", "--help"],
-        &["infra", "--help"],
         &["init", "--help"],
         &["init", "config", "--help"],
         &["keys", "--help"],
@@ -52,6 +53,7 @@ fn removed_top_level_commands_and_aliases_are_rejected() {
         "approvals",
         "grants",
         "server",
+        "infra",
     ] {
         let output = run_cli(&[command, "--help"]);
         assert!(!output.status.success(), "{command} should fail");

@@ -2,8 +2,6 @@ import { Value } from "typebox/value";
 import { ulid } from "ulid";
 
 import { decodeTrellisHttpError, TrellisHttpError } from "../http_error.ts";
-import { base64urlDecode, base64urlEncode, sha256 } from "../utils.ts";
-import { sessionProofRequestDigest } from "../session_proof.ts";
 import type { TrellisAuth } from "../session_auth.ts";
 import type { AuthorizationContextCache } from "./client_context.ts";
 import type {
@@ -25,6 +23,8 @@ export class AuthorizationContextRefreshError extends TrellisHttpError {
       "session_not_found",
       "session_expired",
       "session_revoked",
+      "identity_not_found",
+      "identity_inactive",
       "user_not_found",
       "user_inactive",
       "participant_not_found",
@@ -62,47 +62,35 @@ export async function refreshAuthorizationContextWithMetadata(args: {
   } catch {
     current = undefined;
   }
-  const session = args.cache.sessionBinding();
-  if (session.sessionId !== args.sessionId) {
+  let runtime: AuthorizationRuntimeBinding | undefined;
+  try {
+    runtime = args.cache.runtimeBinding();
+  } catch {
+    runtime = undefined;
+  }
+  if (runtime?.loginSessionId && runtime.loginSessionId !== args.sessionId) {
     throw new Error("authorization recovery session mismatch");
   }
-  const durable = await args.cache.store.load();
-  if (!durable) throw new Error("authorization trust floor unavailable");
   const requestStartedAt = args.cache.nowMilliseconds();
-  const request = {
+  const unsignedRequest = {
     requestId: ulid(),
     issuedAt: Math.trunc(args.auth.currentIat() * 1_000),
-    sessionId: args.sessionId,
-    sessionNkey: args.auth.sessionNkey,
+    loginSessionId: args.sessionId,
+    connectionId: runtime?.connectionId ?? ulid(),
     currentContextDigest: current?.contextDigest ?? null,
-    expectedParticipantDigest: session.participantDigest,
-    expectedNeedsDigest: session.needsDigest,
-    knownRootKeyId: durable.trust.rootKeyId,
-    minimumManifestGeneration: durable.trust.minimumManifestGeneration,
-    proof: { format: "trellis.session-proof.v1", signature: "" } as const,
   };
-  const requestDigest = await sessionProofRequestDigest(request);
   const proof = await args.auth.signSessionProof({
     purpose: "authorizationContextRefresh",
-    requestId: request.requestId,
-    issuedAt: request.issuedAt,
-    sessionId: request.sessionId,
-    sessionKeyId: base64urlEncode(
-      await sha256(base64urlDecode(args.auth.sessionKey)),
-    ),
-    currentContextDigest: request.currentContextDigest,
-    expectedParticipantDigest: request.expectedParticipantDigest,
-    expectedNeedsDigest: request.expectedNeedsDigest,
-    knownRootKeyId: request.knownRootKeyId,
-    minimumManifestGeneration: request.minimumManifestGeneration,
-    requestDigest,
+    origin: new URL(args.trellisUrl).origin,
+    sessionPublicKey: args.auth.sessionKey,
+    unsignedRequest,
   });
   const response = await fetch(
     new URL("/auth/context/refresh", args.trellisUrl),
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...request, proof }),
+      body: JSON.stringify({ ...unsignedRequest, proof }),
     },
   );
   if (!response.ok) {
@@ -115,7 +103,7 @@ export async function refreshAuthorizationContextWithMetadata(args: {
   ) as AuthorizationContextRefreshResponse;
   if (
     args.requiredTransport &&
-    !next.nats.transports[args.requiredTransport]?.natsServers.length
+    !next.transports[args.requiredTransport]?.natsServers.length
   ) {
     throw new Error(
       `authorization refresh has no ${args.requiredTransport} NATS endpoints`,
@@ -129,16 +117,16 @@ export async function refreshAuthorizationContextWithMetadata(args: {
   if (args.shouldInstall?.() === false) {
     throw new Error("authorization context refresh stopped");
   }
-  const runtime = runtimeBindingFromResponse(next);
+  const nextRuntime = runtimeBindingFromResponse(next);
   const context = await args.cache.install(
     next.authorizationContext,
     {
-      bootstrapJwt: next.nats.jwt,
-      bootstrapJwtExpiresAt: next.nats.jwtExpiresAt,
+      bootstrapJwt: next.routing.bootstrapJwt,
+      bootstrapJwtExpiresAt: next.routing.bootstrapJwtExpiresAt,
     },
     Math.floor(next.serverNow / 1_000),
     args.shouldInstall,
-    runtime,
+    nextRuntime,
   );
   return { context, response: next };
 }
@@ -163,6 +151,9 @@ export function startAuthorizationContextRefresh(args: {
   auth: TrellisAuth;
   cache: AuthorizationContextCache;
   fetch?: typeof globalThis.fetch;
+  refresh?: (
+    shouldInstall: () => boolean,
+  ) => Promise<VerifiedAuthorizationContext>;
   onTerminalFailure?: (error: unknown) => void | Promise<void>;
   onTransientFailure?: (error: unknown) => void | Promise<void>;
   onRefresh?: (context: VerifiedAuthorizationContext) => void | Promise<void>;
@@ -189,19 +180,21 @@ export function startAuthorizationContextRefresh(args: {
       } catch {
         before = undefined;
       }
-      const result = await refreshAuthorizationContextWithMetadata({
-        ...args,
-        shouldInstall: () => !stopped,
-      });
+      const context = args.refresh
+        ? await args.refresh(() => !stopped)
+        : (await refreshAuthorizationContextWithMetadata({
+          ...args,
+          shouldInstall: () => !stopped,
+        })).context;
       if (stopped) return;
       failures = 0;
-      if (before !== result.context.contextDigest) {
-        await args.onRefresh?.(result.context);
+      if (before !== context.contextDigest) {
+        await args.onRefresh?.(context);
       }
       schedule(
         refreshDelay(
           args.cache,
-          before === result.context.contextDigest ? 5_000 : 1_000,
+          before === context.contextDigest ? 5_000 : 1_000,
         ),
       );
     } catch (error) {
@@ -281,30 +274,27 @@ function runtimeBindingFromResponse(
   response: AuthorizationContextRefreshResponse,
 ): AuthorizationRuntimeBinding {
   if (
-    !response.nats.transports.native &&
-    !response.nats.transports.websocket
+    !response.transports.native &&
+    !response.transports.websocket
   ) {
     throw new Error("authorization refresh returned no NATS transport");
   }
   return {
-    sessionId: response.session.sessionId,
-    participantId: response.session.participantId,
-    participantArtifactDigest: response.session.participantArtifactDigest,
-    participantNeedsDigest: response.session.participantNeedsDigest,
-    inboxPrefix: response.session.inboxPrefix,
+    connectionId: response.runtime.connectionId,
+    loginSessionId: response.runtime.loginSessionId,
+    participantId: response.runtime.participantId,
+    inboxPrefix: response.runtime.inboxPrefix,
     transports: {
-      ...(response.nats.transports.native === undefined ? {} : {
+      ...(response.transports.native === undefined ? {} : {
         native: {
-          natsServers: [...response.nats.transports.native.natsServers],
+          natsServers: [...response.transports.native.natsServers],
         },
       }),
-      ...(response.nats.transports.websocket === undefined ? {} : {
+      ...(response.transports.websocket === undefined ? {} : {
         websocket: {
-          natsServers: [...response.nats.transports.websocket.natsServers],
+          natsServers: [...response.transports.websocket.natsServers],
         },
       }),
     },
   };
 }
-
-export type { AuthorizationContextPersistence } from "./store.ts";

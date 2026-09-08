@@ -2,7 +2,6 @@ import {
   type AuthorizationContextBundle,
   AuthorizationContextCache,
   AuthorizationContextRefreshError,
-  type AuthorizationContextStore,
   type AuthorizationRoutingMaterial,
   refreshAuthorizationContext,
   startAuthorizationContextRefresh,
@@ -31,16 +30,9 @@ export class AuthorizationContextController {
 
   constructor(
     trellisUrl: string,
-    binding: string,
-    store: AuthorizationContextStore,
     fetch?: typeof globalThis.fetch,
   ) {
-    this.#cache = new AuthorizationContextCache(
-      trellisUrl,
-      binding,
-      store,
-      fetch,
-    );
+    this.#cache = new AuthorizationContextCache(trellisUrl, fetch);
   }
 
   get context(): VerifiedAuthorizationContext | undefined {
@@ -61,21 +53,6 @@ export class AuthorizationContextController {
 
   get expiresAt(): number | undefined {
     return this.#context?.context.expiresAt;
-  }
-
-  async restore(): Promise<boolean> {
-    this.#status = "loading";
-    this.#error = undefined;
-    try {
-      const restored = await this.#cache.restore();
-      this.#context = restored ? this.#cache.current() : undefined;
-      this.#status = restored ? "ready" : "empty";
-      return restored;
-    } catch (error) {
-      this.#status = "failed";
-      this.#error = error;
-      return false;
-    }
   }
 
   async install(

@@ -1,81 +1,62 @@
-Deployment authority is Trellis's durable record of accepted intent for one
-deployment. It is separate from materialized authority, which is the current
-permission-bearing result that the runtime can safely issue.
+Authorization is expressed by installed participants and participant-scoped
+`GrantBinding` records. This page keeps its historical URL so existing links do
+not break; the retired deployment-authority proposal/materialization model no
+longer exists.
 
-## Authority model
+## Installed participant revisions
 
-Every participant presents an exact `trellis.participant.v1` artifact and its
-digest-pinned API dependencies. Trellis resolves that artifact into required and
-optional needs, then compares those needs with accepted desired authority.
+`Auth.Participants.Install` stores an immutable canonical participant and its
+exact resolved APIs. Installing a participant defines what may be granted; it
+does not grant anything by itself.
 
-The effective grants are:
+## Identity grants
+
+`Auth.Grants.Set` writes one binding for an identity and participant. The
+binding selects an installed revision, exact permission atoms, and finite
+platform privileges. Writes require `expectedRevision` and fail if an atom is
+not declared by the installed participant.
+
+Effective application authority is:
 
 ```text
-accepted desired authority
-  intersect resolved participant needs
-  intersect available dependency/resource evidence
+current GrantBinding
+  intersect installed participant actions
+  intersect current required/optional resource evidence
 ```
 
-NATS subjects, runtime ACLs, and resource names never add grant atoms.
+NATS subjects, API packages, resource names, and client-provided artifacts never
+add authority.
 
-## Proposals and decisions
+## Deployments and resources
 
-An authority proposal is immutable historical evidence of one requested change.
-It moves from `pending` to `accepted`, `rejected`, `superseded`, or `expired`.
-Only a pending proposal can be decided.
+`Auth.Deployments.Apply` is the direct deployment mutation. It validates the
+installed participant and creates/adopts declared resource bindings. Required
+missing evidence prevents context issuance; unavailable optional evidence
+removes only affected optional grants.
 
-Acceptance atomically records the decision, updates the current desired-authority
-projection, supersedes competing pending proposals, and inserts an outbox record.
-It does not mutate materialized authority directly.
+Services receive typed resource handles from `TrellisService.connect(...)`.
+They do not fetch raw bindings or derive physical names.
 
-Every mutating request is idempotent. Repeating the same request id and content
-returns the committed result; reusing the id for different content fails.
+## Administration
 
-## Reconciliation
+The `Admin` platform privilege gates Auth administrative RPCs. It is carried in
+the current participant-scoped binding and does not imply all application
+permissions. First-admin setup atomically grants Admin for the built-in CLI and
+Console participants; the activation Portal receives no Admin binding.
 
-Reconciliation reads the accepted desired record, exact participant binding, and
-authority-scoped dependency/resource evidence. It validates that coherent input
-and atomically replaces materialized authority.
-
-Required missing evidence fails closed. Optional missing evidence omits only the
-affected optional grants. A materialization is valid only for the exact authority
-version, participant artifact digest, and needs digest that produced it.
-
-Runtime eligibility is checked separately during issuance:
-
-- session state and expiry
-- deployment state and expiry
-- immutable instance-to-deployment/principal identity
-- device lifecycle state
-- device delegation state and expiry
-
-This keeps authority shared at the correct scope: one unhealthy instance cannot
-rewrite authority for healthy peers.
-
-## Resources
-
-Accepted resource needs are provisioned by the Rust platform allocator.
-Materialized evidence uses typed bindings for KV/state buckets, object stores,
-Jobs namespaces/streams, event streams, and durable event consumers. Services
-receive those resolved handles from `TrellisService.connect(...)`; they do not
-fetch binding payloads or derive physical names.
-
-## Identity authority
-
-User/app, CLI, native, and device-user access uses the same proposal, decision,
-desired-authority, and materialization model. The stable principal is separate
-from the participant artifact being authorized.
-
-Capability groups and portal grant overrides are administrative authoring tools.
-Auth expands them against the participant's declared optional capabilities
-before applying an ordinary identity authority. Contract-era identity grants and
-stored subject ACLs remain retired; only exact resolved permission atoms enter
-`GrantSet`.
+The CLI uses `participants install`, `identity grants get/list/set/revoke`,
+`issuers list/rotate/revoke`, and direct `svc`/`dev` apply/get commands. Console
+shows installed revisions, current bindings, deployments, resources, logins,
+connections, and issuer state. There are no plans, proposals, acceptance, or
+reconcile actions.
 
 ## Runtime issuance
 
-Bootstrap returns the exact participant binding, effective grants, resource
-evidence, effective expiry, session metadata, endpoints, and a deny-all JWT bound
-to the session NKey. NATS Auth Callout rechecks current issuable state and
-deterministically compiles short-lived transport permissions on every connect and
-reconnect.
+Auth rereads current identity/login, binding, installed revision, resources, and
+issuer inside the signing transaction. It stores the exact signed context and
+issuance snapshot by digest, then returns server-owned runtime and transport
+data. Auth Callout repeats the current-state comparison before issuing a
+short-lived NATS JWT.
+
+Every mutation and idempotency replay is authorized in the same SQL transaction
+against the actor's current binding revision and Admin privilege.

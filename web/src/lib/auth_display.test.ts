@@ -62,52 +62,6 @@ Deno.test("describeSessionPrincipal renders explicit user app and agent metadata
   );
 });
 
-Deno.test("describeSessionPrincipal renders device and service metadata without key parsing", () => {
-  deepEqual(
-    describeSessionPrincipal({
-      key: "dev_1.pub.sk_device",
-      sessionKey: "sk_device",
-      participantKind: "device",
-      principal: {
-        type: "device",
-        deviceId: "dev_1",
-        deviceType: "ios",
-        runtimePublicKey: "PUB",
-        deploymentId: "ios.mobile",
-      },
-      contractId: "device.contract@v1",
-      contractDisplayName: "Device Runtime",
-      createdAt: Date.parse("2026-04-10T00:00:00.000Z"),
-      lastAuth: Date.parse("2026-04-10T01:00:00.000Z"),
-    }),
-    {
-      title: "dev_1",
-      details: "ios • ios.mobile • Device Runtime (device.contract@v1)",
-    },
-  );
-
-  deepEqual(
-    describeSessionPrincipal({
-      key: "service.billing.sk_service",
-      sessionKey: "sk_service",
-      participantKind: "service",
-      principal: {
-        type: "service",
-        id: "billing",
-        name: "Billing Service",
-        instanceId: "svc_123",
-        deploymentId: "billing.default",
-      },
-      createdAt: Date.parse("2026-04-10T00:00:00.000Z"),
-      lastAuth: Date.parse("2026-04-10T01:00:00.000Z"),
-    }),
-    {
-      title: "Billing Service",
-      details: "billing • billing.default • svc_123",
-    },
-  );
-});
-
 Deno.test("grant helpers expose honest participant labels and compact keys", () => {
   equal(participantKindLabel("app"), "App");
   equal(participantKindLabel("agent"), "Agent");

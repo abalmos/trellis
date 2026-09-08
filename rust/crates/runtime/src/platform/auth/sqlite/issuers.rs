@@ -39,12 +39,17 @@ impl SqliteAuthorizationStore {
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?, row.get::<_, Option<i64>>(2)?)),
             ).optional().map_err(sql_error)?;
             if let Some((public_key, is_current, revoked_at)) = existing {
-                if public_key != issuer.public_key || !is_current || revoked_at.is_some() {
+                if public_key != issuer.public_key || revoked_at.is_some() {
                     return Err(AuthorizationStateError::InvalidRecord(
-                        "configured issuer was revoked, superseded, or has conflicting key material".to_owned(),
+                        "configured issuer was revoked or has conflicting key material".to_owned(),
                     ));
                 }
-                return Ok(());
+                if is_current {
+                    return Ok(());
+                }
+                transaction.execute("UPDATE auth_authorization_issuers SET is_current = 0 WHERE is_current = 1", []).map_err(map_write_error)?;
+                transaction.execute("UPDATE auth_authorization_issuers SET is_current = 1 WHERE key_id = ?1", [&issuer.key_id]).map_err(map_write_error)?;
+                return transaction.commit().map_err(sql_error);
             }
             transaction.execute("UPDATE auth_authorization_issuers SET is_current = 0 WHERE is_current = 1", []).map_err(map_write_error)?;
             transaction.execute(
@@ -83,6 +88,7 @@ impl SqliteAuthorizationStore {
     /// Irreversibly revoke a noncurrent issuer with its event and context/kick intents.
     pub(crate) async fn revoke_issuer(
         &self,
+        actor: super::super::MutationActor,
         key_id: String,
         revoked_by: String,
         reason: Option<String>,
@@ -91,6 +97,12 @@ impl SqliteAuthorizationStore {
         require_protocol_timestamp("now", idempotency.created_at)?;
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
+            super::grants::require_current_actor(
+                &transaction,
+                &actor,
+                true,
+                idempotency.created_at,
+            )?;
             if let Some(result) = sqlite_idempotency_replay(&transaction, &idempotency)? {
                 return Ok(result);
             }
@@ -142,7 +154,9 @@ mod tests {
     use sha2::{Digest as _, Sha256};
 
     use super::*;
-    use crate::platform::auth::{rpc::rpc_idempotency, OutboxRepository};
+    use crate::platform::auth::{
+        rpc::rpc_idempotency, GrantOwnerKind, MutationActor, OutboxRepository,
+    };
 
     #[tokio::test]
     async fn rotation_and_idempotent_revocation_remain_separate(
@@ -158,6 +172,47 @@ mod tests {
         });
         let now = 1_735_689_600_000;
         let admin = ulid::Ulid::new().to_string();
+        let login_session_id = ulid::Ulid::new().to_string();
+        let actor = MutationActor {
+            principal_id: admin.clone(),
+            participant_id: "trellis.auth.admin".to_owned(),
+            owner_kind: GrantOwnerKind::User,
+            owner_id: admin.clone(),
+            grant_revision: 1,
+            login_session_id: Some(login_session_id.clone()),
+            session_public_key: first.public_key.clone(),
+        };
+        let setup_admin = admin.clone();
+        let setup_key = first.public_key.clone();
+        store
+            .run(move |connection| {
+                connection.execute(
+                    "INSERT INTO auth_principals (principal_id, kind, state, created_at, updated_at, version, disabled_at, revoked_at)
+                     VALUES (?1, 'user', 'active', ?2, ?2, 1, NULL, NULL)",
+                    params![&setup_admin, now],
+                )
+                .map_err(sql_error)?;
+                connection.execute(
+                    "INSERT INTO auth_installed_participants (participant_id, revision, participant_kind, artifact_digest, needs_digest, participant_json, api_artifacts_json, installed_at)
+                     VALUES ('trellis.auth.admin', 1, 'app', ?1, ?1, '{}', '[]', ?2)",
+                    params![setup_key, now],
+                )
+                .map_err(sql_error)?;
+                connection.execute(
+                    "INSERT INTO auth_grant_bindings (owner_kind, owner_id, participant_id, installed_revision, grants_json, platform_privileges_json, revision, state, expires_at, provenance_json, created_at, updated_at)
+                     VALUES ('user', ?1, 'trellis.auth.admin', 1, '{\"format\":\"trellis.grant-set.v1\",\"permissions\":[]}', '[\"trellis.auth::admin\"]', 1, 'active', NULL, NULL, ?2, ?2)",
+                    params![&setup_admin, now],
+                )
+                .map_err(sql_error)?;
+                connection.execute(
+                    "INSERT INTO auth_sessions (session_id, principal_id, participant_id, participant_kind, session_public_key, session_key_id, state, created_at, last_authenticated_at, expires_at, revoked_at, version)
+                     VALUES (?1, ?2, 'trellis.auth.admin', 'app', ?3, ?3, 'active', ?4, ?4, NULL, NULL, 1)",
+                    params![login_session_id, &setup_admin, setup_key, now],
+                )
+                .map_err(sql_error)?;
+                Ok(())
+            })
+            .await?;
         let request_id = ulid::Ulid::new().to_string();
         let input = json!({"keyId": first.key_id, "reason": "compromised"});
         let idempotency = rpc_idempotency("Auth.Issuers.Revoke", &admin, &request_id, &input, now)?;
@@ -166,6 +221,7 @@ mod tests {
         assert_eq!(
             store
                 .revoke_issuer(
+                    actor.clone(),
                     first.key_id.clone(),
                     admin.clone(),
                     Some("compromised".to_owned()),
@@ -192,9 +248,20 @@ mod tests {
                 .state,
             AuthorizationIssuerState::Retired
         );
+        store.activate_issuer(first.clone(), now).await?;
+        assert_eq!(
+            store
+                .get_issuer_key(first.key_id.clone(), now)
+                .await?
+                .unwrap()
+                .state,
+            AuthorizationIssuerState::Active
+        );
+        store.activate_issuer(second.clone(), now).await?;
 
         let result = store
             .revoke_issuer(
+                actor.clone(),
                 first.key_id.clone(),
                 admin.clone(),
                 Some("compromised".to_owned()),
@@ -205,6 +272,7 @@ mod tests {
         assert_eq!(
             store
                 .revoke_issuer(
+                    actor.clone(),
                     first.key_id.clone(),
                     admin.clone(),
                     Some("compromised".to_owned()),
@@ -229,6 +297,7 @@ mod tests {
         assert_eq!(
             store
                 .revoke_issuer(
+                    actor.clone(),
                     first.key_id.clone(),
                     admin.clone(),
                     Some("compromised".to_owned()),
@@ -251,6 +320,7 @@ mod tests {
         assert_eq!(
             store
                 .revoke_issuer(
+                    actor,
                     first.key_id.clone(),
                     admin,
                     Some("different".to_owned()),

@@ -13,7 +13,7 @@ const docs = [
 const repoRoot = new URL("../../../", import.meta.url);
 const repoFile = (path: string) => new URL(path, repoRoot);
 
-const legacyAuthorityPatterns = [
+const retiredAuthorityPatterns = [
   /firstConnectPolicy/g,
   /compatibilityPolicy/g,
   /allowedDigests/g,
@@ -32,28 +32,30 @@ const legacyAuthorityPatterns = [
   /Auth\.(?:List|Set|Disable)PortalProfiles?/g,
   /Auth\.(?:List|Upsert|Disable)InstanceGrantPolic(?:y|ies)/g,
   /Auth\.(?:ValidateRequest|Me|GetDeviceConnectInfo|DecideDeviceActivationReview)/g,
+  /Auth\.DeploymentAuthority\./g,
+  /Auth\.IdentityAuthority\./g,
+  /Auth\.IdentityGrants\./g,
   /known approved app\/agent contracts/gi,
   /known approved delegated contracts/gi,
   /\bapplied contract(?: digest)?\b/gi,
   /\binstalled contract(?:s| record| records| digest| digests)?\b/gi,
 ];
 
-const requiredAuthorityTerms = [
-  "deployment authority",
-  "desired authority",
-  "materialized authority",
-  "reconciliation",
-  "authority proposals",
-  "identity authority",
-  "participant artifact",
+const requiredAuthorizationTerms = [
+  "installed participant",
+  "grantbinding",
+  "platformprivilege::admin",
+  "login session",
+  "logical connection",
+  "signed authorization context",
   "resource evidence",
   "grantset",
 ];
 
-Deno.test("deployment authority docs define the clean-break vocabulary", async () => {
+Deno.test("authorization docs define the GrantBinding vocabulary", async () => {
   const text = await Deno.readTextFile(repoFile("design/auth/trellis-auth.md"));
 
-  for (const term of requiredAuthorityTerms) {
+  for (const term of requiredAuthorizationTerms) {
     assert(
       text.toLowerCase().includes(term),
       `design/auth/trellis-auth.md should define '${term}'`,
@@ -61,26 +63,29 @@ Deno.test("deployment authority docs define the clean-break vocabulary", async (
   }
 });
 
-Deno.test("auth API docs use deployment authority names", async () => {
+Deno.test("auth API docs use installed participant and GrantBinding RPCs", async () => {
   const text = await Deno.readTextFile(repoFile("design/auth/auth-api.md"));
 
   for (
     const rpc of [
       "Auth.Deployments.Create",
-      "Auth.Devices.List",
-      "Auth.DeploymentAuthority.Plan",
-      "Auth.DeploymentAuthority.AcceptUpdate",
-      "Auth.DeploymentAuthority.AcceptMigration",
-      "Auth.DeploymentAuthority.Reconcile",
-      "Auth.IdentityAuthority.List",
-      "Auth.IdentityAuthority.Revoke",
+      "Auth.Deployments.Apply",
+      "Auth.Deployments.Get",
+      "Auth.Participants.Get",
+      "Auth.Participants.Install",
+      "Auth.Grants.Get",
+      "Auth.Grants.List",
+      "Auth.Grants.Set",
+      "Auth.Grants.Revoke",
+      "Auth.Sessions.Me",
+      "Auth.Connections.List",
     ]
   ) {
     assert(text.includes(rpc), `auth-api.md should document ${rpc}`);
   }
 });
 
-Deno.test("auth API section headings use grouped rpc auth names", async () => {
+Deno.test("auth API section headings use grouped auth names", async () => {
   const text = await Deno.readTextFile(repoFile("design/auth/auth-api.md"));
   const ungroupedHeadings = text
     .split("\n")
@@ -92,12 +97,12 @@ Deno.test("auth API section headings use grouped rpc auth names", async () => {
   assertEquals(ungroupedHeadings, []);
 });
 
-Deno.test("auth and contract docs do not endorse legacy authority primitives", async () => {
+Deno.test("auth and contract docs do not endorse retired authority primitives", async () => {
   const failures: string[] = [];
 
   for (const doc of docs) {
     const text = await Deno.readTextFile(repoFile(doc));
-    for (const pattern of legacyAuthorityPatterns) {
+    for (const pattern of retiredAuthorityPatterns) {
       const matches = text.match(pattern) ?? [];
       if (matches.length > 0) {
         failures.push(`${doc}: ${pattern} matched ${matches.length} time(s)`);

@@ -2,7 +2,6 @@ import {
   type ClientAuthContinuation,
   type ClientAuthRequiredContext,
   type ClientOpts,
-  createAuth,
   TrellisClient,
 } from "@qlever-llc/trellis";
 import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
@@ -27,7 +26,6 @@ import {
   type TrellisProcessHandle,
 } from "./trellis_process.ts";
 import type {
-  TrellisTestAuthorityPlanClassification,
   TrellisTestClientAuth,
   TrellisTestClientKey,
   TrellisTestClientParticipant,
@@ -43,7 +41,6 @@ import { waitFor as waitForHelper } from "./wait.ts";
 type ConnectedClient = { connection: { close(): Promise<void> } };
 type RuntimeTimeouts = {
   startupMs: number;
-  reconciliationMs: number;
   waitForMs: number;
   shutdownMs: number;
 };
@@ -137,17 +134,16 @@ export class TrellisTestRuntime implements AsyncDisposable {
         reviewMode?: "none" | "required";
       },
     ): Promise<void>;
-    reconcile(deployment: string): Promise<void>;
-    waitReady(deployment: string): Promise<void>;
   };
   readonly contracts: {
-    approve(
+    apply(
       args: {
         deployment?: string;
         contract: TrellisTestParticipantLike;
-        allowPlanClassifications?:
-          readonly TrellisTestAuthorityPlanClassification[];
       },
+    ): Promise<TrellisTestParticipantApproval>;
+    install(
+      args: { contract: TrellisTestParticipantLike },
     ): Promise<TrellisTestParticipantApproval>;
   };
   readonly services: {
@@ -155,12 +151,10 @@ export class TrellisTestRuntime implements AsyncDisposable {
       deployment?: string;
       name: string;
       contract: TrellisTestParticipantLike;
-      sessionKeySeed?: string;
     }): Promise<TrellisTestServiceKey>;
-    provisionInstanceOnly(args: {
-      deployment?: string;
-      sessionKeySeed?: string;
-    }): Promise<{ seed: string; sessionKey: string }>;
+    provisionInstanceOnly(
+      args: { deployment?: string },
+    ): Promise<{ seed: string; sessionKey: string }>;
   };
   readonly devices: {
     provision(
@@ -181,27 +175,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     ): Promise<
       import("../trellis/index.js").apis.state.StateAdminDeleteOutput
     >;
-  };
-  readonly authority: {
-    readonly plans: {
-      list(args: {
-        deploymentId?: string;
-        state?: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-        limit?: number;
-        cursor?: string;
-      }): Promise<{ entries: unknown[]; nextCursor: string | null }>;
-      reject(
-        args: { planId: string; reason?: string },
-      ): Promise<unknown>;
-    };
-    acceptUpdate(
-      args: { planId: string; expectedDesiredVersion?: number },
-    ): Promise<unknown>;
-    acceptMigration(args: {
-      planId: string;
-      acknowledgement: string;
-      expectedDesiredVersion?: number;
-    }): Promise<unknown>;
   };
   #controlPlane: TrellisProcessHandle | undefined;
   #nats: NatsTestContainer;
@@ -253,28 +226,24 @@ export class TrellisTestRuntime implements AsyncDisposable {
           kind,
           reviewMode,
         }),
-      reconcile: (deployment) => this.#admin.reconcile(deployment),
-      waitReady: (deployment) => this.#admin.waitReady(deployment),
     };
     this.contracts = {
-      approve: ({ deployment, contract, allowPlanClassifications }) =>
-        this.#admin.approveContract({
+      apply: ({ deployment, contract }) =>
+        this.#admin.applyParticipant({
           deployment: deployment ?? this.#deployment,
           contract,
-          allowPlanClassifications,
         }),
+      install: ({ contract }) => this.#admin.installParticipant({ contract }),
     };
     this.services = {
-      createInstance: ({ deployment, contract, sessionKeySeed }) =>
+      createInstance: ({ deployment, contract }) =>
         this.#admin.provisionServiceInstance({
           deployment: deployment ?? this.#deployment,
           contract,
-          sessionKeySeed,
         }),
-      provisionInstanceOnly: ({ deployment, sessionKeySeed }) =>
+      provisionInstanceOnly: ({ deployment }) =>
         this.#admin.provisionServiceInstanceOnly({
           deployment: deployment ?? this.#deployment,
-          sessionKeySeed,
         }),
     };
     this.devices = {
@@ -284,14 +253,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
       adminGet: (input) => this.#admin.stateAdminGet(input),
       adminList: (input) => this.#admin.stateAdminList(input),
       adminDelete: (input) => this.#admin.stateAdminDelete(input),
-    };
-    this.authority = {
-      plans: {
-        list: (args) => this.#admin.listAuthorityPlans(args),
-        reject: (args) => this.#admin.rejectAuthorityPlan(args),
-      },
-      acceptUpdate: (args) => this.#admin.acceptAuthorityUpdate(args),
-      acceptMigration: (args) => this.#admin.acceptAuthorityMigration(args),
     };
   }
 
@@ -316,7 +277,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     try {
       const timeouts = {
         startupMs: options.timeouts?.startupMs ?? 30_000,
-        reconciliationMs: options.timeouts?.reconciliationMs ?? 5_000,
         waitForMs: options.timeouts?.waitForMs ?? 5_000,
         shutdownMs: options.timeouts?.shutdownMs ?? 5_000,
       };
@@ -376,8 +336,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
         trellisUrl: startedControlPlane.trellisUrl,
         adminPassword,
         defaultDeployment: deployment,
-        reconciliationMs: timeouts.reconciliationMs,
-        autoAccept: options.authority?.autoAccept ?? ["initial", "update"],
         getBootstrapUrl: () =>
           startedControlPlane.waitForBootstrapUrl(timeouts.startupMs),
       });
@@ -412,12 +370,10 @@ export class TrellisTestRuntime implements AsyncDisposable {
     name: string;
     contract: TrellisTestParticipantLike;
     deployment?: string;
-    sessionKeySeed?: string;
   }): Promise<TrellisTestServiceKey> {
     return await this.#admin.registerService({
       deployment: args.deployment ?? this.#deployment,
       contract: args.contract,
-      sessionKeySeed: args.sessionKeySeed,
     });
   }
 
@@ -425,20 +381,15 @@ export class TrellisTestRuntime implements AsyncDisposable {
   async registerClient(args: {
     name: string;
     contract: TrellisTestClientParticipant;
-    sessionKeySeed?: string;
   }): Promise<TrellisTestClientKey> {
-    const approved = await this.#admin.approveContract({
-      deployment: `${this.#deployment}.client.${args.name}`,
-      contract: args.contract,
-    });
-    const seed = args.sessionKeySeed ?? generateSessionSeed();
-    const auth = await createAuth({ sessionKeySeed: seed });
+    const participantId = args.contract.id;
+    if (!participantId.startsWith("trellis-app.")) {
+      await this.#admin.installParticipant({ contract: args.contract });
+    }
+    const seed = generateSessionSeed();
     return {
       seed,
-      sessionKey: auth.sessionKey,
-      participantId: approved.participantId,
-      participantArtifactDigest: approved.participantDigest,
-      participantNeedsDigest: approved.participantNeedsDigest,
+      participantId,
     };
   }
 
@@ -450,7 +401,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     return {
       auth: {
         mode: "session_key",
-        authorizationContextEphemeral: true,
         sessionKeySeed: key.seed,
         redirectTo: `${this.trellisUrl}/_trellis/test/client-auth`,
       },
@@ -474,7 +424,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     args: ClientOpts & {
       name: string;
       contract: TContract;
-      sessionKeySeed?: string;
     },
   ): Promise<TrellisTestConnectedClient<TContract>> {
     const startedAt = performance.now();

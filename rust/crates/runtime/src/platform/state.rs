@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_protocol::{
-    AuthorizationPrincipalKind, ParticipantKind, ParticipantResourceKind, PermissionAction,
-    PermissionAtom, PermissionTarget, StateKind,
+    AuthorizationPrincipalKind, GrantOwnerKind, ParticipantKind, ParticipantResourceKind,
+    PermissionAction, PermissionAtom, PermissionTarget, StateKind,
 };
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, DeclaredRpcError, RequestContext, Router,
@@ -24,9 +24,10 @@ use trellis_runtime_apis::state::rpc::{
     StateListRpc, StatePutRpc,
 };
 
+use super::auth::context::AuthorizationContextRepository;
 use super::auth::verifier::RuntimeAuthVerifier;
 use super::auth::{
-    AccountRepository, AuthorityEvidenceRepository, AuthorityRepository, ParticipantBindingRecord,
+    AccountRepository, AuthorityEvidenceRepository, ParticipantBindingRecord,
     ParticipantBindingState, PrincipalKind, SqliteAuthorizationStore,
 };
 use crate::shutdown::StopHandle;
@@ -423,16 +424,17 @@ impl StateRuntime {
         store: &str,
     ) -> Result<Declaration, ServerError> {
         let caller = context.caller.as_ref().ok_or_else(auth_denied)?;
-        let binding = self
+        let retained = self
             .repository
-            .get_authorized_participant_binding(
-                &caller.context_digest,
-                i64::try_from(
-                    OffsetDateTime::now_utc()
-                        .unix_timestamp_nanos()
-                        .div_euclid(1_000_000),
-                )
-                .map_err(unexpected)?,
+            .get_context_by_digest(&caller.context_digest)
+            .await
+            .map_err(unexpected)?
+            .ok_or_else(auth_denied)?;
+        let (_, binding) = self
+            .repository
+            .get_installed_participant_record(
+                retained.participant_id,
+                Some(retained.installed_revision),
             )
             .await
             .map_err(unexpected)?
@@ -472,19 +474,23 @@ impl StateRuntime {
                 if principal.kind != PrincipalKind::User {
                     return Err(validation("/userId", "target is not a user"));
                 }
-                let authority = self
+                let grant = self
                     .repository
-                    .get_identity_authority(user_id, &request.contract_id)
+                    .get_grant_binding(
+                        GrantOwnerKind::User,
+                        user_id.to_owned(),
+                        request.contract_id.clone(),
+                    )
                     .await
                     .map_err(unexpected)?
                     .ok_or_else(|| {
-                        validation("/contractId", "user contract authority was not found")
+                        validation("/contractId", "user contract grant was not found")
                     })?;
-                let binding = self
+                let (_, binding) = self
                     .repository
-                    .get_participant_binding(
-                        &authority.participant_id,
-                        &authority.participant_artifact_digest,
+                    .get_installed_participant_record(
+                        grant.participant_id,
+                        Some(grant.installed_revision),
                     )
                     .await
                     .map_err(unexpected)?
@@ -512,19 +518,23 @@ impl StateRuntime {
                     if device.principal_id != device_id {
                         continue;
                     }
-                    let Some(authority) = self
+                    let Some(grant) = self
                         .repository
-                        .get_deployment_authority(&device.deployment_id, &request.contract_id)
+                        .get_grant_binding(
+                            GrantOwnerKind::Deployment,
+                            device.deployment_id.clone(),
+                            request.contract_id.clone(),
+                        )
                         .await
                         .map_err(unexpected)?
                     else {
                         continue;
                     };
-                    let Some(binding) = self
+                    let Some((_, binding)) = self
                         .repository
-                        .get_participant_binding(
-                            &authority.participant_id,
-                            &authority.participant_artifact_digest,
+                        .get_installed_participant_record(
+                            grant.participant_id,
+                            Some(grant.installed_revision),
                         )
                         .await
                         .map_err(unexpected)?

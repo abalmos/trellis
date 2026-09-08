@@ -8,10 +8,6 @@ export const GLOSSARY: Record<string, string> = {
     "Where jobs land after exhausting every retry. Dead-lettered jobs stay inspectable until an operator replays or dismisses them.",
   "dead-lettered":
     "Terminal state after all retries are exhausted. The job remains stored for inspection, replay, or dismissal.",
-  "materialized authority":
-    "The permissions currently enforced at runtime, produced by reconciling desired authority against live evidence.",
-  "desired authority":
-    "The permissions an operator requested for a deployment, before reconciliation produces the effective result.",
   "reconciliation":
     "The pass that reads authority inputs, validates evidence, and replaces materialized permissions atomically. Stale evidence fails closed.",
   "contract digest":

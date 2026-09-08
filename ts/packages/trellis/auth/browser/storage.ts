@@ -1,29 +1,36 @@
-import {
-  type AuthorizationClientState,
-  type AuthorizationContextStore,
-  validateAuthorizationClientStateTransition,
-} from "../authorization_context.ts";
+import { publicKeyBase64urlFromSeed } from "../keys.ts";
 
 const DB_NAME = "trellis-auth";
-const DB_VERSION = 2;
-const STORE_NAME = "keys";
-const INSTALLATION_ID = "trellis-browser-installation";
+const DB_VERSION = 3;
+const STORE_NAME = "installations";
 
 type BrowserInstallationRecord = {
-  readonly id: string;
-  readonly seed?: Uint8Array;
-  readonly authorization?: AuthorizationClientState;
+  id: string;
+  generation: number;
+  seed?: Uint8Array;
+  sessionKey?: string;
+  loginSessionId?: string;
+  expiresAt?: number | null;
+  pendingFlowId?: string;
 };
+
+/** Browser-owned installation credential and optional remembered login. */
+export type BrowserSessionCredential = Readonly<{
+  generation: number;
+  seed: Uint8Array;
+  sessionKey: string;
+  loginSessionId?: string;
+  expiresAt?: number | null;
+  pendingFlowId?: string;
+}>;
 
 const temporaryInstallations = new Map<string, BrowserInstallationRecord>();
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
-
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
@@ -33,23 +40,59 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-/** Canonical opaque identity for one participant installation at one Trellis origin. */
+function validGeneration(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function credential(
+  record: BrowserInstallationRecord | undefined,
+): BrowserSessionCredential | undefined {
+  if (
+    !record || !validGeneration(record.generation) ||
+    !(record.seed instanceof Uint8Array) || !record.sessionKey
+  ) return undefined;
+  return {
+    generation: record.generation,
+    seed: record.seed.slice(),
+    sessionKey: record.sessionKey,
+    ...(record.loginSessionId === undefined
+      ? {}
+      : { loginSessionId: record.loginSessionId }),
+    ...(record.expiresAt === undefined ? {} : { expiresAt: record.expiresAt }),
+    ...(record.pendingFlowId === undefined
+      ? {}
+      : { pendingFlowId: record.pendingFlowId }),
+  };
+}
+
+function expired(record: BrowserInstallationRecord, now: number): boolean {
+  return record.loginSessionId !== undefined && record.expiresAt !== null &&
+    record.expiresAt !== undefined && record.expiresAt <= now;
+}
+
+function tombstone(
+  record: BrowserInstallationRecord,
+): BrowserInstallationRecord {
+  return {
+    id: record.id,
+    generation: validGeneration(record.generation) ? record.generation + 1 : 0,
+  };
+}
+
+/** Canonical identity for one participant installation at one Trellis origin. */
 export function browserInstallationScope(
   trellisUrl: string,
   participantId: string,
-  participantArtifactDigest: string,
 ): string {
   return JSON.stringify([
-    "trellis.browser-installation.v1",
+    "trellis.browser-installation.v2",
     new URL(trellisUrl).origin,
     participantId,
-    participantArtifactDigest,
   ]);
 }
 
-/** One participant-scoped browser credential, session, runtime, and trust installation. */
-export class BrowserAuthorizationContextStore
-  implements AuthorizationContextStore {
+/** Persists only a browser installation key and nullable login metadata. */
+export class BrowserSessionStore {
   readonly #id: string;
   readonly #temporary: boolean;
 
@@ -60,256 +103,183 @@ export class BrowserAuthorizationContextStore
     if (!scope.trim() || scope.length > 4_096) {
       throw new Error("browser installation scope is invalid");
     }
-    this.#id = `${INSTALLATION_ID}:${scope}`;
+    this.#id = scope;
     this.#temporary = persistence === "temporary";
   }
 
-  async getOrCreateSessionSeed(): Promise<Uint8Array> {
+  async getOrCreateCredential(
+    now = Date.now(),
+  ): Promise<BrowserSessionCredential> {
+    const candidateSeed = crypto.getRandomValues(new Uint8Array(32));
+    const candidateSessionKey = publicKeyBase64urlFromSeed(candidateSeed);
     if (this.#temporary) {
-      const current = temporaryInstallations.get(this.#id);
-      if (current?.seed) return current.seed.slice();
-      const seed = crypto.getRandomValues(new Uint8Array(32));
-      temporaryInstallations.set(this.#id, { ...current, id: this.#id, seed });
-      return seed.slice();
-    }
-    const db = await openDB();
-    return await new Promise((resolve, reject) => {
-      let seed: Uint8Array;
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const request = store.get(this.#id);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const current = request.result as BrowserInstallationRecord | undefined;
-        seed = current?.seed instanceof Uint8Array
-          ? current.seed
-          : crypto.getRandomValues(new Uint8Array(32));
-        if (!current?.seed) store.put({ ...current, id: this.#id, seed });
-      };
-      tx.oncomplete = () => {
-        db.close();
-        resolve(seed.slice());
-      };
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async sessionId(): Promise<string | undefined> {
-    return (await this.load())?.session?.sessionId;
-  }
-
-  async load(): Promise<AuthorizationClientState | undefined> {
-    if (this.#temporary) {
-      const state = temporaryInstallations.get(this.#id)?.authorization;
-      return state ? structuredClone(state) : undefined;
-    }
-    const db = await openDB();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readonly");
-      const request = tx.objectStore(STORE_NAME).get(this.#id);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const state = (request.result as BrowserInstallationRecord | undefined)
-          ?.authorization;
-        resolve(state ? structuredClone(state) : undefined);
-      };
-      tx.oncomplete = () => db.close();
-    });
-  }
-
-  async commit(
-    state: AuthorizationClientState,
-  ): Promise<AuthorizationClientState> {
-    validateAuthorizationClientStateTransition(undefined, state);
-    if (this.#temporary) {
-      const current = temporaryInstallations.get(this.#id);
-      validateAuthorizationClientStateTransition(current?.authorization, state);
-      temporaryInstallations.set(this.#id, {
-        ...current,
+      let current = temporaryInstallations.get(this.#id);
+      if (current && expired(current, now)) {
+        current = tombstone(current);
+        temporaryInstallations.set(this.#id, current);
+      }
+      const existing = credential(current);
+      if (existing) return existing;
+      const created = {
         id: this.#id,
-        authorization: structuredClone(state),
-      });
-      return structuredClone(state);
+        generation: validGeneration(current?.generation)
+          ? current.generation
+          : 0,
+        seed: candidateSeed,
+        sessionKey: candidateSessionKey,
+      };
+      temporaryInstallations.set(this.#id, created);
+      return credential(created)!;
     }
     const db = await openDB();
     return await new Promise((resolve, reject) => {
+      let result: BrowserSessionCredential;
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const request = store.get(this.#id);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        let current = request.result as BrowserInstallationRecord | undefined;
+        if (current && expired(current, now)) current = tombstone(current);
+        const existing = credential(current);
+        if (existing) {
+          result = existing;
+          if (current !== request.result) store.put(current);
+          return;
+        }
+        const created = {
+          id: this.#id,
+          generation: validGeneration(current?.generation)
+            ? current.generation
+            : 0,
+          seed: candidateSeed,
+          sessionKey: candidateSessionKey,
+        };
+        store.put(created);
+        result = credential(created)!;
+      };
+      tx.oncomplete = () => {
+        db.close();
+        resolve(result);
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  async readLogin(
+    now = Date.now(),
+  ): Promise<BrowserSessionCredential | undefined> {
+    if (this.#temporary) {
+      const current = temporaryInstallations.get(this.#id);
+      if (!current) return undefined;
+      if (expired(current, now)) {
+        temporaryInstallations.set(this.#id, tombstone(current));
+        return undefined;
+      }
+      return credential(current);
+    }
+    const db = await openDB();
+    return await new Promise((resolve, reject) => {
+      let result: BrowserSessionCredential | undefined;
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
       const request = store.get(this.#id);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const current = request.result as BrowserInstallationRecord | undefined;
-        if (current?.authorization) {
-          try {
-            validateAuthorizationClientStateTransition(
-              current.authorization,
-              state,
-            );
-          } catch (error) {
-            tx.abort();
-            reject(error);
-            return;
-          }
+        if (current && expired(current, now)) {
+          store.put(tombstone(current));
+          return;
         }
-        store.put({
-          ...current,
-          id: this.#id,
-          authorization: structuredClone(state),
-        });
+        result = credential(current);
       };
       tx.oncomplete = () => {
         db.close();
-        resolve(structuredClone(state));
+        resolve(result);
       };
       tx.onerror = () => reject(tx.error);
     });
   }
 
-  async clearContext(
-    expectedContextDigest?: string | null,
-    expectedBootstrapJwt?: string | null,
+  rememberFlow(
+    expected: Pick<BrowserSessionCredential, "generation" | "sessionKey">,
+    flowId: string,
+  ): Promise<boolean> {
+    return this.#update((current) => {
+      if (
+        current.generation !== expected.generation ||
+        current.sessionKey !== expected.sessionKey
+      ) return undefined;
+      return { ...current, pendingFlowId: flowId };
+    });
+  }
+
+  completeBind(
+    expected: Pick<
+      BrowserSessionCredential,
+      "generation" | "sessionKey" | "pendingFlowId"
+    >,
+    login: { loginSessionId: string; expiresAt: number | null },
+  ): Promise<boolean> {
+    return this.#update((current) => {
+      if (
+        current.generation !== expected.generation ||
+        current.sessionKey !== expected.sessionKey ||
+        !expected.pendingFlowId ||
+        current.pendingFlowId !== expected.pendingFlowId
+      ) return undefined;
+      const { pendingFlowId: _, ...retained } = current;
+      return { ...retained, ...login };
+    });
+  }
+
+  clearLogin(
+    expected: Pick<BrowserSessionCredential, "generation" | "sessionKey"> & {
+      loginSessionId?: string;
+    },
+  ): Promise<boolean> {
+    return this.#update((current) => {
+      if (
+        current.generation !== expected.generation ||
+        current.sessionKey !== expected.sessionKey ||
+        (expected.loginSessionId !== undefined &&
+          current.loginSessionId !== expected.loginSessionId)
+      ) return undefined;
+      return tombstone(current);
+    });
+  }
+
+  async #update(
+    update: (
+      current: BrowserInstallationRecord,
+    ) => BrowserInstallationRecord | undefined,
   ): Promise<boolean> {
     if (this.#temporary) {
       const current = temporaryInstallations.get(this.#id);
-      const state = current?.authorization;
-      if (
-        (expectedContextDigest !== undefined &&
-          (state?.contextDigest ?? null) !== expectedContextDigest) ||
-        (expectedBootstrapJwt !== undefined &&
-          (state?.routing?.bootstrapJwt ?? null) !== expectedBootstrapJwt)
-      ) return false;
-      if (state) {
-        temporaryInstallations.set(this.#id, {
-          ...current,
-          id: this.#id,
-          authorization: {
-            ...state,
-            context: null,
-            contextDigest: null,
-            contextExpiresAt: null,
-            routing: null,
-          },
-        });
-      }
+      if (!current) return false;
+      const next = update(current);
+      if (!next) return false;
+      temporaryInstallations.set(this.#id, next);
       return true;
     }
     const db = await openDB();
     return await new Promise((resolve, reject) => {
-      let cleared = false;
+      let changed = false;
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
       const request = store.get(this.#id);
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         const current = request.result as BrowserInstallationRecord | undefined;
-        const state = current?.authorization;
-        if (
-          (expectedContextDigest !== undefined &&
-            (state?.contextDigest ?? null) !==
-              expectedContextDigest) ||
-          (expectedBootstrapJwt !== undefined &&
-            (state?.routing?.bootstrapJwt ?? null) !== expectedBootstrapJwt)
-        ) return;
-        cleared = true;
-        if (state) {
-          store.put({
-            ...current,
-            authorization: {
-              ...state,
-              context: null,
-              contextDigest: null,
-              contextExpiresAt: null,
-              routing: null,
-            },
-          });
-        }
+        if (!current) return;
+        const next = update(current);
+        if (!next) return;
+        store.put(next);
+        changed = true;
       };
       tx.oncomplete = () => {
         db.close();
-        resolve(cleared);
-      };
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async resetTrust(): Promise<void> {
-    if (this.#temporary) {
-      temporaryInstallations.delete(this.#id);
-      return;
-    }
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      tx.objectStore(STORE_NAME).delete(this.#id);
-      tx.oncomplete = () => {
-        db.close();
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async endSession(expectedSessionId?: string): Promise<boolean> {
-    if (this.#temporary) {
-      const current = temporaryInstallations.get(this.#id);
-      if (
-        expectedSessionId &&
-        current?.authorization?.session?.sessionId !== expectedSessionId
-      ) return false;
-      temporaryInstallations.set(this.#id, {
-        id: this.#id,
-        ...(current?.authorization
-          ? {
-            authorization: {
-              ...current.authorization,
-              session: null,
-              context: null,
-              contextDigest: null,
-              contextExpiresAt: null,
-              routing: null,
-              runtime: undefined,
-            },
-          }
-          : {}),
-      });
-      return true;
-    }
-    const db = await openDB();
-    return await new Promise<boolean>((resolve, reject) => {
-      let cleared = true;
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const request = store.get(this.#id);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const current = request.result as BrowserInstallationRecord | undefined;
-        if (
-          expectedSessionId &&
-          current?.authorization?.session?.sessionId !== expectedSessionId
-        ) {
-          cleared = false;
-          return;
-        }
-        store.put({
-          id: this.#id,
-          ...(current?.authorization
-            ? {
-              authorization: {
-                ...current.authorization,
-                session: null,
-                context: null,
-                contextDigest: null,
-                contextExpiresAt: null,
-                routing: null,
-                runtime: undefined,
-              },
-            }
-            : {}),
-        });
-      };
-      tx.oncomplete = () => {
-        db.close();
-        resolve(cleared);
+        resolve(changed);
       };
       tx.onerror = () => reject(tx.error);
     });

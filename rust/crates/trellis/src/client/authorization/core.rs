@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use trellis_protocol::{
     verify_authorization_event, verify_authorization_request, AuthorizationEventProof,
     AuthorizationEventPublisher, AuthorizationEventVerificationInput, AuthorizationRequestProof,
@@ -39,9 +41,6 @@ pub enum AuthorizationVerificationError {
     /// The presented digest does not identify the verified context.
     #[error("authorization context digest does not match verified context")]
     ContextDigestMismatch,
-    /// The transport session key is not the key bound into the context.
-    #[error("authorization session key does not match verified context")]
-    SessionKeyMismatch,
     /// The protocol proof, permission, or validity check failed.
     #[error("authorization proof rejected: {0}")]
     Protocol(Box<ProtocolError>),
@@ -93,8 +92,8 @@ impl VerifiedAuthorizationEvent {
 /// Shared local verifier used by both the platform and connected Rust SDKs.
 ///
 /// Resolution of trust/context records stays with each provider cache. Once a
-/// verified context is available, this core owns proof parsing, session-key
-/// matching, exact permission checks, and caller projection.
+/// verified context is available, this core owns proof parsing, exact
+/// permission checks, and caller projection.
 #[derive(Clone, Debug, Default)]
 pub struct AuthorizationVerificationCore {}
 
@@ -103,8 +102,6 @@ pub struct AuthorizationVerificationCore {}
 pub struct RequestVerificationInput<'a> {
     /// Resolved and cryptographically verified authorization context.
     pub context: &'a VerifiedAuthorizationContext,
-    /// Session key presented by the transport.
-    pub session_key: &'a str,
     /// Context digest presented by the transport.
     pub context_digest: &'a str,
     /// Exact routed subject.
@@ -130,8 +127,6 @@ pub struct RequestVerificationInput<'a> {
 pub struct EventVerificationInput<'a> {
     /// Resolved and cryptographically verified authorization context.
     pub context: &'a VerifiedAuthorizationContext,
-    /// Session key presented by the transport.
-    pub session_key: &'a str,
     /// Context digest presented by the transport.
     pub context_digest: &'a str,
     /// Exact published subject.
@@ -165,7 +160,6 @@ impl AuthorizationVerificationCore {
     ) -> Result<VerifiedAuthorizationRequest, AuthorizationVerificationError> {
         let RequestVerificationInput {
             context,
-            session_key,
             context_digest,
             subject,
             payload,
@@ -176,7 +170,7 @@ impl AuthorizationVerificationCore {
             policy,
             required_permissions,
         } = input;
-        self.check_context_binding(context, session_key, context_digest)?;
+        self.check_context_binding(context, context_digest)?;
         let proof = AuthorizationRequestProof::parse(proof.to_owned())?;
         let request = verify_authorization_request(AuthorizationRequestVerificationInput {
             context,
@@ -190,7 +184,7 @@ impl AuthorizationVerificationCore {
             required_permissions,
         })?;
         Ok(VerifiedAuthorizationRequest {
-            caller: project_caller(session_key, request.context()),
+            caller: project_caller(request.context()),
             request,
         })
     }
@@ -202,7 +196,6 @@ impl AuthorizationVerificationCore {
     ) -> Result<VerifiedAuthorizationEvent, AuthorizationVerificationError> {
         let EventVerificationInput {
             context,
-            session_key,
             context_digest,
             subject,
             payload,
@@ -213,7 +206,7 @@ impl AuthorizationVerificationCore {
             required_permissions,
             revoked_at,
         } = input;
-        self.check_context_binding(context, session_key, context_digest)?;
+        self.check_context_binding(context, context_digest)?;
         let proof = AuthorizationEventProof::parse(proof.to_owned())?;
         let event = verify_authorization_event(AuthorizationEventVerificationInput {
             context,
@@ -232,22 +225,18 @@ impl AuthorizationVerificationCore {
     fn check_context_binding(
         &self,
         context: &VerifiedAuthorizationContext,
-        session_key: &str,
         context_digest: &str,
     ) -> Result<(), AuthorizationVerificationError> {
         if context.context_digest() != context_digest {
             return Err(AuthorizationVerificationError::ContextDigestMismatch);
         }
-        if !session_key_matches(session_key, context.session_key()) {
-            return Err(AuthorizationVerificationError::SessionKeyMismatch);
-        }
         Ok(())
     }
 }
 
-fn project_caller(session_key: &str, context: &VerifiedAuthorizationContext) -> VerifiedCaller {
+fn project_caller(context: &VerifiedAuthorizationContext) -> VerifiedCaller {
     VerifiedCaller {
-        session_key: session_key.to_owned(),
+        session_key: URL_SAFE_NO_PAD.encode(context.session_key()),
         inbox_prefix: context.inbox_prefix().to_owned(),
         context_digest: context.context_digest().to_owned(),
         connection_id: context.connection_id().to_owned(),
@@ -259,13 +248,4 @@ fn project_caller(session_key: &str, context: &VerifiedAuthorizationContext) -> 
         deployment_id: context.deployment_id().map(ToOwned::to_owned),
         instance_id: context.instance_id().map(ToOwned::to_owned),
     }
-}
-
-fn session_key_matches(encoded: &str, verifying_key: &ed25519_dalek::VerifyingKey) -> bool {
-    use base64::Engine as _;
-
-    let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded) else {
-        return false;
-    };
-    bytes.len() == 32 && verifying_key.to_bytes().as_slice() == bytes.as_slice()
 }

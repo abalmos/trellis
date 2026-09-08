@@ -504,8 +504,8 @@ class BaseTransferHandle {
       reply,
       transferFrameProofPayload(seq ?? 0, control, payload),
     );
-    headers.set("session-key", this.#auth.sessionKey);
     headers.set("authorization-context", authHeaders.contextDigest);
+    headers.set("session-key", this.#auth.sessionKey);
     headers.set("proof", authHeaders.proof);
     headers.set("iat", String(authHeaders.iat));
     headers.set("request-id", authHeaders.requestId);

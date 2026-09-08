@@ -30,7 +30,6 @@ database here. Trellis does not choose either.
 Replace `main.ts` with:
 
 ```ts
-import { FileAuthorizationContextStore } from "@qlever-llc/trellis/auth/file";
 import { TrellisService } from "@qlever-llc/trellis/service/deno";
 import { participants } from "orders-trellis";
 import { createOrder } from "./service.ts";
@@ -47,17 +46,7 @@ const service = await TrellisService.connect({
   trellisUrl: requiredEnv("TRELLIS_URL"),
   identity: {
     seed: requiredEnv("TRELLIS_IDENTITY_SEED"),
-    deploymentId: requiredEnv("TRELLIS_DEPLOYMENT"),
-    instanceId: requiredEnv("TRELLIS_INSTANCE"),
-    participantId: requiredEnv("TRELLIS_PARTICIPANT_ID"),
-    participantArtifactDigest: requiredEnv(
-      "TRELLIS_PARTICIPANT_ARTIFACT_DIGEST",
-    ),
-    participantNeedsDigest: requiredEnv("TRELLIS_PARTICIPANT_NEEDS_DIGEST"),
   },
-  authorizationContextStore: new FileAuthorizationContextStore(
-    "./trellis-context.json",
-  ),
 }).orThrow();
 
 const stop = () => {
@@ -80,12 +69,11 @@ Environment variables and their names are this example's configuration
 interface, not a Trellis requirement. Pass the same typed options from a file,
 secret manager, CLI parser, or application configuration system if preferred.
 
-`connect()` verifies the provisioned identity and generated evidence, waits for
-deployment authority, and resolves Trellis resources. `handleOrdersCreate()`
+`connect()` proves the provisioned identity, verifies the server-owned installed
+participant and GrantBinding, and resolves Trellis resources. `handleOrdersCreate()`
 registers the provider. `wait()` supervises the running service; `stop()` closes
-its resources. The context file retains trust state across restarts: keep it
-private, exclude it from source control, and do not share it between
-concurrently running instances.
+its resources. Authorization contexts and route credentials remain in process
+memory and are refreshed on reconnect.
 
 For Node, use `/service/node` and the application's Node configuration and
 signal handling. For Rust, use the generated facade described in
@@ -107,16 +95,15 @@ explicitly:
 
 ```sh
 trellis svc "$TRELLIS_DEPLOYMENT" apply \
-  --api 'trellis/artifacts/apis/acme.orders@v1.json' \
-  --participant 'trellis/artifacts/participants/acme.orders-service.json'
+  --source . \
+  --participant acme.orders-service
 ```
 
-Review the pending deployment authority in Console under **Admin / Services**
-and accept it before expecting service startup to finish. Then inspect the
-accepted authority and provision an instance:
+The direct apply installs the participant and deployment resources. Inspect the
+deployment and provision an instance:
 
 ```sh
-trellis svc "$TRELLIS_DEPLOYMENT" authority show --format json
+trellis svc "$TRELLIS_DEPLOYMENT" show --format json
 trellis svc "$TRELLIS_DEPLOYMENT" provision --format json
 ```
 
@@ -128,13 +115,9 @@ control or logs.
 | `TRELLIS_URL`                         | Runtime HTTP URL, for example `http://127.0.0.1:8080`    |
 | `TRELLIS_DEPLOYMENT`                  | Created `deployment.deploymentId`                        |
 | `TRELLIS_IDENTITY_SEED`               | Provision response `instanceSeed`                        |
-| `TRELLIS_INSTANCE`                    | Provision response `instance.instanceId`                 |
-| `TRELLIS_PARTICIPANT_ID`              | Authority response `authority.participantId`             |
-| `TRELLIS_PARTICIPANT_ARTIFACT_DIGEST` | Authority response `authority.participantArtifactDigest` |
-| `TRELLIS_PARTICIPANT_NEEDS_DIGEST`    | Authority response `authority.acceptedNeedsDigest`       |
 
-Use the accepted authority's exact digests; do not invent or recompute them by
-hand. Use a private working directory for this entrypoint's context file.
+Deployment, instance, participant, grant, resource, and transport data are
+resolved by Trellis during bootstrap; do not duplicate them in service config.
 
 Then run from the directory containing `main.ts`, with the environment
 populated:

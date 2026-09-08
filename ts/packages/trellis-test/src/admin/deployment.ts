@@ -3,12 +3,10 @@ import { ulid } from "ulid";
 
 import { generateSessionSeed } from "../control_plane_config.ts";
 import type {
-  TrellisTestAuthorityPlanClassification,
   TrellisTestParticipantApproval,
   TrellisTestParticipantLike,
   TrellisTestServiceKey,
 } from "../types.ts";
-import { waitFor } from "../wait.ts";
 import { recordTrellisDuration } from "./metrics.ts";
 import type {
   AdminRpc,
@@ -18,7 +16,6 @@ import type {
 
 type JsonObject = Record<string, JsonValue>;
 
-// Temporary private projection until source-project deployment replaces these calls.
 function checkedObject(value: Readonly<Record<string, unknown>>): JsonObject {
   if (!Object.values(value).every(isJsonValue)) {
     throw new Error(
@@ -59,26 +56,19 @@ export type AdminDeploymentRpc = <M extends TrellisTestAdminRpcMethod>(
 
 export type AdminDeploymentContext = {
   defaultDeployment: string;
-  reconciliationMs: number;
-  autoAccept: ReadonlySet<TrellisTestAuthorityPlanClassification>;
   createdDeployments: Map<string, Promise<void>>;
+  deploymentBindingRevisions: Map<string, number>;
   deploymentIds: Map<string, string>;
-  authorityIds: Map<string, string>;
+  installedParticipants: Map<string, { digest: string; revision: number }>;
   protocolApis: Map<string, JsonObject>;
   rpc: AdminDeploymentRpc;
 };
 
-function deploymentKey(deployment: string): string {
-  return `service:${deployment}`;
+function deploymentKey(kind: "service" | "device", deployment: string): string {
+  return `${kind}:${deployment}`;
 }
 
-function isAuthorityPlanClassification(
-  value: string,
-): value is TrellisTestAuthorityPlanClassification {
-  return value === "initial" || value === "update" || value === "migration";
-}
-
-/** @internal Creates a service deployment through Auth.Deployments.Create. */
+/** @internal Creates a service or device deployment. */
 export async function createDeployment(
   context: AdminDeploymentContext,
   args: {
@@ -88,16 +78,16 @@ export async function createDeployment(
   } = {},
 ): Promise<void> {
   const deployment = args.deployment ?? context.defaultDeployment;
-  const key = deploymentKey(deployment);
+  const kind = args.kind ?? "service";
+  const key = deploymentKey(kind, deployment);
   const existing = context.createdDeployments.get(key);
   if (existing !== undefined) return existing;
-  const startedAt = performance.now();
   const promise = (async () => {
     const created = await context.rpc("authDeploymentsCreate", {
       displayName: deployment,
       expiresAt: null,
       idempotencyKey: ulid(),
-      kind: args.kind ?? "service",
+      kind,
       participantId: null,
       portalId: null,
       requiresDeviceDelegation: false,
@@ -105,11 +95,6 @@ export async function createDeployment(
     });
     context.deploymentIds.set(deployment, created.deployment.deploymentId);
     context.createdDeployments.set(key, Promise.resolve());
-    recordTrellisDuration(
-      "trellis.admin.workflow.duration",
-      performance.now() - startedAt,
-      { operation: "register_service", phase: "create_deployment" },
-    );
   })();
   context.createdDeployments.set(key, promise);
   void promise.catch(() => {
@@ -120,359 +105,127 @@ export async function createDeployment(
   await promise;
 }
 
-/** @internal Plans, accepts, reconciles, and waits for a contract authority change. */
-export async function approveContract(
+/** @internal Installs a participant and atomically replaces its deployment GrantBinding. */
+export async function applyParticipant(
   context: AdminDeploymentContext,
-  args: {
-    deployment?: string;
-    contract: TrellisTestParticipantLike;
-    allowPlanClassifications?:
-      readonly TrellisTestAuthorityPlanClassification[];
-  },
+  args: { deployment?: string; contract: TrellisTestParticipantLike },
 ): Promise<TrellisTestParticipantApproval> {
-  const totalStartedAt = performance.now();
+  const startedAt = performance.now();
   const deployment = args.deployment ?? context.defaultDeployment;
-  await createDeployment(context, { deployment });
+  if (!context.deploymentIds.has(deployment)) {
+    await createDeployment(context, { deployment });
+  }
   const deploymentId = context.deploymentIds.get(deployment);
   if (!deploymentId) {
     throw new Error(`Trellis deployment '${deployment}' was not created`);
   }
+
   const artifacts = participantPresentation(args.contract);
   const referencedApis = new Map(context.protocolApis);
   for (const api of artifacts.referencedApis) {
     referencedApis.set(String(api.id), api);
   }
-  const planStartedAt = performance.now();
-  const planned = await context.rpc("authDeploymentAuthorityPlan", {
+  const applied = await context.rpc("authDeploymentsApply", {
+    apiArtifacts: [artifacts.api, ...referencedApis.values()],
     deploymentId,
-    expiresAt: null,
+    expectedRevision: context.deploymentBindingRevisions.get(deploymentId) ?? 0,
     idempotencyKey: ulid(),
     participantArtifact: artifacts.participant,
-    referencedApiArtifacts: [artifacts.api, ...referencedApis.values()],
   });
-  context.protocolApis.set(String(artifacts.api.id), artifacts.api);
-  const classification = planned.proposal.classification;
-  recordTrellisDuration(
-    "trellis.admin.workflow.duration",
-    performance.now() - planStartedAt,
-    {
-      deployment,
-      participantId: String(artifacts.participant.id),
-      operation: "approve_contract",
-      phase: "plan",
-      planClassification: classification,
-    },
-  );
-  if (!isAuthorityPlanClassification(classification)) {
-    throw new Error(
-      `Trellis test runtime received unsupported authority plan classification '${classification}'`,
-    );
-  }
-  const allowed = args.allowPlanClassifications === undefined
-    ? context.autoAccept
-    : new Set(args.allowPlanClassifications);
-  if (!allowed.has(classification)) {
-    throw new Error(
-      `Trellis test runtime cannot auto-accept '${classification}' authority plans; allowed classifications: ${
-        [...allowed].join(", ") || "none"
-      }`,
-    );
-  }
-  if (
-    artifacts.participant.kind !== "service" &&
-    artifacts.participant.kind !== "device"
-  ) {
-    return {
-      planId: planned.proposal.proposalId,
-      classification,
-      participantId: planned.proposal.participantId,
-      participantDigest: planned.proposal.participantArtifactDigest,
-      participantNeedsDigest: planned.proposal.participantNeedsDigest,
+  if (applied.binding) {
+    context.deploymentBindingRevisions.set(
       deploymentId,
-    };
-  }
-  const acceptStartedAt = performance.now();
-  if (classification !== "migration") {
-    await context.rpc("authDeploymentAuthorityAcceptUpdate", {
-      expectedBaseAuthorityVersion: planned.proposal.baseAuthorityVersion,
-      idempotencyKey: ulid(),
-      proposalId: planned.proposal.proposalId,
-      reason: null,
-    });
-  } else {
-    await context.rpc("authDeploymentAuthorityAcceptMigration", {
-      expectedBaseAuthorityVersion: planned.proposal.baseAuthorityVersion,
-      idempotencyKey: ulid(),
-      proposalId: planned.proposal.proposalId,
-      reason:
-        "Approved by TrellisTestRuntime for an isolated integration test.",
-    });
-  }
-  const authority = await context.rpc("authDeploymentAuthorityList", {
-    cursor: undefined,
-    deploymentId,
-    limit: 1,
-    state: "accepted",
-  });
-  const authorityId = authority.entries[0]?.authorityId;
-  if (!authorityId) {
-    throw new Error(
-      `Trellis deployment '${deployment}' has no accepted authority`,
+      applied.binding.revision,
     );
+    context.installedParticipants.set(String(artifacts.participant.id), {
+      digest: String(artifacts.participant.digest),
+      revision: applied.binding.installedRevision,
+    });
   }
-  context.authorityIds.set(deployment, authorityId);
+  context.protocolApis.set(String(artifacts.api.id), artifacts.api);
   recordTrellisDuration(
     "trellis.admin.workflow.duration",
-    performance.now() - acceptStartedAt,
+    performance.now() - startedAt,
     {
       deployment,
       participantId: String(artifacts.participant.id),
       operation: "approve_contract",
-      phase: "accept",
-      planClassification: classification,
-    },
-  );
-  await reconcile(context, deployment, "approveContract.reconcile");
-  await waitReady(context, deployment, "approveContract.waitReady");
-  recordTrellisDuration(
-    "trellis.admin.workflow.duration",
-    performance.now() - totalStartedAt,
-    {
-      deployment,
-      participantId: String(artifacts.participant.id),
-      operation: "approve_contract",
-      phase: "total",
-      planClassification: classification,
+      phase: "apply",
     },
   );
   return {
-    planId: planned.proposal.proposalId,
-    classification,
-    participantId: planned.proposal.participantId,
-    participantDigest: planned.proposal.participantArtifactDigest,
-    participantNeedsDigest: planned.proposal.participantNeedsDigest,
+    participantId: String(artifacts.participant.id),
+    installedRevision: Number(applied.binding?.installedRevision),
     deploymentId,
+    binding: applied.binding,
   };
 }
 
-/** @internal Triggers deployment-authority reconciliation. */
-export async function reconcile(
+/** @internal Installs a participant definition without creating a deployment or grants. */
+export async function installParticipant(
   context: AdminDeploymentContext,
-  deployment: string,
-  label = "reconcile",
-): Promise<void> {
-  const startedAt = performance.now();
-  const authorityId = context.authorityIds.get(deployment);
-  if (!authorityId) {
-    throw new Error(
-      `Trellis deployment '${deployment}' has no accepted authority`,
-    );
+  args: { contract: TrellisTestParticipantLike },
+): Promise<TrellisTestParticipantApproval> {
+  const artifacts = participantPresentation(args.contract);
+  const participantId = String(artifacts.participant.id);
+  const digest = String(artifacts.participant.digest);
+  const current = context.installedParticipants.get(participantId);
+  if (current?.digest === digest) {
+    return { participantId, installedRevision: current.revision };
   }
-  await context.rpc("authDeploymentAuthorityReconcile", {
-    authorityId,
-    expectedVersion: null,
+  const installed = await context.rpc("authParticipantsInstall", {
+    apiArtifacts: [artifacts.api, ...artifacts.referencedApis],
+    expectedRevision: current?.revision ?? 0,
     idempotencyKey: ulid(),
+    participantArtifact: artifacts.participant,
   });
-  recordTrellisDuration(
-    "trellis.admin.workflow.duration",
-    performance.now() - startedAt,
-    { operation: label, phase: "reconcile" },
-  );
+  const revision = installed.participant.revision;
+  context.installedParticipants.set(participantId, { digest, revision });
+  return { participantId, installedRevision: revision };
 }
 
-/** @internal Waits until materialized deployment authority is current. */
-export async function waitReady(
-  context: AdminDeploymentContext,
-  deployment: string,
-  label = "waitReady",
-): Promise<void> {
-  const startedAt = performance.now();
-  const authorityId = context.authorityIds.get(deployment);
-  if (!authorityId) {
-    throw new Error(
-      `Trellis deployment '${deployment}' has no accepted authority`,
-    );
-  }
-  await waitFor(async () => {
-    const pollStartedAt = performance.now();
-    const result = await context.rpc("authDeploymentAuthorityGet", {
-      authorityId,
-    });
-    const materialized = result.authority.materialization;
-    recordTrellisDuration(
-      "trellis.admin.workflow.duration",
-      performance.now() - pollStartedAt,
-      { operation: `${label}.poll`, phase: "wait_ready" },
-    );
-    if (materialized?.state === "error") {
-      throw new Error(
-        `Trellis deployment '${deployment}' reconciliation failed${
-          materialized.error ? `: ${materialized.error}` : ""
-        }`,
-      );
-    }
-    if (
-      materialized?.state === "available" &&
-      materialized.authorityVersion === result.authority.version &&
-      materialized.reconciledAt !== null
-    ) {
-      return true;
-    }
-    return false;
-  }, { timeoutMs: context.reconciliationMs });
-  recordTrellisDuration(
-    "trellis.admin.workflow.duration",
-    performance.now() - startedAt,
-    { operation: label, phase: "wait_ready" },
-  );
-}
-
-/** @internal Provisions a service instance key after approving its contract. */
+/** @internal Provisions a service instance key after installing its participant. */
 export async function provisionServiceInstance(
   context: AdminDeploymentContext,
-  args: {
-    deployment?: string;
-    contract: TrellisTestParticipantLike;
-    sessionKeySeed?: string;
-  },
+  args: { deployment?: string; contract: TrellisTestParticipantLike },
 ): Promise<TrellisTestServiceKey> {
-  const startedAt = performance.now();
   const deployment = args.deployment ?? context.defaultDeployment;
-  const approved = await approveContract(context, {
-    deployment,
-    contract: args.contract,
-  });
-  const identitySeed = args.sessionKeySeed ?? generateSessionSeed();
-  const auth = await createAuth({ sessionKeySeed: identitySeed });
-  const deploymentId = context.deploymentIds.get(deployment);
-  if (!deploymentId) {
-    throw new Error(`Trellis deployment '${deployment}' was not created`);
+  const approved = await applyParticipant(context, args);
+  if (!approved.deploymentId) {
+    throw new Error("deployment apply returned no deployment ID");
   }
+  const identitySeed = generateSessionSeed();
+  const auth = await createAuth({ sessionKeySeed: identitySeed });
   const provisioned = await context.rpc("authServiceInstancesProvision", {
-    deploymentId,
+    deploymentId: approved.deploymentId,
     idempotencyKey: ulid(),
     identityPublicKey: auth.sessionKey,
     instanceId: null,
     participantId: approved.participantId,
   });
-  recordTrellisDuration(
-    "trellis.admin.workflow.duration",
-    performance.now() - startedAt,
-    { operation: "provision_service", phase: "total" },
-  );
   return {
     seed: identitySeed,
-    sessionSeed: generateSessionSeed(),
-    sessionKey: auth.sessionKey,
-    deploymentId,
+    deploymentId: approved.deploymentId,
     instanceId: provisioned.instance.instanceId,
     participantId: approved.participantId,
-    participantArtifactDigest: approved.participantDigest,
-    participantNeedsDigest: approved.participantNeedsDigest,
   };
 }
 
-/** @internal Runs the full service registration sequence used by test services. */
-export async function registerService(
+/** @internal Runs the service registration sequence used by test services. */
+export function registerService(
   context: AdminDeploymentContext,
-  args: {
-    deployment?: string;
-    contract: TrellisTestParticipantLike;
-    sessionKeySeed?: string;
-  },
+  args: { deployment?: string; contract: TrellisTestParticipantLike },
 ): Promise<TrellisTestServiceKey> {
-  const startedAt = performance.now();
-  const deployment = args.deployment ?? context.defaultDeployment;
-  const key = await provisionServiceInstance(context, {
-    deployment,
-    contract: args.contract,
-    sessionKeySeed: args.sessionKeySeed,
-  });
-  await reconcile(
-    context,
-    deployment,
-    "registerService.postProvision.reconcile",
-  );
-  await waitReady(
-    context,
-    deployment,
-    "registerService.postProvision.waitReady",
-  );
-  recordTrellisDuration(
-    "trellis.admin.workflow.duration",
-    performance.now() - startedAt,
-    { operation: "register_service", phase: "total" },
-  );
-  return key;
+  return provisionServiceInstance(context, args);
 }
 
-/** @internal Lists deployment authority plans. */
-export async function listAuthorityPlans(
-  context: AdminDeploymentContext,
-  args: {
-    deploymentId?: string;
-    state?: "pending" | "accepted" | "rejected" | "superseded" | "expired";
-    limit?: number;
-    cursor?: string;
-  },
-): Promise<{ entries: unknown[]; nextCursor: string | null }> {
-  return await context.rpc("authDeploymentAuthorityPlansList", {
-    deploymentId: args.deploymentId,
-    state: args.state,
-    limit: args.limit ?? 20,
-    cursor: args.cursor,
-  });
-}
-
-/** @internal Rejects a pending deployment authority plan. */
-export async function rejectAuthorityPlan(
-  context: AdminDeploymentContext,
-  args: { planId: string; reason?: string },
-): Promise<unknown> {
-  return await context.rpc("authDeploymentAuthorityReject", {
-    proposalId: args.planId,
-    reason: args.reason ?? null,
-    idempotencyKey: ulid(),
-  });
-}
-
-/** @internal Accepts a pending deployment authority update plan. */
-export async function acceptAuthorityUpdate(
-  context: AdminDeploymentContext,
-  args: { planId: string; expectedDesiredVersion?: number },
-): Promise<unknown> {
-  return await context.rpc("authDeploymentAuthorityAcceptUpdate", {
-    proposalId: args.planId,
-    expectedBaseAuthorityVersion: args.expectedDesiredVersion ?? null,
-    reason: null,
-    idempotencyKey: ulid(),
-  });
-}
-
-/** @internal Accepts a pending deployment authority migration plan. */
-export async function acceptAuthorityMigration(
-  context: AdminDeploymentContext,
-  args: {
-    planId: string;
-    acknowledgement: string;
-    expectedDesiredVersion?: number;
-  },
-): Promise<unknown> {
-  return await context.rpc("authDeploymentAuthorityAcceptMigration", {
-    proposalId: args.planId,
-    expectedBaseAuthorityVersion: args.expectedDesiredVersion ?? null,
-    reason: args.acknowledgement,
-    idempotencyKey: ulid(),
-  });
-}
-
-/** @internal Provisions a service instance without changing deployment authority. */
+/** @internal Provisions a service instance without changing its installed participant. */
 export async function provisionServiceInstanceOnly(
   context: AdminDeploymentContext,
-  args: { deployment?: string; sessionKeySeed?: string },
+  args: { deployment?: string },
 ): Promise<{ seed: string; sessionKey: string }> {
   const deployment = args.deployment ?? context.defaultDeployment;
-  const seed = args.sessionKeySeed ?? generateSessionSeed();
+  const seed = generateSessionSeed();
   const auth = await createAuth({ sessionKeySeed: seed });
   const deploymentId = context.deploymentIds.get(deployment);
   if (!deploymentId) {

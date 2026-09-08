@@ -427,8 +427,6 @@ impl RuntimeConfig {
             .as_mut()
             .and_then(|auth| auth.authorization.as_mut())
         {
-            resolve_required_path(base_dir, &mut authorization.trust_root_file);
-            resolve_required_path(base_dir, &mut authorization.issuer_manifest_file);
             resolve_required_path(base_dir, &mut authorization.issuer_signing_seed_file);
         }
     }
@@ -773,10 +771,6 @@ pub struct AuthConfig {
 /// File-backed authorization trust and context-runtime policy.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AuthorizationConfig {
-    /// Public pinned authorization trust-root JSON file.
-    pub trust_root_file: PathBuf,
-    /// Root-signed current issuer-manifest JSON file.
-    pub issuer_manifest_file: PathBuf,
     /// Active issuer's canonical unpadded base64url Ed25519 seed file.
     pub issuer_signing_seed_file: PathBuf,
     /// Maximum newly issued context lifetime in seconds.
@@ -789,18 +783,12 @@ pub struct AuthorizationConfig {
     pub minimum_context_lifetime_seconds: u64,
     /// Maximum lifetime of a deny-all bootstrap JWT in seconds.
     pub maximum_bootstrap_jwt_lifetime_seconds: u64,
-    /// Registry retention grace after context expiry in seconds.
-    pub cleanup_grace_seconds: u64,
     /// Verification clock skew in seconds.
     pub allowed_clock_skew_seconds: u64,
     /// Maximum canonical signed-context JSON size in UTF-8 bytes.
     pub maximum_context_bytes: usize,
     /// Maximum permission atoms allowed in one context.
     pub maximum_permissions: usize,
-    /// Maximum capability names allowed in one context.
-    pub maximum_capabilities: usize,
-    /// Trust-distribution KV bucket.
-    pub trust_bucket: String,
     /// Context/revocation registry KV bucket.
     pub context_bucket: String,
     /// Replica count for both registry buckets.
@@ -809,11 +797,7 @@ pub struct AuthorizationConfig {
 
 impl AuthorizationConfig {
     fn validate(&self) -> Result<(), ConfigError> {
-        for (field, path) in [
-            ("trust_root_file", &self.trust_root_file),
-            ("issuer_manifest_file", &self.issuer_manifest_file),
-            ("issuer_signing_seed_file", &self.issuer_signing_seed_file),
-        ] {
+        for (field, path) in [("issuer_signing_seed_file", &self.issuer_signing_seed_file)] {
             if path.as_os_str().is_empty() {
                 return Err(invalid_authorization(field, "must not be empty"));
             }
@@ -862,12 +846,6 @@ impl AuthorizationConfig {
                 "must be between 60 and 86400",
             ));
         }
-        if self.cleanup_grace_seconds == 0 || self.cleanup_grace_seconds > 86_400 {
-            return Err(invalid_authorization(
-                "cleanup_grace_seconds",
-                "must be between 1 and 86400",
-            ));
-        }
         if self.allowed_clock_skew_seconds > 300 {
             return Err(invalid_authorization(
                 "allowed_clock_skew_seconds",
@@ -886,23 +864,8 @@ impl AuthorizationConfig {
                 "must be between 1 and 16384",
             ));
         }
-        if self.maximum_capabilities == 0 || self.maximum_capabilities > 1_024 {
-            return Err(invalid_authorization(
-                "maximum_capabilities",
-                "must be between 1 and 1024",
-            ));
-        }
-        if self.trust_bucket.trim().is_empty() || self.context_bucket.trim().is_empty() {
-            return Err(invalid_authorization(
-                "trust_bucket/context_bucket",
-                "must not be empty",
-            ));
-        }
-        if self.trust_bucket == self.context_bucket {
-            return Err(invalid_authorization(
-                "trust_bucket/context_bucket",
-                "must be distinct",
-            ));
+        if self.context_bucket.trim().is_empty() {
+            return Err(invalid_authorization("context_bucket", "must not be empty"));
         }
         if self.registry_replicas == 0 {
             return Err(invalid_authorization(

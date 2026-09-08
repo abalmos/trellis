@@ -9,13 +9,10 @@ use tokio::sync::{Mutex, Notify};
 
 use super::{
     browser_consent_proposal, portal_policy_snapshot, resolve_portal_authority_selection,
-    AccountRepository, ApplyIdentityAuthoritySelectionInput, AuthService,
-    AuthorityEvidenceRepository, AuthorityKind, AuthorityRepository, AuthorityState,
-    AuthorityTarget, AuthorizationReconciliationHandle, AuthorizationStateError,
-    CapabilityGroupRecord, ContextRepository, IdempotencyResultRecord, IdentityAuthorityRecord,
-    LoginPortalRecord, LoginSettingsRecord, OutboxRepository, PortalAuthoritySource,
-    PortalBindingMutation, PortalGrantOverrideRecord, PortalPolicySnapshot, PortalRepository,
-    ProviderLoginAttributes, ReconciliationCause,
+    AccountRepository, AuthService, AuthorizationStateError, CapabilityGroupRecord, GrantBinding,
+    GrantBindingReplacement, GrantBindingState, GrantOwnerKind, GrantRepository,
+    IdempotencyResultRecord, LoginPortalRecord, LoginSettingsRecord, PortalGrantOverrideRecord,
+    PortalGrantProvenance, PortalPolicySnapshot, PortalRepository, ProviderLoginAttributes,
 };
 use crate::shutdown::StopHandle;
 
@@ -32,7 +29,6 @@ struct PortalPolicyBatch {
     policy: Option<PortalGrantOverrideRecord>,
     snapshot: PortalPolicySnapshot,
     groups: Arc<BTreeMap<String, CapabilityGroupRecord>>,
-    consents: BTreeMap<(String, String), super::ephemeral::BrowserConsentProposal>,
 }
 
 impl PortalPolicyReconciliationHandle {
@@ -52,13 +48,11 @@ impl PortalPolicyReconciliationHandle {
 
 pub(crate) struct PortalPolicyReconciliationWorker<R> {
     service: AuthService<R>,
-    reconciliation: AuthorizationReconciliationHandle,
     handle: PortalPolicyReconciliationHandle,
 }
 
 pub(crate) fn portal_policy_reconciliation<R>(
     service: AuthService<R>,
-    reconciliation: AuthorizationReconciliationHandle,
 ) -> (
     PortalPolicyReconciliationHandle,
     PortalPolicyReconciliationWorker<R>,
@@ -71,25 +65,13 @@ pub(crate) fn portal_policy_reconciliation<R>(
     };
     (
         handle.clone(),
-        PortalPolicyReconciliationWorker {
-            service,
-            reconciliation,
-            handle,
-        },
+        PortalPolicyReconciliationWorker { service, handle },
     )
 }
 
 impl<R> PortalPolicyReconciliationWorker<R>
 where
-    R: AccountRepository
-        + AuthorityEvidenceRepository
-        + AuthorityRepository
-        + ContextRepository
-        + OutboxRepository
-        + PortalRepository
-        + Clone
-        + Send
-        + Sync,
+    R: AccountRepository + GrantRepository + PortalRepository + Clone + Send + Sync,
 {
     pub(crate) async fn run(self, stop: StopHandle) -> Result<(), AuthorizationStateError> {
         loop {
@@ -127,7 +109,7 @@ where
             let bindings = self
                 .service
                 .repository()
-                .list_portal_authority_bindings()
+                .list_portal_grant_bindings()
                 .await?
                 .into_iter()
                 .filter(|binding| portal_ids.contains(&binding.portal_id))
@@ -145,7 +127,7 @@ where
         let mut bindings = self
             .service
             .repository()
-            .list_portal_authority_bindings()
+            .list_portal_grant_bindings()
             .await?
             .into_iter();
         loop {
@@ -175,7 +157,7 @@ where
 
     async fn reconcile_bindings(
         &self,
-        bindings: Vec<super::PortalAuthorityBindingRecord>,
+        bindings: Vec<super::PortalGrantBindingRecord>,
         materialize_immediately: bool,
         groups: Arc<BTreeMap<String, CapabilityGroupRecord>>,
     ) -> Result<(), AuthorizationStateError> {
@@ -212,49 +194,17 @@ where
             )?;
             let mut current_bindings = Vec::new();
             for binding in bindings {
-                match self
+                if let Some(current) = self
                     .service
                     .repository()
-                    .get_identity_authority(&binding.principal_id, &binding.participant_id)
+                    .get_grant_binding(
+                        GrantOwnerKind::User,
+                        binding.principal_id.clone(),
+                        binding.participant_id.clone(),
+                    )
                     .await?
                 {
-                    Some(current) => current_bindings.push((binding, current)),
-                    None => {
-                        self.service
-                            .repository()
-                            .remove_portal_authority_binding(
-                                &binding.principal_id,
-                                &binding.participant_id,
-                            )
-                            .await?;
-                    }
-                }
-            }
-            let mut consents = BTreeMap::new();
-            if policy.is_some() {
-                for (_, current) in &current_bindings {
-                    let key = (
-                        current.participant_artifact_digest.clone(),
-                        current.accepted_needs_digest.clone(),
-                    );
-                    if consents.contains_key(&key) {
-                        continue;
-                    }
-                    let participant = self
-                        .service
-                        .repository()
-                        .get_participant_binding(&current.participant_id, &key.0)
-                        .await?
-                        .ok_or_else(|| {
-                            AuthorizationStateError::InvalidRecord(
-                                "portal-managed participant binding is missing".to_owned(),
-                            )
-                        })?;
-                    let consent = browser_consent_proposal(&participant)?;
-                    if consent.participant_needs_digest != key.1 {
-                        return Err(AuthorizationStateError::StorageConflict);
-                    }
-                    consents.insert(key, consent);
+                    current_bindings.push((binding, current));
                 }
             }
             let batch = Arc::new(PortalPolicyBatch {
@@ -263,7 +213,6 @@ where
                 policy,
                 snapshot,
                 groups: groups.clone(),
-                consents,
             });
             work.extend(
                 current_bindings
@@ -284,118 +233,104 @@ where
 
     async fn reconcile_binding(
         &self,
-        binding: super::PortalAuthorityBindingRecord,
-        current: IdentityAuthorityRecord,
+        binding: super::PortalGrantBindingRecord,
+        current: GrantBinding,
         batch: Arc<PortalPolicyBatch>,
-        materialize_immediately: bool,
+        _materialize_immediately: bool,
     ) -> Result<(), AuthorizationStateError> {
         let provider_allowed = super::policy::portal_allows_authenticated_provider(
             &batch.portal,
             &batch.settings,
             &binding.provider_id,
         );
-        let now = super::reconciliation::unix_time_millis()?;
-        let (state, grant_set, capabilities, replacement, semantic_key) =
-            if !provider_allowed || batch.policy.is_none() {
-                (
-                    AuthorityState::Revoked,
-                    current.desired_grant_set.clone(),
-                    current.desired_capabilities.clone(),
-                    None,
-                    None,
-                )
-            } else {
-                let policy = match batch.policy.as_ref() {
-                    Some(policy) => policy,
-                    None => unreachable!("checked above"),
-                };
-                let consent = batch
-                    .consents
-                    .get(&(
-                        current.participant_artifact_digest.clone(),
-                        current.accepted_needs_digest.clone(),
-                    ))
-                    .ok_or_else(|| {
-                        AuthorizationStateError::InvalidRecord(
-                            "portal-managed participant consent is missing".to_owned(),
-                        )
-                    })?;
-                let selection = resolve_portal_authority_selection(
-                    policy,
-                    &batch.groups,
-                    consent,
-                    &ProviderLoginAttributes {
-                        provider_id: binding.provider_id.clone(),
-                        roles: binding.roles.clone(),
-                    },
-                )?;
-                if current.state == AuthorityState::Accepted
-                    && binding.authority_version == current.version
-                    && binding.effective_policy_digest == selection.effective_policy_digest
-                {
-                    return Ok(());
-                }
-                let semantic_key = selection.effective_policy_digest.clone();
-                (
-                    AuthorityState::Accepted,
-                    selection.grant_set,
-                    selection.capabilities,
-                    Some(PortalAuthoritySource {
-                        portal_id: binding.portal_id.clone(),
-                        provider_id: binding.provider_id.clone(),
-                        roles: binding.roles.clone(),
-                        effective_policy_digest: selection.effective_policy_digest,
-                    }),
-                    Some(semantic_key),
-                )
-            };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?
+            .as_millis()
+            .try_into()
+            .map_err(|_| AuthorizationStateError::Storage("current time exceeds i64".to_owned()))?;
         let retry_portal_id = binding.portal_id.clone();
-        let request = json!({
-            "principalId": binding.principal_id, "participantId": binding.participant_id,
-            "authorityId": binding.authority_id,
-            "currentAuthorityVersion": current.version,
-            "currentEffectivePolicyDigest": binding.effective_policy_digest,
-            "targetEffectivePolicyDigest": semantic_key,
-            "targetState": state,
-        });
-        let request_digest = trellis_protocol::digest_json(&request)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let input = ApplyIdentityAuthoritySelectionInput {
-            principal_id: binding.principal_id.clone(),
-            participant_id: binding.participant_id.clone(),
-            participant_artifact_digest: current.participant_artifact_digest,
-            participant_needs_digest: current.accepted_needs_digest,
-            grant_set,
-            capabilities,
-            state,
-            decided_by: "portal-policy-reconciler".to_owned(),
-            source_payload: json!({ "source": "portal_policy_reconciliation", "semanticKey": semantic_key }),
-            portal_binding: PortalBindingMutation::CompareAndSet {
-                expected: Some(binding),
-                replacement,
-            },
-            portal_policy_snapshot: Some(batch.snapshot.clone()),
-            decided_at: now,
-            expires_at: current.expires_at,
-            proposal_idempotency: idempotency(
-                "portal.policy.propose",
-                &request_digest,
-                &request,
-                now,
-            )?,
-            decision_idempotency: idempotency(
-                "portal.policy.accept",
-                &request_digest,
-                &request,
-                now,
-            )?,
-        };
-        let result = if materialize_immediately {
-            self.service.apply_identity_authority_selection(input).await
-        } else {
+        let result = if !provider_allowed || batch.policy.is_none() {
+            let request = json!({
+                "principalId": binding.principal_id,
+                "participantId": binding.participant_id,
+                "expectedRevision": current.revision,
+                "state": "revoked",
+            });
+            let request_digest = trellis_protocol::digest_json(&request)
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
             self.service
-                .commit_identity_authority_selection(input)
+                .repository()
+                .revoke_portal_grant_binding(
+                    binding.principal_id,
+                    binding.participant_id,
+                    current.revision,
+                    batch.snapshot.clone(),
+                    idempotency("portal.policy.revoke", &request_digest, &request, now)?,
+                )
                 .await
+                .map(|_| ())
+        } else {
+            let (_, participant) = self
+                .service
+                .repository()
+                .get_installed_participant_record(
+                    binding.participant_id.clone(),
+                    Some(current.installed_revision),
+                )
+                .await?
+                .ok_or(AuthorizationStateError::ParticipantMissing)?;
+            let consent = browser_consent_proposal(&participant)?;
+            let selection = resolve_portal_authority_selection(
+                batch.policy.as_ref().expect("checked above"),
+                &batch.groups,
+                &consent,
+                &ProviderLoginAttributes {
+                    provider_id: binding.provider_id.clone(),
+                    roles: binding.roles.clone(),
+                },
+            )?;
+            let provenance = PortalGrantProvenance {
+                portal_id: binding.portal_id.clone(),
+                provider_id: binding.provider_id.clone(),
+                roles: binding.roles.clone(),
+                effective_policy_digest: selection.effective_policy_digest.clone(),
+            };
+            if current.state == GrantBindingState::Active
+                && current.grants == selection.grant_set
+                && current.platform_privileges.is_empty()
+                && current.provenance.as_ref() == Some(&provenance)
+            {
+                return Ok(());
+            }
+            let request = json!({
+                "principalId": binding.principal_id,
+                "participantId": binding.participant_id,
+                "expectedRevision": current.revision,
+                "effectivePolicyDigest": selection.effective_policy_digest,
+            });
+            let request_digest = trellis_protocol::digest_json(&request)
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+            self.service
+                .repository()
+                .set_portal_grant_binding(
+                    GrantBindingReplacement {
+                        owner_kind: GrantOwnerKind::User,
+                        owner_id: binding.principal_id,
+                        participant_id: binding.participant_id,
+                        installed_revision: current.installed_revision,
+                        grants: selection.grant_set,
+                        platform_privileges: Vec::new(),
+                        state: GrantBindingState::Active,
+                        expires_at: current.expires_at,
+                        provenance: Some(provenance),
+                        expected_revision: current.revision,
+                    },
+                    batch.snapshot.clone(),
+                    idempotency("portal.policy.replace", &request_digest, &request, now)?,
+                )
+                .await
+                .map(|_| ())
         };
         if matches!(
             result,
@@ -406,15 +341,7 @@ where
             self.handle.notify_portal(&retry_portal_id).await;
             return Ok(());
         }
-        let authority = result?;
-        if !materialize_immediately {
-            self.reconciliation
-                .reconcile(
-                    AuthorityTarget::new(AuthorityKind::Identity, authority.authority_id)?,
-                    ReconciliationCause::DesiredAuthorityChanged,
-                )
-                .await?;
-        }
+        result?;
         Ok(())
     }
 }

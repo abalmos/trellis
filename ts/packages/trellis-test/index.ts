@@ -5,7 +5,6 @@ export type {
   TrellisControlPlaneWebSource,
 } from "./src/control_plane_config.ts";
 export type {
-  TrellisTestAuthorityPlanClassification,
   TrellisTestClientAuth,
   TrellisTestClientKey,
   TrellisTestClientParticipant,

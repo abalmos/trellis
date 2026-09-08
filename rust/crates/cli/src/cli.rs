@@ -9,6 +9,7 @@ mod deploy;
 mod self_cmd;
 
 pub use auth::*;
+#[cfg(feature = "runtime")]
 pub use bootstrap::*;
 pub use deploy::*;
 pub use self_cmd::*;
@@ -57,8 +58,12 @@ pub enum TopLevelCommand {
     Logout,
     /// Show the currently logged-in Trellis admin session.
     Whoami,
-    /// Manage identity authority and delegated grants.
+    /// Manage participant-scoped identity grants.
     Identity(IdentityCommand),
+    /// Install participant definitions without granting authority.
+    Participants(ParticipantsCommand),
+    /// Manage authorization signing issuers.
+    Issuers(IssuersCommand),
     /// Manage Trellis users.
     Users(UsersCommand),
     /// Inspect and manage login portals.
@@ -67,8 +72,6 @@ pub enum TopLevelCommand {
     Svc(SvcCommand),
     /// Manage device deployments.
     Dev(DevCommand),
-    /// Manage offline authorization trust artifacts.
-    Infra(InfraCommand),
     /// Run one-time initialization workflows.
     #[cfg(feature = "runtime")]
     Init(InitCommand),

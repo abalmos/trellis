@@ -21,10 +21,9 @@ stream-derived projections.
 
 ### Contract Declaration
 
-Service-owned KV resources are schema-backed requested needs declared with
-`kv({...})` in the contract's `uses` array. Accepted KV requests become
-deployment authority desired state. Reconciliation is the only path that
-creates, updates, removes, or adopts materialized KV buckets and bindings.
+Service-owned KV resources are schema-backed needs declared with `kv({...})` in
+the participant. `Auth.Deployments.Apply` validates and creates, updates,
+removes, or adopts the corresponding buckets and exact resource bindings.
 
 Example:
 
@@ -46,29 +45,29 @@ Rules:
 - the referenced schema must exist in the contract's top-level `schemas` map
 - `required` defaults to `true`; it controls whether generated service code sees
   the alias as required or optional
-- all accepted KV resources must be materialized; Trellis does not silently omit
-  `required: false` KV resources when reconciliation is unavailable or fails
-- Trellis validates KV declarations from the presented contract proposal against
-  deployment authority, but physical bucket identity is scoped to the
-  deployment/profile and contract lineage rather than the digest so compatible
-  service updates preserve data
+- required resources must have current exact evidence before context issuance;
+  unavailable optional resources omit only their affected optional grants
+- Trellis validates KV declarations from the installed participant revision;
+  physical bucket identity is scoped to deployment/profile and participant
+  lineage rather than an artifact digest so compatible service updates preserve
+  data
 - service bootstrap resolves `service.kv.<alias>` and injected handler
   `client.kv.<alias>` as direct typed KV stores; service code does not call
   `.open(schema)`
 
-### Authority Update And Migration Classification
+### Deployment Apply Classification
 
-Safe auto-applied KV authority updates include:
+Compatible KV deployment updates include:
 
 - increasing `history` or `maxValueBytes`
 - changing `purpose` without changing runtime behavior
-- changing `required` when it does not remove already materialized access
+- changing `required` when it does not remove active required access
 
-Approval-required KV authority updates include:
+Explicit additions include:
 
 - adding a new KV alias
 
-Dangerous KV authority migrations include:
+Breaking replacements include:
 
 - removing or renaming a KV alias
 - reducing `history`, `ttlMs`, or `maxValueBytes`

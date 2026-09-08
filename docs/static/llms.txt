@@ -59,9 +59,14 @@ compilation, rendering, or formatting retains the last successful generated
 outputs; colliding participant output paths are errors.
 
 Trellis operations are caller-visible workflows; Trellis jobs are
-service-private execution. Their declarations request authority, but do not
-grant it. A runtime administrator must approve the participant's required
-authority before it can operate.
+service-private execution. Declarations define what may be granted but grant
+nothing by themselves. An administrator installs the immutable participant
+revision and writes a participant-scoped `GrantBinding`; deployment apply
+provisions exact resource evidence. Services/devices bootstrap with identity
+and proof inputs only, while browsers bind a user login and then refresh.
+Authorization contexts, route JWTs, transports, grants, and issuer keys remain
+process-memory-only. Requests/events carry context digest, matching redundant
+`session-key`, and a message-specific proof.
 
 Consumer AGENTS templates are available under `templates/`. They describe the
 Trellis boundary; application policies belong in the consumer repository.

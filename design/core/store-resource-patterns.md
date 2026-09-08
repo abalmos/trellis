@@ -56,9 +56,8 @@ Rules:
 - values are opaque bytes plus small metadata, not typed JSON records
 - services discover stores through normal resource bindings rather than through
   cloud-management credentials
-- accepted store requests become deployment authority desired state;
-  reconciliation is the only path that creates, updates, removes, or adopts
-  materialized stores and bindings
+- `Auth.Deployments.Apply` creates, updates, removes, or adopts declared stores
+  and records exact resource evidence used by context issuance
 
 `store({...})` in the contract's `uses` array is intended for service-local and
 service-owned binary data. It is not a shared public data plane and it does not

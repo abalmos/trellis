@@ -17,29 +17,26 @@ import {
   AuthorizationContextBundleSchema,
   AuthorizationContextCache,
   AuthorizationContextRefreshError,
-  type AuthorizationContextStore,
   AuthorizationProviderCache,
-  MemoryAuthorizationContextStore,
   refreshAuthorizationContextWithMetadata,
   startAuthorizationContextRefresh,
 } from "./auth/authorization_context.ts";
 import {
   base64urlDecode,
   base64urlEncode,
-  BrowserAuthorizationContextStore,
+  BrowserSessionStore,
   toArrayBuffer,
 } from "./auth/browser.ts";
-import { browserInstallationScope } from "./auth/browser/storage.ts";
+import {
+  browserInstallationScope,
+  type BrowserSessionCredential,
+} from "./auth/browser/storage.ts";
 import { decodeTrellisHttpError } from "./auth/http_error.ts";
 import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromSeed,
 } from "./auth/keys.ts";
 import { createAuth, type TrellisAuth } from "./auth/session_auth.ts";
-import {
-  SESSION_PROOF_FORMAT_V1,
-  sessionProofRequestDigest,
-} from "./auth/session_proof.ts";
 import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import type { ClientOpts } from "./client.ts";
@@ -53,7 +50,6 @@ import {
   type ParticipantStateMetadata,
 } from "./participant_runtime/metadata.ts";
 import type { GeneratedParticipantEvidence } from "./participant_runtime/artifacts.ts";
-import { resolveParticipantPresentation } from "./participant_runtime/resolution.ts";
 import type { RuntimeApi } from "./participant_runtime/api.ts";
 import { TransportError } from "./errors/index.ts";
 import {
@@ -145,7 +141,6 @@ type BrowserClientAuthOptions = {
   currentUrl?: URL | string | (() => URL | string);
   flowId?: string;
   persistence?: "remembered" | "temporary";
-  authorizationContextStore?: AuthorizationContextStore;
 };
 
 type SessionKeyClientAuthOptionsBase = {
@@ -159,18 +154,7 @@ type SessionKeyClientAuthOptionsBase = {
   flowId?: string;
 };
 
-type SessionKeyClientAuthOptions =
-  & SessionKeyClientAuthOptionsBase
-  & (
-    | {
-      authorizationContextStore: AuthorizationContextStore;
-      authorizationContextEphemeral?: never;
-    }
-    | {
-      authorizationContextStore?: never;
-      authorizationContextEphemeral: true;
-    }
-  );
+type SessionKeyClientAuthOptions = SessionKeyClientAuthOptionsBase;
 
 export type ClientAuthOptions =
   | BrowserClientAuthOptions
@@ -232,6 +216,7 @@ type ClientRuntimeIdentity = {
   sessionNkey: string;
   seed: Uint8Array;
   sessionId?: string;
+  browserCredential?: BrowserSessionCredential;
   auth: TrellisAuth;
   sign(data: Uint8Array): Promise<Uint8Array>;
 };
@@ -249,7 +234,6 @@ type RuntimeTransports = StaticDecode<typeof ClientTransportsSchema>;
 type ClientConnectDeps = {
   loadTransport(): Promise<RuntimeTransport>;
   now(): number;
-  authorizationContextStore?: AuthorizationContextStore;
 };
 
 const ClientBootstrapReadySchema = Type.Object({
@@ -259,7 +243,6 @@ const ClientBootstrapReadySchema = Type.Object({
     sessionId: Type.String({ minLength: 1 }),
     participantId: Type.String({ minLength: 1 }),
     participantDigest: Type.String({ minLength: 1 }),
-    participantNeedsDigest: Type.String({ minLength: 1 }),
     transports: ClientTransportsSchema,
     transport: Type.Object({
       inboxPrefix: Type.String({ minLength: 1 }),
@@ -360,37 +343,18 @@ const BindWireSchema = Type.Object({
   session: Type.Object({
     sessionId: Type.String({ minLength: 1 }),
     principalId: Type.String({ minLength: 1 }),
-    principalKind: Type.Union([
-      Type.Literal("user"),
-      Type.Literal("service"),
-      Type.Literal("device"),
-    ]),
     participantId: Type.String({ minLength: 1 }),
-    participantKind: Type.Union([
-      Type.Literal("app"),
-      Type.Literal("agent"),
-      Type.Literal("device"),
-      Type.Literal("service"),
-    ]),
-    inboxPrefix: Type.String({ minLength: 1 }),
-    participantArtifactDigest: Type.String({ minLength: 1 }),
-    participantNeedsDigest: Type.String({ minLength: 1 }),
-    sessionPublicKey: Type.String({ minLength: 1 }),
-    sessionKeyId: Type.String({ minLength: 1 }),
-    state: Type.Literal("active"),
-    createdAt: Type.Integer(),
-    lastSeenAt: Type.Integer(),
-    expiresAt: Type.Integer(),
-    revokedAt: Type.Union([Type.Integer(), Type.Null()]),
-    version: Type.Integer({ minimum: 1 }),
-  }, { additionalProperties: false }),
-  nats: Type.Object({
-    jwt: Type.String({ minLength: 1 }),
-    jwtExpiresAt: Type.Integer({ minimum: 1 }),
-    transports: ClientTransportsSchema,
-  }, { additionalProperties: false }),
-  authorizationContext: AuthorizationContextBundleSchema,
-}, { additionalProperties: false });
+    sessionKey: Type.String({ minLength: 1 }),
+    expiresAt: Type.Union([Type.Integer(), Type.Null()]),
+  }),
+});
+
+type BrowserBindResult = {
+  sessionId: string;
+  expiresAt: number | null;
+  serverNow: number;
+  serverClockOffsetMs: number;
+};
 
 async function readJsonResponse(
   response: Response,
@@ -461,6 +425,7 @@ async function createSessionKeyRuntimeIdentity(
   sessionKeySeed: string,
   sessionId?: string,
   mode: "browser" | "session_key" = "session_key",
+  browserCredential?: BrowserSessionCredential,
 ): Promise<ClientRuntimeIdentity> {
   const seed = base64urlDecode(sessionKeySeed);
   const privateKey = await importEd25519PrivateKeyFromSeedBase64url(
@@ -484,6 +449,7 @@ async function createSessionKeyRuntimeIdentity(
     seed,
     auth,
     sessionId,
+    ...(browserCredential === undefined ? {} : { browserCredential }),
     sign,
   };
   return identity;
@@ -491,7 +457,7 @@ async function createSessionKeyRuntimeIdentity(
 
 async function resolveClientIdentity(
   auth: ClientAuthOptions | undefined,
-  installation?: BrowserAuthorizationContextStore,
+  installation?: BrowserSessionStore,
 ): Promise<ClientRuntimeIdentity> {
   if (auth?.mode === "session_key") {
     return await createSessionKeyRuntimeIdentity(
@@ -503,11 +469,28 @@ async function resolveClientIdentity(
   if (!installation) {
     throw new Error("browser installation storage is unavailable");
   }
+  const stored = await installation.readLogin() ??
+    await installation.getOrCreateCredential();
   return await createSessionKeyRuntimeIdentity(
-    base64urlEncode(await installation.getOrCreateSessionSeed()),
-    await installation.sessionId(),
+    base64urlEncode(stored.seed),
+    stored.loginSessionId,
     "browser",
+    stored,
   );
+}
+
+async function clearBrowserLogin(
+  installation: BrowserSessionStore | undefined,
+  identity: ClientRuntimeIdentity,
+): Promise<boolean> {
+  if (!installation || !identity.browserCredential) return false;
+  return await installation.clearLogin({
+    generation: identity.browserCredential.generation,
+    sessionKey: identity.browserCredential.sessionKey,
+    ...(identity.sessionId === undefined
+      ? {}
+      : { loginSessionId: identity.sessionId }),
+  });
 }
 
 async function bindClientFlow(args: {
@@ -516,7 +499,7 @@ async function bindClientFlow(args: {
   flowId: string;
   identity: ClientRuntimeIdentity;
   participant: ClientConnectArgsFor<ClientContract>["participant"];
-}): Promise<ClientBootstrapReady> {
+}): Promise<BrowserBindResult> {
   const startedAt = performance.now();
   const requestStartedAtMs = Date.now();
   const requestId = ulid();
@@ -524,9 +507,7 @@ async function bindClientFlow(args: {
   const unsigned = {
     requestId,
     issuedAt,
-    proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
   };
-  const requestDigest = await sessionProofRequestDigest(unsigned);
   const url = `${args.trellisUrl}/auth/flow/${
     encodeURIComponent(args.flowId)
   }/bind`;
@@ -540,11 +521,10 @@ async function bindClientFlow(args: {
       ...unsigned,
       proof: await args.identity.auth.signSessionProof({
         purpose: "userAuthBind",
-        requestId,
-        issuedAt,
+        origin: args.trellisUrl,
         flowId: args.flowId,
         sessionPublicKey: args.identity.sessionKey,
-        requestDigest,
+        unsignedRequest: unsigned,
       }),
     }),
   };
@@ -587,6 +567,12 @@ async function bindClientFlow(args: {
       context: { flowId: args.flowId },
     });
   }
+  if (
+    parsed.session.sessionKey !== args.identity.sessionKey ||
+    parsed.session.participantId !== args.participant.id
+  ) {
+    throw new Error("Trellis returned a login for another installation");
+  }
   const serverClockOffsetMs = estimateMidpointClockOffsetMs({
     requestStartedAtMs,
     responseReceivedAtMs: Date.now(),
@@ -602,22 +588,10 @@ async function bindClientFlow(args: {
     },
   );
   return {
-    status: "ready",
+    sessionId: parsed.session.sessionId,
+    expiresAt: parsed.session.expiresAt,
     serverNow: parsed.serverNow / 1_000,
     serverClockOffsetMs,
-    connectInfo: {
-      sessionId: parsed.session.sessionId,
-      participantId: parsed.session.participantId,
-      participantDigest: parsed.session.participantArtifactDigest,
-      participantNeedsDigest: parsed.session.participantNeedsDigest,
-      transports: parsed.nats.transports,
-      transport: {
-        inboxPrefix: parsed.session.inboxPrefix,
-        jwt: parsed.nats.jwt,
-        jwtExpiresAt: parsed.nats.jwtExpiresAt,
-      },
-      authorizationContext: parsed.authorizationContext,
-    },
   };
 }
 
@@ -634,26 +608,6 @@ async function recoverClientBootstrapWithRetry(args: {
       status: "auth_required",
       serverNow: args.deps.now() / 1_000,
     };
-  }
-
-  try {
-    await args.cache.restore();
-    args.cache.sessionBinding();
-    args.offsetState.serverClockOffsetMs = args.cache.serverClockOffsetMs();
-    args.identity.auth.setServerClockOffsetMs(
-      args.offsetState.serverClockOffsetMs + args.deps.now() - Date.now(),
-    );
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message === "no authorization session is installed"
-    ) {
-      return {
-        status: "auth_required",
-        serverNow: args.deps.now() / 1_000,
-      };
-    }
-    throw error;
   }
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -674,8 +628,8 @@ async function recoverClientBootstrapWithRetry(args: {
         serverNowSeconds: result.response.serverNow / 1_000,
       });
       args.offsetState.serverClockOffsetMs = serverClockOffsetMs;
-      const session = result.response.session;
-      const nats = result.response.nats;
+      const session = result.response.runtime;
+      const nats = result.response;
       if (
         !nats.transports.native && !nats.transports.websocket
       ) {
@@ -699,15 +653,15 @@ async function recoverClientBootstrapWithRetry(args: {
         status: "ready",
         serverNow: result.response.serverNow / 1_000,
         connectInfo: {
-          sessionId: session.sessionId,
+          sessionId: session.loginSessionId!,
           participantId: session.participantId,
-          participantDigest: session.participantArtifactDigest,
-          participantNeedsDigest: session.participantNeedsDigest,
+          participantDigest:
+            result.response.authorization.participantArtifactDigest,
           transports: nats.transports,
           transport: {
             inboxPrefix: session.inboxPrefix,
-            jwt: nats.jwt,
-            jwtExpiresAt: nats.jwtExpiresAt,
+            jwt: nats.routing.bootstrapJwt,
+            jwtExpiresAt: nats.routing.bootstrapJwtExpiresAt,
           },
           authorizationContext: result.response.authorizationContext,
         },
@@ -807,8 +761,7 @@ function bootstrapTargetsRequestedContract<
   args: ClientConnectArgsFor<TContract>,
 ): boolean {
   return bootstrap.status === "ready" &&
-    bootstrap.connectInfo.participantId === args.participant.id &&
-    bootstrap.connectInfo.participantDigest === args.participant.digest;
+    bootstrap.connectInfo.participantId === args.participant.id;
 }
 
 async function buildSessionKeyLoginUrl(args: {
@@ -817,27 +770,18 @@ async function buildSessionKeyLoginUrl(args: {
   identity: ClientRuntimeIdentity;
   participant: ClientConnectArgsFor<ClientContract>["participant"];
 }): Promise<
-  { status: "auth_required"; loginUrl: string }
+  { status: "auth_required"; flowId: string; loginUrl: string }
 > {
   const startedAt = performance.now();
   const requestId = ulid();
   const issuedAt = Date.now();
-  const presentation = await resolveParticipantPresentation(
-    args.participant,
-  );
   const unsigned = {
     requestId,
     issuedAt,
     sessionPublicKey: args.identity.sessionKey,
-    sessionNkey: args.identity.sessionNkey,
     participantId: args.participant.id,
-    participantArtifactDigest: args.participant.digest,
-    participantArtifact: presentation.participant,
-    referencedApiArtifacts: [presentation.api, ...presentation.referencedApis],
     redirectTarget: args.redirectTo,
-    proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
   };
-  const requestDigest = await sessionProofRequestDigest(unsigned);
   const response = await fetch(`${args.trellisUrl}/auth/requests`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -845,14 +789,8 @@ async function buildSessionKeyLoginUrl(args: {
       ...unsigned,
       proof: await args.identity.auth.signSessionProof({
         purpose: "userAuthRequest",
-        requestId,
-        issuedAt,
-        sessionPublicKey: args.identity.sessionKey,
-        sessionNkey: args.identity.sessionNkey,
-        participantId: args.participant.id,
-        participantDigest: args.participant.digest,
-        redirectTarget: args.redirectTo,
-        requestDigest,
+        origin: args.trellisUrl,
+        unsignedRequest: unsigned,
       }),
     }),
   });
@@ -893,6 +831,7 @@ async function buildSessionKeyLoginUrl(args: {
     );
     return {
       status: "auth_required",
+      flowId: start.flowId,
       loginUrl: start.loginUrl,
     };
   }
@@ -915,11 +854,10 @@ export async function connectClientWithDeps<
   const trustScope = browserInstallationScope(
     trellisUrl,
     args.participant.id,
-    args.participant.digest,
   );
   const browserInstallation = args.auth?.mode === "session_key"
     ? undefined
-    : new BrowserAuthorizationContextStore(
+    : new BrowserSessionStore(
       trustScope,
       args.auth?.persistence ?? "remembered",
     );
@@ -935,24 +873,8 @@ export async function connectClientWithDeps<
     : currentUrl?.searchParams.get("authError") ?? undefined;
   const offsetState: ClockOffsetState = { serverClockOffsetMs: 0 };
 
-  if (
-    args.auth?.mode === "session_key" &&
-    !args.auth.authorizationContextStore &&
-    args.auth.authorizationContextEphemeral !== true
-  ) {
-    throw new Error(
-      "session-key clients require persistent authorization context storage or explicit ephemeral mode",
-    );
-  }
-  const contextStore = args.auth?.authorizationContextStore ??
-    deps.authorizationContextStore ??
-    (args.auth?.mode === "session_key"
-      ? new MemoryAuthorizationContextStore()
-      : browserInstallation!);
   const authorizationContexts = new AuthorizationContextCache(
     trellisUrl,
-    `installation:${trustScope}`,
-    contextStore,
     (input, init) => globalThis.fetch(input, init),
     deps.now,
   );
@@ -967,15 +889,47 @@ export async function connectClientWithDeps<
     });
   }
 
-  let callbackBootstrap: ClientBootstrapReady | undefined;
+  let callbackBootstrap: ClientBootstrapResponse | undefined;
   if (callbackFlowId) {
     try {
-      callbackBootstrap = await bindClientFlow({
+      const bound = await bindClientFlow({
         trellisUrl,
         origin: currentUrl?.origin ?? new URL(trellisUrl).origin,
         flowId: callbackFlowId,
         identity,
         participant: args.participant,
+      });
+      if (browserInstallation) {
+        const current = identity.browserCredential;
+        if (
+          !current || !await browserInstallation.completeBind({
+            generation: current.generation,
+            sessionKey: current.sessionKey,
+            pendingFlowId: callbackFlowId,
+          }, {
+            loginSessionId: bound.sessionId,
+            expiresAt: bound.expiresAt,
+          })
+        ) {
+          globalThis.location?.reload();
+          throw new Error("browser installation changed in another tab");
+        }
+        identity.browserCredential = {
+          generation: current.generation,
+          seed: current.seed,
+          sessionKey: current.sessionKey,
+          loginSessionId: bound.sessionId,
+          expiresAt: bound.expiresAt,
+        };
+      }
+      identity.sessionId = bound.sessionId;
+      offsetState.serverClockOffsetMs = bound.serverClockOffsetMs;
+      callbackBootstrap = await recoverClientBootstrapWithRetry({
+        trellisUrl,
+        identity,
+        cache: authorizationContexts,
+        deps,
+        offsetState,
       });
     } catch (error) {
       if (currentUrl && isExpiredBindError(error)) {
@@ -997,7 +951,7 @@ export async function connectClientWithDeps<
       onTerminalSession: async () => {
         if (
           browserInstallation &&
-          !await browserInstallation.endSession(identity.sessionId)
+          !await clearBrowserLogin(browserInstallation, identity)
         ) {
           globalThis.location?.reload();
           throw new Error("browser installation changed in another tab");
@@ -1026,7 +980,7 @@ export async function connectClientWithDeps<
     ) {
       if (
         browserInstallation &&
-        !await browserInstallation.endSession(identity.sessionId)
+        !await clearBrowserLogin(browserInstallation, identity)
       ) {
         globalThis.location?.reload();
         throw new Error("browser installation changed in another tab");
@@ -1035,7 +989,15 @@ export async function connectClientWithDeps<
     if (browserInstallation) {
       identity = await resolveClientIdentity(args.auth, browserInstallation);
     }
-    bootstrap = await resolveAuthRequired(args, identity, currentUrl);
+    bootstrap = await resolveAuthRequired(
+      args,
+      identity,
+      browserInstallation,
+      currentUrl,
+      authorizationContexts,
+      deps,
+      offsetState,
+    );
   }
   recordTrellisDuration(
     "trellis.connect.duration",
@@ -1075,23 +1037,6 @@ export async function connectClientWithDeps<
     offsetState.serverClockOffsetMs,
   );
   selectClientRuntimeTransportServers(bootstrap.connectInfo.transports);
-  await authorizationContexts.install(
-    bootstrap.connectInfo.authorizationContext,
-    {
-      bootstrapJwt: bootstrap.connectInfo.transport.jwt,
-      bootstrapJwtExpiresAt: bootstrap.connectInfo.transport.jwtExpiresAt,
-    },
-    authorizationContexts.correctedNowSeconds(),
-    () => true,
-    {
-      sessionId: bootstrap.connectInfo.sessionId,
-      participantId: bootstrap.connectInfo.participantId,
-      participantArtifactDigest: bootstrap.connectInfo.participantDigest,
-      participantNeedsDigest: bootstrap.connectInfo.participantNeedsDigest,
-      inboxPrefix: bootstrap.connectInfo.transport.inboxPrefix,
-      transports: bootstrap.connectInfo.transports,
-    },
-  );
   identity.sessionId = bootstrap.connectInfo.sessionId;
   if (callbackFlowId && currentUrl) cleanupBrowserCallbackUrl(currentUrl);
   const runtimeState = {
@@ -1104,7 +1049,7 @@ export async function connectClientWithDeps<
   const handleSessionNotFound = identity.mode === "browser"
     ? async () => {
       if (endingSession) return;
-      if (!await browserInstallation?.endSession(identity.sessionId)) {
+      if (!await clearBrowserLogin(browserInstallation, identity)) {
         if (nc && !nc.isClosed()) await nc.close();
         globalThis.location?.reload();
         return;
@@ -1118,7 +1063,11 @@ export async function connectClientWithDeps<
         await resolveAuthRequired(
           args,
           replacementIdentity,
+          browserInstallation,
           latestCurrentUrl,
+          authorizationContexts,
+          deps,
+          offsetState,
         );
       } catch (error) {
         if (error instanceof ClientAuthHandledError) {
@@ -1151,7 +1100,7 @@ export async function connectClientWithDeps<
     const connectedNats = nc;
     authorizationProviderCache = await AuthorizationProviderCache.attach(
       connectedNats,
-      authorizationContexts.bundle().trust.authorizationRegistry,
+      authorizationContexts.bundle().authorizationRegistry,
       authorizationContexts,
     );
     authorizationProviderCache.start();
@@ -1306,7 +1255,7 @@ export async function connectClientWithDeps<
         }
       } finally {
         try {
-          await browserInstallation?.endSession(identity.sessionId);
+          await clearBrowserLogin(browserInstallation, identity);
         } finally {
           try {
             if (!nc.isClosed()) await nc.close();
@@ -1324,7 +1273,11 @@ async function resolveAuthRequired<
 >(
   args: ClientConnectArgsFor<TContract>,
   identity: ClientRuntimeIdentity,
+  browserInstallation: BrowserSessionStore | undefined,
   currentUrl: URL | null,
+  cache: AuthorizationContextCache,
+  deps: ClientConnectDeps,
+  offsetState: ClockOffsetState,
 ): Promise<ClientBootstrapResponse> {
   const browserAuth: BrowserClientAuthOptions =
     args.auth?.mode === "session_key" ? {} : args.auth ?? {};
@@ -1343,6 +1296,22 @@ async function resolveAuthRequired<
     identity,
     participant: args.participant,
   });
+  if (browserInstallation) {
+    const current = identity.browserCredential;
+    if (
+      !current || !await browserInstallation.rememberFlow({
+        generation: current.generation,
+        sessionKey: current.sessionKey,
+      }, authStart.flowId)
+    ) {
+      globalThis.location?.reload();
+      throw new Error("browser installation changed in another tab");
+    }
+    identity.browserCredential = {
+      ...current,
+      pendingFlowId: authStart.flowId,
+    };
+  }
 
   const loginUrl = authStart.loginUrl;
 
@@ -1367,13 +1336,36 @@ async function resolveAuthRequired<
 
   if (continuation && continuation.status === "bound") {
     const bindStartedAt = performance.now();
-    const bootstrap = await bindClientFlow({
+    const bound = await bindClientFlow({
       trellisUrl: normalizeTrellisUrl(args.trellisUrl),
       origin: new URL(redirectTo).origin,
       flowId: continuation.flowId,
       identity,
       participant: args.participant,
     });
+    if (browserInstallation) {
+      const current = identity.browserCredential;
+      if (
+        !current || !await browserInstallation.completeBind({
+          generation: current.generation,
+          sessionKey: current.sessionKey,
+          pendingFlowId: continuation.flowId,
+        }, {
+          loginSessionId: bound.sessionId,
+          expiresAt: bound.expiresAt,
+        })
+      ) {
+        throw new Error("browser installation changed in another tab");
+      }
+      identity.browserCredential = {
+        generation: current.generation,
+        seed: current.seed,
+        sessionKey: current.sessionKey,
+        loginSessionId: bound.sessionId,
+        expiresAt: bound.expiresAt,
+      };
+    }
+    identity.sessionId = bound.sessionId;
     recordTrellisDuration(
       "trellis.connect.duration",
       performance.now() - bindStartedAt,
@@ -1383,7 +1375,13 @@ async function resolveAuthRequired<
         outcome: "ok",
       },
     );
-    return bootstrap;
+    return recoverClientBootstrapWithRetry({
+      trellisUrl: normalizeTrellisUrl(args.trellisUrl),
+      identity,
+      cache,
+      deps,
+      offsetState,
+    });
   }
 
   if (isBrowserRuntime()) {

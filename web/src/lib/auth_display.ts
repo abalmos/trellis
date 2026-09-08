@@ -152,7 +152,8 @@ export function describeSessionPrincipal(
   const contract = contractLabel(record);
   if (!("principal" in record)) {
     const title = "userNkey" in record ? record.userNkey : record.principalId;
-    return { title, details: joinDetails([record.sessionId, contract]) };
+    const id = "userNkey" in record ? record.connectionId : record.sessionId;
+    return { title, details: joinDetails([id, contract]) };
   }
   const principal = record.principal;
 

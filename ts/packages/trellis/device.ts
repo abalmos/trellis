@@ -14,18 +14,18 @@ import {
   UnexpectedError,
 } from "@qlever-llc/result";
 import { ulid } from "ulid";
-import { decodeTrellisHttpError } from "./auth/http_error.ts";
+import { decodeTrellisHttpError, TrellisHttpError } from "./auth/http_error.ts";
 import { ContractResourceBindingsSchema } from "./participant.ts";
 import {
   PARTICIPANT_STATE_METADATA,
   type ParticipantStateMetadata,
 } from "./participant_runtime/metadata.ts";
 import type { GeneratedParticipantEvidence } from "./participant_runtime/artifacts.ts";
-import { resolveParticipantPresentation } from "./participant_runtime/resolution.ts";
 
 import {
   deriveDeviceConfirmationCode,
   deriveDeviceIdentity,
+  requestDeviceEnrollment,
   verifyDeviceConfirmationCode,
   waitForDeviceActivation,
 } from "./auth/device_activation.ts";
@@ -37,10 +37,7 @@ import {
 } from "./auth/utils.ts";
 import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
 import { createAuth } from "./auth/session_auth.ts";
-import {
-  SESSION_PROOF_FORMAT_V1,
-  sessionProofRequestDigest,
-} from "./auth/session_proof.ts";
+import { AuthorizationContextRefreshResponseSchema } from "./auth/authorization/types.ts";
 import type { RuntimeApi } from "./participant_runtime/api.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
@@ -55,16 +52,14 @@ import { publishHealthHeartbeatSample } from "./health_transport.ts";
 import { type RuntimeStateStoresForContract, Trellis } from "./session.ts";
 import { logger as noopLogger, type LoggerLike } from "./globals.ts";
 import { TransportError } from "./errors/index.ts";
-import { type StaticDecode, Type } from "typebox";
+import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { observeNatsTrellisConnection } from "./connection.ts";
 import {
   type AuthorizationContextBundle,
-  AuthorizationContextBundleSchema,
   AuthorizationContextCache,
-  type AuthorizationContextPersistence,
+  AuthorizationContextRefreshError,
   AuthorizationProviderCache,
-  MemoryAuthorizationContextStore,
   startAuthorizationContextRefresh,
 } from "./auth/authorization_context.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
@@ -192,7 +187,7 @@ export type TrellisDeviceActivationArgs<
   trellisUrl: string;
   participant: TContract;
   rootSecret: Uint8Array | string;
-  identity: TrellisDeviceProvisionedIdentity;
+  provisioningSecret?: string;
 };
 
 /** Provisioned device identity and exact deployment participant binding. */
@@ -231,107 +226,22 @@ export type TrellisDeviceConnectArgs<
   trellisUrl: string;
   participant: TContract;
   rootSecret: Uint8Array | string;
-  identity: TrellisDeviceProvisionedIdentity;
   log?: LoggerLike | false;
-} & AuthorizationContextPersistence;
+};
 
 const DeviceBootstrapReadySchema = Type.Object({
-  state: Type.Literal("ready"),
-  serverNow: Type.Integer(),
-  session: Type.Object({
-    sessionId: Type.String({ minLength: 1 }),
-    principalId: Type.String({ minLength: 1 }),
-    principalKind: Type.Literal("device"),
-    participantId: Type.String({ minLength: 1 }),
-    participantKind: Type.Literal("device"),
-    participantArtifactDigest: Type.String({ minLength: 1 }),
-    participantNeedsDigest: Type.String({ minLength: 1 }),
-    sessionPublicKey: Type.String({ minLength: 1 }),
-    sessionKeyId: Type.String({ minLength: 1 }),
-    inboxPrefix: Type.String({ minLength: 1 }),
-    state: Type.Literal("active"),
-    createdAt: Type.Integer(),
-    lastSeenAt: Type.Integer(),
-    expiresAt: Type.Union([Type.Integer(), Type.Null()]),
-    revokedAt: Type.Union([Type.Integer(), Type.Null()]),
-    version: Type.Integer({ minimum: 1 }),
-  }, { additionalProperties: false }),
+  ...AuthorizationContextRefreshResponseSchema.properties,
   authorization: Type.Object({
     participantId: Type.String({ minLength: 1 }),
     participantArtifactDigest: Type.String({ minLength: 1 }),
-    participantNeedsDigest: Type.String({ minLength: 1 }),
-    participantJson: Type.String({ minLength: 1 }),
-    effectiveGrants: Type.Unknown(),
-    resourceBindings: Type.Array(Type.Unknown()),
     resourceRuntime: ContractResourceBindingsSchema,
-    effectiveAuthorityExpiresAt: Type.Union([Type.Integer(), Type.Null()]),
-  }, { additionalProperties: false }),
-  nats: Type.Object({
-    jwt: Type.String({ minLength: 1 }),
-    jwtExpiresAt: Type.Integer({ minimum: 1 }),
-    transports: Type.Object({
-      native: Type.Optional(Type.Object({
-        natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-      }, { additionalProperties: false })),
-      websocket: Type.Optional(Type.Object({
-        natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-      }, { additionalProperties: false })),
-    }, { additionalProperties: false }),
-  }, { additionalProperties: false }),
-  authorizationContext: AuthorizationContextBundleSchema,
-  activation: Type.Null(),
-  proposal: Type.Null(),
-}, { additionalProperties: false });
-
-const DeviceBootstrapActivationRequiredSchema = Type.Object({
-  state: Type.Literal("activation_pending"),
-  serverNow: Type.Integer(),
-  activation: Type.Object({
-    state: Type.Literal("pending"),
-    reviewId: Type.String({ minLength: 1 }),
-    activationUrl: Type.String({ minLength: 1 }),
-    expiresAt: Type.Integer(),
-    retryAfterMs: Type.Integer({ minimum: 1 }),
-  }, { additionalProperties: false }),
-  session: Type.Null(),
-  authorization: Type.Null(),
-  nats: Type.Null(),
-  authorizationContext: Type.Null(),
-  proposal: Type.Null(),
-}, { additionalProperties: false });
-
-const DeviceBootstrapNotReadySchema = Type.Object({
-  state: Type.Union([
-    Type.Literal("authority_pending"),
-    Type.Literal("authority_rejected"),
-    Type.Literal("migration_required"),
-    Type.Literal("dependency_pending"),
-    Type.Literal("resource_pending"),
-    Type.Literal("disabled"),
-    Type.Literal("activation_rejected"),
-  ]),
-  serverNow: Type.Integer(),
-  session: Type.Null(),
-  authorization: Type.Null(),
-  nats: Type.Null(),
-  authorizationContext: Type.Null(),
-  activation: Type.Null(),
-  proposal: Type.Union([
-    Type.Object({
-      proposalId: Type.String({ minLength: 1 }),
-      proposalKind: Type.String({ minLength: 1 }),
-      proposalDigest: Type.String({ minLength: 1 }),
-    }, { additionalProperties: false }),
-    Type.Null(),
-  ]),
-}, { additionalProperties: false });
+  }),
+});
 
 type DeviceBootstrapReady = {
   status: "ready";
   connectInfo: {
-    sessionId: string;
-    instanceId: string;
-    deploymentId: string;
+    connectionId: string;
     participantId: string;
     participantDigest: string;
     transports: {
@@ -343,16 +253,7 @@ type DeviceBootstrapReady = {
   };
   sessionAuth: Awaited<ReturnType<typeof createAuth>>;
 };
-type DeviceBootstrapActivationRequired = {
-  status: "activation_required";
-  reviewId: string;
-  activationUrl: string;
-};
-type DeviceBootstrapNotReady = { status: "not_ready"; reason: string };
-type DeviceBootstrapResponse =
-  | DeviceBootstrapReady
-  | DeviceBootstrapActivationRequired
-  | DeviceBootstrapNotReady;
+type DeviceBootstrapResponse = DeviceBootstrapReady;
 type ResolvedDeviceConnectInfo = DeviceBootstrapReady["connectInfo"];
 type DeviceClockOffsetState = {
   serverClockOffsetMs: number;
@@ -400,31 +301,6 @@ function createTransportError(args: {
   });
 }
 
-function assertBootstrapContractMatches(args: {
-  participantId: string;
-  participantDigest: string;
-  connectInfo: ResolvedDeviceConnectInfo;
-}): void {
-  if (
-    args.connectInfo.participantId !== args.participantId ||
-    args.connectInfo.participantDigest !== args.participantDigest
-  ) {
-    throw createTransportError({
-      code: "trellis.bootstrap.participant_mismatch",
-      message:
-        "Trellis returned connection details for a different device participant.",
-      hint:
-        "Retry the connection. If it keeps happening, check the requested device participant and Trellis activation state.",
-      context: {
-        requestedParticipantId: args.participantId,
-        requestedParticipantDigest: args.participantDigest,
-        returnedParticipantId: args.connectInfo.participantId,
-        returnedParticipantDigest: args.connectInfo.participantDigest,
-      },
-    });
-  }
-}
-
 async function readJsonResponse(
   response: Response,
   args: {
@@ -450,18 +326,6 @@ function resolveDeviceLogger(log?: LoggerLike | false): LoggerLike {
   }
 
   return log ?? noopLogger;
-}
-
-function createActivationRequiredTransportError(
-  context?: Record<string, unknown>,
-) {
-  return createTransportError({
-    code: "trellis.bootstrap.activation_required",
-    message: "Trellis requires device activation before connecting.",
-    hint:
-      "Start or resume device activation, then retry the runtime connection after activation completes.",
-    context,
-  });
 }
 
 function createInvalidConfirmationCodeTransportError(
@@ -529,10 +393,15 @@ function createActivationSession<
   trellisUrl: string;
   participantDigest: string;
   identity: Awaited<ReturnType<typeof deriveDeviceIdentity>>;
-  provisioned: TrellisDeviceProvisionedIdentity;
+  provisioned: Pick<
+    TrellisDeviceProvisionedIdentity,
+    "participantId" | "provisioningSecret"
+  >;
   participant: DeviceContract;
   now: () => number;
   localState: TLocalState;
+  sessionIdentity?: Awaited<ReturnType<typeof createAuth>>;
+  connectionId?: string;
 }): TrellisDeviceActivationSession<TLocalState> {
   assertActivationStateMatchesIdentity({
     localState: args.localState,
@@ -557,14 +426,12 @@ function createActivationSession<
         publicIdentityKey: args.identity.publicIdentityKey,
         identitySeed: args.identity.identitySeed,
         activationKey: args.identity.activationKey,
-        deploymentId: args.provisioned.deploymentId,
-        instanceId: args.provisioned.instanceId,
-        principalId: args.provisioned.principalId,
         participantId: args.provisioned.participantId,
-        participantArtifactDigest: args.provisioned.participantArtifactDigest,
-        participantNeedsDigest: args.provisioned.participantNeedsDigest,
+        provisioningSecret: args.provisioned.provisioningSecret ?? undefined,
         nonce: args.localState.nonce,
         signal: opts?.signal,
+        sessionIdentity: args.sessionIdentity,
+        connectionId: args.connectionId,
       });
       return activatedState;
     },
@@ -594,17 +461,14 @@ function createActivationSession<
 async function fetchDeviceBootstrap(args: {
   trellisUrl: string;
   deviceIdentity: Awaited<ReturnType<typeof deriveDeviceIdentity>>;
-  provisioned: TrellisDeviceProvisionedIdentity;
   participant: DeviceContract;
   now: () => number;
   offsetState: DeviceClockOffsetState;
-  activationNonce?: string;
   signal?: AbortSignal;
+  sessionAuth?: Awaited<ReturnType<typeof createAuth>>;
+  connectionId?: string;
 }): Promise<DeviceBootstrapResponse> {
-  const presentation = await resolveParticipantPresentation(
-    args.participant,
-  );
-  const sessionAuth = await createAuth({
+  const sessionAuth = args.sessionAuth ?? await createAuth({
     sessionKeySeed: base64urlEncode(
       crypto.getRandomValues(new Uint8Array(32)),
     ),
@@ -620,51 +484,14 @@ async function fetchDeviceBootstrap(args: {
   const deviceIdentityKeyId = base64urlEncode(
     await sha256(base64urlDecode(identityAuth.sessionKey)),
   );
-  const activationNonce = args.activationNonce ??
-    base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-  const challengeDigest = base64urlEncode(
-    await sha256(utf8(activationNonce)),
-  );
-  if (
-    args.provisioned.participantId !== args.participant.id ||
-    args.provisioned.participantArtifactDigest !==
-      args.participant.digest ||
-    args.provisioned.participantNeedsDigest !==
-      presentation.participantNeedsDigest
-  ) {
-    throw new Error(
-      "Device participant identity does not match its contract",
-    );
-  }
   const unsigned = {
+    identityKeyId: deviceIdentityKeyId,
+    sessionKey: sessionAuth.sessionKey,
+    connectionId: args.connectionId ?? ulid(),
     requestId,
-    issuedAt,
-    deploymentId: args.provisioned.deploymentId,
-    instanceId: args.provisioned.instanceId,
-    deviceIdentityKeyId,
-    principalId: args.provisioned.principalId,
-    identityPublicKey: identityAuth.sessionKey,
-    provisioningSecret: args.provisioned.provisioningSecret ?? null,
-    expectedSecretVersion: args.provisioned.expectedSecretVersion ?? null,
-    newSessionPublicKey: sessionAuth.sessionKey,
-    newSessionNkey: sessionAuth.sessionNkey,
-    participantId: args.provisioned.participantId,
-    participantArtifactDigest: args.participant.digest,
-    participantNeedsDigest: presentation.participantNeedsDigest,
-    participantArtifact: presentation.participant,
-    referencedApiArtifacts: [
-      presentation.api,
-      ...presentation.referencedApis,
-    ],
-    challengeDigest,
-    confirmationCode: await deriveDeviceConfirmationCode({
-      activationKey: args.deviceIdentity.activationKey,
-      publicIdentityKey: args.deviceIdentity.publicIdentityKey,
-      nonce: activationNonce,
-    }),
-    proof: { format: SESSION_PROOF_FORMAT_V1, signature: "" },
+    iat: issuedAt,
+    name: args.participant.id,
   };
-  const requestDigest = await sessionProofRequestDigest(unsigned);
   const response = await fetch(
     new URL("/bootstrap/device", args.trellisUrl),
     {
@@ -675,17 +502,8 @@ async function fetchDeviceBootstrap(args: {
         ...unsigned,
         proof: await identityAuth.signSessionProof({
           purpose: "deviceBootstrap",
-          requestId,
-          issuedAt,
-          deploymentId: args.provisioned.deploymentId,
-          instanceId: args.provisioned.instanceId,
-          deviceIdentityKeyId,
-          newSessionPublicKey: sessionAuth.sessionKey,
-          newSessionNkey: sessionAuth.sessionNkey,
-          participantId: args.provisioned.participantId,
-          participantDigest: args.provisioned.participantArtifactDigest,
-          challengeDigest,
-          requestDigest,
+          origin: new URL(args.trellisUrl).origin,
+          unsignedRequest: unsigned,
         }),
       }),
     },
@@ -698,54 +516,31 @@ async function fetchDeviceBootstrap(args: {
     hint: "Retry the connection or complete device activation.",
     context: { trellisUrl: args.trellisUrl },
   });
-  if (Value.Check(DeviceBootstrapReadySchema, payload)) {
-    const ready = payload as StaticDecode<typeof DeviceBootstrapReadySchema>;
-    args.offsetState.serverClockOffsetMs = estimateMidpointClockOffsetMs({
-      requestStartedAtMs,
-      responseReceivedAtMs,
-      serverNowSeconds: ready.serverNow / 1_000,
-    });
-    sessionAuth.setServerClockOffsetMs(
-      args.offsetState.serverClockOffsetMs + args.now() - Date.now(),
-    );
-    return {
-      status: "ready",
-      sessionAuth,
-      connectInfo: {
-        sessionId: ready.session.sessionId,
-        instanceId: args.provisioned.instanceId,
-        deploymentId: args.provisioned.deploymentId,
-        participantId: args.provisioned.participantId,
-        participantDigest: ready.authorization.participantArtifactDigest,
-        transports: ready.nats.transports,
-        transport: {
-          jwt: ready.nats.jwt,
-          jwtExpiresAt: ready.nats.jwtExpiresAt,
-          inboxPrefix: ready.session.inboxPrefix,
-        },
-        authorizationContext: ready.authorizationContext,
-      },
-    };
-  }
-  if (Value.Check(DeviceBootstrapActivationRequiredSchema, payload)) {
-    const pending = payload as StaticDecode<
-      typeof DeviceBootstrapActivationRequiredSchema
-    >;
-    return {
-      status: "activation_required",
-      reviewId: pending.activation.reviewId,
-      activationUrl: pending.activation.activationUrl,
-    };
-  }
-  if (Value.Check(DeviceBootstrapNotReadySchema, payload)) {
-    return { status: "not_ready", reason: payload.state };
-  }
-  throw createTransportError({
-    code: "trellis.bootstrap.invalid_response",
-    message: "Trellis returned an invalid device bootstrap response.",
-    hint: "Retry the connection or complete device activation.",
-    context: { trellisUrl: args.trellisUrl },
+  const ready = Value.Parse(DeviceBootstrapReadySchema, payload);
+  args.offsetState.serverClockOffsetMs = estimateMidpointClockOffsetMs({
+    requestStartedAtMs,
+    responseReceivedAtMs,
+    serverNowSeconds: ready.serverNow / 1_000,
   });
+  sessionAuth.setServerClockOffsetMs(
+    args.offsetState.serverClockOffsetMs + args.now() - Date.now(),
+  );
+  return {
+    status: "ready",
+    sessionAuth,
+    connectInfo: {
+      connectionId: ready.runtime.connectionId,
+      participantId: ready.runtime.participantId,
+      participantDigest: ready.authorization.participantArtifactDigest,
+      transports: ready.transports,
+      transport: {
+        jwt: ready.routing.bootstrapJwt,
+        jwtExpiresAt: ready.routing.bootstrapJwtExpiresAt,
+        inboxPrefix: ready.runtime.inboxPrefix,
+      },
+      authorizationContext: ready.authorizationContext,
+    },
+  };
 }
 
 /**
@@ -765,40 +560,67 @@ export async function startDeviceActivationWithDeps<
   const rootSecret = normalizeRootSecret(args.rootSecret);
   const identity = await deriveDeviceIdentity(rootSecret);
   const nonce = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-  const activation = await fetchDeviceBootstrap({
-    trellisUrl: args.trellisUrl,
-    deviceIdentity: identity,
-    provisioned: args.identity,
-    participant: args.participant,
-    now: deps.now,
-    offsetState: { serverClockOffsetMs: 0 },
-    activationNonce: nonce,
+  const sessionIdentity = await createAuth({
+    sessionKeySeed: base64urlEncode(
+      crypto.getRandomValues(new Uint8Array(32)),
+    ),
   });
-  if (activation.status !== "activation_required") {
+  const connectionId = ulid();
+  const activation = await requestDeviceEnrollment({
+    trellisUrl: args.trellisUrl,
+    publicIdentityKey: identity.publicIdentityKey,
+    identitySeed: identity.identitySeed,
+    sessionIdentity,
+    connectionId,
+    participantId: args.participant.id,
+    provisioningSecret: args.provisioningSecret,
+    challengeDigest: base64urlEncode(await sha256(utf8(nonce))),
+    confirmationCode: await deriveDeviceConfirmationCode({
+      activationKey: identity.activationKey,
+      publicIdentityKey: identity.publicIdentityKey,
+      nonce,
+    }),
+  });
+  const activationState = activation.activation as
+    | Record<string, unknown>
+    | null;
+  if (
+    activation.state !== "pending" ||
+    typeof activationState?.reviewId !== "string" ||
+    typeof activationState.activationUrl !== "string" ||
+    typeof activationState.principalId !== "string" ||
+    typeof activationState.deploymentId !== "string" ||
+    typeof activationState.instanceId !== "string"
+  ) {
     throw createTransportError({
       code: "device_activation_unavailable",
       message: "The device does not require activation.",
       hint: "Connect the device directly.",
-      context: { status: activation.status },
+      context: { status: activation.state },
     });
   }
   return await createActivationSession({
     trellisUrl: args.trellisUrl,
     participantDigest: args.participant.digest,
     identity,
-    provisioned: args.identity,
+    provisioned: {
+      participantId: args.participant.id,
+      provisioningSecret: args.provisioningSecret,
+    },
     participant: args.participant,
     now: deps.now,
     localState: {
       status: "pending",
       participantDigest: args.participant.digest,
       publicIdentityKey: identity.publicIdentityKey,
-      instanceId: args.identity.instanceId,
-      deploymentId: args.identity.deploymentId,
-      flowId: activation.reviewId,
+      instanceId: activationState.instanceId,
+      deploymentId: activationState.deploymentId,
+      flowId: activationState.reviewId,
       nonce,
-      activationUrl: activation.activationUrl,
+      activationUrl: activationState.activationUrl,
     },
+    sessionIdentity,
+    connectionId,
   });
 }
 
@@ -826,7 +648,7 @@ export async function resumeDeviceActivationWithDeps<
     trellisUrl: args.trellisUrl,
     participantDigest: args.participant.digest,
     identity,
-    provisioned: args.identity,
+    provisioned: { participantId: args.participant.id },
     participant: args.participant,
     now: deps.now,
     localState: args.localState,
@@ -855,49 +677,16 @@ export async function connectDeviceWithDeps<
   const bootstrap = await fetchDeviceBootstrap({
     trellisUrl: args.trellisUrl,
     deviceIdentity: identity,
-    provisioned: args.identity,
     participant: args.participant,
     now: deps.now,
     offsetState,
   });
 
-  if (bootstrap.status === "activation_required") {
-    throw createActivationRequiredTransportError({
-      publicIdentityKey: identity.publicIdentityKey,
-      contractId: args.participant.id,
-    });
-  }
-
-  if (bootstrap.status === "not_ready") {
-    throw createTransportError({
-      code: "trellis.bootstrap.not_ready",
-      message: "Trellis is not ready to connect this device.",
-      hint:
-        "Wait for the device to be activated and the requested deployment to become available, then try again.",
-      context: { reason: bootstrap.reason },
-    });
-  }
-
   const connectInfo = bootstrap.connectInfo;
-  assertBootstrapContractMatches({
-    participantId: args.participant.id,
-    participantDigest: args.identity.participantArtifactDigest,
-    connectInfo,
-  });
 
   const transport = await deps.loadTransport();
-  if (
-    !args.authorizationContextStore &&
-    args.authorizationContextEphemeral !== true
-  ) {
-    throw new Error(
-      "devices require persistent authorization context storage or explicit ephemeral mode",
-    );
-  }
   const authorizationContexts = new AuthorizationContextCache(
     args.trellisUrl,
-    `device:${identity.publicIdentityKey}`,
-    args.authorizationContextStore ?? new MemoryAuthorizationContextStore(),
     (input, init) => globalThis.fetch(input, init),
     deps.now,
   );
@@ -908,8 +697,21 @@ export async function connectDeviceWithDeps<
     bootstrapJwt: connectInfo.transport.jwt,
     bootstrapJwtExpiresAt: connectInfo.transport.jwtExpiresAt,
   });
+  const verifiedContext = authorizationContexts.current();
+  if (verifiedContext.context.participantId !== args.participant.id) {
+    throw new Error(
+      "device authorization context belongs to another participant",
+    );
+  }
+  const deploymentId = verifiedContext.context.deploymentId;
+  const instanceId = verifiedContext.context.instanceId;
+  if (!deploymentId || !instanceId) {
+    throw new Error(
+      "device authorization context is missing its deployment assignment",
+    );
+  }
   const sessionOptions = await bootstrap.sessionAuth.natsConnectOptions({
-    sessionId: connectInfo.sessionId,
+    sessionId: connectInfo.connectionId,
     contextDigest: () => authorizationContexts.current().contextDigest,
     jwt: () => authorizationContexts.routingJwt(),
   });
@@ -927,7 +729,7 @@ export async function connectDeviceWithDeps<
     const connectedNats = nc;
     authorizationProviderCache = await AuthorizationProviderCache.attach(
       connectedNats,
-      authorizationContexts.bundle().trust.authorizationRegistry,
+      authorizationContexts.bundle().authorizationRegistry,
       authorizationContexts,
     );
     authorizationProviderCache.start();
@@ -966,9 +768,39 @@ export async function connectDeviceWithDeps<
   );
   const stopContextRefresh = startAuthorizationContextRefresh({
     trellisUrl: args.trellisUrl,
-    sessionId: connectInfo.sessionId,
+    sessionId: connectInfo.connectionId,
     auth: bootstrap.sessionAuth,
     cache: authorizationContexts,
+    refresh: async (shouldInstall) => {
+      try {
+        const next = await fetchDeviceBootstrap({
+          trellisUrl: args.trellisUrl,
+          deviceIdentity: identity,
+          participant: args.participant,
+          now: deps.now,
+          offsetState,
+          sessionAuth: bootstrap.sessionAuth,
+          connectionId: connectInfo.connectionId,
+        });
+        authorizationContexts.setServerClockOffsetMs(
+          offsetState.serverClockOffsetMs,
+        );
+        return await authorizationContexts.install(
+          next.connectInfo.authorizationContext,
+          {
+            bootstrapJwt: next.connectInfo.transport.jwt,
+            bootstrapJwtExpiresAt: next.connectInfo.transport.jwtExpiresAt,
+          },
+          undefined,
+          shouldInstall,
+        );
+      } catch (error) {
+        if (error instanceof TrellisHttpError) {
+          throw new AuthorizationContextRefreshError(error.status, error.code);
+        }
+        throw error;
+      }
+    },
     onRefresh: () =>
       connection.status.phase !== "connected" ? nc.reconnect() : undefined,
     onTerminalFailure: async () => {
@@ -1004,14 +836,14 @@ export async function connectDeviceWithDeps<
       ? args.participant.artifact.displayName
       : args.participant.id,
     kind: "device",
-    instanceId: connectInfo.instanceId,
+    instanceId,
     contractId: connectInfo.participantId,
     contractDigest: connectInfo.participantDigest,
     publishIntervalMs: 30_000,
   });
   health.setInfo({
     info: {
-      deploymentId: connectInfo.deploymentId,
+      deploymentId,
     },
   });
   health.add("nats", () => ({
@@ -1041,8 +873,8 @@ export async function connectDeviceWithDeps<
           participantKind: "device",
           contractId: connectInfo.participantId,
           contractDigest: connectInfo.participantDigest,
-          deploymentId: connectInfo.deploymentId,
-          instanceId: connectInfo.instanceId,
+          deploymentId,
+          instanceId,
         },
         sample: await health.sample(),
       });

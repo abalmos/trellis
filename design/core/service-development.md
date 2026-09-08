@@ -86,7 +86,6 @@ const service = await TrellisService.connect({
   participant,
   name: "<name>",
   identity: config.identity,
-  authorizationContextStore,
 }).orThrow();
 
 // Names come from this example's declared RPC and event.
@@ -294,7 +293,6 @@ const service = await TrellisService.connect({
   participant,
   name: "echo",
   identity, // Provisioned identity and accepted participant binding.
-  authorizationContextStore, // Durable store owned by this installation.
 }).orThrow();
 
 await service.handleEchoPing(({ input }) =>
@@ -359,55 +357,26 @@ Behavior:
 
 - `TrellisService.connect(...)` performs bootstrap, auth handshake, participant
   verification, runtime connection setup, and eager binding resolution
-- if Trellis does not know the requested digest, service bootstrap presents the
-  canonical participant artifact carried by the generated participant module
-- service bootstrap validates and analyzes the presented manifest as a contract
-  proposal; invalid manifests fail immediately, while unknown required `uses`
-  dependencies produce targeted dependency blockers unless deployment authority
-  supplies an accepted dependency shape. Bootstrap does not derive authority
-  from historical manifests.
-- optional `uses` dependencies that are missing or whose requested surfaces are
-  missing do not fail bootstrap planning and do not grant runtime authority;
-  when they later resolve as active, they require an authority update or
-  authority migration before a fresh reconnect receives that authority
-- Trellis derives requested needs from the contract proposal and compares them
-  to deployment authority desired state
-- if desired authority is missing, bootstrap classifies the delta. Safe updates
-  auto-apply. Updates that add new capability grants or resource aliases record
-  a pending authority update and ask the service runtime to wait and retry until
-  an admin accepts or rejects the proposal.
-- service-originated pending authority proposals are durable and deduplicated by
-  the requested boundary so repeated starts with the same missing boundary
-  coalesce into one pending authority update or migration
-- if the service presents a different digest for the same `contractId` as the
-  deployment's latest accepted digest or offer, Trellis validates same-lineage
-  compatibility. Incompatible replacement is an authority migration. In `strict`
-  mode, bootstrap records a pending migration plan and asks the service runtime
-  to wait and retry until an admin accepts or rejects it. In `mutable-dev` mode,
-  Trellis records and auto-accepts the same migration plan for unreleased
-  iteration, then continues through normal desired-state and materialization
-  checks.
-- compatibility mode controls whether migrations require manual approval or are
-  auto-approved for development; it does not make contract history an authority
-  source
-- once deployment authority desired state covers the requested needs, bootstrap
-  verifies that required `uses` dependencies resolve against effective active
-  contracts or accepted dependency shapes. If a required dependency has neither,
-  bootstrap returns a dependency-not-active blocker and the runtime waits and
-  retries.
-- if desired authority exists but materialization is incomplete, bootstrap
-  returns reconciliation pending and the runtime waits and retries; bootstrap
-  never provisions resources
-- if a service presents a contract that no longer fits enabled deployment
-  authority, bootstrap returns `contract_changed` rather than refreshing an old
-  offer or issuing credentials for stale authority
-- after the dependency closure is active or accepted and all required
-  materialized resource bindings are present, bootstrap accepts or refreshes the
-  implementation offer, persists instance runtime state, and returns transport
-  and binding details to the service runtime
+- service bootstrap sends only the provisioned identity key, participant ID,
+  fresh session public key, request identity/time, proof, and optional one-use
+  provisioning secret; it never uploads participant/API artifacts, deployment
+  IDs, needs digests, grants, resources, or transports
+- Trellis resolves the server-owned service assignment, immutable installed
+  participant revision, current participant-scoped `GrantBinding`, exact
+  resource evidence, and online issuer state
+- unknown or inactive principals, missing bindings, stale installed revisions,
+  unavailable required resources, invalid proofs, or revoked issuers fail closed
+- optional `uses` whose evidence is unavailable contribute no grants; required
+  unavailable evidence denies bootstrap
+- deployment changes are applied explicitly through `Auth.Deployments.Apply`;
+  there is no bootstrap proposal, authority migration, or reconciliation wait
+- bootstrap issues and persists one signed authorization context and returns the
+  exact retained participant/API artifacts, effective grant, resource evidence,
+  server-owned assignment, route JWT, inbox, and transport endpoints
+- the runtime independently verifies every returned binding before NATS CONNECT
 - all declared `resources.kv`, `resources.store`, top-level `jobs`, and
-  top-level `eventConsumers` bindings are materialized authority resources. A
-  service must not become ready with a silently skipped declared resource;
+  top-level `eventConsumers` bindings are resolved resource evidence. A service
+  must not become ready with a silently skipped required resource;
   `required: false` only makes the generated service handle optional.
 - schema-backed KV handles such as `service.kv.<alias>` resolve during bootstrap
   as direct typed stores, while store handles such as `service.store.<alias>`
@@ -418,7 +387,7 @@ Behavior:
   resolves a typed `service.jobs` facade for job creation, handler registration,
   and worker startup
 - when a contract declares `eventConsumers`, `TrellisService.connect(...)`
-  receives the reconciled event-consumer bindings during bootstrap. Register
+  receives exact event-consumer resource bindings during bootstrap. Register
   listeners during startup through `service.onOrdersChanged(..., { group })`
   (name follows the declared event); handler-injected clients are outbound-only
   and cannot register long-lived listeners. Service code must not choose or
@@ -427,13 +396,13 @@ Behavior:
 - grouped durable event consumers start only after every event in the group has
   a registered handler, preserving the contract-declared group as the unit of
   ordering and replay.
-- the shared jobs streams are Trellis-owned infrastructure; reconciliation
-  creates or adopts all declared job bindings before jobs-enabled services
-  become ready. Bootstrap resolves those materialized bindings. Jobs admin
-  projections are internal to the Jobs admin runtime.
-- the latest presented contract is not the ongoing source of truth for already
-  accepted resources; deployment authority owns desired state until an authority
-  update or authority migration changes it
+- the shared jobs streams are Trellis-owned infrastructure; deployment apply
+  creates or adopts declared job bindings before jobs-enabled services become
+  ready. Bootstrap resolves their exact evidence. Jobs admin projections are
+  internal to the Jobs admin runtime.
+- generated participant code is not an authority source; the installed snapshot
+  and current `GrantBinding` remain authoritative until an explicit admin
+  install/apply/grant mutation changes them
 - when an RPC needs to start caller-visible follow-up work after a transfer,
   prefer a transfer-capable operation over an RPC-started workflow
 - the `trellis` control-plane service is the one bootstrap exception and may use

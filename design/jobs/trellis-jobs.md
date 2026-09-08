@@ -59,12 +59,12 @@ Caller-visible asynchronous APIs are defined separately in
 Jobs remain service-private execution machinery.
 
 The shared streams used by jobs are Trellis-owned runtime infrastructure.
-Accepted top-level job queues are deployment authority desired state, and
-reconciliation creates or binds the materialized job infrastructure and queue
-bindings for jobs-enabled services. The Jobs admin runtime may host the built-in
-`trellis.jobs@v1` RPCs, but it does not own or control the contract. Ordinary
-services and demos should not need an extra manual `trellis.jobs@v1` install
-step just to create or process jobs.
+Deployment apply creates or binds declared job infrastructure, and the installed
+participant plus current `GrantBinding` controls access for jobs-enabled
+services. The Jobs admin runtime may host the built-in `trellis.jobs@v1` RPCs,
+but it does not own or control the contract. Ordinary services and demos should
+not need an extra manual `trellis.jobs@v1` install step just to create or
+process jobs.
 
 ### Design Principles
 
@@ -279,11 +279,11 @@ Ordinary services do not bind to or write any admin projection storage.
 
 ### Provisioning Model
 
-Shared jobs infrastructure is Trellis-owned runtime state. Accepted job queues
-are deployment authority desired state. Trellis reconciles the shared streams,
-queue bindings, and per-service materialized authority for jobs-enabled
-environments rather than requiring a separate manual jobs install step or
-first-bootstrap side effect.
+Shared jobs infrastructure is Trellis-owned runtime state. Deployment apply
+creates or adopts declared streams and queue bindings before a service can
+bootstrap with the corresponding exact resource evidence and grants. This does
+not require a separate manual jobs install step or a first-bootstrap side
+effect.
 
 - normal services declare top-level `jobs` to participate in jobs processing
   without owning the shared stream topology directly

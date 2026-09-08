@@ -25,6 +25,7 @@ async-nats = { workspace = true, optional = true }
 axum.workspace = true
 axum-reverse-proxy = "2.2.0"
 base64.workspace = true
+data-encoding.workspace = true
 ed25519-dalek.workspace = true
 bytes = { workspace = true, optional = true }
 clap.workspace = true

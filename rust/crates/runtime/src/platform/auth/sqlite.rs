@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 
 mod accounts;
-mod authority;
 pub(in crate::platform::auth) mod common;
 pub(super) mod contexts;
 mod deployments;

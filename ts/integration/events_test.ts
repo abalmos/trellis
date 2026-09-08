@@ -38,10 +38,7 @@ Deno.test("Rust durable events match registrations and retain unhandled messages
         ],
         env: {
           TRELLIS_URL: runtime.trellisUrl,
-          TRELLIS_DEPLOYMENT: identity.deploymentId,
           TRELLIS_IDENTITY_SEED: identity.seed,
-          TRELLIS_SESSION_SEED: identity.sessionSeed,
-          TRELLIS_INSTANCE: identity.instanceId,
           REVERSE: String(reverse),
           CARGO_TARGET_DIR: fromFileUrl(
             new URL("../../rust/target", import.meta.url),

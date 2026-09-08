@@ -46,7 +46,6 @@ function activatedOutput(
   decidedAt = Date.parse("2026-04-21T12:34:56Z"),
 ): AuthDeviceUserAuthoritiesResolveOutput {
   return {
-    authority: null,
     device: {
       administrativeApproval: "approved",
       createdAt: decidedAt - 1_000,

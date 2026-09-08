@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::super::application::repository::{IdempotentOutcome, OutboxRepository};
+use super::super::application::repository::OutboxRepository;
 use super::super::{AuthorizationStateError, IdempotencyResultRecord, PostCommitActionRecord};
 use super::common::{
     decode_enum, decode_json, encode_enum, encode_json, from_sql_u32, map_write_error, sql_error,
@@ -22,23 +22,6 @@ impl OutboxRepository for SqliteAuthorizationStore {
         let request_id = request_id.to_owned();
         self.run_read(move |connection| {
             load_idempotency_result(connection, &purpose, &signer_id, &request_id)
-        })
-        .await
-    }
-
-    async fn record_idempotency_result(
-        &self,
-        record: IdempotencyResultRecord,
-    ) -> Result<IdempotentOutcome<serde_json::Value>, AuthorizationStateError> {
-        self.run(move |connection| {
-            let transaction = connection.transaction().map_err(sql_error)?;
-            if let Some(value) = sqlite_idempotency_replay(&transaction, &record)? {
-                return Ok(IdempotentOutcome::Replayed(value));
-            }
-            let value = record.result.clone();
-            insert_sql_idempotency_and_actions(&transaction, &record, &[])?;
-            transaction.commit().map_err(sql_error)?;
-            Ok(IdempotentOutcome::Applied(value))
         })
         .await
     }
@@ -122,6 +105,68 @@ impl OutboxRepository for SqliteAuthorizationStore {
                 return Ok(None);
             }
             load_post_commit_action(connection, &action_id)
+        })
+        .await
+    }
+
+    async fn prepare_post_commit_event_delivery(
+        &self,
+        action_id: &str,
+        expected_claimed_until: i64,
+        expected_attempts: u32,
+        delivery: serde_json::Value,
+    ) -> Result<serde_json::Value, AuthorizationStateError> {
+        super::super::domain::require_protocol_timestamp(
+            "expectedClaimedUntil",
+            expected_claimed_until,
+        )?;
+        let action_id = action_id.to_owned();
+        self.run(move |connection| {
+            let current = load_post_commit_action(connection, &action_id)?
+                .ok_or(AuthorizationStateError::StorageConflict)?;
+            if current.kind != super::super::PostCommitActionKind::Event
+                || current.claimed_until != Some(expected_claimed_until)
+                || current.attempts != expected_attempts
+            {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
+            let existing = connection
+                .query_row(
+                    "SELECT event_delivery_json FROM auth_post_commit_actions WHERE action_id = ?1",
+                    [&action_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .map_err(sql_error)?;
+            if let Some(existing) = existing {
+                return decode_json(existing).map_err(sql_error);
+            }
+            connection
+                .execute(
+                    "UPDATE auth_post_commit_actions SET event_delivery_json = ?1
+                     WHERE action_id = ?2 AND claimed_until = ?3 AND attempts = ?4
+                       AND event_delivery_json IS NULL",
+                    params![
+                        encode_json(&delivery)?,
+                        action_id,
+                        expected_claimed_until,
+                        i64::from(expected_attempts),
+                    ],
+                )
+                .map_err(map_write_error)?;
+            connection
+                .query_row(
+                    "SELECT event_delivery_json FROM auth_post_commit_actions
+                     WHERE action_id = ?1 AND claimed_until = ?2 AND attempts = ?3",
+                    params![
+                        action_id,
+                        expected_claimed_until,
+                        i64::from(expected_attempts)
+                    ],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .map_err(sql_error)?
+                .ok_or(AuthorizationStateError::StorageConflict)
+                .and_then(|saved| decode_json(saved).map_err(sql_error))
         })
         .await
     }
@@ -365,4 +410,114 @@ pub(in crate::platform::auth) fn load_post_commit_action(
     )
     .optional()
     .map_err(sql_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+    use crate::platform::auth::{
+        IdempotencyResultRecord, PostCommitActionKind, PostCommitActionRecord,
+    };
+
+    #[tokio::test]
+    async fn event_delivery_is_prepared_once_by_the_current_claim(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        const NOW: i64 = 1_700_000_000_000;
+        let store = SqliteAuthorizationStore::open_in_memory()?;
+        let idempotency = IdempotencyResultRecord {
+            scope_key: "s".repeat(43),
+            purpose: "purpose".to_owned(),
+            signer_id: "signer".to_owned(),
+            request_id: "request".to_owned(),
+            request_digest: "r".repeat(43),
+            result: json!({"ok": true}),
+            created_at: NOW,
+            expires_at: NOW + 60_000,
+        };
+        let action_id = "a".repeat(43);
+        let action = PostCommitActionRecord {
+            predecessor_action_id: None,
+            action_id: action_id.clone(),
+            kind: PostCommitActionKind::Event,
+            payload: json!({"eventId": "event", "occurredAt": NOW}),
+            created_at: NOW,
+            attempts: 0,
+            next_attempt_at: NOW,
+            claimed_until: None,
+            last_error: None,
+        };
+        store
+            .run(move |connection| {
+                insert_sql_idempotency_and_actions(connection, &idempotency, &[action])
+            })
+            .await
+            .expect("insert event action");
+
+        let claimed_until = NOW + 30_000;
+        let claimed = store
+            .claim_post_commit_action(&action_id, NOW, claimed_until)
+            .await
+            .expect("claim event")
+            .expect("claimed event");
+        let first = json!({"proof": "first"});
+        assert_eq!(
+            store
+                .prepare_post_commit_event_delivery(
+                    &action_id,
+                    claimed_until,
+                    claimed.attempts,
+                    first.clone(),
+                )
+                .await
+                .expect("prepare first delivery"),
+            first
+        );
+        assert_eq!(
+            store
+                .prepare_post_commit_event_delivery(
+                    &action_id,
+                    claimed_until,
+                    claimed.attempts,
+                    json!({"proof": "replacement"}),
+                )
+                .await
+                .expect("read winning delivery"),
+            first
+        );
+
+        store
+            .fail_post_commit_action(&action_id, claimed_until, NOW + 31_000, "retry".to_owned())
+            .await
+            .expect("schedule retry");
+        let reclaimed_until = NOW + 61_000;
+        let reclaimed = store
+            .claim_post_commit_action(&action_id, NOW + 31_000, reclaimed_until)
+            .await
+            .expect("reclaim event")
+            .expect("reclaimed event");
+        assert!(store
+            .prepare_post_commit_event_delivery(
+                &action_id,
+                claimed_until,
+                claimed.attempts,
+                json!({"proof": "stale"}),
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            store
+                .prepare_post_commit_event_delivery(
+                    &action_id,
+                    reclaimed_until,
+                    reclaimed.attempts,
+                    json!({"proof": "new"}),
+                )
+                .await
+                .expect("read prepared delivery after retry"),
+            first
+        );
+        Ok(())
+    }
 }

@@ -73,8 +73,10 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
                         deployment_id: publisher.deployment_id,
                         instance_id: publisher.instance_id,
                         participant_id: publisher.participant_id,
-                        participant_digest: publisher.participant_digest,
-                        session_id: publisher.session_id,
+                        principal_id: publisher.principal_id,
+                        connection_id: publisher.connection_id,
+                        login_session_id: publisher.login_session_id,
+                        context_digest: input.authorization_context,
                     })
             })
                 as std::pin::Pin<

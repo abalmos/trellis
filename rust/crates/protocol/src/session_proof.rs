@@ -3,7 +3,6 @@ use std::fmt;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use jsonptr::PointerBuf;
-use nkeys::KeyPairType;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
@@ -62,43 +61,28 @@ pub struct SessionProofInput {
     issued_at: i64,
     signer_key_id: String,
     transcript_fields: Vec<Vec<u8>>,
-    nkey_binding: Option<NkeyBinding>,
 }
 
 /// Owned fields for a user browser-auth initiation proof.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UserAuthRequestSessionProofInput {
-    /// Caller-generated request identifier.
-    pub request_id: String,
-    /// Claimed Unix issue time in milliseconds.
-    pub issued_at: i64,
-    /// Unpadded base64url Ed25519 session public key.
-    pub session_public_key: String,
-    /// NATS User NKey encoding the session public key.
-    pub session_nkey: String,
-    /// Participant identifier requesting authorization.
-    pub participant_id: String,
-    /// Canonical participant artifact digest.
-    pub participant_digest: String,
-    /// Exact post-authentication redirect target.
-    pub redirect_target: String,
-    /// Digest of the complete request with its proof signature removed.
-    pub request_digest: String,
+    /// Exact configured Trellis origin, independently supplied by both peers.
+    pub origin: String,
+    /// Complete canonical request input, with the entire `proof` field omitted.
+    pub unsigned_request: Value,
 }
 
 /// Owned fields for claiming an approved browser-auth flow.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UserAuthBindSessionProofInput {
-    /// Caller-generated proof request identifier.
-    pub request_id: String,
-    /// Claimed Unix issue time in milliseconds.
-    pub issued_at: i64,
+    /// Exact configured Trellis origin, independently supplied by both peers.
+    pub origin: String,
     /// Immutable browser flow identifier.
     pub flow_id: String,
     /// Enrolled unpadded base64url Ed25519 session public key.
     pub session_public_key: String,
-    /// Digest of the complete bind request with its proof signature removed.
-    pub request_digest: String,
+    /// Complete canonical request input, with the entire `proof` field omitted.
+    pub unsigned_request: Value,
 }
 
 /// Proof inputs shared by native service and device bootstrap.
@@ -121,14 +105,6 @@ pub struct AuthorizationContextRefreshSessionProofInput {
     pub unsigned_request: Value,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum NkeyBinding {
-    PublicKey {
-        nkey: String,
-        public_key: VerifyingKey,
-    },
-}
-
 impl SessionProofInput {
     /// Build a user browser-auth initiation proof input.
     ///
@@ -142,36 +118,62 @@ impl SessionProofInput {
         input: UserAuthRequestSessionProofInput,
     ) -> Result<Self, ProtocolError> {
         let UserAuthRequestSessionProofInput {
-            request_id,
-            issued_at,
-            session_public_key,
-            session_nkey,
-            participant_id,
-            participant_digest,
-            redirect_target,
-            request_digest,
+            origin,
+            unsigned_request,
         } = input;
+        validate_safe_json_integers(&unsigned_request, &mut Vec::new())?;
+        let request = unsigned_request.as_object().ok_or_else(|| {
+            proof_error(
+                SessionProofErrorCode::InvalidFormat,
+                ["request"],
+                "unsigned request must be an object",
+            )
+        })?;
+        if request.contains_key("proof") {
+            return Err(proof_error(
+                SessionProofErrorCode::InvalidFormat,
+                ["proof"],
+                "unsigned request must omit proof",
+            ));
+        }
+        let required_text = |field: &str| -> Result<String, ProtocolError> {
+            request
+                .get(field)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    proof_error(
+                        SessionProofErrorCode::InvalidFormat,
+                        [field],
+                        "required string is missing",
+                    )
+                })
+        };
+        let request_id = required_text("requestId")?;
+        let issued_at = request
+            .get("issuedAt")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| {
+                proof_error(
+                    SessionProofErrorCode::InvalidFormat,
+                    ["issuedAt"],
+                    "issuedAt must be an integer",
+                )
+            })?;
+        let session_public_key = required_text("sessionPublicKey")?;
         let key = decode_public_key(&session_public_key, &["sessionPublicKey"])?;
-        let session_nkey_bytes = validate_nkey_binding(&session_nkey, &key, &["sessionNkey"])?;
         let signer_key_id = derived_key_id(&key);
-
         Self::new(
             SessionProofPurpose::UserAuthRequest,
             request_id,
             issued_at,
             signer_key_id,
             vec![
+                text(&origin, &["origin"])?,
+                text("/auth/requests", &["route"])?,
                 key.as_bytes().to_vec(),
-                session_nkey_bytes.to_vec(),
-                text(&participant_id, &["participantId"])?,
-                digest(&participant_digest, &["participantDigest"])?,
-                text(&redirect_target, &["redirectTarget"])?,
-                digest(&request_digest, &["requestDigest"])?,
+                Sha256::digest(canonicalize_json(&unsigned_request)?.as_bytes()).to_vec(),
             ],
-            Some(NkeyBinding::PublicKey {
-                nkey: session_nkey,
-                public_key: key,
-            }),
         )
     }
 
@@ -183,12 +185,47 @@ impl SessionProofInput {
     /// unsafe, empty, or malformed.
     pub fn user_auth_bind(input: UserAuthBindSessionProofInput) -> Result<Self, ProtocolError> {
         let UserAuthBindSessionProofInput {
-            request_id,
-            issued_at,
+            origin,
             flow_id,
             session_public_key,
-            request_digest,
+            unsigned_request,
         } = input;
+        validate_safe_json_integers(&unsigned_request, &mut Vec::new())?;
+        let request = unsigned_request.as_object().ok_or_else(|| {
+            proof_error(
+                SessionProofErrorCode::InvalidFormat,
+                ["request"],
+                "unsigned request must be an object",
+            )
+        })?;
+        if request.contains_key("proof") {
+            return Err(proof_error(
+                SessionProofErrorCode::InvalidFormat,
+                ["proof"],
+                "unsigned request must omit proof",
+            ));
+        }
+        let request_id = request
+            .get("requestId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                proof_error(
+                    SessionProofErrorCode::InvalidFormat,
+                    ["requestId"],
+                    "requestId must be a string",
+                )
+            })?
+            .to_owned();
+        let issued_at = request
+            .get("issuedAt")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| {
+                proof_error(
+                    SessionProofErrorCode::InvalidFormat,
+                    ["issuedAt"],
+                    "issuedAt must be an integer",
+                )
+            })?;
         if ulid::Ulid::from_string(&request_id)
             .map(|parsed| parsed.to_string() != request_id)
             .unwrap_or(true)
@@ -201,18 +238,17 @@ impl SessionProofInput {
         }
         let key = decode_public_key(&session_public_key, &["sessionPublicKey"])?;
         let signer_key_id = derived_key_id(&key);
-
         Self::new(
             SessionProofPurpose::UserAuthBind,
             request_id,
             issued_at,
             signer_key_id,
             vec![
-                text(&flow_id, &["flowId"])?,
+                text(&origin, &["origin"])?,
+                text(&format!("/auth/flow/{flow_id}/bind"), &["route"])?,
                 key.as_bytes().to_vec(),
-                digest(&request_digest, &["requestDigest"])?,
+                Sha256::digest(canonicalize_json(&unsigned_request)?.as_bytes()).to_vec(),
             ],
-            None,
         )
     }
 
@@ -340,7 +376,6 @@ impl SessionProofInput {
                 text(&connection_id, &["connectionId"])?,
                 request_digest.to_vec(),
             ],
-            None,
         )
     }
 
@@ -437,7 +472,6 @@ impl SessionProofInput {
                 text(&connection_id, &["connectionId"])?,
                 request_digest.to_vec(),
             ],
-            None,
         )
     }
 
@@ -447,7 +481,6 @@ impl SessionProofInput {
         issued_at: i64,
         signer_key_id: String,
         transcript_fields: Vec<Vec<u8>>,
-        nkey_binding: Option<NkeyBinding>,
     ) -> Result<Self, ProtocolError> {
         validate_request_id(&request_id)?;
         validate_safe_integer(issued_at, &["issuedAt"])?;
@@ -457,7 +490,6 @@ impl SessionProofInput {
             issued_at,
             signer_key_id,
             transcript_fields,
-            nkey_binding,
         })
     }
 
@@ -505,12 +537,7 @@ impl SessionProofInput {
                 "signer key id does not match the verification key",
             ));
         }
-        match &self.nkey_binding {
-            Some(NkeyBinding::PublicKey { nkey, public_key }) => {
-                validate_nkey_binding(nkey, public_key, &["sessionNkey"]).map(|_| ())
-            }
-            None => Ok(()),
-        }
+        Ok(())
     }
 }
 
@@ -880,41 +907,6 @@ fn validate_key_id(value: &str, path: &[&str]) -> Result<(), ProtocolError> {
     decode_base64url::<32>(value, path, SessionProofErrorCode::InvalidKeyId).map(|_| ())
 }
 
-fn validate_nkey(value: &str, path: &[&str]) -> Result<[u8; 32], ProtocolError> {
-    let (kind, bytes) = nkeys::from_public_key(value).map_err(|_| {
-        proof_error(
-            SessionProofErrorCode::InvalidNatsKey,
-            path.iter().copied(),
-            "value is not a canonical NATS public key",
-        )
-    })?;
-    if KeyPairType::from(kind) != KeyPairType::User {
-        return Err(proof_error(
-            SessionProofErrorCode::InvalidNatsKey,
-            path.iter().copied(),
-            "value must be a NATS User NKey",
-        ));
-    }
-    Ok(bytes)
-}
-
-fn validate_nkey_binding(
-    nkey: &str,
-    key: &VerifyingKey,
-    path: &[&str],
-) -> Result<[u8; 32], ProtocolError> {
-    let nkey_bytes = validate_nkey(nkey, path)?;
-    if nkey_bytes == *key.as_bytes() {
-        Ok(nkey_bytes)
-    } else {
-        Err(proof_error(
-            SessionProofErrorCode::InvalidNatsKey,
-            path.iter().copied(),
-            "NATS User NKey does not encode the session public key",
-        ))
-    }
-}
-
 fn validate_safe_json_integers(value: &Value, path: &mut Vec<String>) -> Result<(), ProtocolError> {
     match value {
         Value::Number(number) => {
@@ -1025,16 +1017,42 @@ mod tests {
     const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
     #[test]
+    fn user_auth_request_needs_no_nats_key() -> Result<(), ProtocolError> {
+        let signing_key = SigningKey::from_bytes(&[6; 32]);
+        let public_key = encode_base64url(signing_key.verifying_key().as_bytes());
+        let input = SessionProofInput::user_auth_request(UserAuthRequestSessionProofInput {
+            origin: "https://trellis.example".to_owned(),
+            unsigned_request: json!({
+                "requestId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+                "issuedAt": 1_000,
+                "sessionPublicKey": public_key,
+                "participantId": "app.example@v1",
+            }),
+        })?;
+        let proof = sign_session_proof(&input, &signing_key)?;
+        verify_session_proof(
+            &input,
+            &proof,
+            &encode_base64url(signing_key.verifying_key().as_bytes()),
+            1_000,
+            SessionProofPolicy::default(),
+        )?;
+        Ok(())
+    }
+
+    #[test]
     fn user_auth_bind_proof_is_bound_to_the_flow() -> Result<(), ProtocolError> {
         let signing_key = SigningKey::from_bytes(&[7; 32]);
         let public_key = encode_base64url(signing_key.verifying_key().as_bytes());
         let bind = |flow_id: &str| {
             SessionProofInput::user_auth_bind(UserAuthBindSessionProofInput {
-                request_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV".to_owned(),
-                issued_at: 1_000,
+                origin: "https://trellis.example".to_owned(),
                 flow_id: flow_id.to_owned(),
                 session_public_key: public_key.clone(),
-                request_digest: DIGEST.to_owned(),
+                unsigned_request: json!({
+                    "requestId": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+                    "issuedAt": 1_000,
+                }),
             })
         };
         let proof = sign_session_proof(&bind("flow_1")?, &signing_key)?;
@@ -1055,11 +1073,10 @@ mod tests {
         .is_err());
         assert!(
             SessionProofInput::user_auth_bind(UserAuthBindSessionProofInput {
-                request_id: "req_bind_1".to_owned(),
-                issued_at: 1_000,
+                origin: "https://trellis.example".to_owned(),
                 flow_id: "flow_1".to_owned(),
                 session_public_key: public_key,
-                request_digest: DIGEST.to_owned(),
+                unsigned_request: json!({"requestId": "req_bind_1", "issuedAt": 1_000}),
             })
             .is_err()
         );

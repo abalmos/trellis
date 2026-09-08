@@ -62,8 +62,8 @@ pub struct CompletePasswordResetInput {
     pub expected_flow_version: u64,
     /// Username required only when installing the first local credential.
     pub username: Option<String>,
-    /// Canonical administrator authority restored by an admin-account flow.
-    pub authority: Option<IdentityAuthorityRecord>,
+    /// Canonical participant bindings restored by an admin-account flow.
+    pub bindings: Vec<GrantBindingReplacement>,
     /// Optional profile replacement committed by administrator recovery.
     pub profile: Option<UserProfileRecord>,
     /// Plaintext password retained only for this call.
@@ -148,6 +148,75 @@ pub struct UserAccount {
     pub principal: PrincipalRecord,
     /// Required user profile.
     pub profile: UserProfileRecord,
+}
+
+impl<R> AuthService<R>
+where
+    R: AccountRepository + Clone,
+{
+    pub(crate) async fn change_password(
+        &self,
+        input: ChangePasswordInput,
+    ) -> Result<IdempotentOutcome<usize>, AuthorizationStateError> {
+        let ChangePasswordInput {
+            principal_id,
+            current_session_id,
+            current_password,
+            new_password,
+            changed_at,
+            idempotency,
+            actions,
+        } = input;
+        super::validation::validate_idempotency_and_actions(&idempotency, &actions)?;
+        super::super::domain::require_protocol_timestamp("changedAt", changed_at)?;
+        let credential = self
+            .repository
+            .get_local_credential(&principal_id)
+            .await?
+            .ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord("local credential not found".to_owned())
+            })?;
+        if !verify_password(&credential.password_hash, &current_password) {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "current password is invalid".to_owned(),
+            ));
+        }
+        if verify_password(&credential.password_hash, &new_password) {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "new password must differ from current password".to_owned(),
+            ));
+        }
+        let (password_hash, hash_profile) =
+            hash_password(&new_password, Some(self.config.password_min_length))?;
+        let replacement = LocalCredentialRecord {
+            password_hash,
+            hash_profile,
+            failed_attempts: 0,
+            locked_until: None,
+            password_changed_at: changed_at,
+            updated_at: changed_at,
+            version: credential.version.checked_add(1).ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord("credential version overflow".to_owned())
+            })?,
+            ..credential.clone()
+        };
+        super::validation::validate_replacement_credential(
+            &credential,
+            &replacement,
+            &principal_id,
+        )?;
+        self.repository
+            .change_password(PasswordChange {
+                principal_id,
+                current_session_id,
+                credential: replacement,
+                expected_version: credential.version,
+                changed_at,
+                idempotency,
+                actions,
+            })
+            .await
+    }
 }
 
 impl<R> AuthService<R>
@@ -308,16 +377,19 @@ mod tests {
         )?;
         let target = FirstAdminAuthorityTarget {
             participant_id: "trellis-app.cli@v1".to_owned(),
-            participant_artifact_digest: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE".to_owned(),
-            participant_needs_digest: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI".to_owned(),
+            installed_revision: 1,
         };
 
         assert!(service
-            .ensure_admin_account_flow("not a URL", &target, NOW)
+            .ensure_admin_account_flow("not a URL", std::slice::from_ref(&target), NOW)
             .await
             .is_err());
         let first = service
-            .ensure_admin_account_flow("https://auth.example/base", &target, NOW)
+            .ensure_admin_account_flow(
+                "https://auth.example/base",
+                std::slice::from_ref(&target),
+                NOW,
+            )
             .await?
             .ok_or("first-admin flow missing")?;
         let first_record = repository
@@ -337,7 +409,11 @@ mod tests {
             .any(|(key, value)| key == "adminAccountToken" && !value.is_empty()));
         assert!(!bootstrap_url.as_str().contains(&first.flow_id_hash));
         let second = service
-            .ensure_admin_account_flow("https://auth.example/base", &target, NOW + 1)
+            .ensure_admin_account_flow(
+                "https://auth.example/base",
+                std::slice::from_ref(&target),
+                NOW + 1,
+            )
             .await?
             .ok_or("pending first-admin flow missing")?;
         assert_eq!(second.flow_id_hash, first.flow_id_hash);
@@ -351,7 +427,11 @@ mod tests {
             AccountFlowState::Pending
         );
         let replacement = service
-            .rotate_admin_account_flow("https://auth.example/base", &target, NOW + 2)
+            .rotate_admin_account_flow(
+                "https://auth.example/base",
+                std::slice::from_ref(&target),
+                NOW + 2,
+            )
             .await?
             .ok_or("first-admin flow was not rotated")?;
         assert_ne!(replacement.flow_id_hash, first.flow_id_hash);
@@ -367,7 +447,7 @@ mod tests {
         let after_expiry = service
             .ensure_admin_account_flow(
                 "https://auth.example/base",
-                &target,
+                std::slice::from_ref(&target),
                 replacement.expires_at + 1,
             )
             .await?
@@ -438,72 +518,8 @@ mod tests {
 
 impl<R> AuthService<R>
 where
-    R: AccountRepository + AuthorityRepository + Clone,
+    R: AccountRepository + Clone,
 {
-    pub(crate) async fn change_password(
-        &self,
-        input: ChangePasswordInput,
-    ) -> Result<IdempotentOutcome<usize>, AuthorizationStateError> {
-        let ChangePasswordInput {
-            principal_id,
-            current_session_id,
-            current_password,
-            new_password,
-            changed_at,
-            idempotency,
-            actions,
-        } = input;
-        super::validation::validate_idempotency_and_actions(&idempotency, &actions)?;
-        super::super::domain::require_protocol_timestamp("changedAt", changed_at)?;
-        let credential = self
-            .repository
-            .get_local_credential(&principal_id)
-            .await?
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("local credential not found".to_owned())
-            })?;
-        if !verify_password(&credential.password_hash, &current_password) {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "current password is invalid".to_owned(),
-            ));
-        }
-        if verify_password(&credential.password_hash, &new_password) {
-            return Err(AuthorizationStateError::InvalidRecord(
-                "new password must differ from current password".to_owned(),
-            ));
-        }
-        let (password_hash, hash_profile) =
-            hash_password(&new_password, Some(self.config.password_min_length))?;
-        let replacement = LocalCredentialRecord {
-            password_hash,
-            hash_profile,
-            failed_attempts: 0,
-            locked_until: None,
-            password_changed_at: changed_at,
-            updated_at: changed_at,
-            version: credential.version.checked_add(1).ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("credential version overflow".to_owned())
-            })?,
-            ..credential.clone()
-        };
-        super::validation::validate_replacement_credential(
-            &credential,
-            &replacement,
-            &principal_id,
-        )?;
-        self.repository
-            .change_password(PasswordChange {
-                principal_id,
-                current_session_id,
-                credential: replacement,
-                expected_version: credential.version,
-                changed_at,
-                idempotency,
-                actions,
-            })
-            .await
-    }
-
     /// Replace a local password and consume its durable account flow atomically.
     ///
     /// # Errors
@@ -518,7 +534,7 @@ where
             token,
             expected_flow_version,
             username,
-            authority,
+            bindings,
             profile,
             password,
             consumed_at,
@@ -623,10 +639,7 @@ where
                 expected_credential_version: current.as_ref().map(|current| current.version),
                 replacement,
                 identity,
-                expected_authority_version: authority
-                    .as_ref()
-                    .and_then(|authority| (authority.version > 1).then_some(authority.version - 1)),
-                authority,
+                bindings,
                 profile,
                 consumed_at,
                 idempotency,

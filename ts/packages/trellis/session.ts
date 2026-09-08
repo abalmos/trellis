@@ -44,7 +44,7 @@ import { AuthorizationProviderUnavailableError } from "./auth/authorization/prov
 import type {
   AuthorizationVerificationErrorCode,
   PermissionAtom as VerifierPermissionAtom,
-  VerifiedAuthorizationContextProjection,
+  VerifiedAuthorizationContextTokenProjection,
 } from "./auth/protocol_wasm.ts";
 import {
   AsyncResult,
@@ -161,20 +161,16 @@ type InferRuntimeRpcError<T> = T extends {
 export type VerifiedCaller = {
   type: "verified";
   sessionKey: string;
-  principal: {
-    kind: "user" | "service" | "device";
-    id: string;
-  };
-  participant: {
-    kind: "service" | "app" | "device" | "agent";
-    id: string;
-    artifactDigest: string;
-    needsDigest: string;
-  };
+  principalId: string;
+  principalKind: "user" | "service" | "device";
+  participantId: string;
+  connectionId: string;
+  loginSessionId: string | null;
+  identityKeyId: string | null;
   deploymentId: string | null;
   instanceId: string | null;
-  sessionId: string;
-  capabilities: string[];
+  grantRevision: number;
+  platformPrivileges: ("trellis.auth::admin")[];
   inboxPrefix: string;
 };
 
@@ -211,7 +207,10 @@ type LocalAuthorizationArgs =
   };
 
 type VerifyAuthorizationRequestResultLike =
-  | ({ ok: true } & VerifiedAuthorizationContextProjection)
+  | {
+    ok: true;
+    context: VerifiedAuthorizationContextTokenProjection["context"];
+  }
   | { ok: false; error: { code: AuthorizationVerificationErrorCode } };
 type VerifyAuthorizationEventResultLike = VerifyAuthorizationRequestResultLike;
 
@@ -234,13 +233,10 @@ export async function verifyLocalAuthorization(
     return err(new AuthError({ reason: "invalid_signature" }));
   }
 
-  const sessionKey = args.message.headers?.get("session-key");
   const proof = args.message.headers?.get("proof");
   const contextDigest = args.message.headers?.get("authorization-context");
-  if (!sessionKey) {
-    return err(new AuthError({ reason: "missing_session_key" }));
-  }
-  if (!proof || !contextDigest) {
+  const sessionKey = args.message.headers?.get("session-key");
+  if (!proof || !contextDigest || !sessionKey) {
     return err(new AuthError({ reason: "missing_proof" }));
   }
 
@@ -258,6 +254,7 @@ export async function verifyLocalAuthorization(
       }
       const request: AuthorizationProviderRequest = {
         contextDigest,
+        sessionKey,
         subject: args.message.subject,
         reply,
         payload: args.proofPayload ??
@@ -277,6 +274,7 @@ export async function verifyLocalAuthorization(
       }
       const event: AuthorizationProviderEvent = {
         contextDigest,
+        sessionKey,
         subject: args.message.subject,
         payload: new Uint8Array(args.message.data ?? new Uint8Array()),
         eventId,
@@ -304,10 +302,7 @@ export async function verifyLocalAuthorization(
       }),
     );
   }
-  if (result.sessionKey !== sessionKey) {
-    return err(new AuthError({ reason: "invalid_signature" }));
-  }
-  return ok(toVerifiedCaller(result));
+  return ok(toVerifiedCaller(result.context));
 }
 
 function toVerifierPermission(
@@ -342,17 +337,21 @@ function toVerifierPermission(
 }
 
 function toVerifiedCaller(
-  projection: VerifiedAuthorizationContextProjection,
+  projection: VerifiedAuthorizationContextTokenProjection["context"],
 ): VerifiedCaller {
   return {
     type: "verified",
     sessionKey: projection.sessionKey,
-    principal: { ...projection.principal },
-    participant: { ...projection.participant },
+    principalId: projection.principalId,
+    principalKind: projection.principalKind,
+    participantId: projection.participantId,
+    connectionId: projection.connectionId,
+    loginSessionId: projection.loginSessionId,
+    identityKeyId: projection.identityKeyId,
     deploymentId: projection.deploymentId,
     instanceId: projection.instanceId,
-    sessionId: projection.sessionId,
-    capabilities: [...projection.capabilities],
+    grantRevision: projection.grantRevision,
+    platformPrivileges: [...projection.platformPrivileges],
     inboxPrefix: projection.inboxPrefix,
   };
 }
@@ -362,7 +361,6 @@ function localAuthorizationErrorReason(
 ): string {
   switch (code) {
     case "PermissionDenied":
-    case "CapabilityDenied":
       return "insufficient_permissions";
     case "ReplySubjectMismatch":
       return "reply_subject_mismatch";
@@ -3133,11 +3131,11 @@ export class Trellis<
         return err(error);
       }
       const headers = natsHeaders();
-      headers.set("session-key", this.#auth.sessionKey);
       headers.set("proof", authHeaders.proof);
       headers.set("iat", String(authHeaders.iat));
       headers.set("request-id", authHeaders.requestId);
       headers.set("authorization-context", authHeaders.contextDigest);
+      headers.set("session-key", this.#auth.sessionKey);
       injectTraceContext(createNatsHeaderCarrier(headers));
 
       const sub = this.#nats.subscribe(inbox);
@@ -3152,11 +3150,11 @@ export class Trellis<
         try {
           const auth = await this.#createProof(subject, cancelPayload, inbox);
           const cancelHeaders = natsHeaders();
-          cancelHeaders.set("session-key", this.#auth.sessionKey);
           cancelHeaders.set("proof", auth.proof);
           cancelHeaders.set("iat", String(auth.iat));
           cancelHeaders.set("request-id", auth.requestId);
           cancelHeaders.set("authorization-context", auth.contextDigest);
+          cancelHeaders.set("session-key", this.#auth.sessionKey);
           injectTraceContext(createNatsHeaderCarrier(cancelHeaders));
           this.#nats.publish(subject, cancelPayload, {
             headers: cancelHeaders,
@@ -3816,7 +3814,6 @@ export class Trellis<
 
         let caller: SessionCaller;
         let callerInboxPrefix = "_INBOX";
-        const callerSessionKey = msg.headers?.get("session-key") ?? "";
         const handlerRequestIdFromHeader = msg.headers?.get("request-id") ?? "";
         const handlerTraceIdFromHeader = traceIdFromTraceparent(
           msg.headers?.get("traceparent"),
@@ -3856,19 +3853,14 @@ export class Trellis<
 
         span.setAttribute("auth.caller.type", caller.type);
         if (caller.type === "verified") {
-          span.setAttribute("auth.principal.kind", caller.principal.kind);
-          span.setAttribute("auth.principal.id", caller.principal.id);
-          span.setAttribute("auth.participant.kind", caller.participant.kind);
-          span.setAttribute("auth.participant.id", caller.participant.id);
-          span.setAttribute(
-            "auth.participant.artifact_digest",
-            caller.participant.artifactDigest,
-          );
-          span.setAttribute(
-            "auth.participant.needs_digest",
-            caller.participant.needsDigest,
-          );
-          span.setAttribute("auth.session.id", caller.sessionId);
+          span.setAttribute("auth.principal.kind", caller.principalKind);
+          span.setAttribute("auth.principal.id", caller.principalId);
+          span.setAttribute("auth.participant.id", caller.participantId);
+          span.setAttribute("auth.connection.id", caller.connectionId);
+          span.setAttribute("auth.grant.revision", caller.grantRevision);
+          if (caller.loginSessionId) {
+            span.setAttribute("auth.login_session.id", caller.loginSessionId);
+          }
           if (caller.deploymentId) {
             span.setAttribute("auth.deployment.id", caller.deploymentId);
           }
@@ -3890,9 +3882,7 @@ export class Trellis<
               input: parsedInput,
               context: {
                 caller,
-                sessionKey: caller.type === "verified"
-                  ? caller.sessionKey
-                  : callerSessionKey,
+                sessionKey: caller.type === "verified" ? caller.sessionKey : "",
                 inboxPrefix: callerInboxPrefix,
                 permission: ctx.permission,
                 requiredCapabilities: ctx.callerCapabilities,
@@ -4202,12 +4192,12 @@ export class Trellis<
         for (const [key, value] of Object.entries(event.headers)) {
           headers.set(key, value);
         }
-        headers.set("session-key", this.#auth.sessionKey);
         headers.set("Nats-Msg-Id", event.header.id);
         headers.set("Trellis-Event-Time", event.header.time);
         const proof = await this.#createEventProof(event);
         headers.set("proof", proof.proof);
         headers.set("authorization-context", proof.contextDigest);
+        headers.set("session-key", this.#auth.sessionKey);
 
         logger.trace(
           { subject: event.subject },
@@ -5073,8 +5063,8 @@ export class Trellis<
         reply,
       );
       const headers = natsHeaders();
-      headers.set("session-key", this.#auth.sessionKey);
       headers.set("authorization-context", authHeaders.contextDigest);
+      headers.set("session-key", this.#auth.sessionKey);
       headers.set("proof", authHeaders.proof);
       headers.set("iat", String(authHeaders.iat));
       headers.set("request-id", authHeaders.requestId);
@@ -5256,11 +5246,11 @@ export class Trellis<
       const authHeaders = await this.#createProof(subject, payload, inbox);
 
       const headers = natsHeaders();
-      headers.set("session-key", this.#auth.sessionKey);
       headers.set("proof", authHeaders.proof);
       headers.set("iat", String(authHeaders.iat));
       headers.set("request-id", authHeaders.requestId);
       headers.set("authorization-context", authHeaders.contextDigest);
+      headers.set("session-key", this.#auth.sessionKey);
 
       const sub = this.#nats.subscribe(inbox);
 

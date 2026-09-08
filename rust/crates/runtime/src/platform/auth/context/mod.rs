@@ -12,5 +12,5 @@ pub(crate) use registry::{
 pub(crate) use repository::{
     revoke_sql_contexts, AuthorizationContextCommit, AuthorizationContextRecord,
     AuthorizationContextRepository, AuthorizationContextRevocationReason,
-    AuthorizationContextSelector, AuthorizationContextState, AuthorizationTrustStateRecord,
+    AuthorizationContextSelector, AuthorizationContextState,
 };

@@ -23,10 +23,10 @@ use openidconnect::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
+use trellis_protocol::PlatformPrivilege;
 use trellis_protocol::{
-    canonicalize_json, parse_api, parse_participant, parse_session_proof, resolve_participant,
-    session_proof_request_digest, verify_session_proof, DeviceBootstrapSessionProofInput, GrantSet,
-    ServiceBootstrapSessionProofInput, SessionProofInput, SessionProofPolicy,
+    parse_session_proof, session_proof_request_digest, verify_session_proof, GrantSet,
+    NativeBootstrapSessionProofInput, SessionProofInput, SessionProofPolicy,
     UserAuthRequestSessionProofInput,
 };
 use trellis_rs::service::{
@@ -61,20 +61,16 @@ use super::ephemeral::{
 };
 use super::{
     portal_policy_snapshot, resolve_portal_authority_selection, AccountFlowState,
-    AccountRepository, ApplyIdentityAuthoritySelectionInput, AuthService,
-    AuthorityEvidenceRepository, AuthorityKind, AuthorityProposalKind, AuthorityProposalRecord,
-    AuthorityProposalState, AuthorityRepository, AuthorityState, AuthorityTarget,
-    AuthorizationStateError, CompleteIdentityLinkInput, CompletePasswordResetInput,
-    ContextRepository, CreateActivationReviewInput, CreateFederatedUserInput, CreateLocalUserInput,
-    CreateSessionInput, DeploymentRepository, DesiredAuthorityRecord, DeviceState,
-    EnrollDeviceIdentityInput, FirstAdminFederatedRegistration, FirstAdminRegistration,
-    IdempotencyResultRecord, IdempotentOutcome, LocalAuthentication, LoginPortalRecord,
-    LoginSettingsRecord, OutboxRepository, ParticipantBindingRecord, ParticipantBindingState,
-    PortalAuthoritySource, PortalBindingMutation, PortalRepository, PostCommitActionKind,
-    PostCommitActionRecord, PresentDeploymentAuthorityInput, PrincipalKind,
-    ProviderLoginAttributes, ProvisionedIdentityKind, ProvisionedIdentityState,
-    ProvisioningRepository, ResourceBindingEvidence, ResourceProviderIdentity,
-    RuntimeInstanceState, SessionRecord, SessionRepository,
+    AccountRepository, AuthService, AuthorityEvidenceRepository, AuthorizationStateError,
+    CompleteIdentityLinkInput, CompletePasswordResetInput, ContextRepository,
+    CreateActivationReviewInput, CreateFederatedUserInput, CreateLocalUserInput,
+    CreateSessionInput, DeploymentRepository, FirstAdminBinding, FirstAdminFederatedRegistration,
+    FirstAdminRegistration, GrantBindingReplacement, GrantBindingState, GrantOwnerKind,
+    GrantRepository, IdempotencyResultRecord, IdempotentOutcome, LocalAuthentication,
+    LoginPortalRecord, LoginSettingsRecord, OutboxRepository, ParticipantBindingRecord,
+    ParticipantBindingState, PortalGrantProvenance, PortalRepository, PostCommitActionKind,
+    PostCommitActionRecord, ProviderLoginAttributes, ProvisioningRepository,
+    ResourceBindingEvidence, ResourceProviderIdentity, SessionRepository,
 };
 
 const FLOW_TTL_MS: i64 = 15 * 60_000;
@@ -353,50 +349,6 @@ struct IssuedBootstrapJwt {
     expires_at: i64,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NatsBootstrapResponse {
-    jwt: String,
-    jwt_expires_at: i64,
-    transports: NatsTransports,
-}
-
-impl NatsBootstrapResponse {
-    fn new(
-        route: IssuedBootstrapJwt,
-        native_nats_servers: Vec<String>,
-        websocket_nats_servers: Vec<String>,
-    ) -> Self {
-        Self {
-            jwt: route.jwt,
-            jwt_expires_at: route.expires_at,
-            transports: NatsTransports {
-                native: (!native_nats_servers.is_empty()).then_some(NatsTransportRoute {
-                    nats_servers: native_nats_servers,
-                }),
-                websocket: (!websocket_nats_servers.is_empty()).then_some(NatsTransportRoute {
-                    nats_servers: websocket_nats_servers,
-                }),
-            },
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NatsTransports {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    native: Option<NatsTransportRoute>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    websocket: Option<NatsTransportRoute>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NatsTransportRoute {
-    nats_servers: Vec<String>,
-}
-
 fn flow_response(flow: AuthBrowserFlow) -> BrowserFlowResponse {
     BrowserFlowResponse {
         flow_id: flow.flow_id,
@@ -543,6 +495,31 @@ fn session_revocation_actions(
 
 fn proof_request_digest(raw: &Value) -> Result<String, trellis_protocol::ProtocolError> {
     session_proof_request_digest(raw)
+}
+
+fn session_public_key_to_user_nkey(session_public_key: &str) -> Result<String, HttpError> {
+    let key = URL_SAFE_NO_PAD
+        .decode(session_public_key)
+        .map_err(|_| HttpError::bad_request("invalid_session_key"))?;
+    if key.len() != 32 || URL_SAFE_NO_PAD.encode(&key) != session_public_key {
+        return Err(HttpError::bad_request("invalid_session_key"));
+    }
+    let mut encoded = Vec::with_capacity(35);
+    encoded.push(20 << 3);
+    encoded.extend_from_slice(&key);
+    let mut crc = 0_u16;
+    for byte in &encoded {
+        crc ^= u16::from(*byte) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 == 0 {
+                crc << 1
+            } else {
+                (crc << 1) ^ 0x1021
+            };
+        }
+    }
+    encoded.extend_from_slice(&crc.to_le_bytes());
+    Ok(data_encoding::BASE32_NOPAD.encode(&encoded))
 }
 
 fn first_admin_token_hash(token: &str) -> Result<String, HttpError> {

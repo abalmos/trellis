@@ -145,141 +145,6 @@ impl<'a> AuthRpc<'a> {
             )
             .await
     }
-    /// Call `Auth.DeploymentAuthority.AcceptMigration`.
-    pub async fn deployment_authority_accept_migration(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityAcceptMigrationRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityAcceptMigrationResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityAcceptMigrationError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityAcceptMigrationRpc,
-                super::rpc::AuthDeploymentAuthorityAcceptMigrationError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.AcceptUpdate`.
-    pub async fn deployment_authority_accept_update(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityAcceptUpdateRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityAcceptUpdateResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityAcceptUpdateError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityAcceptUpdateRpc,
-                super::rpc::AuthDeploymentAuthorityAcceptUpdateError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.Get`.
-    pub async fn deployment_authority_get(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityGetRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityGetResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityGetError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityGetRpc,
-                super::rpc::AuthDeploymentAuthorityGetError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.List`.
-    pub async fn deployment_authority_list(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityListRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityListResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityListError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityListRpc,
-                super::rpc::AuthDeploymentAuthorityListError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.Plan`.
-    pub async fn deployment_authority_plan(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityPlanRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityPlanResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityPlanError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityPlanRpc,
-                super::rpc::AuthDeploymentAuthorityPlanError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.Plans.Get`.
-    pub async fn deployment_authority_plans_get(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityPlansGetRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityPlansGetResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityPlansGetError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityPlansGetRpc,
-                super::rpc::AuthDeploymentAuthorityPlansGetError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.Plans.List`.
-    pub async fn deployment_authority_plans_list(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityPlansListRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityPlansListResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityPlansListError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityPlansListRpc,
-                super::rpc::AuthDeploymentAuthorityPlansListError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.Reconcile`.
-    pub async fn deployment_authority_reconcile(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityReconcileRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityReconcileResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityReconcileError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityReconcileRpc,
-                super::rpc::AuthDeploymentAuthorityReconcileError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.DeploymentAuthority.Reject`.
-    pub async fn deployment_authority_reject(
-        &self,
-        input: &super::types::AuthDeploymentAuthorityRejectRequest,
-    ) -> Result<
-        super::types::AuthDeploymentAuthorityRejectResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthDeploymentAuthorityRejectError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDeploymentAuthorityRejectRpc,
-                super::rpc::AuthDeploymentAuthorityRejectError,
-            >(input)
-            .await
-    }
     /// Call `Auth.Deployments.Apply`.
     pub async fn deployments_apply(
         &self,
@@ -338,6 +203,20 @@ impl<'a> AuthRpc<'a> {
                 super::rpc::AuthDeploymentsEnableRpc,
                 super::rpc::AuthDeploymentsEnableError,
             >(input)
+            .await
+    }
+    /// Call `Auth.Deployments.Get`.
+    pub async fn deployments_get(
+        &self,
+        input: &super::types::AuthDeploymentsGetRequest,
+    ) -> Result<
+        super::types::AuthDeploymentsGetResponse,
+        trellis_rs::generated::CallError<super::rpc::AuthDeploymentsGetError>,
+    > {
+        self.inner
+            .call_typed::<super::rpc::AuthDeploymentsGetRpc, super::rpc::AuthDeploymentsGetError>(
+                input,
+            )
             .await
     }
     /// Call `Auth.Deployments.List`.
@@ -429,21 +308,6 @@ impl<'a> AuthRpc<'a> {
             >(input)
             .await
     }
-    /// Call `Auth.Devices.ConnectInfo.Get`.
-    pub async fn devices_connect_info_get(
-        &self,
-        input: &super::types::AuthDevicesConnectInfoGetRequest,
-    ) -> Result<
-        super::types::AuthDevicesConnectInfoGetResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthDevicesConnectInfoGetError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthDevicesConnectInfoGetRpc,
-                super::rpc::AuthDevicesConnectInfoGetError,
-            >(input)
-            .await
-    }
     /// Call `Auth.Devices.Disable`.
     pub async fn devices_disable(
         &self,
@@ -525,6 +389,18 @@ impl<'a> AuthRpc<'a> {
             .call_typed::<super::rpc::AuthGrantsGetRpc, super::rpc::AuthGrantsGetError>(input)
             .await
     }
+    /// Call `Auth.Grants.List`.
+    pub async fn grants_list(
+        &self,
+        input: &super::types::AuthGrantsListRequest,
+    ) -> Result<
+        super::types::AuthGrantsListResponse,
+        trellis_rs::generated::CallError<super::rpc::AuthGrantsListError>,
+    > {
+        self.inner
+            .call_typed::<super::rpc::AuthGrantsListRpc, super::rpc::AuthGrantsListError>(input)
+            .await
+    }
     /// Call `Auth.Grants.Revoke`.
     pub async fn grants_revoke(
         &self,
@@ -549,81 +425,6 @@ impl<'a> AuthRpc<'a> {
             .call_typed::<super::rpc::AuthGrantsSetRpc, super::rpc::AuthGrantsSetError>(input)
             .await
     }
-    /// Call `Auth.IdentityAuthority.Get`.
-    pub async fn identity_authority_get(
-        &self,
-        input: &super::types::AuthIdentityAuthorityGetRequest,
-    ) -> Result<
-        super::types::AuthIdentityAuthorityGetResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthIdentityAuthorityGetError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthIdentityAuthorityGetRpc,
-                super::rpc::AuthIdentityAuthorityGetError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.IdentityAuthority.List`.
-    pub async fn identity_authority_list(
-        &self,
-        input: &super::types::AuthIdentityAuthorityListRequest,
-    ) -> Result<
-        super::types::AuthIdentityAuthorityListResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthIdentityAuthorityListError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthIdentityAuthorityListRpc,
-                super::rpc::AuthIdentityAuthorityListError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.IdentityAuthority.Revoke`.
-    pub async fn identity_authority_revoke(
-        &self,
-        input: &super::types::AuthIdentityAuthorityRevokeRequest,
-    ) -> Result<
-        super::types::AuthIdentityAuthorityRevokeResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthIdentityAuthorityRevokeError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthIdentityAuthorityRevokeRpc,
-                super::rpc::AuthIdentityAuthorityRevokeError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.IdentityGrants.List`.
-    pub async fn identity_grants_list(
-        &self,
-        input: &super::types::AuthIdentityGrantsListRequest,
-    ) -> Result<
-        super::types::AuthIdentityGrantsListResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthIdentityGrantsListError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthIdentityGrantsListRpc,
-                super::rpc::AuthIdentityGrantsListError,
-            >(input)
-            .await
-    }
-    /// Call `Auth.IdentityGrants.Revoke`.
-    pub async fn identity_grants_revoke(
-        &self,
-        input: &super::types::AuthIdentityGrantsRevokeRequest,
-    ) -> Result<
-        super::types::AuthIdentityGrantsRevokeResponse,
-        trellis_rs::generated::CallError<super::rpc::AuthIdentityGrantsRevokeError>,
-    > {
-        self.inner
-            .call_typed::<
-                super::rpc::AuthIdentityGrantsRevokeRpc,
-                super::rpc::AuthIdentityGrantsRevokeError,
-            >(input)
-            .await
-    }
     /// Call `Auth.Issuers.Revoke`.
     pub async fn issuers_revoke(
         &self,
@@ -634,6 +435,20 @@ impl<'a> AuthRpc<'a> {
     > {
         self.inner
             .call_typed::<super::rpc::AuthIssuersRevokeRpc, super::rpc::AuthIssuersRevokeError>(
+                input,
+            )
+            .await
+    }
+    /// Call `Auth.Participants.Get`.
+    pub async fn participants_get(
+        &self,
+        input: &super::types::AuthParticipantsGetRequest,
+    ) -> Result<
+        super::types::AuthParticipantsGetResponse,
+        trellis_rs::generated::CallError<super::rpc::AuthParticipantsGetError>,
+    > {
+        self.inner
+            .call_typed::<super::rpc::AuthParticipantsGetRpc, super::rpc::AuthParticipantsGetError>(
                 input,
             )
             .await

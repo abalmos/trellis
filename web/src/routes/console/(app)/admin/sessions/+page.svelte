@@ -31,17 +31,6 @@
   const trellis = getTrellis();
 
   let activeTab = $state<"sessions" | "connections">(page.url.searchParams.get("tab") === "connections" ? "connections" : "sessions");
-  let handledTabParam = page.url.searchParams.get("tab");
-
-  $effect(() => {
-    const value = page.url.searchParams.get("tab");
-    if (value === handledTabParam) return;
-    handledTabParam = value;
-    if (value === "connections" && activeTab !== "connections") {
-      activeTab = "connections";
-      void loadConnections();
-    }
-  });
   let loading = $state(true);
   let error = $state<string | null>(null);
 
@@ -69,7 +58,7 @@
     loading = true;
     error = null;
     try {
-      currentSessionId = (await trellis.authSessionsMe({}).orThrow()).session.sessionId;
+      currentSessionId = (await trellis.authSessionsMe({}).orThrow()).session?.sessionId ?? null;
       const response = await trellis.authSessionsList({
         principalId: sessionFilterUser.trim() || undefined,
         limit: 100,
@@ -310,7 +299,7 @@
                 </td>
                 <td class="trellis-identifier text-base-content/60">{formatShortKey(session.sessionKeyId)}</td>
                 <td class="text-xs text-base-content/60">
-                  <div>Last auth {formatDate(session.lastSeenAt)}</div>
+                  <div>Last auth {formatDate(session.lastAuthenticatedAt)}</div>
                   <div>Created {formatDate(session.createdAt)}</div>
                 </td>
                 <td class="text-right">
@@ -410,7 +399,7 @@
                 <td>
                   <span class="badge badge-sm">Connection</span>
                 </td>
-                <td class="trellis-identifier text-base-content/60">{formatShortKey(connection.sessionId)}</td>
+                <td class="trellis-identifier text-base-content/60">{formatShortKey(connection.loginSessionId ?? "native")}</td>
                 <td class="trellis-identifier text-base-content/60">{formatShortKey(connection.userNkey)}</td>
                 <td>
                   <span class="text-sm">{connection.serverId}</span>

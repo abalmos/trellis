@@ -38,12 +38,12 @@ Rules:
 - deployments assign capability bundles to users and services
 - capability groups are recursive administrative macros, not runtime authority
 - trusted portal policy is keyed by exact `portalId + participantId` and selects
-  only concrete capabilities from the participant's proposal
-- services receive deployment policy through deployment authority
-  materialization and current materialized authority
-- authorization changes take effect after accepted authority is materialized;
-  runtime auth derives transport permissions from current authority, exact API
-  descriptors, and resource evidence
+  only concrete atoms from the installed participant revision
+- identities receive participant-scoped policy through the current
+  `GrantBinding`
+- authorization changes take effect when the aggregate grant/resource mutation
+  commits; runtime auth derives transport permissions from that binding, exact
+  installed API descriptors, and current resource evidence
 - auth-owned self-service RPCs may intentionally require zero granted
   capabilities when ordinary authenticated user context is sufficient, such as
   `Auth.Sessions.Me` and `Auth.Sessions.Logout`
@@ -132,8 +132,8 @@ Some operations require both:
 - the needed capabilities
 - a registered service identity
 
-Auth enforces this using service identity plus a presented contract compatible
-with the materialized authority.
+Auth enforces this using the service identity, installed participant revision,
+and current `GrantBinding`.
 
 ## Future Direction
 

@@ -36,7 +36,6 @@ service deployment:
 ```sh
 cargo run --manifest-path demos/rust/service/Cargo.toml -- \
   --trellis-url http://localhost:3000 \
-  --deployment-id <deployment-id> \
   --seed <instance-seed>
 ```
 
@@ -57,8 +56,6 @@ Run as a provisioned device:
 cargo run --manifest-path demos/rust/device/Cargo.toml -- \
   --device \
   --trellis-url http://localhost:3000 \
-  --device-deployment-id <deployment-id> \
-  --device-instance-id <instance-id> \
   --device-root-secret <root-secret>
 ```
 

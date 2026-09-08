@@ -31,10 +31,6 @@ pub(super) async fn dispatch(
         "rpc.v1.Auth.CapabilityGroups.Delete" => {
             processor.capability_groups_delete(payload, &caller).await
         }
-        "rpc.v1.Auth.IdentityGrants.List" => processor.identity_grants_list(payload, &caller).await,
-        "rpc.v1.Auth.IdentityGrants.Revoke" => {
-            processor.identity_grants_revoke(payload, &caller).await
-        }
         _ => unknown(subject),
     }
 }

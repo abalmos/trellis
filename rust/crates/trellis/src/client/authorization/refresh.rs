@@ -113,10 +113,15 @@ pub(crate) async fn refresh(
         .checked_add(system_now_millis()?)
         .and_then(|sum| sum.checked_div(2))
         .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap time overflow".into()))?;
+    let mut runtime = response["runtime"].clone();
+    runtime
+        .as_object_mut()
+        .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap runtime is not an object".into()))?
+        .insert("transports".into(), response["transports"].clone());
     cache.install(AuthorizationInstallation {
         context: serde_json::from_value(response["authorizationContext"].clone())?,
         routing: serde_json::from_value(response["routing"].clone())?,
-        runtime: serde_json::from_value(response["runtime"].clone())?,
+        runtime: serde_json::from_value(runtime)?,
         server_clock_offset_ms: server_now
             .checked_sub(midpoint)
             .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap time overflow".into()))?,

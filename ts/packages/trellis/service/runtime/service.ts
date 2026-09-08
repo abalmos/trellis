@@ -22,11 +22,11 @@ import {
 } from "../../auth.ts";
 import {
   AuthorizationContextCache,
-  type AuthorizationContextPersistence,
+  AuthorizationContextRefreshError,
   AuthorizationProviderCache,
-  MemoryAuthorizationContextStore,
   startAuthorizationContextRefresh,
 } from "../../auth/authorization_context.ts";
+import { TrellisHttpError } from "../../auth/http_error.ts";
 import type { InferSchemaType } from "../../participant.ts";
 import type {
   PermissionAtom,
@@ -534,14 +534,9 @@ export type TrellisServiceConnectOpts<
   trellisUrl: string;
   participant: GeneratedServiceParticipant<TOwnedApi, TTrellisApi>;
   name: string;
-  /** Immutable provisioned service identity and exact participant binding. */
+  /** Immutable provisioned service identity. */
   identity: {
     seed: string;
-    deploymentId: string;
-    instanceId: string;
-    participantId: string;
-    participantArtifactDigest: string;
-    participantNeedsDigest: string;
   };
   /**
    * Controls automatic telemetry initialization for this service connection.
@@ -549,7 +544,7 @@ export type TrellisServiceConnectOpts<
    */
   telemetry?: TrellisServiceConnectTelemetryOpts;
   runtime?: TrellisServiceRuntimeOpts;
-} & AuthorizationContextPersistence;
+};
 
 /** Controls automatic telemetry initialization for `TrellisService.connect()`. */
 export type TrellisServiceConnectTelemetryOpts = false | {
@@ -1248,14 +1243,9 @@ export type TrellisServiceConnectArgs<
   trellisUrl: string;
   participant: TContract;
   name: string;
-  /** Immutable provisioned service identity and exact participant binding. */
+  /** Immutable provisioned service identity. */
   identity: {
     seed: string;
-    deploymentId: string;
-    instanceId: string;
-    participantId: string;
-    participantArtifactDigest: string;
-    participantNeedsDigest: string;
   };
   /**
    * Controls automatic telemetry initialization for this service connection.
@@ -1263,7 +1253,7 @@ export type TrellisServiceConnectArgs<
    */
   telemetry?: TrellisServiceConnectTelemetryOpts;
   runtime?: TrellisServiceRuntimeOpts;
-} & AuthorizationContextPersistence;
+};
 
 /** Connected provider runtime inferred from a service contract. */
 export type ConnectedTrellisService<
@@ -2788,18 +2778,8 @@ export function connectTrellisServiceWithRuntimeDeps<
           outcome: "ok",
         },
       );
-      if (
-        !args.authorizationContextStore &&
-        args.authorizationContextEphemeral !== true
-      ) {
-        throw new Error(
-          "services require persistent authorization context storage or explicit ephemeral mode",
-        );
-      }
       const authorizationContexts = new AuthorizationContextCache(
         args.trellisUrl,
-        `service:${args.identity.deploymentId}:${args.identity.instanceId}`,
-        args.authorizationContextStore ?? new MemoryAuthorizationContextStore(),
       );
       authorizationContexts.setServerClockOffsetMs(
         bootstrap.serverClockOffsetMs,
@@ -2811,9 +2791,23 @@ export function connectTrellisServiceWithRuntimeDeps<
           bootstrapJwtExpiresAt: bootstrap.connectInfo.jwtExpiresAt,
         },
       );
+      const verifiedContext = authorizationContexts.current();
+      if (verifiedContext.context.participantId !== args.participant.id) {
+        throw new Error(
+          "service authorization context belongs to another participant",
+        );
+      }
+      if (
+        !verifiedContext.context.deploymentId ||
+        !verifiedContext.context.instanceId
+      ) {
+        throw new Error(
+          "service authorization context is missing its deployment assignment",
+        );
+      }
       const { authenticator, inboxPrefix } = await sessionAuth
         .natsConnectOptions({
-          sessionId: bootstrap.connectInfo.sessionId,
+          sessionId: bootstrap.connectInfo.connectionId,
           contextDigest: () => authorizationContexts.current().contextDigest,
           jwt: () => authorizationContexts.routingJwt(),
         });
@@ -2836,7 +2830,7 @@ export function connectTrellisServiceWithRuntimeDeps<
         const connectedNats = nc;
         authorizationProviderCache = await AuthorizationProviderCache.attach(
           connectedNats,
-          authorizationContexts.bundle().trust.authorizationRegistry,
+          authorizationContexts.bundle().authorizationRegistry,
           authorizationContexts,
         );
         authorizationProviderCache.start();
@@ -2922,8 +2916,8 @@ export function connectTrellisServiceWithRuntimeDeps<
           runtime,
           bindings: bootstrap.binding.resources,
           healthIdentity: {
-            instanceId: bootstrap.connectInfo.instanceId,
-            deploymentId: bootstrap.connectInfo.deploymentId,
+            instanceId: verifiedContext.context.instanceId,
+            deploymentId: verifiedContext.context.deploymentId,
           },
           durableEventConsumerBeforeReadinessCheck:
             runtimeDeps.durableEventConsumerBeforeReadinessCheck,
@@ -2931,9 +2925,45 @@ export function connectTrellisServiceWithRuntimeDeps<
         });
         stopContextRefresh = startAuthorizationContextRefresh({
           trellisUrl: args.trellisUrl,
-          sessionId: bootstrap.connectInfo.sessionId,
+          sessionId: bootstrap.connectInfo.connectionId,
           auth: sessionAuth,
           cache: authorizationContexts,
+          refresh: async (shouldInstall) => {
+            try {
+              const next = await fetchServiceBootstrapInfo({
+                trellisUrl: args.trellisUrl,
+                serviceName: args.name,
+                contractId: args.participant.id,
+                contractDigest: args.participant.digest,
+                contract: args.participant,
+                identityAuth,
+                sessionAuth,
+                identity: args.identity,
+                log: bootstrapLog,
+                connectionId: bootstrap.connectInfo.connectionId,
+              });
+              authorizationContexts.setServerClockOffsetMs(
+                next.serverClockOffsetMs,
+              );
+              return await authorizationContexts.install(
+                next.connectInfo.authorizationContext,
+                {
+                  bootstrapJwt: next.connectInfo.jwt,
+                  bootstrapJwtExpiresAt: next.connectInfo.jwtExpiresAt,
+                },
+                undefined,
+                shouldInstall,
+              );
+            } catch (error) {
+              if (error instanceof TrellisHttpError) {
+                throw new AuthorizationContextRefreshError(
+                  error.status,
+                  error.code,
+                );
+              }
+              throw error;
+            }
+          },
           onRefresh: () =>
             service.connection.status.phase !== "connected"
               ? nc.reconnect()

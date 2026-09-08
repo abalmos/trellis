@@ -22,12 +22,7 @@ export {
   refreshAuthorizationContextWithMetadata,
   startAuthorizationContextRefresh,
 } from "./authorization/refresh.ts";
-export {
-  MemoryAuthorizationContextStore,
-  validateAuthorizationClientStateTransition,
-} from "./authorization/store.ts";
 export type {
-  AuthorizationClientState,
   AuthorizationContextBundle,
   AuthorizationContextRefreshResponse,
   AuthorizationContextRefreshResult,
@@ -37,17 +32,9 @@ export type {
   AuthorizationRoutingMaterial,
   AuthorizationRuntimeBinding,
   AuthorizationRuntimeTransports,
-  AuthorizationSessionBinding,
-  AuthorizationTrustBundle,
-  AuthorizationTrustState,
   VerifiedAuthorizationContext,
 } from "./authorization/types.ts";
-export type {
-  AuthorizationContextPersistence,
-  AuthorizationContextStore,
-} from "./authorization/store.ts";
 export {
   AuthorizationContextBundleSchema,
   AuthorizationContextRefreshResponseSchema,
-  AuthorizationTrustBundleSchema,
 } from "./authorization/types.ts";

@@ -7,12 +7,9 @@
   import { onMount } from "svelte";
   import { getInitials, getRoleLabel } from "$lib/control-panel.ts";
   import {
-    describeUserGrant,
     formatIdentityProviderLabel,
-    participantKindBadgeClass,
     participantKindLabel,
     type ParticipantKind,
-    type UserGrantRecord,
   } from "$lib/auth_display.ts";
   import { errorMessage, formatDate } from "$lib/format";
   import { getNotifications } from "$lib/notifications.svelte";
@@ -24,11 +21,6 @@
   import { getAuthenticatedUser, getConnection, getTrellis } from "$lib/trellis";
 
   type IdentityRecord = apis.auth.AuthUserIdentitiesListOutput["entries"][number];
-  type RpcTakeable<T> = { take(): Promise<T> };
-  type IdentityGrantsRequest = {
-    (method: "Auth.IdentityGrants.List", input: { limit: number; offset: number }): RpcTakeable<{ entries?: UserGrantRecord[] }>;
-  };
-
   const trellis = getTrellis();
   const connection = getConnection();
   const notifications = getNotifications();
@@ -37,7 +29,7 @@
   let error = $state<string | null>(null);
   let user = $state<apis.auth.AuthSessionsMeOutput["user"] | null>(null);
   let participantKind = $state<ParticipantKind | null>(null);
-  let grants = $state<UserGrantRecord[]>([]);
+  let platformPrivileges = $state<string[]>([]);
   let identities = $state<IdentityRecord[]>([]);
   let linkPending = $state(false);
   let linkError = $state<string | null>(null);
@@ -50,18 +42,21 @@
 
   const connectionStatus = $derived(connection.status.phase);
   const hasLocalIdentity = $derived(identities.some((identity) => identity.providerId.trim().toLowerCase() === "local"));
-  const capabilityCount: number = $derived(0);
+  const capabilityCount = $derived(platformPrivileges.length);
   const accountRole = $derived(user ? getRoleLabel(user) : "Member");
   const sessionStatusLabel = $derived(
     connectionStatus === "connected" ? "Connected" : connectionStatus === "reconnecting" ? "Reconnecting" : "Disconnected",
   );
-  const activeGrantCount = $derived(grants.length);
   const mastheadSentence = $derived(
-    `This account signs in through ${identities.length} ${identities.length === 1 ? "method" : "methods"} and has ${activeGrantCount} active delegated ${activeGrantCount === 1 ? "grant" : "grants"}.`,
+    `This account signs in through ${identities.length} ${identities.length === 1 ? "method" : "methods"}.`,
   );
 
   function friendlyIdentityName(identity: IdentityRecord): string {
     return identity.observedName?.trim() || identity.observedEmail?.trim() || formatIdentityProviderLabel(identity.providerId);
+  }
+
+  function capabilityCountLabel(count: number): string {
+    return `${count} ${count === 1 ? "privilege" : "privileges"}`;
   }
 
   function isLocalIdentity(identity: IdentityRecord): boolean {
@@ -73,10 +68,6 @@
       return identity.subject.trim() || identity.observedName?.trim() || identity.observedEmail?.trim() || "Local account";
     }
     return friendlyIdentityName(identity);
-  }
-
-  function capabilityCountLabel(count: number): string {
-    return `${count} ${count === 1 ? "capability" : "capabilities"}`;
   }
 
   function currentReturnTarget(): string {
@@ -166,10 +157,10 @@
     try {
       const me = await getAuthenticatedUser(trellis);
       user = me.user ?? null;
-      participantKind = me.session.participantKind;
+      participantKind = me.connection.participantKind;
+      platformPrivileges = me.connection.platformPrivileges;
       if (!me.user) {
         identities = [];
-        grants = [];
         return;
       }
 
@@ -178,7 +169,6 @@
         error = errorMessage(identitiesResponse);
         return;
       }
-      grants = [];
       identities = identitiesResponse.entries ?? [];
     } catch (e) {
       error = errorMessage(e);
@@ -280,46 +270,6 @@
 
               {#if !hasLocalIdentity}
                 <p class="text-sm text-base-content/60">No local password is connected to this account. Your connected login providers still work.</p>
-              {/if}
-            </div>
-          </div>
-        </section>
-
-        <section class="py-4">
-          <div class="grid gap-3 lg:grid-cols-[14rem_minmax(0,1fr)]">
-            <div>
-              <h3 class="font-semibold">What can access your data</h3>
-              <p class="mt-1 text-sm text-base-content/60">Apps and agents listed here can act for this account.</p>
-            </div>
-            <div>
-              {#if grants.length === 0}
-                <div class="rounded-box border border-base-300 p-3">
-                  <EmptyState title="No apps or agents can act for this account" description="New delegated access will appear here before it can be revoked." />
-                </div>
-              {:else}
-                <div class="divide-y divide-base-300 rounded-box border border-base-300">
-                  {#each grants as grant (grant.identityGrantId)}
-                    {@const summary = describeUserGrant(grant)}
-                    <div class="p-3">
-                      <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_12rem_5rem] lg:items-start">
-                        <div class="min-w-0">
-                          <div class="flex flex-wrap items-center gap-2">
-                            <p class="font-medium">{summary.title}</p>
-                            <span class={["badge badge-sm", participantKindBadgeClass(grant.participantKind)]}>{participantKindLabel(grant.participantKind)}</span>
-                          </div>
-                          <p class="mt-1 text-sm text-base-content/70">{grant.description || summary.details}</p>
-                        </div>
-                        <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-base-content/60 sm:grid-cols-3 lg:block lg:space-y-1">
-                          <div><dt class="font-semibold text-base-content/70">Access</dt><dd>{capabilityCountLabel(grant.capabilities.length)}</dd></div>
-                          <div><dt class="font-semibold text-base-content/70">Granted</dt><dd>{formatDate(grant.grantedAt)}</dd></div>
-                          <div><dt class="font-semibold text-base-content/70">Updated</dt><dd>{formatDate(grant.updatedAt)}</dd></div>
-                        </dl>
-                        <div class="lg:text-right">
-                        </div>
-                      </div>
-                    </div>
-                  {/each}
-                </div>
               {/if}
             </div>
           </div>

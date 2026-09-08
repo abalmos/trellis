@@ -9,7 +9,7 @@ The expected lifecycle is:
 1. an admin or manufacturing process provisions the device instance by `publicIdentityKey` and `activationKey`
 2. the instance is attached to a device deployment
 3. a user activates the device through an authenticated portal flow
-4. the activated device reconnects later by asking Trellis for current connect info
+4. the activated device bootstraps with its durable identity and a fresh session key
 
 Unknown or self-registering devices may be added later as an extension, but they are not the primary v1 model.
 
@@ -27,9 +27,13 @@ Trellis stores the public identity key plus activation-only secret material. It 
 
 ## Device deployments
 
-A device deployment is a deployment-owned record used during activation and online auth. It defines deployment authority, reviewed contract evidence, review policy, and disabled state for the devices attached to it.
+A device deployment is a deployment-owned record used during activation and
+online auth. It selects the installed participant, review policy, resource
+evidence, and lifecycle state for attached devices.
 
-Activated devices present contract evidence at runtime. Trellis checks that the derived required boundary fits deployment authority before granting NATS access.
+Activated devices send identity/proof inputs at runtime. Trellis resolves the
+installed participant and current `GrantBinding` server-side before granting
+NATS access.
 
 ## Activation portals
 
@@ -41,7 +45,9 @@ The activation portal is still a browser web app. If it calls Trellis after logi
 
 Device deployments may require review before a device becomes usable online. Review policy is deployment-owned, which means operators can decide whether activation is automatic, manually reviewed, or disabled for a deployment.
 
-Review gates activation. It does not replace the device's later runtime proof. Once online, the activated device must still authenticate with its own identity key and present contract evidence that fits deployment authority.
+Review gates activation. It does not replace the later runtime proof. Once
+approved, the device still authenticates with its identity key and receives
+only the grants/resources in its current participant-scoped binding.
 
 ## Online credentials
 

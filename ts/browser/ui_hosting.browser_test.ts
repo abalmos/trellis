@@ -1,5 +1,5 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { join, resolve } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 import { chromium } from "playwright";
 
 import { startTrellisRuntime } from "../integration/_support/runtime.ts";
@@ -101,7 +101,7 @@ Deno.test("configured UI directories serve both applications", async () => {
 });
 
 Deno.test("the unified web source is fully reverse proxied through Trellis", async () => {
-  const vite = startVite(resolve("../web"));
+  const vite = startVite(fromFileUrl(new URL("../../web/", import.meta.url)));
   try {
     await waitForUrl("http://127.0.0.1:5173/login");
     const runtime = await startTrellisRuntime({

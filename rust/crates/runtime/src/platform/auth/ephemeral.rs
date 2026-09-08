@@ -117,11 +117,10 @@ pub(crate) struct AuthBrowserFlow {
     pub request_id: String,
     pub request_digest: String,
     pub participant_id: String,
-    pub participant_artifact_digest: String,
-    pub participant_needs_digest: String,
+    pub installed_revision: u64,
+    pub target_grant_revision: u64,
     pub consent: BrowserConsentProposal,
     pub session_public_key: String,
-    pub session_nkey: String,
     pub portal_id: String,
     pub redirect_target: Option<String>,
     pub principal_id: Option<String>,
@@ -144,20 +143,15 @@ impl AuthBrowserFlow {
         require_nonempty("requestId", &self.request_id)?;
         require_digest("requestDigest", &self.request_digest)?;
         require_nonempty("participantId", &self.participant_id)?;
-        require_digest(
-            "participantArtifactDigest",
-            &self.participant_artifact_digest,
-        )?;
-        require_digest("participantNeedsDigest", &self.participant_needs_digest)?;
+        require_positive("installedRevision", self.installed_revision)?;
+        if self.target_grant_revision > super::MAX_PROTOCOL_INTEGER {
+            return invalid("targetGrantRevision exceeds safe integer range");
+        }
         self.consent.validate()?;
-        if self.consent.participant_id != self.participant_id
-            || self.consent.participant_artifact_digest != self.participant_artifact_digest
-            || self.consent.participant_needs_digest != self.participant_needs_digest
-        {
+        if self.consent.participant_id != self.participant_id {
             return invalid("consent proposal does not match participant binding");
         }
         require_nonempty("sessionPublicKey", &self.session_public_key)?;
-        require_nonempty("sessionNkey", &self.session_nkey)?;
         require_nonempty("portalId", &self.portal_id)?;
         validate_optional_text("redirectTarget", self.redirect_target.as_deref())?;
         validate_optional_text("principalId", self.principal_id.as_deref())?;
@@ -231,11 +225,9 @@ impl AuthBrowserFlow {
             && self.request_id == replacement.request_id
             && self.request_digest == replacement.request_digest
             && self.participant_id == replacement.participant_id
-            && self.participant_artifact_digest == replacement.participant_artifact_digest
-            && self.participant_needs_digest == replacement.participant_needs_digest
+            && self.installed_revision == replacement.installed_revision
             && self.consent == replacement.consent
             && self.session_public_key == replacement.session_public_key
-            && self.session_nkey == replacement.session_nkey
             && self.portal_id == replacement.portal_id
             && self.redirect_target == replacement.redirect_target
             && self.created_at == replacement.created_at
@@ -296,7 +288,13 @@ pub(crate) struct AuthOAuthState {
 pub(crate) struct AuthConnectionPresence {
     pub format: String,
     pub connection_id: String,
-    pub session_id: String,
+    pub runtime_connection_id: String,
+    pub login_session_id: Option<String>,
+    pub principal_id: String,
+    pub principal_kind: trellis_protocol::AuthorizationPrincipalKind,
+    pub participant_id: String,
+    pub deployment_id: Option<String>,
+    pub instance_id: Option<String>,
     pub context_digest: String,
     pub server_id: String,
     pub client_id: String,
@@ -335,7 +333,38 @@ impl AuthConnectionPresence {
             "trellis.auth-connection-presence.v1",
         )?;
         require_digest("connectionId", &self.connection_id)?;
-        require_nonempty("sessionId", &self.session_id)?;
+        self.runtime_connection_id
+            .parse::<ulid::Ulid>()
+            .map_err(|_| {
+                AuthorizationStateError::InvalidRecord("runtimeConnectionId must be a ULID".into())
+            })?;
+        require_nonempty("principalId", &self.principal_id)?;
+        require_nonempty("participantId", &self.participant_id)?;
+        match self.principal_kind {
+            trellis_protocol::AuthorizationPrincipalKind::User => {
+                self.login_session_id
+                    .as_deref()
+                    .ok_or(AuthorizationStateError::NotAuthorized)?
+                    .parse::<ulid::Ulid>()
+                    .map_err(|_| {
+                        AuthorizationStateError::InvalidRecord(
+                            "loginSessionId must be a ULID".into(),
+                        )
+                    })?;
+                if self.deployment_id.is_some() || self.instance_id.is_some() {
+                    return invalid("user presence cannot carry native instance identity");
+                }
+            }
+            trellis_protocol::AuthorizationPrincipalKind::Service
+            | trellis_protocol::AuthorizationPrincipalKind::Device => {
+                if self.login_session_id.is_some()
+                    || self.deployment_id.as_ref().is_none_or(String::is_empty)
+                    || self.instance_id.as_ref().is_none_or(String::is_empty)
+                {
+                    return invalid("native presence requires deployment and instance identity, without a login session");
+                }
+            }
+        }
         require_digest("contextDigest", &self.context_digest)?;
         require_nonempty("serverId", &self.server_id)?;
         require_nonempty("clientId", &self.client_id)?;
@@ -488,7 +517,7 @@ pub(crate) trait AuthEphemeralRepository: Send + Sync {
     ) -> Result<(), AuthorizationStateError>;
     async fn list_connection_presence(
         &self,
-        session_id: Option<&str>,
+        login_session_id: Option<&str>,
     ) -> Result<Vec<AuthConnectionPresence>, AuthorizationStateError>;
     async fn list_connection_presence_by_context(
         &self,
@@ -630,11 +659,13 @@ impl AuthEphemeralRepository for InMemoryAuthEphemeralRepository {
 
     async fn list_connection_presence(
         &self,
-        session_id: Option<&str>,
+        login_session_id: Option<&str>,
     ) -> Result<Vec<AuthConnectionPresence>, AuthorizationStateError> {
         Ok(lock(&self.connections)?
             .values()
-            .filter(|record| session_id.is_none_or(|id| record.session_id == id))
+            .filter(|record| {
+                login_session_id.is_none_or(|id| record.login_session_id.as_deref() == Some(id))
+            })
             .cloned()
             .collect())
     }
@@ -679,7 +710,8 @@ fn validate_browser_replacement(
             && (current.principal_id != replacement.principal_id
                 || current.authenticated_provider_id != replacement.authenticated_provider_id
                 || current.authenticated_roles != replacement.authenticated_roles
-                || current.portal_binding_digest != replacement.portal_binding_digest)
+                || current.portal_binding_digest != replacement.portal_binding_digest
+                || current.target_grant_revision != replacement.target_grant_revision)
         || current.principal_id.is_none()
             && replacement.principal_id.is_some()
             && replacement.state != AuthBrowserFlowState::Authenticated
@@ -952,7 +984,7 @@ mod nats {
 
         async fn list_connection_presence(
             &self,
-            session_id: Option<&str>,
+            login_session_id: Option<&str>,
         ) -> Result<Vec<AuthConnectionPresence>, AuthorizationStateError> {
             let mut keys =
                 self.connections.keys().await.map_err(|error| {
@@ -979,7 +1011,8 @@ mod nats {
                         continue;
                     }
                 };
-                if session_id.is_none_or(|id| record.session_id == id) {
+                if login_session_id.is_none_or(|id| record.login_session_id.as_deref() == Some(id))
+                {
                     records.push(record);
                 }
             }

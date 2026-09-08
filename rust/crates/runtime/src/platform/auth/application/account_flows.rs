@@ -2,7 +2,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use trellis_protocol::GrantSet;
+use trellis_protocol::{GrantSet, PlatformPrivilege};
 use ulid::Ulid;
 use url::Url;
 
@@ -15,10 +15,21 @@ use super::bearer_secret_digest;
 pub struct FirstAdminAuthorityTarget {
     /// Internal administration participant ID.
     pub participant_id: String,
-    /// Exact internal participant artifact digest.
-    pub participant_artifact_digest: String,
-    /// Exact internal participant needs digest.
-    pub participant_needs_digest: String,
+    /// Exact installed internal participant definition.
+    pub installed_revision: u64,
+}
+
+/// Exact participant authority installed atomically with a first administrator.
+#[derive(Clone, Debug)]
+pub struct FirstAdminBinding {
+    /// Participant receiving authority.
+    pub participant_id: String,
+    /// Exact installed participant revision.
+    pub installed_revision: u64,
+    /// Exact granted atoms and platform privileges.
+    pub grant_set: GrantSet,
+    /// Platform privileges granted only while using this participant.
+    pub platform_privileges: Vec<PlatformPrivilege>,
 }
 
 /// One-time first-administrator startup result.
@@ -49,16 +60,8 @@ pub struct FirstAdminRegistration {
     pub email: Option<String>,
     /// Required-nullable profile image URL.
     pub image_url: Option<String>,
-    /// Exact app or agent participant ID receiving admin authority.
-    pub participant_id: String,
-    /// Exact participant artifact digest.
-    pub participant_artifact_digest: String,
-    /// Exact accepted needs digest.
-    pub participant_needs_digest: String,
-    /// Exact grants required to invoke administrator surfaces.
-    pub grant_set: GrantSet,
-    /// Exact capabilities required by the complete administration participant.
-    pub capabilities: Vec<String>,
+    /// Exact participant authorities committed with the administrator.
+    pub bindings: Vec<FirstAdminBinding>,
     /// Required-nullable authority expiry.
     pub authority_expires_at: Option<i64>,
     /// Completion time in Unix milliseconds.
@@ -86,16 +89,8 @@ pub struct FirstAdminFederatedRegistration {
     pub email: Option<String>,
     /// Required-nullable profile image URL.
     pub image_url: Option<String>,
-    /// Exact administration participant ID.
-    pub participant_id: String,
-    /// Exact administration participant artifact digest.
-    pub participant_artifact_digest: String,
-    /// Exact accepted administration participant needs digest.
-    pub participant_needs_digest: String,
-    /// Exact grants required to invoke administrator surfaces.
-    pub grant_set: GrantSet,
-    /// Exact capabilities required by the complete administration participant.
-    pub capabilities: Vec<String>,
+    /// Exact participant authorities committed with the administrator.
+    pub bindings: Vec<FirstAdminBinding>,
     /// Required-nullable authority expiry.
     pub authority_expires_at: Option<i64>,
     /// Completion time in Unix milliseconds.
@@ -170,47 +165,8 @@ pub struct CompleteIdentityLinkInput {
 
 impl<R> AuthService<R>
 where
-    R: AccountRepository
-        + AuthorityEvidenceRepository
-        + AuthorityRepository
-        + ContextRepository
-        + Clone,
+    R: AccountRepository + GrantRepository + Clone,
 {
-    async fn materialize_admin_authority(
-        &self,
-        authority_id: String,
-        principal_id: &str,
-        participant_id: &str,
-        participant_artifact_digest: &str,
-        participant_needs_digest: &str,
-        now: i64,
-    ) -> Result<(), AuthorizationStateError> {
-        let binding = self
-            .repository
-            .get_participant_binding(participant_id, participant_artifact_digest)
-            .await?
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord(
-                    "administrator participant binding is missing".to_owned(),
-                )
-            })?;
-        let target = AuthorityTarget {
-            kind: AuthorityKind::Identity,
-            authority_id,
-        };
-        let scope = AuthorityEvidenceScope {
-            target: target.clone(),
-            participant_id: participant_id.to_owned(),
-            participant_artifact_digest: participant_artifact_digest.to_owned(),
-            participant_needs_digest: participant_needs_digest.to_owned(),
-        };
-        ensure_identity_resources(&self.repository, scope.clone(), &binding, principal_id, now)
-            .await?;
-        ensure_authority_dependencies(&self.repository, scope, &binding, now).await?;
-        self.authorization.reconcile_authority(&target, now).await?;
-        Ok(())
-    }
-
     /// Complete a first-administrator flow and reconcile its exact authority.
     ///
     /// # Errors
@@ -224,15 +180,6 @@ where
     ) -> Result<IdempotentOutcome<FirstAdminAccount>, AuthorizationStateError> {
         super::validation::validate_idempotency_and_actions(&input.idempotency, &input.actions)?;
         super::super::domain::require_protocol_timestamp("completedAt", input.completed_at)?;
-        if !input
-            .capabilities
-            .iter()
-            .any(|capability| capability == "trellis.auth::admin")
-        {
-            input.capabilities.push("trellis.auth::admin".to_owned());
-            input.capabilities.sort();
-            input.capabilities.dedup();
-        }
         let token = URL_SAFE_NO_PAD.decode(&input.token).map_err(|_| {
             AuthorizationStateError::InvalidRecord(
                 "first-admin token is not canonical base64url".to_owned(),
@@ -254,41 +201,29 @@ where
                 .user(&principal_id)
                 .await?
                 .ok_or(AuthorizationStateError::StorageConflict)?;
-            let current = self
-                .repository
-                .get_identity_authority(&principal_id, &input.participant_id)
-                .await?;
-            let authority = IdentityAuthorityRecord {
-                authority_id: current.as_ref().map_or_else(
-                    || format!("auth_{}", Ulid::new()),
-                    |authority| authority.authority_id.clone(),
-                ),
-                principal_id: principal_id.clone(),
-                participant_id: input.participant_id.clone(),
-                participant_artifact_digest: input.participant_artifact_digest.clone(),
-                accepted_needs_digest: input.participant_needs_digest.clone(),
-                desired_grant_set: input.grant_set.clone(),
-                desired_capabilities: input.capabilities.clone(),
-                state: AuthorityState::Accepted,
-                version: current
-                    .as_ref()
-                    .map_or(1, |authority| authority.version + 1),
-                created_at: current
-                    .as_ref()
-                    .map_or(input.completed_at, |authority| authority.created_at),
-                updated_at: input.completed_at,
-                expires_at: input.authority_expires_at,
-                decision: Some(AuthorityDecision {
-                    decided_at: input.completed_at,
-                    decided_by: "system:admin-account".to_owned(),
-                    reason: None,
-                }),
-            };
-            super::validation::validate_first_admin_authority(
-                &authority,
-                &account.principal,
-                input.completed_at,
-            )?;
+            let mut bindings = Vec::with_capacity(input.bindings.len());
+            for requested in &input.bindings {
+                let current = self
+                    .repository
+                    .get_grant_binding(
+                        GrantOwnerKind::User,
+                        principal_id.clone(),
+                        requested.participant_id.clone(),
+                    )
+                    .await?;
+                bindings.push(GrantBindingReplacement {
+                    owner_kind: GrantOwnerKind::User,
+                    owner_id: principal_id.clone(),
+                    participant_id: requested.participant_id.clone(),
+                    installed_revision: requested.installed_revision,
+                    grants: requested.grant_set.clone(),
+                    platform_privileges: requested.platform_privileges.clone(),
+                    expires_at: input.authority_expires_at,
+                    expected_revision: current.as_ref().map_or(0, |binding| binding.revision),
+                    state: GrantBindingState::Active,
+                    provenance: None,
+                });
+            }
             let profile = UserProfileRecord {
                 display_name: input.display_name.clone(),
                 email: input.email.clone(),
@@ -299,13 +234,12 @@ where
                 })?,
                 ..account.profile.clone()
             };
-            let authority_id = authority.authority_id.clone();
             let outcome = self
                 .complete_password_reset(CompletePasswordResetInput {
                     token: input.token,
                     expected_flow_version: input.expected_flow_version,
                     username: Some(input.username),
-                    authority: Some(authority),
+                    bindings,
                     profile: Some(profile.clone()),
                     password: input.password,
                     consumed_at: input.completed_at,
@@ -313,15 +247,6 @@ where
                     actions: input.actions,
                 })
                 .await?;
-            self.materialize_admin_authority(
-                authority_id,
-                &principal_id,
-                &input.participant_id,
-                &input.participant_artifact_digest,
-                &input.participant_needs_digest,
-                input.completed_at,
-            )
-            .await?;
             return Ok(match outcome {
                 IdempotentOutcome::Applied(_) => IdempotentOutcome::Applied(FirstAdminAccount {
                     principal: account.principal,
@@ -371,39 +296,30 @@ where
             linked_at: input.completed_at,
             last_seen_at: input.completed_at,
         };
-        let authority = IdentityAuthorityRecord {
-            authority_id: format!("auth_{}", Ulid::new()),
-            principal_id: principal_id.clone(),
-            participant_id: input.participant_id,
-            participant_artifact_digest: input.participant_artifact_digest,
-            accepted_needs_digest: input.participant_needs_digest,
-            desired_grant_set: input.grant_set,
-            desired_capabilities: input.capabilities,
-            state: AuthorityState::Accepted,
-            version: 1,
-            created_at: input.completed_at,
-            updated_at: input.completed_at,
-            expires_at: input.authority_expires_at,
-            decision: Some(AuthorityDecision {
-                decided_at: input.completed_at,
-                decided_by: "system:first-admin".to_owned(),
-                reason: None,
-            }),
-        };
+        let bindings = input
+            .bindings
+            .into_iter()
+            .map(|requested| GrantBindingReplacement {
+                owner_kind: GrantOwnerKind::User,
+                owner_id: principal_id.clone(),
+                participant_id: requested.participant_id,
+                installed_revision: requested.installed_revision,
+                grants: requested.grant_set,
+                platform_privileges: requested.platform_privileges,
+                expires_at: input.authority_expires_at,
+                expected_revision: 0,
+                state: GrantBindingState::Active,
+                provenance: None,
+            })
+            .collect();
         super::validation::validate_new_user_account(
             &principal,
             &profile,
             Some(&credential),
             Some(&local_identity),
         )?;
-        super::validation::validate_first_admin_authority(
-            &authority,
-            &principal,
-            input.completed_at,
-        )?;
         input.idempotency.result = json!({
             "principalId": principal_id,
-            "authorityId": authority.authority_id,
         });
         let outcome = self
             .repository
@@ -414,33 +330,12 @@ where
                 profile: profile.clone(),
                 credential: Some(credential),
                 identity: local_identity,
-                authority: authority.clone(),
+                bindings,
                 consumed_at: input.completed_at,
                 idempotency: input.idempotency,
                 actions: input.actions,
             })
             .await?;
-        let authority_id = match &outcome {
-            IdempotentOutcome::Applied(_) => authority.authority_id,
-            IdempotentOutcome::Replayed(value) => value
-                .get("authorityId")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| {
-                    AuthorizationStateError::Storage(
-                        "first-admin replay result has no authorityId".to_owned(),
-                    )
-                })?
-                .to_owned(),
-        };
-        self.materialize_admin_authority(
-            authority_id,
-            &principal.principal_id,
-            &authority.participant_id,
-            &authority.participant_artifact_digest,
-            &authority.accepted_needs_digest,
-            input.completed_at,
-        )
-        .await?;
         Ok(match outcome {
             IdempotentOutcome::Applied(_) => {
                 IdempotentOutcome::Applied(FirstAdminAccount { principal, profile })
@@ -461,15 +356,6 @@ where
     ) -> Result<IdempotentOutcome<FirstAdminAccount>, AuthorizationStateError> {
         super::validation::validate_idempotency_and_actions(&input.idempotency, &input.actions)?;
         super::super::domain::require_protocol_timestamp("completedAt", input.completed_at)?;
-        if !input
-            .capabilities
-            .iter()
-            .any(|capability| capability == "trellis.auth::admin")
-        {
-            input.capabilities.push("trellis.auth::admin".to_owned());
-            input.capabilities.sort();
-            input.capabilities.dedup();
-        }
         let token = URL_SAFE_NO_PAD.decode(&input.token).map_err(|_| {
             AuthorizationStateError::InvalidRecord(
                 "first-admin token is not canonical base64url".to_owned(),
@@ -508,34 +394,25 @@ where
             linked_at: input.completed_at,
             last_seen_at: input.completed_at,
         };
-        let authority = IdentityAuthorityRecord {
-            authority_id: format!("auth_{}", Ulid::new()),
-            principal_id: principal_id.clone(),
-            participant_id: input.participant_id,
-            participant_artifact_digest: input.participant_artifact_digest,
-            accepted_needs_digest: input.participant_needs_digest,
-            desired_grant_set: input.grant_set,
-            desired_capabilities: input.capabilities,
-            state: AuthorityState::Accepted,
-            version: 1,
-            created_at: input.completed_at,
-            updated_at: input.completed_at,
-            expires_at: input.authority_expires_at,
-            decision: Some(AuthorityDecision {
-                decided_at: input.completed_at,
-                decided_by: "system:first-admin".to_owned(),
-                reason: Some("federated first-administrator bootstrap".to_owned()),
-            }),
-        };
+        let bindings = input
+            .bindings
+            .into_iter()
+            .map(|requested| GrantBindingReplacement {
+                owner_kind: GrantOwnerKind::User,
+                owner_id: principal_id.clone(),
+                participant_id: requested.participant_id,
+                installed_revision: requested.installed_revision,
+                grants: requested.grant_set,
+                platform_privileges: requested.platform_privileges,
+                expires_at: input.authority_expires_at,
+                expected_revision: 0,
+                state: GrantBindingState::Active,
+                provenance: None,
+            })
+            .collect();
         super::validation::validate_new_user_account(&principal, &profile, None, Some(&identity))?;
-        super::validation::validate_first_admin_authority(
-            &authority,
-            &principal,
-            input.completed_at,
-        )?;
         input.idempotency.result = json!({
             "principalId": principal_id,
-            "authorityId": authority.authority_id,
         });
         let outcome = self
             .repository
@@ -546,32 +423,11 @@ where
                 profile: profile.clone(),
                 credential: None,
                 identity,
-                authority: authority.clone(),
+                bindings,
                 consumed_at: input.completed_at,
                 idempotency: input.idempotency,
                 actions: input.actions,
             })
-            .await?;
-        let authority_id = match &outcome {
-            IdempotentOutcome::Applied(_) => authority.authority_id,
-            IdempotentOutcome::Replayed(value) => value
-                .get("authorityId")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| {
-                    AuthorizationStateError::Storage(
-                        "first-admin replay result has no authorityId".to_owned(),
-                    )
-                })?
-                .to_owned(),
-        };
-        self.authorization
-            .reconcile_authority(
-                &AuthorityTarget {
-                    kind: AuthorityKind::Identity,
-                    authority_id,
-                },
-                input.completed_at,
-            )
             .await?;
         Ok(match outcome {
             IdempotentOutcome::Applied(_) => {
@@ -724,10 +580,10 @@ where
     pub(crate) async fn ensure_admin_account_flow(
         &self,
         portal_base_url: &str,
-        authority_target: &FirstAdminAuthorityTarget,
+        authority_targets: &[FirstAdminAuthorityTarget],
         now: i64,
     ) -> Result<Option<FirstAdminBootstrap>, AuthorizationStateError> {
-        self.first_admin_flow(portal_base_url, authority_target, now, false)
+        self.first_admin_flow(portal_base_url, authority_targets, now, false)
             .await
     }
 
@@ -740,21 +596,30 @@ where
     pub(crate) async fn rotate_admin_account_flow(
         &self,
         portal_base_url: &str,
-        authority_target: &FirstAdminAuthorityTarget,
+        authority_targets: &[FirstAdminAuthorityTarget],
         now: i64,
     ) -> Result<Option<FirstAdminBootstrap>, AuthorizationStateError> {
-        self.first_admin_flow(portal_base_url, authority_target, now, true)
+        self.first_admin_flow(portal_base_url, authority_targets, now, true)
             .await
     }
 
     async fn first_admin_flow(
         &self,
         portal_base_url: &str,
-        authority_target: &FirstAdminAuthorityTarget,
+        authority_targets: &[FirstAdminAuthorityTarget],
         now: i64,
         rotate: bool,
     ) -> Result<Option<FirstAdminBootstrap>, AuthorizationStateError> {
         super::super::domain::require_protocol_timestamp("now", now)?;
+        if authority_targets.is_empty()
+            || authority_targets.iter().any(|target| {
+                target.participant_id.trim().is_empty() || target.installed_revision == 0
+            })
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "first-admin authority target is invalid".to_owned(),
+            ));
+        }
         let mut bootstrap_url = Url::parse(portal_base_url).map_err(|_| {
             AuthorizationStateError::InvalidRecord("portal base URL is invalid".to_owned())
         })?;
@@ -781,9 +646,10 @@ where
             target_provider_id: None,
             return_location: None,
             payload: json!({
-                "participantId": authority_target.participant_id,
-                "participantArtifactDigest": authority_target.participant_artifact_digest,
-                "participantNeedsDigest": authority_target.participant_needs_digest,
+                "bindings": authority_targets.iter().map(|target| json!({
+                    "participantId": target.participant_id,
+                    "installedRevision": target.installed_revision,
+                })).collect::<Vec<_>>(),
             }),
             state: AccountFlowState::Pending,
             created_at: now,

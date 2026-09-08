@@ -15,8 +15,8 @@ pub(super) async fn dispatch(
             .filter(|value| !value.is_empty())
             .ok_or_else(|| AuthorizationStateError::InvalidRecord(format!("{name} header missing")))
     };
-    let session_key = header("session-key")?;
     let proof = header("proof")?;
+    let session_key = header("session-key")?;
     let authorization_context = header("authorization-context")?;
     let request_id = header("request-id")?;
     let iat = header("iat")?
@@ -57,9 +57,9 @@ pub(super) async fn dispatch(
             AuthorizationPrincipalKind::Service => PrincipalKind::Service,
             AuthorizationPrincipalKind::Device => PrincipalKind::Device,
         },
-        session_id: verified.caller.session_id.clone(),
-        session_public_key: session_key,
+        session_public_key: verified.caller.session_key,
         platform_privileges: verified.context.platform_privileges().to_vec(),
+        context: verified.context,
     };
     workflows::dispatch(processor, subject, &message.payload, validated).await
 }

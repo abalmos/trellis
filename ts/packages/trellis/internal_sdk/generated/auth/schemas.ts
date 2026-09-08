@@ -378,16 +378,31 @@ export const AuthConnectionsListResponseSchema = {
             "type": "integer",
           },
           "connectionId": { "minLength": 1, "type": "string" },
+          "contextDigest": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "type": "string",
+          },
+          "deploymentId": {
+            "anyOf": [{ "minLength": 1, "type": "string" }, { "type": "null" }],
+          },
+          "instanceId": {
+            "anyOf": [{ "minLength": 1, "type": "string" }, { "type": "null" }],
+          },
           "lastSeenAt": {
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer",
           },
+          "loginSessionId": {
+            "anyOf": [{ "minLength": 1, "type": "string" }, { "type": "null" }],
+          },
+          "participantId": { "minLength": 1, "type": "string" },
+          "principalId": { "minLength": 1, "type": "string" },
           "remoteAddress": {
             "anyOf": [{ "type": "string" }, { "type": "null" }],
           },
+          "runtimeConnectionId": { "minLength": 1, "type": "string" },
           "serverId": { "minLength": 1, "type": "string" },
-          "sessionId": { "minLength": 1, "type": "string" },
           "userNkey": { "minLength": 1, "type": "string" },
         },
         "required": [
@@ -397,7 +412,13 @@ export const AuthConnectionsListResponseSchema = {
           "lastSeenAt",
           "remoteAddress",
           "serverId",
-          "sessionId",
+          "runtimeConnectionId",
+          "loginSessionId",
+          "contextDigest",
+          "principalId",
+          "participantId",
+          "deploymentId",
+          "instanceId",
           "userNkey",
         ],
         "type": "object",
@@ -438,3129 +459,6 @@ export const AuthConnectionsOpenedEventSchema = {
   "type": "object",
 } as const;
 
-export const AuthDeploymentAuthorityAcceptMigrationRequestSchema = {
-  "properties": {
-    "expectedBaseAuthorityVersion": {
-      "anyOf": [{
-        "maximum": 9007199254740991,
-        "minimum": 1,
-        "type": "integer",
-      }, { "type": "null" }],
-    },
-    "idempotencyKey": { "minLength": 1, "type": "string" },
-    "proposalId": { "minLength": 1, "type": "string" },
-    "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-  },
-  "required": [
-    "expectedBaseAuthorityVersion",
-    "idempotencyKey",
-    "proposalId",
-    "reason",
-  ],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityAcceptMigrationResponseSchema = {
-  "properties": {
-    "authority": {
-      "properties": {
-        "acceptedNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "authorityId": { "minLength": 1, "type": "string" },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decision": {
-          "anyOf": [{
-            "properties": {
-              "decidedAt": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer",
-              },
-              "decidedBy": { "minLength": 1, "type": "string" },
-              "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-            },
-            "required": ["decidedAt", "decidedBy", "reason"],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "deploymentId": { "minLength": 1, "type": "string" },
-        "desiredCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "desiredGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "kind": { "const": "deployment", "type": "string" },
-        "materialization": {
-          "anyOf": [{
-            "properties": {
-              "authorityId": { "minLength": 1, "type": "string" },
-              "authorityKind": {
-                "anyOf": [{ "const": "identity", "type": "string" }, {
-                  "const": "deployment",
-                  "type": "string",
-                }],
-              },
-              "authorityVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "effectiveCapabilities": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
-              "effectiveGrantSet": {
-                "properties": {
-                  "format": {
-                    "const": "trellis.grant-set.v1",
-                    "type": "string",
-                  },
-                  "permissions": {
-                    "items": {
-                      "properties": {
-                        "action": {
-                          "anyOf": [
-                            { "const": "call", "type": "string" },
-                            { "const": "invoke", "type": "string" },
-                            { "const": "observe", "type": "string" },
-                            { "const": "cancel", "type": "string" },
-                            { "const": "control", "type": "string" },
-                            { "const": "publish", "type": "string" },
-                            { "const": "subscribe", "type": "string" },
-                            { "const": "read", "type": "string" },
-                            { "const": "write", "type": "string" },
-                            { "const": "delete", "type": "string" },
-                            { "const": "submit", "type": "string" },
-                            { "const": "process", "type": "string" },
-                            { "const": "consume", "type": "string" },
-                          ],
-                        },
-                        "target": {
-                          "anyOf": [{
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "apiSurface",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "surface": {
-                                "anyOf": [
-                                  { "const": "rpc", "type": "string" },
-                                  { "const": "operation", "type": "string" },
-                                  { "const": "event", "type": "string" },
-                                  { "const": "feed", "type": "string" },
-                                  { "const": "state", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": ["api", "kind", "name", "surface"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "operationSignal",
-                                "type": "string",
-                              },
-                              "operation": { "minLength": 1, "type": "string" },
-                              "signal": { "minLength": 1, "type": "string" },
-                            },
-                            "required": ["api", "kind", "operation", "signal"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "kind": {
-                                "const": "participantResource",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "participant": {
-                                "minLength": 1,
-                                "type": "string",
-                              },
-                              "resource": {
-                                "anyOf": [
-                                  { "const": "state", "type": "string" },
-                                  { "const": "jobQueue", "type": "string" },
-                                  {
-                                    "const": "eventConsumer",
-                                    "type": "string",
-                                  },
-                                  { "const": "kv", "type": "string" },
-                                  { "const": "store", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": [
-                              "kind",
-                              "name",
-                              "participant",
-                              "resource",
-                            ],
-                            "type": "object",
-                          }],
-                        },
-                      },
-                      "required": ["action", "target"],
-                      "type": "object",
-                    },
-                    "type": "array",
-                  },
-                },
-                "required": ["format", "permissions"],
-                "type": "object",
-              },
-              "error": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-              "expiresAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "materializationId": { "minLength": 1, "type": "string" },
-              "materializationVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "participantArtifactDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "participantId": { "minLength": 1, "type": "string" },
-              "participantKind": {
-                "anyOf": [
-                  { "const": "service", "type": "string" },
-                  { "const": "app", "type": "string" },
-                  { "const": "device", "type": "string" },
-                  { "const": "agent", "type": "string" },
-                ],
-              },
-              "participantNeedsDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "reconciledAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "state": {
-                "anyOf": [{ "const": "available", "type": "string" }, {
-                  "const": "unavailable",
-                  "type": "string",
-                }, { "const": "error", "type": "string" }],
-              },
-              "subjectId": { "minLength": 1, "type": "string" },
-            },
-            "required": [
-              "authorityId",
-              "authorityKind",
-              "authorityVersion",
-              "effectiveCapabilities",
-              "effectiveGrantSet",
-              "error",
-              "expiresAt",
-              "materializationId",
-              "materializationVersion",
-              "participantArtifactDigest",
-              "participantId",
-              "participantKind",
-              "participantNeedsDigest",
-              "reconciledAt",
-              "state",
-              "subjectId",
-            ],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "participantKind": {
-          "anyOf": [{ "const": "service", "type": "string" }, {
-            "const": "device",
-            "type": "string",
-          }],
-        },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "revoked", "type": "string" },
-            { "const": "stale", "type": "string" },
-          ],
-        },
-        "updatedAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "version": {
-          "maximum": 9007199254740991,
-          "minimum": 1,
-          "type": "integer",
-        },
-      },
-      "required": [
-        "acceptedNeedsDigest",
-        "authorityId",
-        "createdAt",
-        "decision",
-        "deploymentId",
-        "desiredCapabilities",
-        "desiredGrantSet",
-        "expiresAt",
-        "kind",
-        "materialization",
-        "participantArtifactDigest",
-        "participantId",
-        "participantKind",
-        "state",
-        "updatedAt",
-        "version",
-      ],
-      "type": "object",
-    },
-    "proposal": {
-      "properties": {
-        "authorityKind": {
-          "anyOf": [{ "const": "identity", "type": "string" }, {
-            "const": "deployment",
-            "type": "string",
-          }],
-        },
-        "baseAuthorityVersion": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "classification": {
-          "anyOf": [{ "const": "initial", "type": "string" }, {
-            "const": "update",
-            "type": "string",
-          }, { "const": "migration", "type": "string" }],
-        },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decisionAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "decisionBy": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-        "decisionReason": {
-          "anyOf": [{ "type": "string" }, { "type": "null" }],
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "participantNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "proposalId": { "minLength": 1, "type": "string" },
-        "proposedCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "proposedGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "reasons": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "superseded", "type": "string" },
-            { "const": "expired", "type": "string" },
-          ],
-        },
-        "subjectId": { "minLength": 1, "type": "string" },
-      },
-      "required": [
-        "authorityKind",
-        "baseAuthorityVersion",
-        "classification",
-        "createdAt",
-        "decisionAt",
-        "decisionBy",
-        "decisionReason",
-        "expiresAt",
-        "participantArtifactDigest",
-        "participantId",
-        "participantNeedsDigest",
-        "proposalId",
-        "proposedCapabilities",
-        "proposedGrantSet",
-        "reasons",
-        "state",
-        "subjectId",
-      ],
-      "type": "object",
-    },
-  },
-  "required": ["authority", "proposal"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityAcceptUpdateRequestSchema = {
-  "properties": {
-    "expectedBaseAuthorityVersion": {
-      "anyOf": [{
-        "maximum": 9007199254740991,
-        "minimum": 1,
-        "type": "integer",
-      }, { "type": "null" }],
-    },
-    "idempotencyKey": { "minLength": 1, "type": "string" },
-    "proposalId": { "minLength": 1, "type": "string" },
-    "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-  },
-  "required": [
-    "expectedBaseAuthorityVersion",
-    "idempotencyKey",
-    "proposalId",
-    "reason",
-  ],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityAcceptUpdateResponseSchema = {
-  "properties": {
-    "authority": {
-      "properties": {
-        "acceptedNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "authorityId": { "minLength": 1, "type": "string" },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decision": {
-          "anyOf": [{
-            "properties": {
-              "decidedAt": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer",
-              },
-              "decidedBy": { "minLength": 1, "type": "string" },
-              "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-            },
-            "required": ["decidedAt", "decidedBy", "reason"],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "deploymentId": { "minLength": 1, "type": "string" },
-        "desiredCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "desiredGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "kind": { "const": "deployment", "type": "string" },
-        "materialization": {
-          "anyOf": [{
-            "properties": {
-              "authorityId": { "minLength": 1, "type": "string" },
-              "authorityKind": {
-                "anyOf": [{ "const": "identity", "type": "string" }, {
-                  "const": "deployment",
-                  "type": "string",
-                }],
-              },
-              "authorityVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "effectiveCapabilities": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
-              "effectiveGrantSet": {
-                "properties": {
-                  "format": {
-                    "const": "trellis.grant-set.v1",
-                    "type": "string",
-                  },
-                  "permissions": {
-                    "items": {
-                      "properties": {
-                        "action": {
-                          "anyOf": [
-                            { "const": "call", "type": "string" },
-                            { "const": "invoke", "type": "string" },
-                            { "const": "observe", "type": "string" },
-                            { "const": "cancel", "type": "string" },
-                            { "const": "control", "type": "string" },
-                            { "const": "publish", "type": "string" },
-                            { "const": "subscribe", "type": "string" },
-                            { "const": "read", "type": "string" },
-                            { "const": "write", "type": "string" },
-                            { "const": "delete", "type": "string" },
-                            { "const": "submit", "type": "string" },
-                            { "const": "process", "type": "string" },
-                            { "const": "consume", "type": "string" },
-                          ],
-                        },
-                        "target": {
-                          "anyOf": [{
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "apiSurface",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "surface": {
-                                "anyOf": [
-                                  { "const": "rpc", "type": "string" },
-                                  { "const": "operation", "type": "string" },
-                                  { "const": "event", "type": "string" },
-                                  { "const": "feed", "type": "string" },
-                                  { "const": "state", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": ["api", "kind", "name", "surface"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "operationSignal",
-                                "type": "string",
-                              },
-                              "operation": { "minLength": 1, "type": "string" },
-                              "signal": { "minLength": 1, "type": "string" },
-                            },
-                            "required": ["api", "kind", "operation", "signal"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "kind": {
-                                "const": "participantResource",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "participant": {
-                                "minLength": 1,
-                                "type": "string",
-                              },
-                              "resource": {
-                                "anyOf": [
-                                  { "const": "state", "type": "string" },
-                                  { "const": "jobQueue", "type": "string" },
-                                  {
-                                    "const": "eventConsumer",
-                                    "type": "string",
-                                  },
-                                  { "const": "kv", "type": "string" },
-                                  { "const": "store", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": [
-                              "kind",
-                              "name",
-                              "participant",
-                              "resource",
-                            ],
-                            "type": "object",
-                          }],
-                        },
-                      },
-                      "required": ["action", "target"],
-                      "type": "object",
-                    },
-                    "type": "array",
-                  },
-                },
-                "required": ["format", "permissions"],
-                "type": "object",
-              },
-              "error": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-              "expiresAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "materializationId": { "minLength": 1, "type": "string" },
-              "materializationVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "participantArtifactDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "participantId": { "minLength": 1, "type": "string" },
-              "participantKind": {
-                "anyOf": [
-                  { "const": "service", "type": "string" },
-                  { "const": "app", "type": "string" },
-                  { "const": "device", "type": "string" },
-                  { "const": "agent", "type": "string" },
-                ],
-              },
-              "participantNeedsDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "reconciledAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "state": {
-                "anyOf": [{ "const": "available", "type": "string" }, {
-                  "const": "unavailable",
-                  "type": "string",
-                }, { "const": "error", "type": "string" }],
-              },
-              "subjectId": { "minLength": 1, "type": "string" },
-            },
-            "required": [
-              "authorityId",
-              "authorityKind",
-              "authorityVersion",
-              "effectiveCapabilities",
-              "effectiveGrantSet",
-              "error",
-              "expiresAt",
-              "materializationId",
-              "materializationVersion",
-              "participantArtifactDigest",
-              "participantId",
-              "participantKind",
-              "participantNeedsDigest",
-              "reconciledAt",
-              "state",
-              "subjectId",
-            ],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "participantKind": {
-          "anyOf": [{ "const": "service", "type": "string" }, {
-            "const": "device",
-            "type": "string",
-          }],
-        },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "revoked", "type": "string" },
-            { "const": "stale", "type": "string" },
-          ],
-        },
-        "updatedAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "version": {
-          "maximum": 9007199254740991,
-          "minimum": 1,
-          "type": "integer",
-        },
-      },
-      "required": [
-        "acceptedNeedsDigest",
-        "authorityId",
-        "createdAt",
-        "decision",
-        "deploymentId",
-        "desiredCapabilities",
-        "desiredGrantSet",
-        "expiresAt",
-        "kind",
-        "materialization",
-        "participantArtifactDigest",
-        "participantId",
-        "participantKind",
-        "state",
-        "updatedAt",
-        "version",
-      ],
-      "type": "object",
-    },
-    "proposal": {
-      "properties": {
-        "authorityKind": {
-          "anyOf": [{ "const": "identity", "type": "string" }, {
-            "const": "deployment",
-            "type": "string",
-          }],
-        },
-        "baseAuthorityVersion": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "classification": {
-          "anyOf": [{ "const": "initial", "type": "string" }, {
-            "const": "update",
-            "type": "string",
-          }, { "const": "migration", "type": "string" }],
-        },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decisionAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "decisionBy": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-        "decisionReason": {
-          "anyOf": [{ "type": "string" }, { "type": "null" }],
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "participantNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "proposalId": { "minLength": 1, "type": "string" },
-        "proposedCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "proposedGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "reasons": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "superseded", "type": "string" },
-            { "const": "expired", "type": "string" },
-          ],
-        },
-        "subjectId": { "minLength": 1, "type": "string" },
-      },
-      "required": [
-        "authorityKind",
-        "baseAuthorityVersion",
-        "classification",
-        "createdAt",
-        "decisionAt",
-        "decisionBy",
-        "decisionReason",
-        "expiresAt",
-        "participantArtifactDigest",
-        "participantId",
-        "participantNeedsDigest",
-        "proposalId",
-        "proposedCapabilities",
-        "proposedGrantSet",
-        "reasons",
-        "state",
-        "subjectId",
-      ],
-      "type": "object",
-    },
-  },
-  "required": ["authority", "proposal"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityGetRequestSchema = {
-  "properties": { "authorityId": { "minLength": 1, "type": "string" } },
-  "required": ["authorityId"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityGetResponseSchema = {
-  "properties": {
-    "authority": {
-      "properties": {
-        "acceptedNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "authorityId": { "minLength": 1, "type": "string" },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decision": {
-          "anyOf": [{
-            "properties": {
-              "decidedAt": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer",
-              },
-              "decidedBy": { "minLength": 1, "type": "string" },
-              "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-            },
-            "required": ["decidedAt", "decidedBy", "reason"],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "deploymentId": { "minLength": 1, "type": "string" },
-        "desiredCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "desiredGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "kind": { "const": "deployment", "type": "string" },
-        "materialization": {
-          "anyOf": [{
-            "properties": {
-              "authorityId": { "minLength": 1, "type": "string" },
-              "authorityKind": {
-                "anyOf": [{ "const": "identity", "type": "string" }, {
-                  "const": "deployment",
-                  "type": "string",
-                }],
-              },
-              "authorityVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "effectiveCapabilities": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
-              "effectiveGrantSet": {
-                "properties": {
-                  "format": {
-                    "const": "trellis.grant-set.v1",
-                    "type": "string",
-                  },
-                  "permissions": {
-                    "items": {
-                      "properties": {
-                        "action": {
-                          "anyOf": [
-                            { "const": "call", "type": "string" },
-                            { "const": "invoke", "type": "string" },
-                            { "const": "observe", "type": "string" },
-                            { "const": "cancel", "type": "string" },
-                            { "const": "control", "type": "string" },
-                            { "const": "publish", "type": "string" },
-                            { "const": "subscribe", "type": "string" },
-                            { "const": "read", "type": "string" },
-                            { "const": "write", "type": "string" },
-                            { "const": "delete", "type": "string" },
-                            { "const": "submit", "type": "string" },
-                            { "const": "process", "type": "string" },
-                            { "const": "consume", "type": "string" },
-                          ],
-                        },
-                        "target": {
-                          "anyOf": [{
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "apiSurface",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "surface": {
-                                "anyOf": [
-                                  { "const": "rpc", "type": "string" },
-                                  { "const": "operation", "type": "string" },
-                                  { "const": "event", "type": "string" },
-                                  { "const": "feed", "type": "string" },
-                                  { "const": "state", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": ["api", "kind", "name", "surface"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "operationSignal",
-                                "type": "string",
-                              },
-                              "operation": { "minLength": 1, "type": "string" },
-                              "signal": { "minLength": 1, "type": "string" },
-                            },
-                            "required": ["api", "kind", "operation", "signal"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "kind": {
-                                "const": "participantResource",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "participant": {
-                                "minLength": 1,
-                                "type": "string",
-                              },
-                              "resource": {
-                                "anyOf": [
-                                  { "const": "state", "type": "string" },
-                                  { "const": "jobQueue", "type": "string" },
-                                  {
-                                    "const": "eventConsumer",
-                                    "type": "string",
-                                  },
-                                  { "const": "kv", "type": "string" },
-                                  { "const": "store", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": [
-                              "kind",
-                              "name",
-                              "participant",
-                              "resource",
-                            ],
-                            "type": "object",
-                          }],
-                        },
-                      },
-                      "required": ["action", "target"],
-                      "type": "object",
-                    },
-                    "type": "array",
-                  },
-                },
-                "required": ["format", "permissions"],
-                "type": "object",
-              },
-              "error": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-              "expiresAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "materializationId": { "minLength": 1, "type": "string" },
-              "materializationVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "participantArtifactDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "participantId": { "minLength": 1, "type": "string" },
-              "participantKind": {
-                "anyOf": [
-                  { "const": "service", "type": "string" },
-                  { "const": "app", "type": "string" },
-                  { "const": "device", "type": "string" },
-                  { "const": "agent", "type": "string" },
-                ],
-              },
-              "participantNeedsDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "reconciledAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "state": {
-                "anyOf": [{ "const": "available", "type": "string" }, {
-                  "const": "unavailable",
-                  "type": "string",
-                }, { "const": "error", "type": "string" }],
-              },
-              "subjectId": { "minLength": 1, "type": "string" },
-            },
-            "required": [
-              "authorityId",
-              "authorityKind",
-              "authorityVersion",
-              "effectiveCapabilities",
-              "effectiveGrantSet",
-              "error",
-              "expiresAt",
-              "materializationId",
-              "materializationVersion",
-              "participantArtifactDigest",
-              "participantId",
-              "participantKind",
-              "participantNeedsDigest",
-              "reconciledAt",
-              "state",
-              "subjectId",
-            ],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "participantKind": {
-          "anyOf": [{ "const": "service", "type": "string" }, {
-            "const": "device",
-            "type": "string",
-          }],
-        },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "revoked", "type": "string" },
-            { "const": "stale", "type": "string" },
-          ],
-        },
-        "updatedAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "version": {
-          "maximum": 9007199254740991,
-          "minimum": 1,
-          "type": "integer",
-        },
-      },
-      "required": [
-        "acceptedNeedsDigest",
-        "authorityId",
-        "createdAt",
-        "decision",
-        "deploymentId",
-        "desiredCapabilities",
-        "desiredGrantSet",
-        "expiresAt",
-        "kind",
-        "materialization",
-        "participantArtifactDigest",
-        "participantId",
-        "participantKind",
-        "state",
-        "updatedAt",
-        "version",
-      ],
-      "type": "object",
-    },
-  },
-  "required": ["authority"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityListRequestSchema = {
-  "properties": {
-    "cursor": { "minLength": 1, "type": "string" },
-    "deploymentId": { "minLength": 1, "type": "string" },
-    "limit": { "maximum": 100, "minimum": 1, "type": "integer" },
-    "participantId": { "minLength": 1, "type": "string" },
-    "state": {
-      "anyOf": [
-        { "const": "pending", "type": "string" },
-        { "const": "accepted", "type": "string" },
-        { "const": "rejected", "type": "string" },
-        { "const": "revoked", "type": "string" },
-        { "const": "stale", "type": "string" },
-      ],
-    },
-  },
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityListResponseSchema = {
-  "properties": {
-    "entries": {
-      "items": {
-        "properties": {
-          "acceptedNeedsDigest": {
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "type": "string",
-          },
-          "authorityId": { "minLength": 1, "type": "string" },
-          "createdAt": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          },
-          "decision": {
-            "anyOf": [{
-              "properties": {
-                "decidedAt": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                },
-                "decidedBy": { "minLength": 1, "type": "string" },
-                "reason": {
-                  "anyOf": [{ "type": "string" }, { "type": "null" }],
-                },
-              },
-              "required": ["decidedAt", "decidedBy", "reason"],
-              "type": "object",
-            }, { "type": "null" }],
-          },
-          "deploymentId": { "minLength": 1, "type": "string" },
-          "desiredCapabilities": {
-            "items": { "minLength": 1, "type": "string" },
-            "type": "array",
-          },
-          "desiredGrantSet": {
-            "properties": {
-              "format": { "const": "trellis.grant-set.v1", "type": "string" },
-              "permissions": {
-                "items": {
-                  "properties": {
-                    "action": {
-                      "anyOf": [
-                        { "const": "call", "type": "string" },
-                        { "const": "invoke", "type": "string" },
-                        { "const": "observe", "type": "string" },
-                        { "const": "cancel", "type": "string" },
-                        { "const": "control", "type": "string" },
-                        { "const": "publish", "type": "string" },
-                        { "const": "subscribe", "type": "string" },
-                        { "const": "read", "type": "string" },
-                        { "const": "write", "type": "string" },
-                        { "const": "delete", "type": "string" },
-                        { "const": "submit", "type": "string" },
-                        { "const": "process", "type": "string" },
-                        { "const": "consume", "type": "string" },
-                      ],
-                    },
-                    "target": {
-                      "anyOf": [{
-                        "properties": {
-                          "api": { "minLength": 1, "type": "string" },
-                          "kind": { "const": "apiSurface", "type": "string" },
-                          "name": { "minLength": 1, "type": "string" },
-                          "surface": {
-                            "anyOf": [
-                              { "const": "rpc", "type": "string" },
-                              { "const": "operation", "type": "string" },
-                              { "const": "event", "type": "string" },
-                              { "const": "feed", "type": "string" },
-                              { "const": "state", "type": "string" },
-                            ],
-                          },
-                        },
-                        "required": ["api", "kind", "name", "surface"],
-                        "type": "object",
-                      }, {
-                        "properties": {
-                          "api": { "minLength": 1, "type": "string" },
-                          "kind": {
-                            "const": "operationSignal",
-                            "type": "string",
-                          },
-                          "operation": { "minLength": 1, "type": "string" },
-                          "signal": { "minLength": 1, "type": "string" },
-                        },
-                        "required": ["api", "kind", "operation", "signal"],
-                        "type": "object",
-                      }, {
-                        "properties": {
-                          "kind": {
-                            "const": "participantResource",
-                            "type": "string",
-                          },
-                          "name": { "minLength": 1, "type": "string" },
-                          "participant": { "minLength": 1, "type": "string" },
-                          "resource": {
-                            "anyOf": [
-                              { "const": "state", "type": "string" },
-                              { "const": "jobQueue", "type": "string" },
-                              { "const": "eventConsumer", "type": "string" },
-                              { "const": "kv", "type": "string" },
-                              { "const": "store", "type": "string" },
-                            ],
-                          },
-                        },
-                        "required": ["kind", "name", "participant", "resource"],
-                        "type": "object",
-                      }],
-                    },
-                  },
-                  "required": ["action", "target"],
-                  "type": "object",
-                },
-                "type": "array",
-              },
-            },
-            "required": ["format", "permissions"],
-            "type": "object",
-          },
-          "expiresAt": {
-            "anyOf": [{
-              "maximum": 9007199254740991,
-              "minimum": 0,
-              "type": "integer",
-            }, { "type": "null" }],
-          },
-          "kind": { "const": "deployment", "type": "string" },
-          "materialization": {
-            "anyOf": [{
-              "properties": {
-                "authorityId": { "minLength": 1, "type": "string" },
-                "authorityKind": {
-                  "anyOf": [{ "const": "identity", "type": "string" }, {
-                    "const": "deployment",
-                    "type": "string",
-                  }],
-                },
-                "authorityVersion": {
-                  "maximum": 9007199254740991,
-                  "minimum": 1,
-                  "type": "integer",
-                },
-                "effectiveCapabilities": {
-                  "items": { "minLength": 1, "type": "string" },
-                  "type": "array",
-                },
-                "effectiveGrantSet": {
-                  "properties": {
-                    "format": {
-                      "const": "trellis.grant-set.v1",
-                      "type": "string",
-                    },
-                    "permissions": {
-                      "items": {
-                        "properties": {
-                          "action": {
-                            "anyOf": [
-                              { "const": "call", "type": "string" },
-                              { "const": "invoke", "type": "string" },
-                              { "const": "observe", "type": "string" },
-                              { "const": "cancel", "type": "string" },
-                              { "const": "control", "type": "string" },
-                              { "const": "publish", "type": "string" },
-                              { "const": "subscribe", "type": "string" },
-                              { "const": "read", "type": "string" },
-                              { "const": "write", "type": "string" },
-                              { "const": "delete", "type": "string" },
-                              { "const": "submit", "type": "string" },
-                              { "const": "process", "type": "string" },
-                              { "const": "consume", "type": "string" },
-                            ],
-                          },
-                          "target": {
-                            "anyOf": [{
-                              "properties": {
-                                "api": { "minLength": 1, "type": "string" },
-                                "kind": {
-                                  "const": "apiSurface",
-                                  "type": "string",
-                                },
-                                "name": { "minLength": 1, "type": "string" },
-                                "surface": {
-                                  "anyOf": [
-                                    { "const": "rpc", "type": "string" },
-                                    { "const": "operation", "type": "string" },
-                                    { "const": "event", "type": "string" },
-                                    { "const": "feed", "type": "string" },
-                                    { "const": "state", "type": "string" },
-                                  ],
-                                },
-                              },
-                              "required": ["api", "kind", "name", "surface"],
-                              "type": "object",
-                            }, {
-                              "properties": {
-                                "api": { "minLength": 1, "type": "string" },
-                                "kind": {
-                                  "const": "operationSignal",
-                                  "type": "string",
-                                },
-                                "operation": {
-                                  "minLength": 1,
-                                  "type": "string",
-                                },
-                                "signal": { "minLength": 1, "type": "string" },
-                              },
-                              "required": [
-                                "api",
-                                "kind",
-                                "operation",
-                                "signal",
-                              ],
-                              "type": "object",
-                            }, {
-                              "properties": {
-                                "kind": {
-                                  "const": "participantResource",
-                                  "type": "string",
-                                },
-                                "name": { "minLength": 1, "type": "string" },
-                                "participant": {
-                                  "minLength": 1,
-                                  "type": "string",
-                                },
-                                "resource": {
-                                  "anyOf": [
-                                    { "const": "state", "type": "string" },
-                                    { "const": "jobQueue", "type": "string" },
-                                    {
-                                      "const": "eventConsumer",
-                                      "type": "string",
-                                    },
-                                    { "const": "kv", "type": "string" },
-                                    { "const": "store", "type": "string" },
-                                  ],
-                                },
-                              },
-                              "required": [
-                                "kind",
-                                "name",
-                                "participant",
-                                "resource",
-                              ],
-                              "type": "object",
-                            }],
-                          },
-                        },
-                        "required": ["action", "target"],
-                        "type": "object",
-                      },
-                      "type": "array",
-                    },
-                  },
-                  "required": ["format", "permissions"],
-                  "type": "object",
-                },
-                "error": {
-                  "anyOf": [{ "type": "string" }, { "type": "null" }],
-                },
-                "expiresAt": {
-                  "anyOf": [{
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer",
-                  }, { "type": "null" }],
-                },
-                "materializationId": { "minLength": 1, "type": "string" },
-                "materializationVersion": {
-                  "maximum": 9007199254740991,
-                  "minimum": 1,
-                  "type": "integer",
-                },
-                "participantArtifactDigest": {
-                  "pattern": "^[A-Za-z0-9_-]{43}$",
-                  "type": "string",
-                },
-                "participantId": { "minLength": 1, "type": "string" },
-                "participantKind": {
-                  "anyOf": [
-                    { "const": "service", "type": "string" },
-                    { "const": "app", "type": "string" },
-                    { "const": "device", "type": "string" },
-                    { "const": "agent", "type": "string" },
-                  ],
-                },
-                "participantNeedsDigest": {
-                  "pattern": "^[A-Za-z0-9_-]{43}$",
-                  "type": "string",
-                },
-                "reconciledAt": {
-                  "anyOf": [{
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer",
-                  }, { "type": "null" }],
-                },
-                "state": {
-                  "anyOf": [{ "const": "available", "type": "string" }, {
-                    "const": "unavailable",
-                    "type": "string",
-                  }, { "const": "error", "type": "string" }],
-                },
-                "subjectId": { "minLength": 1, "type": "string" },
-              },
-              "required": [
-                "authorityId",
-                "authorityKind",
-                "authorityVersion",
-                "effectiveCapabilities",
-                "effectiveGrantSet",
-                "error",
-                "expiresAt",
-                "materializationId",
-                "materializationVersion",
-                "participantArtifactDigest",
-                "participantId",
-                "participantKind",
-                "participantNeedsDigest",
-                "reconciledAt",
-                "state",
-                "subjectId",
-              ],
-              "type": "object",
-            }, { "type": "null" }],
-          },
-          "participantArtifactDigest": {
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "type": "string",
-          },
-          "participantId": { "minLength": 1, "type": "string" },
-          "participantKind": {
-            "anyOf": [{ "const": "service", "type": "string" }, {
-              "const": "device",
-              "type": "string",
-            }],
-          },
-          "state": {
-            "anyOf": [
-              { "const": "pending", "type": "string" },
-              { "const": "accepted", "type": "string" },
-              { "const": "rejected", "type": "string" },
-              { "const": "revoked", "type": "string" },
-              { "const": "stale", "type": "string" },
-            ],
-          },
-          "updatedAt": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          },
-          "version": {
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer",
-          },
-        },
-        "required": [
-          "acceptedNeedsDigest",
-          "authorityId",
-          "createdAt",
-          "decision",
-          "deploymentId",
-          "desiredCapabilities",
-          "desiredGrantSet",
-          "expiresAt",
-          "kind",
-          "materialization",
-          "participantArtifactDigest",
-          "participantId",
-          "participantKind",
-          "state",
-          "updatedAt",
-          "version",
-        ],
-        "type": "object",
-      },
-      "type": "array",
-    },
-    "nextCursor": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-  },
-  "required": ["entries", "nextCursor"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityPlanRequestSchema = {
-  "properties": {
-    "deploymentId": { "minLength": 1, "type": "string" },
-    "expiresAt": {
-      "anyOf": [{
-        "maximum": 9007199254740991,
-        "minimum": 0,
-        "type": "integer",
-      }, { "type": "null" }],
-    },
-    "idempotencyKey": { "minLength": 1, "type": "string" },
-    "participantArtifact": { "properties": {}, "type": "object" },
-    "referencedApiArtifacts": {
-      "items": { "properties": {}, "type": "object" },
-      "type": "array",
-    },
-  },
-  "required": [
-    "deploymentId",
-    "expiresAt",
-    "idempotencyKey",
-    "participantArtifact",
-    "referencedApiArtifacts",
-  ],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityPlanResponseSchema = {
-  "properties": {
-    "proposal": {
-      "properties": {
-        "authorityKind": {
-          "anyOf": [{ "const": "identity", "type": "string" }, {
-            "const": "deployment",
-            "type": "string",
-          }],
-        },
-        "baseAuthorityVersion": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "classification": {
-          "anyOf": [{ "const": "initial", "type": "string" }, {
-            "const": "update",
-            "type": "string",
-          }, { "const": "migration", "type": "string" }],
-        },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decisionAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "decisionBy": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-        "decisionReason": {
-          "anyOf": [{ "type": "string" }, { "type": "null" }],
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "participantNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "proposalId": { "minLength": 1, "type": "string" },
-        "proposedCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "proposedGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "reasons": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "superseded", "type": "string" },
-            { "const": "expired", "type": "string" },
-          ],
-        },
-        "subjectId": { "minLength": 1, "type": "string" },
-      },
-      "required": [
-        "authorityKind",
-        "baseAuthorityVersion",
-        "classification",
-        "createdAt",
-        "decisionAt",
-        "decisionBy",
-        "decisionReason",
-        "expiresAt",
-        "participantArtifactDigest",
-        "participantId",
-        "participantNeedsDigest",
-        "proposalId",
-        "proposedCapabilities",
-        "proposedGrantSet",
-        "reasons",
-        "state",
-        "subjectId",
-      ],
-      "type": "object",
-    },
-  },
-  "required": ["proposal"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityPlansGetRequestSchema = {
-  "properties": { "proposalId": { "minLength": 1, "type": "string" } },
-  "required": ["proposalId"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityPlansGetResponseSchema = {
-  "properties": {
-    "proposal": {
-      "properties": {
-        "authorityKind": {
-          "anyOf": [{ "const": "identity", "type": "string" }, {
-            "const": "deployment",
-            "type": "string",
-          }],
-        },
-        "baseAuthorityVersion": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "classification": {
-          "anyOf": [{ "const": "initial", "type": "string" }, {
-            "const": "update",
-            "type": "string",
-          }, { "const": "migration", "type": "string" }],
-        },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decisionAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "decisionBy": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-        "decisionReason": {
-          "anyOf": [{ "type": "string" }, { "type": "null" }],
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "participantNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "proposalId": { "minLength": 1, "type": "string" },
-        "proposedCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "proposedGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "reasons": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "superseded", "type": "string" },
-            { "const": "expired", "type": "string" },
-          ],
-        },
-        "subjectId": { "minLength": 1, "type": "string" },
-      },
-      "required": [
-        "authorityKind",
-        "baseAuthorityVersion",
-        "classification",
-        "createdAt",
-        "decisionAt",
-        "decisionBy",
-        "decisionReason",
-        "expiresAt",
-        "participantArtifactDigest",
-        "participantId",
-        "participantNeedsDigest",
-        "proposalId",
-        "proposedCapabilities",
-        "proposedGrantSet",
-        "reasons",
-        "state",
-        "subjectId",
-      ],
-      "type": "object",
-    },
-  },
-  "required": ["proposal"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityPlansListRequestSchema = {
-  "properties": {
-    "cursor": { "minLength": 1, "type": "string" },
-    "deploymentId": { "minLength": 1, "type": "string" },
-    "limit": { "maximum": 100, "minimum": 1, "type": "integer" },
-    "state": {
-      "anyOf": [
-        { "const": "pending", "type": "string" },
-        { "const": "accepted", "type": "string" },
-        { "const": "rejected", "type": "string" },
-        { "const": "superseded", "type": "string" },
-        { "const": "expired", "type": "string" },
-      ],
-    },
-  },
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityPlansListResponseSchema = {
-  "properties": {
-    "entries": {
-      "items": {
-        "properties": {
-          "authorityKind": {
-            "anyOf": [{ "const": "identity", "type": "string" }, {
-              "const": "deployment",
-              "type": "string",
-            }],
-          },
-          "baseAuthorityVersion": {
-            "anyOf": [{
-              "maximum": 9007199254740991,
-              "minimum": 1,
-              "type": "integer",
-            }, { "type": "null" }],
-          },
-          "classification": {
-            "anyOf": [{ "const": "initial", "type": "string" }, {
-              "const": "update",
-              "type": "string",
-            }, { "const": "migration", "type": "string" }],
-          },
-          "createdAt": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          },
-          "decisionAt": {
-            "anyOf": [{
-              "maximum": 9007199254740991,
-              "minimum": 0,
-              "type": "integer",
-            }, { "type": "null" }],
-          },
-          "decisionBy": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-          "decisionReason": {
-            "anyOf": [{ "type": "string" }, { "type": "null" }],
-          },
-          "expiresAt": {
-            "anyOf": [{
-              "maximum": 9007199254740991,
-              "minimum": 0,
-              "type": "integer",
-            }, { "type": "null" }],
-          },
-          "participantArtifactDigest": {
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "type": "string",
-          },
-          "participantId": { "minLength": 1, "type": "string" },
-          "participantNeedsDigest": {
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "type": "string",
-          },
-          "proposalId": { "minLength": 1, "type": "string" },
-          "proposedCapabilities": {
-            "items": { "minLength": 1, "type": "string" },
-            "type": "array",
-          },
-          "proposedGrantSet": {
-            "properties": {
-              "format": { "const": "trellis.grant-set.v1", "type": "string" },
-              "permissions": {
-                "items": {
-                  "properties": {
-                    "action": {
-                      "anyOf": [
-                        { "const": "call", "type": "string" },
-                        { "const": "invoke", "type": "string" },
-                        { "const": "observe", "type": "string" },
-                        { "const": "cancel", "type": "string" },
-                        { "const": "control", "type": "string" },
-                        { "const": "publish", "type": "string" },
-                        { "const": "subscribe", "type": "string" },
-                        { "const": "read", "type": "string" },
-                        { "const": "write", "type": "string" },
-                        { "const": "delete", "type": "string" },
-                        { "const": "submit", "type": "string" },
-                        { "const": "process", "type": "string" },
-                        { "const": "consume", "type": "string" },
-                      ],
-                    },
-                    "target": {
-                      "anyOf": [{
-                        "properties": {
-                          "api": { "minLength": 1, "type": "string" },
-                          "kind": { "const": "apiSurface", "type": "string" },
-                          "name": { "minLength": 1, "type": "string" },
-                          "surface": {
-                            "anyOf": [
-                              { "const": "rpc", "type": "string" },
-                              { "const": "operation", "type": "string" },
-                              { "const": "event", "type": "string" },
-                              { "const": "feed", "type": "string" },
-                              { "const": "state", "type": "string" },
-                            ],
-                          },
-                        },
-                        "required": ["api", "kind", "name", "surface"],
-                        "type": "object",
-                      }, {
-                        "properties": {
-                          "api": { "minLength": 1, "type": "string" },
-                          "kind": {
-                            "const": "operationSignal",
-                            "type": "string",
-                          },
-                          "operation": { "minLength": 1, "type": "string" },
-                          "signal": { "minLength": 1, "type": "string" },
-                        },
-                        "required": ["api", "kind", "operation", "signal"],
-                        "type": "object",
-                      }, {
-                        "properties": {
-                          "kind": {
-                            "const": "participantResource",
-                            "type": "string",
-                          },
-                          "name": { "minLength": 1, "type": "string" },
-                          "participant": { "minLength": 1, "type": "string" },
-                          "resource": {
-                            "anyOf": [
-                              { "const": "state", "type": "string" },
-                              { "const": "jobQueue", "type": "string" },
-                              { "const": "eventConsumer", "type": "string" },
-                              { "const": "kv", "type": "string" },
-                              { "const": "store", "type": "string" },
-                            ],
-                          },
-                        },
-                        "required": ["kind", "name", "participant", "resource"],
-                        "type": "object",
-                      }],
-                    },
-                  },
-                  "required": ["action", "target"],
-                  "type": "object",
-                },
-                "type": "array",
-              },
-            },
-            "required": ["format", "permissions"],
-            "type": "object",
-          },
-          "reasons": {
-            "items": { "minLength": 1, "type": "string" },
-            "type": "array",
-          },
-          "state": {
-            "anyOf": [
-              { "const": "pending", "type": "string" },
-              { "const": "accepted", "type": "string" },
-              { "const": "rejected", "type": "string" },
-              { "const": "superseded", "type": "string" },
-              { "const": "expired", "type": "string" },
-            ],
-          },
-          "subjectId": { "minLength": 1, "type": "string" },
-        },
-        "required": [
-          "authorityKind",
-          "baseAuthorityVersion",
-          "classification",
-          "createdAt",
-          "decisionAt",
-          "decisionBy",
-          "decisionReason",
-          "expiresAt",
-          "participantArtifactDigest",
-          "participantId",
-          "participantNeedsDigest",
-          "proposalId",
-          "proposedCapabilities",
-          "proposedGrantSet",
-          "reasons",
-          "state",
-          "subjectId",
-        ],
-        "type": "object",
-      },
-      "type": "array",
-    },
-    "nextCursor": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-  },
-  "required": ["entries", "nextCursor"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityReconcileRequestSchema = {
-  "properties": {
-    "authorityId": { "minLength": 1, "type": "string" },
-    "expectedVersion": {
-      "anyOf": [{
-        "maximum": 9007199254740991,
-        "minimum": 1,
-        "type": "integer",
-      }, { "type": "null" }],
-    },
-    "idempotencyKey": { "minLength": 1, "type": "string" },
-  },
-  "required": ["authorityId", "expectedVersion", "idempotencyKey"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityReconcileResponseSchema = {
-  "properties": {
-    "authority": {
-      "properties": {
-        "acceptedNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "authorityId": { "minLength": 1, "type": "string" },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decision": {
-          "anyOf": [{
-            "properties": {
-              "decidedAt": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer",
-              },
-              "decidedBy": { "minLength": 1, "type": "string" },
-              "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-            },
-            "required": ["decidedAt", "decidedBy", "reason"],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "deploymentId": { "minLength": 1, "type": "string" },
-        "desiredCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "desiredGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "kind": { "const": "deployment", "type": "string" },
-        "materialization": {
-          "anyOf": [{
-            "properties": {
-              "authorityId": { "minLength": 1, "type": "string" },
-              "authorityKind": {
-                "anyOf": [{ "const": "identity", "type": "string" }, {
-                  "const": "deployment",
-                  "type": "string",
-                }],
-              },
-              "authorityVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "effectiveCapabilities": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
-              "effectiveGrantSet": {
-                "properties": {
-                  "format": {
-                    "const": "trellis.grant-set.v1",
-                    "type": "string",
-                  },
-                  "permissions": {
-                    "items": {
-                      "properties": {
-                        "action": {
-                          "anyOf": [
-                            { "const": "call", "type": "string" },
-                            { "const": "invoke", "type": "string" },
-                            { "const": "observe", "type": "string" },
-                            { "const": "cancel", "type": "string" },
-                            { "const": "control", "type": "string" },
-                            { "const": "publish", "type": "string" },
-                            { "const": "subscribe", "type": "string" },
-                            { "const": "read", "type": "string" },
-                            { "const": "write", "type": "string" },
-                            { "const": "delete", "type": "string" },
-                            { "const": "submit", "type": "string" },
-                            { "const": "process", "type": "string" },
-                            { "const": "consume", "type": "string" },
-                          ],
-                        },
-                        "target": {
-                          "anyOf": [{
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "apiSurface",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "surface": {
-                                "anyOf": [
-                                  { "const": "rpc", "type": "string" },
-                                  { "const": "operation", "type": "string" },
-                                  { "const": "event", "type": "string" },
-                                  { "const": "feed", "type": "string" },
-                                  { "const": "state", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": ["api", "kind", "name", "surface"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "operationSignal",
-                                "type": "string",
-                              },
-                              "operation": { "minLength": 1, "type": "string" },
-                              "signal": { "minLength": 1, "type": "string" },
-                            },
-                            "required": ["api", "kind", "operation", "signal"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "kind": {
-                                "const": "participantResource",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "participant": {
-                                "minLength": 1,
-                                "type": "string",
-                              },
-                              "resource": {
-                                "anyOf": [
-                                  { "const": "state", "type": "string" },
-                                  { "const": "jobQueue", "type": "string" },
-                                  {
-                                    "const": "eventConsumer",
-                                    "type": "string",
-                                  },
-                                  { "const": "kv", "type": "string" },
-                                  { "const": "store", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": [
-                              "kind",
-                              "name",
-                              "participant",
-                              "resource",
-                            ],
-                            "type": "object",
-                          }],
-                        },
-                      },
-                      "required": ["action", "target"],
-                      "type": "object",
-                    },
-                    "type": "array",
-                  },
-                },
-                "required": ["format", "permissions"],
-                "type": "object",
-              },
-              "error": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-              "expiresAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "materializationId": { "minLength": 1, "type": "string" },
-              "materializationVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "participantArtifactDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "participantId": { "minLength": 1, "type": "string" },
-              "participantKind": {
-                "anyOf": [
-                  { "const": "service", "type": "string" },
-                  { "const": "app", "type": "string" },
-                  { "const": "device", "type": "string" },
-                  { "const": "agent", "type": "string" },
-                ],
-              },
-              "participantNeedsDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "reconciledAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "state": {
-                "anyOf": [{ "const": "available", "type": "string" }, {
-                  "const": "unavailable",
-                  "type": "string",
-                }, { "const": "error", "type": "string" }],
-              },
-              "subjectId": { "minLength": 1, "type": "string" },
-            },
-            "required": [
-              "authorityId",
-              "authorityKind",
-              "authorityVersion",
-              "effectiveCapabilities",
-              "effectiveGrantSet",
-              "error",
-              "expiresAt",
-              "materializationId",
-              "materializationVersion",
-              "participantArtifactDigest",
-              "participantId",
-              "participantKind",
-              "participantNeedsDigest",
-              "reconciledAt",
-              "state",
-              "subjectId",
-            ],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "participantKind": {
-          "anyOf": [{ "const": "service", "type": "string" }, {
-            "const": "device",
-            "type": "string",
-          }],
-        },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "revoked", "type": "string" },
-            { "const": "stale", "type": "string" },
-          ],
-        },
-        "updatedAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "version": {
-          "maximum": 9007199254740991,
-          "minimum": 1,
-          "type": "integer",
-        },
-      },
-      "required": [
-        "acceptedNeedsDigest",
-        "authorityId",
-        "createdAt",
-        "decision",
-        "deploymentId",
-        "desiredCapabilities",
-        "desiredGrantSet",
-        "expiresAt",
-        "kind",
-        "materialization",
-        "participantArtifactDigest",
-        "participantId",
-        "participantKind",
-        "state",
-        "updatedAt",
-        "version",
-      ],
-      "type": "object",
-    },
-  },
-  "required": ["authority"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityRejectRequestSchema = {
-  "properties": {
-    "idempotencyKey": { "minLength": 1, "type": "string" },
-    "proposalId": { "minLength": 1, "type": "string" },
-    "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-  },
-  "required": ["idempotencyKey", "proposalId", "reason"],
-  "type": "object",
-} as const;
-
-export const AuthDeploymentAuthorityRejectResponseSchema = {
-  "properties": {
-    "proposal": {
-      "properties": {
-        "authorityKind": {
-          "anyOf": [{ "const": "identity", "type": "string" }, {
-            "const": "deployment",
-            "type": "string",
-          }],
-        },
-        "baseAuthorityVersion": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "classification": {
-          "anyOf": [{ "const": "initial", "type": "string" }, {
-            "const": "update",
-            "type": "string",
-          }, { "const": "migration", "type": "string" }],
-        },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decisionAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "decisionBy": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-        "decisionReason": {
-          "anyOf": [{ "type": "string" }, { "type": "null" }],
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "participantNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "proposalId": { "minLength": 1, "type": "string" },
-        "proposedCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "proposedGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "reasons": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "superseded", "type": "string" },
-            { "const": "expired", "type": "string" },
-          ],
-        },
-        "subjectId": { "minLength": 1, "type": "string" },
-      },
-      "required": [
-        "authorityKind",
-        "baseAuthorityVersion",
-        "classification",
-        "createdAt",
-        "decisionAt",
-        "decisionBy",
-        "decisionReason",
-        "expiresAt",
-        "participantArtifactDigest",
-        "participantId",
-        "participantNeedsDigest",
-        "proposalId",
-        "proposedCapabilities",
-        "proposedGrantSet",
-        "reasons",
-        "state",
-        "subjectId",
-      ],
-      "type": "object",
-    },
-  },
-  "required": ["proposal"],
-  "type": "object",
-} as const;
-
 export const AuthDeploymentsApplyRequestSchema = {
   "properties": {
     "apiArtifacts": {
@@ -3594,6 +492,11 @@ export const AuthDeploymentsApplyResponseSchema = {
   "properties": {
     "binding": {
       "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
         "expiresAt": {
           "anyOf": [{
             "maximum": 9007199254740991,
@@ -3700,18 +603,13 @@ export const AuthDeploymentsApplyResponseSchema = {
         },
         "participantId": { "minLength": 1, "type": "string" },
         "platformPrivileges": {
-          "items": {
-            "anyOf": [{ "const": "trellis.auth::admin", "type": "string" }, {
-              "const": "trellis.auth::capabilities.delegate",
-              "type": "string",
-            }],
-          },
+          "items": { "const": "trellis.auth::admin", "type": "string" },
           "type": "array",
         },
         "provenance": {
           "anyOf": [{
             "properties": {
-              "policyDigest": {
+              "effectivePolicyDigest": {
                 "pattern": "^[A-Za-z0-9_-]{43}$",
                 "type": "string",
               },
@@ -3722,7 +620,12 @@ export const AuthDeploymentsApplyResponseSchema = {
                 "type": "array",
               },
             },
-            "required": ["portalId", "providerId", "roles", "policyDigest"],
+            "required": [
+              "portalId",
+              "providerId",
+              "roles",
+              "effectivePolicyDigest",
+            ],
             "type": "object",
           }, { "type": "null" }],
         },
@@ -3737,6 +640,11 @@ export const AuthDeploymentsApplyResponseSchema = {
             "type": "string",
           }],
         },
+        "updatedAt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
       },
       "required": [
         "ownerKind",
@@ -3749,6 +657,8 @@ export const AuthDeploymentsApplyResponseSchema = {
         "state",
         "expiresAt",
         "provenance",
+        "createdAt",
+        "updatedAt",
       ],
       "type": "object",
     },
@@ -4224,6 +1134,373 @@ export const AuthDeploymentsEnableResponseSchema = {
   "type": "object",
 } as const;
 
+export const AuthDeploymentsGetRequestSchema = {
+  "properties": { "deploymentId": { "minLength": 1, "type": "string" } },
+  "required": ["deploymentId"],
+  "type": "object",
+} as const;
+
+export const AuthDeploymentsGetResponseSchema = {
+  "properties": {
+    "binding": {
+      "anyOf": [{
+        "properties": {
+          "createdAt": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          },
+          "expiresAt": {
+            "anyOf": [{
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            }, { "type": "null" }],
+          },
+          "grants": {
+            "properties": {
+              "format": { "const": "trellis.grant-set.v1", "type": "string" },
+              "permissions": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "anyOf": [
+                        { "const": "call", "type": "string" },
+                        { "const": "invoke", "type": "string" },
+                        { "const": "observe", "type": "string" },
+                        { "const": "cancel", "type": "string" },
+                        { "const": "control", "type": "string" },
+                        { "const": "publish", "type": "string" },
+                        { "const": "subscribe", "type": "string" },
+                        { "const": "read", "type": "string" },
+                        { "const": "write", "type": "string" },
+                        { "const": "delete", "type": "string" },
+                        { "const": "submit", "type": "string" },
+                        { "const": "process", "type": "string" },
+                        { "const": "consume", "type": "string" },
+                      ],
+                    },
+                    "target": {
+                      "anyOf": [{
+                        "properties": {
+                          "api": { "minLength": 1, "type": "string" },
+                          "kind": { "const": "apiSurface", "type": "string" },
+                          "name": { "minLength": 1, "type": "string" },
+                          "surface": {
+                            "anyOf": [
+                              { "const": "rpc", "type": "string" },
+                              { "const": "operation", "type": "string" },
+                              { "const": "event", "type": "string" },
+                              { "const": "feed", "type": "string" },
+                              { "const": "state", "type": "string" },
+                            ],
+                          },
+                        },
+                        "required": ["kind", "api", "surface", "name"],
+                        "type": "object",
+                      }, {
+                        "properties": {
+                          "api": { "minLength": 1, "type": "string" },
+                          "kind": {
+                            "const": "operationSignal",
+                            "type": "string",
+                          },
+                          "operation": { "minLength": 1, "type": "string" },
+                          "signal": { "minLength": 1, "type": "string" },
+                        },
+                        "required": ["kind", "api", "operation", "signal"],
+                        "type": "object",
+                      }, {
+                        "properties": {
+                          "kind": {
+                            "const": "participantResource",
+                            "type": "string",
+                          },
+                          "name": { "minLength": 1, "type": "string" },
+                          "participant": { "minLength": 1, "type": "string" },
+                          "resource": {
+                            "anyOf": [
+                              { "const": "state", "type": "string" },
+                              { "const": "jobQueue", "type": "string" },
+                              { "const": "eventConsumer", "type": "string" },
+                              { "const": "kv", "type": "string" },
+                              { "const": "store", "type": "string" },
+                            ],
+                          },
+                        },
+                        "required": ["kind", "participant", "resource", "name"],
+                        "type": "object",
+                      }],
+                    },
+                  },
+                  "required": ["action", "target"],
+                  "type": "object",
+                },
+                "type": "array",
+              },
+            },
+            "required": ["format", "permissions"],
+            "type": "object",
+          },
+          "installedRevision": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer",
+          },
+          "ownerId": { "minLength": 1, "type": "string" },
+          "ownerKind": {
+            "anyOf": [{ "const": "deployment", "type": "string" }, {
+              "const": "user",
+              "type": "string",
+            }],
+          },
+          "participantId": { "minLength": 1, "type": "string" },
+          "platformPrivileges": {
+            "items": { "const": "trellis.auth::admin", "type": "string" },
+            "type": "array",
+          },
+          "provenance": {
+            "anyOf": [{
+              "properties": {
+                "effectivePolicyDigest": {
+                  "pattern": "^[A-Za-z0-9_-]{43}$",
+                  "type": "string",
+                },
+                "portalId": { "minLength": 1, "type": "string" },
+                "providerId": { "minLength": 1, "type": "string" },
+                "roles": {
+                  "items": { "minLength": 1, "type": "string" },
+                  "type": "array",
+                },
+              },
+              "required": [
+                "portalId",
+                "providerId",
+                "roles",
+                "effectivePolicyDigest",
+              ],
+              "type": "object",
+            }, { "type": "null" }],
+          },
+          "revision": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer",
+          },
+          "state": {
+            "anyOf": [{ "const": "active", "type": "string" }, {
+              "const": "revoked",
+              "type": "string",
+            }],
+          },
+          "updatedAt": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          },
+        },
+        "required": [
+          "ownerKind",
+          "ownerId",
+          "participantId",
+          "installedRevision",
+          "grants",
+          "platformPrivileges",
+          "revision",
+          "state",
+          "expiresAt",
+          "provenance",
+          "createdAt",
+          "updatedAt",
+        ],
+        "type": "object",
+      }, { "type": "null" }],
+    },
+    "deployment": {
+      "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "deploymentId": { "minLength": 1, "type": "string" },
+        "disabledAt": {
+          "anyOf": [{
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          }, { "type": "null" }],
+        },
+        "displayName": { "minLength": 1, "type": "string" },
+        "expiresAt": {
+          "anyOf": [{
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          }, { "type": "null" }],
+        },
+        "kind": {
+          "anyOf": [{ "const": "service", "type": "string" }, {
+            "const": "device",
+            "type": "string",
+          }],
+        },
+        "participantId": {
+          "anyOf": [{ "type": "string" }, { "type": "null" }],
+        },
+        "portalId": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "requiresDeviceDelegation": { "type": "boolean" },
+        "reviewMode": {
+          "anyOf": [
+            { "const": "none", "type": "string" },
+            { "const": "required", "type": "string" },
+            { "type": "null" },
+            { "const": "none", "type": "string" },
+            { "const": "required", "type": "string" },
+            { "type": "null" },
+          ],
+        },
+        "revokedAt": {
+          "anyOf": [{
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          }, { "type": "null" }],
+        },
+        "state": {
+          "anyOf": [{ "const": "active", "type": "string" }, {
+            "const": "disabled",
+            "type": "string",
+          }, { "const": "revoked", "type": "string" }],
+        },
+        "updatedAt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "version": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "createdAt",
+        "deploymentId",
+        "disabledAt",
+        "displayName",
+        "expiresAt",
+        "kind",
+        "participantId",
+        "portalId",
+        "requiresDeviceDelegation",
+        "reviewMode",
+        "revokedAt",
+        "state",
+        "updatedAt",
+        "version",
+      ],
+      "type": "object",
+    },
+    "resources": {
+      "items": {
+        "properties": {
+          "bindingId": { "minLength": 1, "type": "string" },
+          "error": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+          "localName": { "minLength": 1, "type": "string" },
+          "materializedAt": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          },
+          "ownerParticipantId": { "minLength": 1, "type": "string" },
+          "providerIdentity": {
+            "anyOf": [{
+              "properties": {
+                "bucket": { "minLength": 1, "type": "string" },
+                "kind": { "const": "kv", "type": "string" },
+              },
+              "required": ["kind", "bucket"],
+              "type": "object",
+            }, {
+              "properties": {
+                "bucket": { "minLength": 1, "type": "string" },
+                "kind": { "const": "store", "type": "string" },
+              },
+              "required": ["kind", "bucket"],
+              "type": "object",
+            }, {
+              "properties": {
+                "bucket": { "minLength": 1, "type": "string" },
+                "kind": { "const": "state", "type": "string" },
+              },
+              "required": ["kind", "bucket"],
+              "type": "object",
+            }, {
+              "properties": {
+                "consumer": { "minLength": 1, "type": "string" },
+                "kind": { "const": "jobQueue", "type": "string" },
+                "namespace": { "minLength": 1, "type": "string" },
+                "publishPrefix": { "minLength": 1, "type": "string" },
+                "updatesPrefix": {
+                  "anyOf": [{ "minLength": 1, "type": "string" }, {
+                    "type": "null",
+                  }],
+                },
+                "workStream": { "minLength": 1, "type": "string" },
+                "workSubject": { "minLength": 1, "type": "string" },
+              },
+              "required": [
+                "kind",
+                "namespace",
+                "workStream",
+                "publishPrefix",
+                "updatesPrefix",
+                "workSubject",
+                "consumer",
+              ],
+              "type": "object",
+            }, {
+              "properties": {
+                "consumer": { "minLength": 1, "type": "string" },
+                "filterSubjects": {
+                  "items": { "minLength": 1, "type": "string" },
+                  "type": "array",
+                },
+                "kind": { "const": "eventConsumer", "type": "string" },
+                "stream": { "minLength": 1, "type": "string" },
+              },
+              "required": ["kind", "stream", "consumer", "filterSubjects"],
+              "type": "object",
+            }],
+          },
+          "resourceKind": { "minLength": 1, "type": "string" },
+          "state": {
+            "anyOf": [{ "const": "available", "type": "string" }, {
+              "const": "unavailable",
+              "type": "string",
+            }, { "const": "stale", "type": "string" }],
+          },
+        },
+        "required": [
+          "resourceKind",
+          "localName",
+          "bindingId",
+          "ownerParticipantId",
+          "providerIdentity",
+          "state",
+          "materializedAt",
+          "error",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+  },
+  "required": ["deployment", "binding", "resources"],
+  "type": "object",
+} as const;
+
 export const AuthDeploymentsListRequestSchema = {
   "properties": {
     "cursor": { "minLength": 1, "type": "string" },
@@ -4500,440 +1777,6 @@ export const AuthDeviceUserAuthoritiesListResponseSchema = {
     "entries": {
       "items": {
         "properties": {
-          "authority": {
-            "anyOf": [{
-              "properties": {
-                "acceptedNeedsDigest": {
-                  "pattern": "^[A-Za-z0-9_-]{43}$",
-                  "type": "string",
-                },
-                "authorityId": { "minLength": 1, "type": "string" },
-                "createdAt": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                },
-                "decision": {
-                  "anyOf": [{
-                    "properties": {
-                      "decidedAt": {
-                        "maximum": 9007199254740991,
-                        "minimum": 0,
-                        "type": "integer",
-                      },
-                      "decidedBy": { "minLength": 1, "type": "string" },
-                      "reason": {
-                        "anyOf": [{ "type": "string" }, { "type": "null" }],
-                      },
-                    },
-                    "required": ["decidedAt", "decidedBy", "reason"],
-                    "type": "object",
-                  }, { "type": "null" }],
-                },
-                "desiredCapabilities": {
-                  "items": { "minLength": 1, "type": "string" },
-                  "type": "array",
-                },
-                "desiredGrantSet": {
-                  "properties": {
-                    "format": {
-                      "const": "trellis.grant-set.v1",
-                      "type": "string",
-                    },
-                    "permissions": {
-                      "items": {
-                        "properties": {
-                          "action": {
-                            "anyOf": [
-                              { "const": "call", "type": "string" },
-                              { "const": "invoke", "type": "string" },
-                              { "const": "observe", "type": "string" },
-                              { "const": "cancel", "type": "string" },
-                              { "const": "control", "type": "string" },
-                              { "const": "publish", "type": "string" },
-                              { "const": "subscribe", "type": "string" },
-                              { "const": "read", "type": "string" },
-                              { "const": "write", "type": "string" },
-                              { "const": "delete", "type": "string" },
-                              { "const": "submit", "type": "string" },
-                              { "const": "process", "type": "string" },
-                              { "const": "consume", "type": "string" },
-                            ],
-                          },
-                          "target": {
-                            "anyOf": [{
-                              "properties": {
-                                "api": { "minLength": 1, "type": "string" },
-                                "kind": {
-                                  "const": "apiSurface",
-                                  "type": "string",
-                                },
-                                "name": { "minLength": 1, "type": "string" },
-                                "surface": {
-                                  "anyOf": [
-                                    { "const": "rpc", "type": "string" },
-                                    { "const": "operation", "type": "string" },
-                                    { "const": "event", "type": "string" },
-                                    { "const": "feed", "type": "string" },
-                                    { "const": "state", "type": "string" },
-                                  ],
-                                },
-                              },
-                              "required": ["api", "kind", "name", "surface"],
-                              "type": "object",
-                            }, {
-                              "properties": {
-                                "api": { "minLength": 1, "type": "string" },
-                                "kind": {
-                                  "const": "operationSignal",
-                                  "type": "string",
-                                },
-                                "operation": {
-                                  "minLength": 1,
-                                  "type": "string",
-                                },
-                                "signal": { "minLength": 1, "type": "string" },
-                              },
-                              "required": [
-                                "api",
-                                "kind",
-                                "operation",
-                                "signal",
-                              ],
-                              "type": "object",
-                            }, {
-                              "properties": {
-                                "kind": {
-                                  "const": "participantResource",
-                                  "type": "string",
-                                },
-                                "name": { "minLength": 1, "type": "string" },
-                                "participant": {
-                                  "minLength": 1,
-                                  "type": "string",
-                                },
-                                "resource": {
-                                  "anyOf": [
-                                    { "const": "state", "type": "string" },
-                                    { "const": "jobQueue", "type": "string" },
-                                    {
-                                      "const": "eventConsumer",
-                                      "type": "string",
-                                    },
-                                    { "const": "kv", "type": "string" },
-                                    { "const": "store", "type": "string" },
-                                  ],
-                                },
-                              },
-                              "required": [
-                                "kind",
-                                "name",
-                                "participant",
-                                "resource",
-                              ],
-                              "type": "object",
-                            }],
-                          },
-                        },
-                        "required": ["action", "target"],
-                        "type": "object",
-                      },
-                      "type": "array",
-                    },
-                  },
-                  "required": ["format", "permissions"],
-                  "type": "object",
-                },
-                "expiresAt": {
-                  "anyOf": [{
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer",
-                  }, { "type": "null" }],
-                },
-                "kind": { "const": "identity", "type": "string" },
-                "materialization": {
-                  "anyOf": [{
-                    "properties": {
-                      "authorityId": { "minLength": 1, "type": "string" },
-                      "authorityKind": {
-                        "anyOf": [{ "const": "identity", "type": "string" }, {
-                          "const": "deployment",
-                          "type": "string",
-                        }],
-                      },
-                      "authorityVersion": {
-                        "maximum": 9007199254740991,
-                        "minimum": 1,
-                        "type": "integer",
-                      },
-                      "effectiveCapabilities": {
-                        "items": { "minLength": 1, "type": "string" },
-                        "type": "array",
-                      },
-                      "effectiveGrantSet": {
-                        "properties": {
-                          "format": {
-                            "const": "trellis.grant-set.v1",
-                            "type": "string",
-                          },
-                          "permissions": {
-                            "items": {
-                              "properties": {
-                                "action": {
-                                  "anyOf": [
-                                    { "const": "call", "type": "string" },
-                                    { "const": "invoke", "type": "string" },
-                                    { "const": "observe", "type": "string" },
-                                    { "const": "cancel", "type": "string" },
-                                    { "const": "control", "type": "string" },
-                                    { "const": "publish", "type": "string" },
-                                    { "const": "subscribe", "type": "string" },
-                                    { "const": "read", "type": "string" },
-                                    { "const": "write", "type": "string" },
-                                    { "const": "delete", "type": "string" },
-                                    { "const": "submit", "type": "string" },
-                                    { "const": "process", "type": "string" },
-                                    { "const": "consume", "type": "string" },
-                                  ],
-                                },
-                                "target": {
-                                  "anyOf": [{
-                                    "properties": {
-                                      "api": {
-                                        "minLength": 1,
-                                        "type": "string",
-                                      },
-                                      "kind": {
-                                        "const": "apiSurface",
-                                        "type": "string",
-                                      },
-                                      "name": {
-                                        "minLength": 1,
-                                        "type": "string",
-                                      },
-                                      "surface": {
-                                        "anyOf": [{
-                                          "const": "rpc",
-                                          "type": "string",
-                                        }, {
-                                          "const": "operation",
-                                          "type": "string",
-                                        }, {
-                                          "const": "event",
-                                          "type": "string",
-                                        }, {
-                                          "const": "feed",
-                                          "type": "string",
-                                        }, {
-                                          "const": "state",
-                                          "type": "string",
-                                        }],
-                                      },
-                                    },
-                                    "required": [
-                                      "api",
-                                      "kind",
-                                      "name",
-                                      "surface",
-                                    ],
-                                    "type": "object",
-                                  }, {
-                                    "properties": {
-                                      "api": {
-                                        "minLength": 1,
-                                        "type": "string",
-                                      },
-                                      "kind": {
-                                        "const": "operationSignal",
-                                        "type": "string",
-                                      },
-                                      "operation": {
-                                        "minLength": 1,
-                                        "type": "string",
-                                      },
-                                      "signal": {
-                                        "minLength": 1,
-                                        "type": "string",
-                                      },
-                                    },
-                                    "required": [
-                                      "api",
-                                      "kind",
-                                      "operation",
-                                      "signal",
-                                    ],
-                                    "type": "object",
-                                  }, {
-                                    "properties": {
-                                      "kind": {
-                                        "const": "participantResource",
-                                        "type": "string",
-                                      },
-                                      "name": {
-                                        "minLength": 1,
-                                        "type": "string",
-                                      },
-                                      "participant": {
-                                        "minLength": 1,
-                                        "type": "string",
-                                      },
-                                      "resource": {
-                                        "anyOf": [
-                                          {
-                                            "const": "state",
-                                            "type": "string",
-                                          },
-                                          {
-                                            "const": "jobQueue",
-                                            "type": "string",
-                                          },
-                                          {
-                                            "const": "eventConsumer",
-                                            "type": "string",
-                                          },
-                                          { "const": "kv", "type": "string" },
-                                          {
-                                            "const": "store",
-                                            "type": "string",
-                                          },
-                                        ],
-                                      },
-                                    },
-                                    "required": [
-                                      "kind",
-                                      "name",
-                                      "participant",
-                                      "resource",
-                                    ],
-                                    "type": "object",
-                                  }],
-                                },
-                              },
-                              "required": ["action", "target"],
-                              "type": "object",
-                            },
-                            "type": "array",
-                          },
-                        },
-                        "required": ["format", "permissions"],
-                        "type": "object",
-                      },
-                      "error": {
-                        "anyOf": [{ "type": "string" }, { "type": "null" }],
-                      },
-                      "expiresAt": {
-                        "anyOf": [{
-                          "maximum": 9007199254740991,
-                          "minimum": 0,
-                          "type": "integer",
-                        }, { "type": "null" }],
-                      },
-                      "materializationId": { "minLength": 1, "type": "string" },
-                      "materializationVersion": {
-                        "maximum": 9007199254740991,
-                        "minimum": 1,
-                        "type": "integer",
-                      },
-                      "participantArtifactDigest": {
-                        "pattern": "^[A-Za-z0-9_-]{43}$",
-                        "type": "string",
-                      },
-                      "participantId": { "minLength": 1, "type": "string" },
-                      "participantKind": {
-                        "anyOf": [
-                          { "const": "service", "type": "string" },
-                          { "const": "app", "type": "string" },
-                          { "const": "device", "type": "string" },
-                          { "const": "agent", "type": "string" },
-                        ],
-                      },
-                      "participantNeedsDigest": {
-                        "pattern": "^[A-Za-z0-9_-]{43}$",
-                        "type": "string",
-                      },
-                      "reconciledAt": {
-                        "anyOf": [{
-                          "maximum": 9007199254740991,
-                          "minimum": 0,
-                          "type": "integer",
-                        }, { "type": "null" }],
-                      },
-                      "state": {
-                        "anyOf": [{ "const": "available", "type": "string" }, {
-                          "const": "unavailable",
-                          "type": "string",
-                        }, { "const": "error", "type": "string" }],
-                      },
-                      "subjectId": { "minLength": 1, "type": "string" },
-                    },
-                    "required": [
-                      "authorityId",
-                      "authorityKind",
-                      "authorityVersion",
-                      "effectiveCapabilities",
-                      "effectiveGrantSet",
-                      "error",
-                      "expiresAt",
-                      "materializationId",
-                      "materializationVersion",
-                      "participantArtifactDigest",
-                      "participantId",
-                      "participantKind",
-                      "participantNeedsDigest",
-                      "reconciledAt",
-                      "state",
-                      "subjectId",
-                    ],
-                    "type": "object",
-                  }, { "type": "null" }],
-                },
-                "participantArtifactDigest": {
-                  "pattern": "^[A-Za-z0-9_-]{43}$",
-                  "type": "string",
-                },
-                "participantId": { "minLength": 1, "type": "string" },
-                "principalId": { "minLength": 1, "type": "string" },
-                "state": {
-                  "anyOf": [
-                    { "const": "pending", "type": "string" },
-                    { "const": "accepted", "type": "string" },
-                    { "const": "rejected", "type": "string" },
-                    { "const": "revoked", "type": "string" },
-                    { "const": "stale", "type": "string" },
-                  ],
-                },
-                "updatedAt": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                },
-                "version": {
-                  "maximum": 9007199254740991,
-                  "minimum": 1,
-                  "type": "integer",
-                },
-              },
-              "required": [
-                "acceptedNeedsDigest",
-                "authorityId",
-                "createdAt",
-                "decision",
-                "desiredCapabilities",
-                "desiredGrantSet",
-                "expiresAt",
-                "kind",
-                "materialization",
-                "participantArtifactDigest",
-                "participantId",
-                "principalId",
-                "state",
-                "updatedAt",
-                "version",
-              ],
-              "type": "object",
-            }, { "type": "null" }],
-          },
           "device": {
             "properties": {
               "administrativeApproval": {
@@ -5016,7 +1859,7 @@ export const AuthDeviceUserAuthoritiesListResponseSchema = {
             "type": "object",
           },
         },
-        "required": ["authority", "device"],
+        "required": ["device"],
         "type": "object",
       },
       "type": "array",
@@ -5074,377 +1917,6 @@ export const AuthDeviceUserAuthoritiesResolveRequestSchema = {
 
 export const AuthDeviceUserAuthoritiesResolveResponseSchema = {
   "properties": {
-    "authority": {
-      "anyOf": [{
-        "properties": {
-          "acceptedNeedsDigest": {
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "type": "string",
-          },
-          "authorityId": { "minLength": 1, "type": "string" },
-          "createdAt": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          },
-          "decision": {
-            "anyOf": [{
-              "properties": {
-                "decidedAt": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                },
-                "decidedBy": { "minLength": 1, "type": "string" },
-                "reason": {
-                  "anyOf": [{ "type": "string" }, { "type": "null" }],
-                },
-              },
-              "required": ["decidedAt", "decidedBy", "reason"],
-              "type": "object",
-            }, { "type": "null" }],
-          },
-          "desiredCapabilities": {
-            "items": { "minLength": 1, "type": "string" },
-            "type": "array",
-          },
-          "desiredGrantSet": {
-            "properties": {
-              "format": { "const": "trellis.grant-set.v1", "type": "string" },
-              "permissions": {
-                "items": {
-                  "properties": {
-                    "action": {
-                      "anyOf": [
-                        { "const": "call", "type": "string" },
-                        { "const": "invoke", "type": "string" },
-                        { "const": "observe", "type": "string" },
-                        { "const": "cancel", "type": "string" },
-                        { "const": "control", "type": "string" },
-                        { "const": "publish", "type": "string" },
-                        { "const": "subscribe", "type": "string" },
-                        { "const": "read", "type": "string" },
-                        { "const": "write", "type": "string" },
-                        { "const": "delete", "type": "string" },
-                        { "const": "submit", "type": "string" },
-                        { "const": "process", "type": "string" },
-                        { "const": "consume", "type": "string" },
-                      ],
-                    },
-                    "target": {
-                      "anyOf": [{
-                        "properties": {
-                          "api": { "minLength": 1, "type": "string" },
-                          "kind": { "const": "apiSurface", "type": "string" },
-                          "name": { "minLength": 1, "type": "string" },
-                          "surface": {
-                            "anyOf": [
-                              { "const": "rpc", "type": "string" },
-                              { "const": "operation", "type": "string" },
-                              { "const": "event", "type": "string" },
-                              { "const": "feed", "type": "string" },
-                              { "const": "state", "type": "string" },
-                            ],
-                          },
-                        },
-                        "required": ["api", "kind", "name", "surface"],
-                        "type": "object",
-                      }, {
-                        "properties": {
-                          "api": { "minLength": 1, "type": "string" },
-                          "kind": {
-                            "const": "operationSignal",
-                            "type": "string",
-                          },
-                          "operation": { "minLength": 1, "type": "string" },
-                          "signal": { "minLength": 1, "type": "string" },
-                        },
-                        "required": ["api", "kind", "operation", "signal"],
-                        "type": "object",
-                      }, {
-                        "properties": {
-                          "kind": {
-                            "const": "participantResource",
-                            "type": "string",
-                          },
-                          "name": { "minLength": 1, "type": "string" },
-                          "participant": { "minLength": 1, "type": "string" },
-                          "resource": {
-                            "anyOf": [
-                              { "const": "state", "type": "string" },
-                              { "const": "jobQueue", "type": "string" },
-                              { "const": "eventConsumer", "type": "string" },
-                              { "const": "kv", "type": "string" },
-                              { "const": "store", "type": "string" },
-                            ],
-                          },
-                        },
-                        "required": ["kind", "name", "participant", "resource"],
-                        "type": "object",
-                      }],
-                    },
-                  },
-                  "required": ["action", "target"],
-                  "type": "object",
-                },
-                "type": "array",
-              },
-            },
-            "required": ["format", "permissions"],
-            "type": "object",
-          },
-          "expiresAt": {
-            "anyOf": [{
-              "maximum": 9007199254740991,
-              "minimum": 0,
-              "type": "integer",
-            }, { "type": "null" }],
-          },
-          "kind": { "const": "identity", "type": "string" },
-          "materialization": {
-            "anyOf": [{
-              "properties": {
-                "authorityId": { "minLength": 1, "type": "string" },
-                "authorityKind": {
-                  "anyOf": [{ "const": "identity", "type": "string" }, {
-                    "const": "deployment",
-                    "type": "string",
-                  }],
-                },
-                "authorityVersion": {
-                  "maximum": 9007199254740991,
-                  "minimum": 1,
-                  "type": "integer",
-                },
-                "effectiveCapabilities": {
-                  "items": { "minLength": 1, "type": "string" },
-                  "type": "array",
-                },
-                "effectiveGrantSet": {
-                  "properties": {
-                    "format": {
-                      "const": "trellis.grant-set.v1",
-                      "type": "string",
-                    },
-                    "permissions": {
-                      "items": {
-                        "properties": {
-                          "action": {
-                            "anyOf": [
-                              { "const": "call", "type": "string" },
-                              { "const": "invoke", "type": "string" },
-                              { "const": "observe", "type": "string" },
-                              { "const": "cancel", "type": "string" },
-                              { "const": "control", "type": "string" },
-                              { "const": "publish", "type": "string" },
-                              { "const": "subscribe", "type": "string" },
-                              { "const": "read", "type": "string" },
-                              { "const": "write", "type": "string" },
-                              { "const": "delete", "type": "string" },
-                              { "const": "submit", "type": "string" },
-                              { "const": "process", "type": "string" },
-                              { "const": "consume", "type": "string" },
-                            ],
-                          },
-                          "target": {
-                            "anyOf": [{
-                              "properties": {
-                                "api": { "minLength": 1, "type": "string" },
-                                "kind": {
-                                  "const": "apiSurface",
-                                  "type": "string",
-                                },
-                                "name": { "minLength": 1, "type": "string" },
-                                "surface": {
-                                  "anyOf": [
-                                    { "const": "rpc", "type": "string" },
-                                    { "const": "operation", "type": "string" },
-                                    { "const": "event", "type": "string" },
-                                    { "const": "feed", "type": "string" },
-                                    { "const": "state", "type": "string" },
-                                  ],
-                                },
-                              },
-                              "required": ["api", "kind", "name", "surface"],
-                              "type": "object",
-                            }, {
-                              "properties": {
-                                "api": { "minLength": 1, "type": "string" },
-                                "kind": {
-                                  "const": "operationSignal",
-                                  "type": "string",
-                                },
-                                "operation": {
-                                  "minLength": 1,
-                                  "type": "string",
-                                },
-                                "signal": { "minLength": 1, "type": "string" },
-                              },
-                              "required": [
-                                "api",
-                                "kind",
-                                "operation",
-                                "signal",
-                              ],
-                              "type": "object",
-                            }, {
-                              "properties": {
-                                "kind": {
-                                  "const": "participantResource",
-                                  "type": "string",
-                                },
-                                "name": { "minLength": 1, "type": "string" },
-                                "participant": {
-                                  "minLength": 1,
-                                  "type": "string",
-                                },
-                                "resource": {
-                                  "anyOf": [
-                                    { "const": "state", "type": "string" },
-                                    { "const": "jobQueue", "type": "string" },
-                                    {
-                                      "const": "eventConsumer",
-                                      "type": "string",
-                                    },
-                                    { "const": "kv", "type": "string" },
-                                    { "const": "store", "type": "string" },
-                                  ],
-                                },
-                              },
-                              "required": [
-                                "kind",
-                                "name",
-                                "participant",
-                                "resource",
-                              ],
-                              "type": "object",
-                            }],
-                          },
-                        },
-                        "required": ["action", "target"],
-                        "type": "object",
-                      },
-                      "type": "array",
-                    },
-                  },
-                  "required": ["format", "permissions"],
-                  "type": "object",
-                },
-                "error": {
-                  "anyOf": [{ "type": "string" }, { "type": "null" }],
-                },
-                "expiresAt": {
-                  "anyOf": [{
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer",
-                  }, { "type": "null" }],
-                },
-                "materializationId": { "minLength": 1, "type": "string" },
-                "materializationVersion": {
-                  "maximum": 9007199254740991,
-                  "minimum": 1,
-                  "type": "integer",
-                },
-                "participantArtifactDigest": {
-                  "pattern": "^[A-Za-z0-9_-]{43}$",
-                  "type": "string",
-                },
-                "participantId": { "minLength": 1, "type": "string" },
-                "participantKind": {
-                  "anyOf": [
-                    { "const": "service", "type": "string" },
-                    { "const": "app", "type": "string" },
-                    { "const": "device", "type": "string" },
-                    { "const": "agent", "type": "string" },
-                  ],
-                },
-                "participantNeedsDigest": {
-                  "pattern": "^[A-Za-z0-9_-]{43}$",
-                  "type": "string",
-                },
-                "reconciledAt": {
-                  "anyOf": [{
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer",
-                  }, { "type": "null" }],
-                },
-                "state": {
-                  "anyOf": [{ "const": "available", "type": "string" }, {
-                    "const": "unavailable",
-                    "type": "string",
-                  }, { "const": "error", "type": "string" }],
-                },
-                "subjectId": { "minLength": 1, "type": "string" },
-              },
-              "required": [
-                "authorityId",
-                "authorityKind",
-                "authorityVersion",
-                "effectiveCapabilities",
-                "effectiveGrantSet",
-                "error",
-                "expiresAt",
-                "materializationId",
-                "materializationVersion",
-                "participantArtifactDigest",
-                "participantId",
-                "participantKind",
-                "participantNeedsDigest",
-                "reconciledAt",
-                "state",
-                "subjectId",
-              ],
-              "type": "object",
-            }, { "type": "null" }],
-          },
-          "participantArtifactDigest": {
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "type": "string",
-          },
-          "participantId": { "minLength": 1, "type": "string" },
-          "principalId": { "minLength": 1, "type": "string" },
-          "state": {
-            "anyOf": [
-              { "const": "pending", "type": "string" },
-              { "const": "accepted", "type": "string" },
-              { "const": "rejected", "type": "string" },
-              { "const": "revoked", "type": "string" },
-              { "const": "stale", "type": "string" },
-            ],
-          },
-          "updatedAt": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          },
-          "version": {
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer",
-          },
-        },
-        "required": [
-          "acceptedNeedsDigest",
-          "authorityId",
-          "createdAt",
-          "decision",
-          "desiredCapabilities",
-          "desiredGrantSet",
-          "expiresAt",
-          "kind",
-          "materialization",
-          "participantArtifactDigest",
-          "participantId",
-          "principalId",
-          "state",
-          "updatedAt",
-          "version",
-        ],
-        "type": "object",
-      }, { "type": "null" }],
-    },
     "device": {
       "properties": {
         "administrativeApproval": {
@@ -5585,7 +2057,7 @@ export const AuthDeviceUserAuthoritiesResolveResponseSchema = {
       "type": "object",
     },
   },
-  "required": ["authority", "device", "review"],
+  "required": ["device", "review"],
   "type": "object",
 } as const;
 
@@ -5908,91 +2380,6 @@ export const AuthDeviceUserAuthoritiesRevokeResponseSchema = {
     "kickedSessionCount": { "minimum": 0, "type": "integer" },
   },
   "required": ["device", "kickedSessionCount"],
-  "type": "object",
-} as const;
-
-export const AuthDevicesConnectInfoGetRequestSchema = {
-  "properties": {
-    "challengeDigest": {
-      "anyOf": [{ "pattern": "^[A-Za-z0-9_-]{43}$", "type": "string" }, {
-        "type": "null",
-      }],
-    },
-    "deploymentId": { "minLength": 1, "type": "string" },
-    "deviceIdentityKeyId": {
-      "pattern": "^[A-Za-z0-9_-]{43}$",
-      "type": "string",
-    },
-    "instanceId": { "minLength": 1, "type": "string" },
-    "issuedAt": {
-      "maximum": 9007199254740991,
-      "minimum": 0,
-      "type": "integer",
-    },
-    "newSessionNkey": { "minLength": 1, "type": "string" },
-    "newSessionPublicKey": { "minLength": 1, "type": "string" },
-    "participantDigest": { "pattern": "^[A-Za-z0-9_-]{43}$", "type": "string" },
-    "participantId": { "minLength": 1, "type": "string" },
-    "proof": {
-      "properties": {
-        "format": { "const": "trellis.session-proof.v1", "type": "string" },
-        "signature": { "minLength": 1, "type": "string" },
-      },
-      "required": ["format", "signature"],
-      "type": "object",
-    },
-    "requestId": { "minLength": 1, "type": "string" },
-  },
-  "required": [
-    "challengeDigest",
-    "deploymentId",
-    "deviceIdentityKeyId",
-    "instanceId",
-    "issuedAt",
-    "newSessionNkey",
-    "newSessionPublicKey",
-    "participantDigest",
-    "participantId",
-    "proof",
-    "requestId",
-  ],
-  "type": "object",
-} as const;
-
-export const AuthDevicesConnectInfoGetResponseSchema = {
-  "properties": {
-    "deploymentId": { "minLength": 1, "type": "string" },
-    "endpoints": {
-      "properties": {
-        "authMode": { "const": "session_nkey", "type": "string" },
-        "authorityMode": { "const": "server_issued", "type": "string" },
-        "maximumClockSkewMs": {
-          "maximum": 300000,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "native": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "websocket": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-      },
-      "required": [
-        "authMode",
-        "authorityMode",
-        "maximumClockSkewMs",
-        "native",
-        "websocket",
-      ],
-      "type": "object",
-    },
-    "instanceId": { "minLength": 1, "type": "string" },
-    "participantId": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-  },
-  "required": ["deploymentId", "endpoints", "instanceId", "participantId"],
   "type": "object",
 } as const;
 
@@ -6577,6 +2964,11 @@ export const AuthGrantsChangedEventSchema = {
   "properties": {
     "binding": {
       "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
         "expiresAt": {
           "anyOf": [{
             "maximum": 9007199254740991,
@@ -6683,18 +3075,13 @@ export const AuthGrantsChangedEventSchema = {
         },
         "participantId": { "minLength": 1, "type": "string" },
         "platformPrivileges": {
-          "items": {
-            "anyOf": [{ "const": "trellis.auth::admin", "type": "string" }, {
-              "const": "trellis.auth::capabilities.delegate",
-              "type": "string",
-            }],
-          },
+          "items": { "const": "trellis.auth::admin", "type": "string" },
           "type": "array",
         },
         "provenance": {
           "anyOf": [{
             "properties": {
-              "policyDigest": {
+              "effectivePolicyDigest": {
                 "pattern": "^[A-Za-z0-9_-]{43}$",
                 "type": "string",
               },
@@ -6705,7 +3092,12 @@ export const AuthGrantsChangedEventSchema = {
                 "type": "array",
               },
             },
-            "required": ["portalId", "providerId", "roles", "policyDigest"],
+            "required": [
+              "portalId",
+              "providerId",
+              "roles",
+              "effectivePolicyDigest",
+            ],
             "type": "object",
           }, { "type": "null" }],
         },
@@ -6720,6 +3112,11 @@ export const AuthGrantsChangedEventSchema = {
             "type": "string",
           }],
         },
+        "updatedAt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
       },
       "required": [
         "ownerKind",
@@ -6732,6 +3129,8 @@ export const AuthGrantsChangedEventSchema = {
         "state",
         "expiresAt",
         "provenance",
+        "createdAt",
+        "updatedAt",
       ],
       "type": "object",
     },
@@ -6766,6 +3165,11 @@ export const AuthGrantsGetResponseSchema = {
     "binding": {
       "anyOf": [{
         "properties": {
+          "createdAt": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          },
           "expiresAt": {
             "anyOf": [{
               "maximum": 9007199254740991,
@@ -6872,18 +3276,13 @@ export const AuthGrantsGetResponseSchema = {
           },
           "participantId": { "minLength": 1, "type": "string" },
           "platformPrivileges": {
-            "items": {
-              "anyOf": [{ "const": "trellis.auth::admin", "type": "string" }, {
-                "const": "trellis.auth::capabilities.delegate",
-                "type": "string",
-              }],
-            },
+            "items": { "const": "trellis.auth::admin", "type": "string" },
             "type": "array",
           },
           "provenance": {
             "anyOf": [{
               "properties": {
-                "policyDigest": {
+                "effectivePolicyDigest": {
                   "pattern": "^[A-Za-z0-9_-]{43}$",
                   "type": "string",
                 },
@@ -6894,7 +3293,12 @@ export const AuthGrantsGetResponseSchema = {
                   "type": "array",
                 },
               },
-              "required": ["portalId", "providerId", "roles", "policyDigest"],
+              "required": [
+                "portalId",
+                "providerId",
+                "roles",
+                "effectivePolicyDigest",
+              ],
               "type": "object",
             }, { "type": "null" }],
           },
@@ -6909,6 +3313,11 @@ export const AuthGrantsGetResponseSchema = {
               "type": "string",
             }],
           },
+          "updatedAt": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          },
         },
         "required": [
           "ownerKind",
@@ -6921,6 +3330,8 @@ export const AuthGrantsGetResponseSchema = {
           "state",
           "expiresAt",
           "provenance",
+          "createdAt",
+          "updatedAt",
         ],
         "type": "object",
       }, { "type": "null" }],
@@ -6930,10 +3341,220 @@ export const AuthGrantsGetResponseSchema = {
   "type": "object",
 } as const;
 
+export const AuthGrantsListRequestSchema = {
+  "properties": {
+    "cursor": { "minLength": 1, "type": "string" },
+    "limit": { "maximum": 500, "minimum": 1, "type": "integer" },
+    "ownerId": { "minLength": 1, "type": "string" },
+    "ownerKind": {
+      "anyOf": [{ "const": "deployment", "type": "string" }, {
+        "const": "user",
+        "type": "string",
+      }],
+    },
+    "participantId": { "minLength": 1, "type": "string" },
+    "state": {
+      "anyOf": [{ "const": "active", "type": "string" }, {
+        "const": "revoked",
+        "type": "string",
+      }],
+    },
+  },
+  "type": "object",
+} as const;
+
+export const AuthGrantsListResponseSchema = {
+  "properties": {
+    "entries": {
+      "items": {
+        "properties": {
+          "createdAt": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          },
+          "expiresAt": {
+            "anyOf": [{
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            }, { "type": "null" }],
+          },
+          "grants": {
+            "properties": {
+              "format": { "const": "trellis.grant-set.v1", "type": "string" },
+              "permissions": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "anyOf": [
+                        { "const": "call", "type": "string" },
+                        { "const": "invoke", "type": "string" },
+                        { "const": "observe", "type": "string" },
+                        { "const": "cancel", "type": "string" },
+                        { "const": "control", "type": "string" },
+                        { "const": "publish", "type": "string" },
+                        { "const": "subscribe", "type": "string" },
+                        { "const": "read", "type": "string" },
+                        { "const": "write", "type": "string" },
+                        { "const": "delete", "type": "string" },
+                        { "const": "submit", "type": "string" },
+                        { "const": "process", "type": "string" },
+                        { "const": "consume", "type": "string" },
+                      ],
+                    },
+                    "target": {
+                      "anyOf": [{
+                        "properties": {
+                          "api": { "minLength": 1, "type": "string" },
+                          "kind": { "const": "apiSurface", "type": "string" },
+                          "name": { "minLength": 1, "type": "string" },
+                          "surface": {
+                            "anyOf": [
+                              { "const": "rpc", "type": "string" },
+                              { "const": "operation", "type": "string" },
+                              { "const": "event", "type": "string" },
+                              { "const": "feed", "type": "string" },
+                              { "const": "state", "type": "string" },
+                            ],
+                          },
+                        },
+                        "required": ["kind", "api", "surface", "name"],
+                        "type": "object",
+                      }, {
+                        "properties": {
+                          "api": { "minLength": 1, "type": "string" },
+                          "kind": {
+                            "const": "operationSignal",
+                            "type": "string",
+                          },
+                          "operation": { "minLength": 1, "type": "string" },
+                          "signal": { "minLength": 1, "type": "string" },
+                        },
+                        "required": ["kind", "api", "operation", "signal"],
+                        "type": "object",
+                      }, {
+                        "properties": {
+                          "kind": {
+                            "const": "participantResource",
+                            "type": "string",
+                          },
+                          "name": { "minLength": 1, "type": "string" },
+                          "participant": { "minLength": 1, "type": "string" },
+                          "resource": {
+                            "anyOf": [
+                              { "const": "state", "type": "string" },
+                              { "const": "jobQueue", "type": "string" },
+                              { "const": "eventConsumer", "type": "string" },
+                              { "const": "kv", "type": "string" },
+                              { "const": "store", "type": "string" },
+                            ],
+                          },
+                        },
+                        "required": ["kind", "participant", "resource", "name"],
+                        "type": "object",
+                      }],
+                    },
+                  },
+                  "required": ["action", "target"],
+                  "type": "object",
+                },
+                "type": "array",
+              },
+            },
+            "required": ["format", "permissions"],
+            "type": "object",
+          },
+          "installedRevision": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer",
+          },
+          "ownerId": { "minLength": 1, "type": "string" },
+          "ownerKind": {
+            "anyOf": [{ "const": "deployment", "type": "string" }, {
+              "const": "user",
+              "type": "string",
+            }],
+          },
+          "participantId": { "minLength": 1, "type": "string" },
+          "platformPrivileges": {
+            "items": { "const": "trellis.auth::admin", "type": "string" },
+            "type": "array",
+          },
+          "provenance": {
+            "anyOf": [{
+              "properties": {
+                "effectivePolicyDigest": {
+                  "pattern": "^[A-Za-z0-9_-]{43}$",
+                  "type": "string",
+                },
+                "portalId": { "minLength": 1, "type": "string" },
+                "providerId": { "minLength": 1, "type": "string" },
+                "roles": {
+                  "items": { "minLength": 1, "type": "string" },
+                  "type": "array",
+                },
+              },
+              "required": [
+                "portalId",
+                "providerId",
+                "roles",
+                "effectivePolicyDigest",
+              ],
+              "type": "object",
+            }, { "type": "null" }],
+          },
+          "revision": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer",
+          },
+          "state": {
+            "anyOf": [{ "const": "active", "type": "string" }, {
+              "const": "revoked",
+              "type": "string",
+            }],
+          },
+          "updatedAt": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          },
+        },
+        "required": [
+          "ownerKind",
+          "ownerId",
+          "participantId",
+          "installedRevision",
+          "grants",
+          "platformPrivileges",
+          "revision",
+          "state",
+          "expiresAt",
+          "provenance",
+          "createdAt",
+          "updatedAt",
+        ],
+        "type": "object",
+      },
+      "type": "array",
+    },
+    "nextCursor": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+  },
+  "required": ["entries", "nextCursor"],
+  "type": "object",
+} as const;
+
 export const AuthGrantsMutationResponseSchema = {
   "properties": {
     "binding": {
       "properties": {
+        "createdAt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
         "expiresAt": {
           "anyOf": [{
             "maximum": 9007199254740991,
@@ -7040,18 +3661,13 @@ export const AuthGrantsMutationResponseSchema = {
         },
         "participantId": { "minLength": 1, "type": "string" },
         "platformPrivileges": {
-          "items": {
-            "anyOf": [{ "const": "trellis.auth::admin", "type": "string" }, {
-              "const": "trellis.auth::capabilities.delegate",
-              "type": "string",
-            }],
-          },
+          "items": { "const": "trellis.auth::admin", "type": "string" },
           "type": "array",
         },
         "provenance": {
           "anyOf": [{
             "properties": {
-              "policyDigest": {
+              "effectivePolicyDigest": {
                 "pattern": "^[A-Za-z0-9_-]{43}$",
                 "type": "string",
               },
@@ -7062,7 +3678,12 @@ export const AuthGrantsMutationResponseSchema = {
                 "type": "array",
               },
             },
-            "required": ["portalId", "providerId", "roles", "policyDigest"],
+            "required": [
+              "portalId",
+              "providerId",
+              "roles",
+              "effectivePolicyDigest",
+            ],
             "type": "object",
           }, { "type": "null" }],
         },
@@ -7077,6 +3698,11 @@ export const AuthGrantsMutationResponseSchema = {
             "type": "string",
           }],
         },
+        "updatedAt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
       },
       "required": [
         "ownerKind",
@@ -7089,6 +3715,8 @@ export const AuthGrantsMutationResponseSchema = {
         "state",
         "expiresAt",
         "provenance",
+        "createdAt",
+        "updatedAt",
       ],
       "type": "object",
     },
@@ -7113,6 +3741,7 @@ export const AuthGrantsRevokeRequestSchema = {
       }],
     },
     "participantId": { "minLength": 1, "type": "string" },
+    "reason": { "type": "string" },
   },
   "required": [
     "ownerKind",
@@ -7221,6 +3850,11 @@ export const AuthGrantsSetRequestSchema = {
       "type": "object",
     },
     "idempotencyKey": { "minLength": 1, "type": "string" },
+    "installedRevision": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer",
+    },
     "ownerId": { "minLength": 1, "type": "string" },
     "ownerKind": {
       "anyOf": [{ "const": "deployment", "type": "string" }, {
@@ -7230,12 +3864,7 @@ export const AuthGrantsSetRequestSchema = {
     },
     "participantId": { "minLength": 1, "type": "string" },
     "platformPrivileges": {
-      "items": {
-        "anyOf": [{ "const": "trellis.auth::admin", "type": "string" }, {
-          "const": "trellis.auth::capabilities.delegate",
-          "type": "string",
-        }],
-      },
+      "items": { "const": "trellis.auth::admin", "type": "string" },
       "type": "array",
     },
   },
@@ -7243,1273 +3872,13 @@ export const AuthGrantsSetRequestSchema = {
     "ownerKind",
     "ownerId",
     "participantId",
+    "installedRevision",
     "grants",
     "platformPrivileges",
     "expiresAt",
     "expectedRevision",
     "idempotencyKey",
   ],
-  "type": "object",
-} as const;
-
-export const AuthIdentityAuthorityGetRequestSchema = {
-  "properties": { "authorityId": { "minLength": 1, "type": "string" } },
-  "required": ["authorityId"],
-  "type": "object",
-} as const;
-
-export const AuthIdentityAuthorityGetResponseSchema = {
-  "properties": {
-    "authority": {
-      "properties": {
-        "acceptedNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "authorityId": { "minLength": 1, "type": "string" },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decision": {
-          "anyOf": [{
-            "properties": {
-              "decidedAt": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer",
-              },
-              "decidedBy": { "minLength": 1, "type": "string" },
-              "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-            },
-            "required": ["decidedAt", "decidedBy", "reason"],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "desiredCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "desiredGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "kind": { "const": "identity", "type": "string" },
-        "materialization": {
-          "anyOf": [{
-            "properties": {
-              "authorityId": { "minLength": 1, "type": "string" },
-              "authorityKind": {
-                "anyOf": [{ "const": "identity", "type": "string" }, {
-                  "const": "deployment",
-                  "type": "string",
-                }],
-              },
-              "authorityVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "effectiveCapabilities": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
-              "effectiveGrantSet": {
-                "properties": {
-                  "format": {
-                    "const": "trellis.grant-set.v1",
-                    "type": "string",
-                  },
-                  "permissions": {
-                    "items": {
-                      "properties": {
-                        "action": {
-                          "anyOf": [
-                            { "const": "call", "type": "string" },
-                            { "const": "invoke", "type": "string" },
-                            { "const": "observe", "type": "string" },
-                            { "const": "cancel", "type": "string" },
-                            { "const": "control", "type": "string" },
-                            { "const": "publish", "type": "string" },
-                            { "const": "subscribe", "type": "string" },
-                            { "const": "read", "type": "string" },
-                            { "const": "write", "type": "string" },
-                            { "const": "delete", "type": "string" },
-                            { "const": "submit", "type": "string" },
-                            { "const": "process", "type": "string" },
-                            { "const": "consume", "type": "string" },
-                          ],
-                        },
-                        "target": {
-                          "anyOf": [{
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "apiSurface",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "surface": {
-                                "anyOf": [
-                                  { "const": "rpc", "type": "string" },
-                                  { "const": "operation", "type": "string" },
-                                  { "const": "event", "type": "string" },
-                                  { "const": "feed", "type": "string" },
-                                  { "const": "state", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": ["api", "kind", "name", "surface"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "operationSignal",
-                                "type": "string",
-                              },
-                              "operation": { "minLength": 1, "type": "string" },
-                              "signal": { "minLength": 1, "type": "string" },
-                            },
-                            "required": ["api", "kind", "operation", "signal"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "kind": {
-                                "const": "participantResource",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "participant": {
-                                "minLength": 1,
-                                "type": "string",
-                              },
-                              "resource": {
-                                "anyOf": [
-                                  { "const": "state", "type": "string" },
-                                  { "const": "jobQueue", "type": "string" },
-                                  {
-                                    "const": "eventConsumer",
-                                    "type": "string",
-                                  },
-                                  { "const": "kv", "type": "string" },
-                                  { "const": "store", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": [
-                              "kind",
-                              "name",
-                              "participant",
-                              "resource",
-                            ],
-                            "type": "object",
-                          }],
-                        },
-                      },
-                      "required": ["action", "target"],
-                      "type": "object",
-                    },
-                    "type": "array",
-                  },
-                },
-                "required": ["format", "permissions"],
-                "type": "object",
-              },
-              "error": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-              "expiresAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "materializationId": { "minLength": 1, "type": "string" },
-              "materializationVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "participantArtifactDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "participantId": { "minLength": 1, "type": "string" },
-              "participantKind": {
-                "anyOf": [
-                  { "const": "service", "type": "string" },
-                  { "const": "app", "type": "string" },
-                  { "const": "device", "type": "string" },
-                  { "const": "agent", "type": "string" },
-                ],
-              },
-              "participantNeedsDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "reconciledAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "state": {
-                "anyOf": [{ "const": "available", "type": "string" }, {
-                  "const": "unavailable",
-                  "type": "string",
-                }, { "const": "error", "type": "string" }],
-              },
-              "subjectId": { "minLength": 1, "type": "string" },
-            },
-            "required": [
-              "authorityId",
-              "authorityKind",
-              "authorityVersion",
-              "effectiveCapabilities",
-              "effectiveGrantSet",
-              "error",
-              "expiresAt",
-              "materializationId",
-              "materializationVersion",
-              "participantArtifactDigest",
-              "participantId",
-              "participantKind",
-              "participantNeedsDigest",
-              "reconciledAt",
-              "state",
-              "subjectId",
-            ],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "principalId": { "minLength": 1, "type": "string" },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "revoked", "type": "string" },
-            { "const": "stale", "type": "string" },
-          ],
-        },
-        "updatedAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "version": {
-          "maximum": 9007199254740991,
-          "minimum": 1,
-          "type": "integer",
-        },
-      },
-      "required": [
-        "acceptedNeedsDigest",
-        "authorityId",
-        "createdAt",
-        "decision",
-        "desiredCapabilities",
-        "desiredGrantSet",
-        "expiresAt",
-        "kind",
-        "materialization",
-        "participantArtifactDigest",
-        "participantId",
-        "principalId",
-        "state",
-        "updatedAt",
-        "version",
-      ],
-      "type": "object",
-    },
-  },
-  "required": ["authority"],
-  "type": "object",
-} as const;
-
-export const AuthIdentityAuthorityListRequestSchema = {
-  "properties": {
-    "cursor": { "minLength": 1, "type": "string" },
-    "limit": { "maximum": 100, "minimum": 1, "type": "integer" },
-    "participantId": { "minLength": 1, "type": "string" },
-    "principalId": { "minLength": 1, "type": "string" },
-    "state": {
-      "anyOf": [
-        { "const": "pending", "type": "string" },
-        { "const": "accepted", "type": "string" },
-        { "const": "rejected", "type": "string" },
-        { "const": "revoked", "type": "string" },
-        { "const": "stale", "type": "string" },
-      ],
-    },
-  },
-  "type": "object",
-} as const;
-
-export const AuthIdentityAuthorityListResponseSchema = {
-  "properties": {
-    "entries": {
-      "items": {
-        "properties": {
-          "acceptedNeedsDigest": {
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "type": "string",
-          },
-          "authorityId": { "minLength": 1, "type": "string" },
-          "createdAt": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          },
-          "decision": {
-            "anyOf": [{
-              "properties": {
-                "decidedAt": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                },
-                "decidedBy": { "minLength": 1, "type": "string" },
-                "reason": {
-                  "anyOf": [{ "type": "string" }, { "type": "null" }],
-                },
-              },
-              "required": ["decidedAt", "decidedBy", "reason"],
-              "type": "object",
-            }, { "type": "null" }],
-          },
-          "desiredCapabilities": {
-            "items": { "minLength": 1, "type": "string" },
-            "type": "array",
-          },
-          "desiredGrantSet": {
-            "properties": {
-              "format": { "const": "trellis.grant-set.v1", "type": "string" },
-              "permissions": {
-                "items": {
-                  "properties": {
-                    "action": {
-                      "anyOf": [
-                        { "const": "call", "type": "string" },
-                        { "const": "invoke", "type": "string" },
-                        { "const": "observe", "type": "string" },
-                        { "const": "cancel", "type": "string" },
-                        { "const": "control", "type": "string" },
-                        { "const": "publish", "type": "string" },
-                        { "const": "subscribe", "type": "string" },
-                        { "const": "read", "type": "string" },
-                        { "const": "write", "type": "string" },
-                        { "const": "delete", "type": "string" },
-                        { "const": "submit", "type": "string" },
-                        { "const": "process", "type": "string" },
-                        { "const": "consume", "type": "string" },
-                      ],
-                    },
-                    "target": {
-                      "anyOf": [{
-                        "properties": {
-                          "api": { "minLength": 1, "type": "string" },
-                          "kind": { "const": "apiSurface", "type": "string" },
-                          "name": { "minLength": 1, "type": "string" },
-                          "surface": {
-                            "anyOf": [
-                              { "const": "rpc", "type": "string" },
-                              { "const": "operation", "type": "string" },
-                              { "const": "event", "type": "string" },
-                              { "const": "feed", "type": "string" },
-                              { "const": "state", "type": "string" },
-                            ],
-                          },
-                        },
-                        "required": ["api", "kind", "name", "surface"],
-                        "type": "object",
-                      }, {
-                        "properties": {
-                          "api": { "minLength": 1, "type": "string" },
-                          "kind": {
-                            "const": "operationSignal",
-                            "type": "string",
-                          },
-                          "operation": { "minLength": 1, "type": "string" },
-                          "signal": { "minLength": 1, "type": "string" },
-                        },
-                        "required": ["api", "kind", "operation", "signal"],
-                        "type": "object",
-                      }, {
-                        "properties": {
-                          "kind": {
-                            "const": "participantResource",
-                            "type": "string",
-                          },
-                          "name": { "minLength": 1, "type": "string" },
-                          "participant": { "minLength": 1, "type": "string" },
-                          "resource": {
-                            "anyOf": [
-                              { "const": "state", "type": "string" },
-                              { "const": "jobQueue", "type": "string" },
-                              { "const": "eventConsumer", "type": "string" },
-                              { "const": "kv", "type": "string" },
-                              { "const": "store", "type": "string" },
-                            ],
-                          },
-                        },
-                        "required": ["kind", "name", "participant", "resource"],
-                        "type": "object",
-                      }],
-                    },
-                  },
-                  "required": ["action", "target"],
-                  "type": "object",
-                },
-                "type": "array",
-              },
-            },
-            "required": ["format", "permissions"],
-            "type": "object",
-          },
-          "expiresAt": {
-            "anyOf": [{
-              "maximum": 9007199254740991,
-              "minimum": 0,
-              "type": "integer",
-            }, { "type": "null" }],
-          },
-          "kind": { "const": "identity", "type": "string" },
-          "materialization": {
-            "anyOf": [{
-              "properties": {
-                "authorityId": { "minLength": 1, "type": "string" },
-                "authorityKind": {
-                  "anyOf": [{ "const": "identity", "type": "string" }, {
-                    "const": "deployment",
-                    "type": "string",
-                  }],
-                },
-                "authorityVersion": {
-                  "maximum": 9007199254740991,
-                  "minimum": 1,
-                  "type": "integer",
-                },
-                "effectiveCapabilities": {
-                  "items": { "minLength": 1, "type": "string" },
-                  "type": "array",
-                },
-                "effectiveGrantSet": {
-                  "properties": {
-                    "format": {
-                      "const": "trellis.grant-set.v1",
-                      "type": "string",
-                    },
-                    "permissions": {
-                      "items": {
-                        "properties": {
-                          "action": {
-                            "anyOf": [
-                              { "const": "call", "type": "string" },
-                              { "const": "invoke", "type": "string" },
-                              { "const": "observe", "type": "string" },
-                              { "const": "cancel", "type": "string" },
-                              { "const": "control", "type": "string" },
-                              { "const": "publish", "type": "string" },
-                              { "const": "subscribe", "type": "string" },
-                              { "const": "read", "type": "string" },
-                              { "const": "write", "type": "string" },
-                              { "const": "delete", "type": "string" },
-                              { "const": "submit", "type": "string" },
-                              { "const": "process", "type": "string" },
-                              { "const": "consume", "type": "string" },
-                            ],
-                          },
-                          "target": {
-                            "anyOf": [{
-                              "properties": {
-                                "api": { "minLength": 1, "type": "string" },
-                                "kind": {
-                                  "const": "apiSurface",
-                                  "type": "string",
-                                },
-                                "name": { "minLength": 1, "type": "string" },
-                                "surface": {
-                                  "anyOf": [
-                                    { "const": "rpc", "type": "string" },
-                                    { "const": "operation", "type": "string" },
-                                    { "const": "event", "type": "string" },
-                                    { "const": "feed", "type": "string" },
-                                    { "const": "state", "type": "string" },
-                                  ],
-                                },
-                              },
-                              "required": ["api", "kind", "name", "surface"],
-                              "type": "object",
-                            }, {
-                              "properties": {
-                                "api": { "minLength": 1, "type": "string" },
-                                "kind": {
-                                  "const": "operationSignal",
-                                  "type": "string",
-                                },
-                                "operation": {
-                                  "minLength": 1,
-                                  "type": "string",
-                                },
-                                "signal": { "minLength": 1, "type": "string" },
-                              },
-                              "required": [
-                                "api",
-                                "kind",
-                                "operation",
-                                "signal",
-                              ],
-                              "type": "object",
-                            }, {
-                              "properties": {
-                                "kind": {
-                                  "const": "participantResource",
-                                  "type": "string",
-                                },
-                                "name": { "minLength": 1, "type": "string" },
-                                "participant": {
-                                  "minLength": 1,
-                                  "type": "string",
-                                },
-                                "resource": {
-                                  "anyOf": [
-                                    { "const": "state", "type": "string" },
-                                    { "const": "jobQueue", "type": "string" },
-                                    {
-                                      "const": "eventConsumer",
-                                      "type": "string",
-                                    },
-                                    { "const": "kv", "type": "string" },
-                                    { "const": "store", "type": "string" },
-                                  ],
-                                },
-                              },
-                              "required": [
-                                "kind",
-                                "name",
-                                "participant",
-                                "resource",
-                              ],
-                              "type": "object",
-                            }],
-                          },
-                        },
-                        "required": ["action", "target"],
-                        "type": "object",
-                      },
-                      "type": "array",
-                    },
-                  },
-                  "required": ["format", "permissions"],
-                  "type": "object",
-                },
-                "error": {
-                  "anyOf": [{ "type": "string" }, { "type": "null" }],
-                },
-                "expiresAt": {
-                  "anyOf": [{
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer",
-                  }, { "type": "null" }],
-                },
-                "materializationId": { "minLength": 1, "type": "string" },
-                "materializationVersion": {
-                  "maximum": 9007199254740991,
-                  "minimum": 1,
-                  "type": "integer",
-                },
-                "participantArtifactDigest": {
-                  "pattern": "^[A-Za-z0-9_-]{43}$",
-                  "type": "string",
-                },
-                "participantId": { "minLength": 1, "type": "string" },
-                "participantKind": {
-                  "anyOf": [
-                    { "const": "service", "type": "string" },
-                    { "const": "app", "type": "string" },
-                    { "const": "device", "type": "string" },
-                    { "const": "agent", "type": "string" },
-                  ],
-                },
-                "participantNeedsDigest": {
-                  "pattern": "^[A-Za-z0-9_-]{43}$",
-                  "type": "string",
-                },
-                "reconciledAt": {
-                  "anyOf": [{
-                    "maximum": 9007199254740991,
-                    "minimum": 0,
-                    "type": "integer",
-                  }, { "type": "null" }],
-                },
-                "state": {
-                  "anyOf": [{ "const": "available", "type": "string" }, {
-                    "const": "unavailable",
-                    "type": "string",
-                  }, { "const": "error", "type": "string" }],
-                },
-                "subjectId": { "minLength": 1, "type": "string" },
-              },
-              "required": [
-                "authorityId",
-                "authorityKind",
-                "authorityVersion",
-                "effectiveCapabilities",
-                "effectiveGrantSet",
-                "error",
-                "expiresAt",
-                "materializationId",
-                "materializationVersion",
-                "participantArtifactDigest",
-                "participantId",
-                "participantKind",
-                "participantNeedsDigest",
-                "reconciledAt",
-                "state",
-                "subjectId",
-              ],
-              "type": "object",
-            }, { "type": "null" }],
-          },
-          "participantArtifactDigest": {
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "type": "string",
-          },
-          "participantId": { "minLength": 1, "type": "string" },
-          "principalId": { "minLength": 1, "type": "string" },
-          "state": {
-            "anyOf": [
-              { "const": "pending", "type": "string" },
-              { "const": "accepted", "type": "string" },
-              { "const": "rejected", "type": "string" },
-              { "const": "revoked", "type": "string" },
-              { "const": "stale", "type": "string" },
-            ],
-          },
-          "updatedAt": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          },
-          "version": {
-            "maximum": 9007199254740991,
-            "minimum": 1,
-            "type": "integer",
-          },
-        },
-        "required": [
-          "acceptedNeedsDigest",
-          "authorityId",
-          "createdAt",
-          "decision",
-          "desiredCapabilities",
-          "desiredGrantSet",
-          "expiresAt",
-          "kind",
-          "materialization",
-          "participantArtifactDigest",
-          "participantId",
-          "principalId",
-          "state",
-          "updatedAt",
-          "version",
-        ],
-        "type": "object",
-      },
-      "type": "array",
-    },
-    "nextCursor": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-  },
-  "required": ["entries", "nextCursor"],
-  "type": "object",
-} as const;
-
-export const AuthIdentityAuthorityRevokeRequestSchema = {
-  "properties": {
-    "authorityId": { "minLength": 1, "type": "string" },
-    "expectedVersion": {
-      "maximum": 9007199254740991,
-      "minimum": 1,
-      "type": "integer",
-    },
-    "idempotencyKey": { "minLength": 1, "type": "string" },
-    "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-  },
-  "required": ["authorityId", "expectedVersion", "idempotencyKey", "reason"],
-  "type": "object",
-} as const;
-
-export const AuthIdentityAuthorityRevokeResponseSchema = {
-  "properties": {
-    "authority": {
-      "properties": {
-        "acceptedNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "authorityId": { "minLength": 1, "type": "string" },
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "decision": {
-          "anyOf": [{
-            "properties": {
-              "decidedAt": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer",
-              },
-              "decidedBy": { "minLength": 1, "type": "string" },
-              "reason": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-            },
-            "required": ["decidedAt", "decidedBy", "reason"],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "desiredCapabilities": {
-          "items": { "minLength": 1, "type": "string" },
-          "type": "array",
-        },
-        "desiredGrantSet": {
-          "properties": {
-            "format": { "const": "trellis.grant-set.v1", "type": "string" },
-            "permissions": {
-              "items": {
-                "properties": {
-                  "action": {
-                    "anyOf": [
-                      { "const": "call", "type": "string" },
-                      { "const": "invoke", "type": "string" },
-                      { "const": "observe", "type": "string" },
-                      { "const": "cancel", "type": "string" },
-                      { "const": "control", "type": "string" },
-                      { "const": "publish", "type": "string" },
-                      { "const": "subscribe", "type": "string" },
-                      { "const": "read", "type": "string" },
-                      { "const": "write", "type": "string" },
-                      { "const": "delete", "type": "string" },
-                      { "const": "submit", "type": "string" },
-                      { "const": "process", "type": "string" },
-                      { "const": "consume", "type": "string" },
-                    ],
-                  },
-                  "target": {
-                    "anyOf": [{
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": { "const": "apiSurface", "type": "string" },
-                        "name": { "minLength": 1, "type": "string" },
-                        "surface": {
-                          "anyOf": [
-                            { "const": "rpc", "type": "string" },
-                            { "const": "operation", "type": "string" },
-                            { "const": "event", "type": "string" },
-                            { "const": "feed", "type": "string" },
-                            { "const": "state", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["api", "kind", "name", "surface"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "api": { "minLength": 1, "type": "string" },
-                        "kind": {
-                          "const": "operationSignal",
-                          "type": "string",
-                        },
-                        "operation": { "minLength": 1, "type": "string" },
-                        "signal": { "minLength": 1, "type": "string" },
-                      },
-                      "required": ["api", "kind", "operation", "signal"],
-                      "type": "object",
-                    }, {
-                      "properties": {
-                        "kind": {
-                          "const": "participantResource",
-                          "type": "string",
-                        },
-                        "name": { "minLength": 1, "type": "string" },
-                        "participant": { "minLength": 1, "type": "string" },
-                        "resource": {
-                          "anyOf": [
-                            { "const": "state", "type": "string" },
-                            { "const": "jobQueue", "type": "string" },
-                            { "const": "eventConsumer", "type": "string" },
-                            { "const": "kv", "type": "string" },
-                            { "const": "store", "type": "string" },
-                          ],
-                        },
-                      },
-                      "required": ["kind", "name", "participant", "resource"],
-                      "type": "object",
-                    }],
-                  },
-                },
-                "required": ["action", "target"],
-                "type": "object",
-              },
-              "type": "array",
-            },
-          },
-          "required": ["format", "permissions"],
-          "type": "object",
-        },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
-        "kind": { "const": "identity", "type": "string" },
-        "materialization": {
-          "anyOf": [{
-            "properties": {
-              "authorityId": { "minLength": 1, "type": "string" },
-              "authorityKind": {
-                "anyOf": [{ "const": "identity", "type": "string" }, {
-                  "const": "deployment",
-                  "type": "string",
-                }],
-              },
-              "authorityVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "effectiveCapabilities": {
-                "items": { "minLength": 1, "type": "string" },
-                "type": "array",
-              },
-              "effectiveGrantSet": {
-                "properties": {
-                  "format": {
-                    "const": "trellis.grant-set.v1",
-                    "type": "string",
-                  },
-                  "permissions": {
-                    "items": {
-                      "properties": {
-                        "action": {
-                          "anyOf": [
-                            { "const": "call", "type": "string" },
-                            { "const": "invoke", "type": "string" },
-                            { "const": "observe", "type": "string" },
-                            { "const": "cancel", "type": "string" },
-                            { "const": "control", "type": "string" },
-                            { "const": "publish", "type": "string" },
-                            { "const": "subscribe", "type": "string" },
-                            { "const": "read", "type": "string" },
-                            { "const": "write", "type": "string" },
-                            { "const": "delete", "type": "string" },
-                            { "const": "submit", "type": "string" },
-                            { "const": "process", "type": "string" },
-                            { "const": "consume", "type": "string" },
-                          ],
-                        },
-                        "target": {
-                          "anyOf": [{
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "apiSurface",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "surface": {
-                                "anyOf": [
-                                  { "const": "rpc", "type": "string" },
-                                  { "const": "operation", "type": "string" },
-                                  { "const": "event", "type": "string" },
-                                  { "const": "feed", "type": "string" },
-                                  { "const": "state", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": ["api", "kind", "name", "surface"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "api": { "minLength": 1, "type": "string" },
-                              "kind": {
-                                "const": "operationSignal",
-                                "type": "string",
-                              },
-                              "operation": { "minLength": 1, "type": "string" },
-                              "signal": { "minLength": 1, "type": "string" },
-                            },
-                            "required": ["api", "kind", "operation", "signal"],
-                            "type": "object",
-                          }, {
-                            "properties": {
-                              "kind": {
-                                "const": "participantResource",
-                                "type": "string",
-                              },
-                              "name": { "minLength": 1, "type": "string" },
-                              "participant": {
-                                "minLength": 1,
-                                "type": "string",
-                              },
-                              "resource": {
-                                "anyOf": [
-                                  { "const": "state", "type": "string" },
-                                  { "const": "jobQueue", "type": "string" },
-                                  {
-                                    "const": "eventConsumer",
-                                    "type": "string",
-                                  },
-                                  { "const": "kv", "type": "string" },
-                                  { "const": "store", "type": "string" },
-                                ],
-                              },
-                            },
-                            "required": [
-                              "kind",
-                              "name",
-                              "participant",
-                              "resource",
-                            ],
-                            "type": "object",
-                          }],
-                        },
-                      },
-                      "required": ["action", "target"],
-                      "type": "object",
-                    },
-                    "type": "array",
-                  },
-                },
-                "required": ["format", "permissions"],
-                "type": "object",
-              },
-              "error": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-              "expiresAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "materializationId": { "minLength": 1, "type": "string" },
-              "materializationVersion": {
-                "maximum": 9007199254740991,
-                "minimum": 1,
-                "type": "integer",
-              },
-              "participantArtifactDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "participantId": { "minLength": 1, "type": "string" },
-              "participantKind": {
-                "anyOf": [
-                  { "const": "service", "type": "string" },
-                  { "const": "app", "type": "string" },
-                  { "const": "device", "type": "string" },
-                  { "const": "agent", "type": "string" },
-                ],
-              },
-              "participantNeedsDigest": {
-                "pattern": "^[A-Za-z0-9_-]{43}$",
-                "type": "string",
-              },
-              "reconciledAt": {
-                "anyOf": [{
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer",
-                }, { "type": "null" }],
-              },
-              "state": {
-                "anyOf": [{ "const": "available", "type": "string" }, {
-                  "const": "unavailable",
-                  "type": "string",
-                }, { "const": "error", "type": "string" }],
-              },
-              "subjectId": { "minLength": 1, "type": "string" },
-            },
-            "required": [
-              "authorityId",
-              "authorityKind",
-              "authorityVersion",
-              "effectiveCapabilities",
-              "effectiveGrantSet",
-              "error",
-              "expiresAt",
-              "materializationId",
-              "materializationVersion",
-              "participantArtifactDigest",
-              "participantId",
-              "participantKind",
-              "participantNeedsDigest",
-              "reconciledAt",
-              "state",
-              "subjectId",
-            ],
-            "type": "object",
-          }, { "type": "null" }],
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
-        "participantId": { "minLength": 1, "type": "string" },
-        "principalId": { "minLength": 1, "type": "string" },
-        "state": {
-          "anyOf": [
-            { "const": "pending", "type": "string" },
-            { "const": "accepted", "type": "string" },
-            { "const": "rejected", "type": "string" },
-            { "const": "revoked", "type": "string" },
-            { "const": "stale", "type": "string" },
-          ],
-        },
-        "updatedAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "version": {
-          "maximum": 9007199254740991,
-          "minimum": 1,
-          "type": "integer",
-        },
-      },
-      "required": [
-        "acceptedNeedsDigest",
-        "authorityId",
-        "createdAt",
-        "decision",
-        "desiredCapabilities",
-        "desiredGrantSet",
-        "expiresAt",
-        "kind",
-        "materialization",
-        "participantArtifactDigest",
-        "participantId",
-        "principalId",
-        "state",
-        "updatedAt",
-        "version",
-      ],
-      "type": "object",
-    },
-  },
-  "required": ["authority"],
-  "type": "object",
-} as const;
-
-export const AuthIdentityGrantsListRequestSchema = {
-  "properties": {
-    "limit": { "maximum": 500, "minimum": 0, "type": "integer" },
-    "offset": { "minimum": 0, "type": "integer" },
-    "user": { "minLength": 1, "type": "string" },
-  },
-  "required": ["limit"],
-  "type": "object",
-} as const;
-
-export const AuthIdentityGrantsListResponseSchema = {
-  "properties": {
-    "count": { "minimum": 0, "type": "integer" },
-    "entries": {
-      "items": {
-        "properties": {
-          "capabilities": { "items": { "type": "string" }, "type": "array" },
-          "contractEvidence": {
-            "properties": {
-              "contractDigest": {
-                "pattern": "^[A-Za-z0-9_-]+$",
-                "type": "string",
-              },
-              "contractId": { "minLength": 1, "type": "string" },
-            },
-            "required": ["contractDigest", "contractId"],
-            "type": "object",
-          },
-          "description": { "minLength": 1, "type": "string" },
-          "displayName": { "minLength": 1, "type": "string" },
-          "grantedAt": { "format": "date-time", "type": "string" },
-          "identityAnchor": {
-            "anyOf": [{
-              "properties": {
-                "contractId": { "minLength": 1, "type": "string" },
-                "kind": { "const": "web", "type": "string" },
-                "origin": { "minLength": 1, "type": "string" },
-              },
-              "required": ["contractId", "kind", "origin"],
-              "type": "object",
-            }, {
-              "properties": {
-                "contractId": { "minLength": 1, "type": "string" },
-                "kind": { "const": "cli", "type": "string" },
-                "sessionPublicKey": { "minLength": 1, "type": "string" },
-              },
-              "required": ["contractId", "kind", "sessionPublicKey"],
-              "type": "object",
-            }, {
-              "properties": {
-                "contractId": { "minLength": 1, "type": "string" },
-                "kind": { "const": "native", "type": "string" },
-                "sessionPublicKey": { "minLength": 1, "type": "string" },
-              },
-              "required": ["contractId", "kind", "sessionPublicKey"],
-              "type": "object",
-            }, {
-              "properties": {
-                "contractId": { "minLength": 1, "type": "string" },
-                "devicePublicKey": { "minLength": 1, "type": "string" },
-                "kind": { "const": "device-user", "type": "string" },
-              },
-              "required": ["contractId", "devicePublicKey", "kind"],
-              "type": "object",
-            }],
-          },
-          "identityGrantId": { "minLength": 1, "type": "string" },
-          "participantKind": {
-            "anyOf": [{ "const": "app", "type": "string" }, {
-              "const": "agent",
-              "type": "string",
-            }],
-          },
-          "updatedAt": { "format": "date-time", "type": "string" },
-        },
-        "required": [
-          "capabilities",
-          "contractEvidence",
-          "description",
-          "displayName",
-          "grantedAt",
-          "identityAnchor",
-          "identityGrantId",
-          "participantKind",
-          "updatedAt",
-        ],
-        "type": "object",
-      },
-      "type": "array",
-    },
-    "limit": { "minimum": 0, "type": "integer" },
-    "nextOffset": { "minimum": 0, "type": "integer" },
-    "offset": { "minimum": 0, "type": "integer" },
-  },
-  "required": ["count", "entries", "limit", "offset"],
-  "type": "object",
-} as const;
-
-export const AuthIdentityGrantsRevokeRequestSchema = {
-  "properties": {
-    "identityGrantId": { "minLength": 1, "type": "string" },
-    "user": { "minLength": 1, "type": "string" },
-  },
-  "required": ["identityGrantId"],
-  "type": "object",
-} as const;
-
-export const AuthIdentityGrantsRevokeResponseSchema = {
-  "properties": { "success": { "type": "boolean" } },
-  "required": ["success"],
   "type": "object",
 } as const;
 
@@ -8548,6 +3917,244 @@ export const AuthIssuersRevokedEventSchema = {
   "type": "object",
 } as const;
 
+export const AuthParticipantsGetRequestSchema = {
+  "properties": {
+    "participantId": { "minLength": 1, "type": "string" },
+    "revision": {
+      "maximum": 9007199254740991,
+      "minimum": 1,
+      "type": "integer",
+    },
+  },
+  "required": ["participantId"],
+  "type": "object",
+} as const;
+
+export const AuthParticipantsGetResponseSchema = {
+  "properties": {
+    "participant": {
+      "properties": {
+        "apiArtifacts": {
+          "items": { "properties": {}, "type": "object" },
+          "type": "array",
+        },
+        "artifactDigest": {
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "type": "string",
+        },
+        "installedAt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "optionalBundles": {
+          "items": {
+            "properties": {
+              "apiId": { "minLength": 1, "type": "string" },
+              "id": { "minLength": 1, "type": "string" },
+              "permissions": {
+                "items": {
+                  "properties": {
+                    "action": {
+                      "anyOf": [
+                        { "const": "call", "type": "string" },
+                        { "const": "invoke", "type": "string" },
+                        { "const": "observe", "type": "string" },
+                        { "const": "cancel", "type": "string" },
+                        { "const": "control", "type": "string" },
+                        { "const": "publish", "type": "string" },
+                        { "const": "subscribe", "type": "string" },
+                        { "const": "read", "type": "string" },
+                        { "const": "write", "type": "string" },
+                        { "const": "delete", "type": "string" },
+                        { "const": "submit", "type": "string" },
+                        { "const": "process", "type": "string" },
+                        { "const": "consume", "type": "string" },
+                      ],
+                    },
+                    "target": {
+                      "anyOf": [{
+                        "properties": {
+                          "api": { "minLength": 1, "type": "string" },
+                          "kind": { "const": "apiSurface", "type": "string" },
+                          "name": { "minLength": 1, "type": "string" },
+                          "surface": {
+                            "anyOf": [
+                              { "const": "rpc", "type": "string" },
+                              { "const": "operation", "type": "string" },
+                              { "const": "event", "type": "string" },
+                              { "const": "feed", "type": "string" },
+                              { "const": "state", "type": "string" },
+                            ],
+                          },
+                        },
+                        "required": ["kind", "api", "surface", "name"],
+                        "type": "object",
+                      }, {
+                        "properties": {
+                          "api": { "minLength": 1, "type": "string" },
+                          "kind": {
+                            "const": "operationSignal",
+                            "type": "string",
+                          },
+                          "operation": { "minLength": 1, "type": "string" },
+                          "signal": { "minLength": 1, "type": "string" },
+                        },
+                        "required": ["kind", "api", "operation", "signal"],
+                        "type": "object",
+                      }, {
+                        "properties": {
+                          "kind": {
+                            "const": "participantResource",
+                            "type": "string",
+                          },
+                          "name": { "minLength": 1, "type": "string" },
+                          "participant": { "minLength": 1, "type": "string" },
+                          "resource": {
+                            "anyOf": [
+                              { "const": "state", "type": "string" },
+                              { "const": "jobQueue", "type": "string" },
+                              { "const": "eventConsumer", "type": "string" },
+                              { "const": "kv", "type": "string" },
+                              { "const": "store", "type": "string" },
+                            ],
+                          },
+                        },
+                        "required": ["kind", "participant", "resource", "name"],
+                        "type": "object",
+                      }],
+                    },
+                  },
+                  "required": ["action", "target"],
+                  "type": "object",
+                },
+                "type": "array",
+              },
+            },
+            "required": ["id", "apiId", "permissions"],
+            "type": "object",
+          },
+          "type": "array",
+        },
+        "participantArtifact": { "properties": {}, "type": "object" },
+        "participantId": { "minLength": 1, "type": "string" },
+        "participantKind": {
+          "anyOf": [
+            { "const": "service", "type": "string" },
+            { "const": "device", "type": "string" },
+            { "const": "app", "type": "string" },
+            { "const": "agent", "type": "string" },
+          ],
+        },
+        "requiredGrants": {
+          "properties": {
+            "format": { "const": "trellis.grant-set.v1", "type": "string" },
+            "permissions": {
+              "items": {
+                "properties": {
+                  "action": {
+                    "anyOf": [
+                      { "const": "call", "type": "string" },
+                      { "const": "invoke", "type": "string" },
+                      { "const": "observe", "type": "string" },
+                      { "const": "cancel", "type": "string" },
+                      { "const": "control", "type": "string" },
+                      { "const": "publish", "type": "string" },
+                      { "const": "subscribe", "type": "string" },
+                      { "const": "read", "type": "string" },
+                      { "const": "write", "type": "string" },
+                      { "const": "delete", "type": "string" },
+                      { "const": "submit", "type": "string" },
+                      { "const": "process", "type": "string" },
+                      { "const": "consume", "type": "string" },
+                    ],
+                  },
+                  "target": {
+                    "anyOf": [{
+                      "properties": {
+                        "api": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "apiSurface", "type": "string" },
+                        "name": { "minLength": 1, "type": "string" },
+                        "surface": {
+                          "anyOf": [
+                            { "const": "rpc", "type": "string" },
+                            { "const": "operation", "type": "string" },
+                            { "const": "event", "type": "string" },
+                            { "const": "feed", "type": "string" },
+                            { "const": "state", "type": "string" },
+                          ],
+                        },
+                      },
+                      "required": ["kind", "api", "surface", "name"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "api": { "minLength": 1, "type": "string" },
+                        "kind": {
+                          "const": "operationSignal",
+                          "type": "string",
+                        },
+                        "operation": { "minLength": 1, "type": "string" },
+                        "signal": { "minLength": 1, "type": "string" },
+                      },
+                      "required": ["kind", "api", "operation", "signal"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "kind": {
+                          "const": "participantResource",
+                          "type": "string",
+                        },
+                        "name": { "minLength": 1, "type": "string" },
+                        "participant": { "minLength": 1, "type": "string" },
+                        "resource": {
+                          "anyOf": [
+                            { "const": "state", "type": "string" },
+                            { "const": "jobQueue", "type": "string" },
+                            { "const": "eventConsumer", "type": "string" },
+                            { "const": "kv", "type": "string" },
+                            { "const": "store", "type": "string" },
+                          ],
+                        },
+                      },
+                      "required": ["kind", "participant", "resource", "name"],
+                      "type": "object",
+                    }],
+                  },
+                },
+                "required": ["action", "target"],
+                "type": "object",
+              },
+              "type": "array",
+            },
+          },
+          "required": ["format", "permissions"],
+          "type": "object",
+        },
+        "revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "participantId",
+        "participantKind",
+        "revision",
+        "artifactDigest",
+        "installedAt",
+        "participantArtifact",
+        "apiArtifacts",
+        "requiredGrants",
+        "optionalBundles",
+      ],
+      "type": "object",
+    },
+  },
+  "required": ["participant"],
+  "type": "object",
+} as const;
+
 export const AuthParticipantsInstallRequestSchema = {
   "properties": {
     "apiArtifacts": {
@@ -8573,15 +4180,43 @@ export const AuthParticipantsInstallRequestSchema = {
 
 export const AuthParticipantsInstallResponseSchema = {
   "properties": {
-    "digest": { "pattern": "^[A-Za-z0-9_-]{43}$", "type": "string" },
-    "participantId": { "minLength": 1, "type": "string" },
-    "revision": {
-      "maximum": 9007199254740991,
-      "minimum": 1,
-      "type": "integer",
+    "participant": {
+      "properties": {
+        "artifactDigest": {
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "type": "string",
+        },
+        "installedAt": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer",
+        },
+        "participantId": { "minLength": 1, "type": "string" },
+        "participantKind": {
+          "anyOf": [
+            { "const": "service", "type": "string" },
+            { "const": "device", "type": "string" },
+            { "const": "app", "type": "string" },
+            { "const": "agent", "type": "string" },
+          ],
+        },
+        "revision": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer",
+        },
+      },
+      "required": [
+        "participantId",
+        "participantKind",
+        "revision",
+        "artifactDigest",
+        "installedAt",
+      ],
+      "type": "object",
     },
   },
-  "required": ["participantId", "revision", "digest"],
+  "required": ["participant"],
   "type": "object",
 } as const;
 
@@ -9776,7 +5411,6 @@ export const AuthServiceInstancesRemoveResponseSchema = {
 export const AuthSessionsListRequestSchema = {
   "properties": {
     "cursor": { "minLength": 1, "type": "string" },
-    "deploymentId": { "minLength": 1, "type": "string" },
     "limit": { "maximum": 100, "minimum": 1, "type": "integer" },
     "participantId": { "minLength": 1, "type": "string" },
     "principalId": { "minLength": 1, "type": "string" },
@@ -9807,36 +5441,19 @@ export const AuthSessionsListResponseSchema = {
               "type": "integer",
             }, { "type": "null" }],
           },
-          "inboxPrefix": { "minLength": 1, "type": "string" },
-          "lastSeenAt": {
+          "lastAuthenticatedAt": {
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer",
           },
-          "participantArtifactDigest": {
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "type": "string",
-          },
           "participantId": { "minLength": 1, "type": "string" },
           "participantKind": {
-            "anyOf": [
-              { "const": "service", "type": "string" },
-              { "const": "app", "type": "string" },
-              { "const": "device", "type": "string" },
-              { "const": "agent", "type": "string" },
-            ],
-          },
-          "participantNeedsDigest": {
-            "pattern": "^[A-Za-z0-9_-]{43}$",
-            "type": "string",
+            "anyOf": [{ "const": "app", "type": "string" }, {
+              "const": "agent",
+              "type": "string",
+            }],
           },
           "principalId": { "minLength": 1, "type": "string" },
-          "principalKind": {
-            "anyOf": [{ "const": "user", "type": "string" }, {
-              "const": "service",
-              "type": "string",
-            }, { "const": "device", "type": "string" }],
-          },
           "revokedAt": {
             "anyOf": [{
               "maximum": 9007199254740991,
@@ -9865,14 +5482,10 @@ export const AuthSessionsListResponseSchema = {
         "required": [
           "createdAt",
           "expiresAt",
-          "inboxPrefix",
-          "lastSeenAt",
-          "participantArtifactDigest",
+          "lastAuthenticatedAt",
           "participantId",
           "participantKind",
-          "participantNeedsDigest",
           "principalId",
-          "principalKind",
           "revokedAt",
           "sessionId",
           "sessionKeyId",
@@ -9912,36 +5525,19 @@ export const AuthSessionsLogoutResponseSchema = {
             "type": "integer",
           }, { "type": "null" }],
         },
-        "inboxPrefix": { "minLength": 1, "type": "string" },
-        "lastSeenAt": {
+        "lastAuthenticatedAt": {
           "maximum": 9007199254740991,
           "minimum": 0,
           "type": "integer",
         },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
         "participantId": { "minLength": 1, "type": "string" },
         "participantKind": {
-          "anyOf": [
-            { "const": "service", "type": "string" },
-            { "const": "app", "type": "string" },
-            { "const": "device", "type": "string" },
-            { "const": "agent", "type": "string" },
-          ],
-        },
-        "participantNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
+          "anyOf": [{ "const": "app", "type": "string" }, {
+            "const": "agent",
+            "type": "string",
+          }],
         },
         "principalId": { "minLength": 1, "type": "string" },
-        "principalKind": {
-          "anyOf": [{ "const": "user", "type": "string" }, {
-            "const": "service",
-            "type": "string",
-          }, { "const": "device", "type": "string" }],
-        },
         "revokedAt": {
           "anyOf": [{
             "maximum": 9007199254740991,
@@ -9967,14 +5563,10 @@ export const AuthSessionsLogoutResponseSchema = {
       "required": [
         "createdAt",
         "expiresAt",
-        "inboxPrefix",
-        "lastSeenAt",
-        "participantArtifactDigest",
+        "lastAuthenticatedAt",
         "participantId",
         "participantKind",
-        "participantNeedsDigest",
         "principalId",
-        "principalKind",
         "revokedAt",
         "sessionId",
         "sessionKeyId",
@@ -9996,32 +5588,99 @@ export const AuthSessionsMeRequestSchema = {
 
 export const AuthSessionsMeResponseSchema = {
   "properties": {
-    "deploymentId": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-    "instanceId": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
-    "session": {
+    "connection": {
       "properties": {
-        "createdAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
+        "connectionId": { "minLength": 1, "type": "string" },
+        "deploymentId": { "minLength": 1, "type": "string" },
+        "grants": {
+          "properties": {
+            "format": { "const": "trellis.grant-set.v1", "type": "string" },
+            "permissions": {
+              "items": {
+                "properties": {
+                  "action": {
+                    "anyOf": [
+                      { "const": "call", "type": "string" },
+                      { "const": "invoke", "type": "string" },
+                      { "const": "observe", "type": "string" },
+                      { "const": "cancel", "type": "string" },
+                      { "const": "control", "type": "string" },
+                      { "const": "publish", "type": "string" },
+                      { "const": "subscribe", "type": "string" },
+                      { "const": "read", "type": "string" },
+                      { "const": "write", "type": "string" },
+                      { "const": "delete", "type": "string" },
+                      { "const": "submit", "type": "string" },
+                      { "const": "process", "type": "string" },
+                      { "const": "consume", "type": "string" },
+                    ],
+                  },
+                  "target": {
+                    "anyOf": [{
+                      "properties": {
+                        "api": { "minLength": 1, "type": "string" },
+                        "kind": { "const": "apiSurface", "type": "string" },
+                        "name": { "minLength": 1, "type": "string" },
+                        "surface": {
+                          "anyOf": [
+                            { "const": "rpc", "type": "string" },
+                            { "const": "operation", "type": "string" },
+                            { "const": "event", "type": "string" },
+                            { "const": "feed", "type": "string" },
+                            { "const": "state", "type": "string" },
+                          ],
+                        },
+                      },
+                      "required": ["kind", "api", "surface", "name"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "api": { "minLength": 1, "type": "string" },
+                        "kind": {
+                          "const": "operationSignal",
+                          "type": "string",
+                        },
+                        "operation": { "minLength": 1, "type": "string" },
+                        "signal": { "minLength": 1, "type": "string" },
+                      },
+                      "required": ["kind", "api", "operation", "signal"],
+                      "type": "object",
+                    }, {
+                      "properties": {
+                        "kind": {
+                          "const": "participantResource",
+                          "type": "string",
+                        },
+                        "name": { "minLength": 1, "type": "string" },
+                        "participant": { "minLength": 1, "type": "string" },
+                        "resource": {
+                          "anyOf": [
+                            { "const": "state", "type": "string" },
+                            { "const": "jobQueue", "type": "string" },
+                            { "const": "eventConsumer", "type": "string" },
+                            { "const": "kv", "type": "string" },
+                            { "const": "store", "type": "string" },
+                          ],
+                        },
+                      },
+                      "required": ["kind", "participant", "resource", "name"],
+                      "type": "object",
+                    }],
+                  },
+                },
+                "required": ["action", "target"],
+                "type": "object",
+              },
+              "type": "array",
+            },
+          },
+          "required": ["format", "permissions"],
+          "type": "object",
         },
-        "expiresAt": {
-          "anyOf": [{
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "type": "integer",
-          }, { "type": "null" }],
-        },
+        "identityKeyId": { "minLength": 1, "type": "string" },
         "inboxPrefix": { "minLength": 1, "type": "string" },
-        "lastSeenAt": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer",
-        },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
+        "instanceId": { "minLength": 1, "type": "string" },
+        "loginSessionId": { "minLength": 1, "type": "string" },
         "participantId": { "minLength": 1, "type": "string" },
         "participantKind": {
           "anyOf": [
@@ -10031,9 +5690,9 @@ export const AuthSessionsMeResponseSchema = {
             { "const": "agent", "type": "string" },
           ],
         },
-        "participantNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
+        "platformPrivileges": {
+          "items": { "const": "trellis.auth::admin", "type": "string" },
+          "type": "array",
         },
         "principalId": { "minLength": 1, "type": "string" },
         "principalKind": {
@@ -10042,47 +5701,90 @@ export const AuthSessionsMeResponseSchema = {
             "type": "string",
           }, { "const": "device", "type": "string" }],
         },
-        "revokedAt": {
-          "anyOf": [{
+        "sessionKey": { "pattern": "^[A-Za-z0-9_-]{43}$", "type": "string" },
+      },
+      "required": [
+        "connectionId",
+        "sessionKey",
+        "inboxPrefix",
+        "participantId",
+        "participantKind",
+        "principalId",
+        "principalKind",
+        "grants",
+        "platformPrivileges",
+      ],
+      "type": "object",
+    },
+    "session": {
+      "anyOf": [{
+        "properties": {
+          "createdAt": {
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer",
-          }, { "type": "null" }],
-        },
-        "sessionId": { "minLength": 1, "type": "string" },
-        "sessionKeyId": { "pattern": "^[A-Za-z0-9_-]{43}$", "type": "string" },
-        "sessionPublicKey": { "minLength": 1, "type": "string" },
-        "state": {
-          "anyOf": [{ "const": "active", "type": "string" }, {
-            "const": "expired",
+          },
+          "expiresAt": {
+            "anyOf": [{
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            }, { "type": "null" }],
+          },
+          "lastAuthenticatedAt": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+          },
+          "participantId": { "minLength": 1, "type": "string" },
+          "participantKind": {
+            "anyOf": [{ "const": "app", "type": "string" }, {
+              "const": "agent",
+              "type": "string",
+            }],
+          },
+          "principalId": { "minLength": 1, "type": "string" },
+          "revokedAt": {
+            "anyOf": [{
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer",
+            }, { "type": "null" }],
+          },
+          "sessionId": { "minLength": 1, "type": "string" },
+          "sessionKeyId": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
             "type": "string",
-          }, { "const": "revoked", "type": "string" }],
+          },
+          "sessionPublicKey": { "minLength": 1, "type": "string" },
+          "state": {
+            "anyOf": [{ "const": "active", "type": "string" }, {
+              "const": "expired",
+              "type": "string",
+            }, { "const": "revoked", "type": "string" }],
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer",
+          },
         },
-        "version": {
-          "maximum": 9007199254740991,
-          "minimum": 1,
-          "type": "integer",
-        },
-      },
-      "required": [
-        "createdAt",
-        "expiresAt",
-        "inboxPrefix",
-        "lastSeenAt",
-        "participantArtifactDigest",
-        "participantId",
-        "participantKind",
-        "participantNeedsDigest",
-        "principalId",
-        "principalKind",
-        "revokedAt",
-        "sessionId",
-        "sessionKeyId",
-        "sessionPublicKey",
-        "state",
-        "version",
-      ],
-      "type": "object",
+        "required": [
+          "createdAt",
+          "expiresAt",
+          "lastAuthenticatedAt",
+          "participantId",
+          "participantKind",
+          "principalId",
+          "revokedAt",
+          "sessionId",
+          "sessionKeyId",
+          "sessionPublicKey",
+          "state",
+          "version",
+        ],
+        "type": "object",
+      }, { "type": "null" }],
     },
     "user": {
       "anyOf": [{
@@ -10145,7 +5847,7 @@ export const AuthSessionsMeResponseSchema = {
       }, { "type": "null" }],
     },
   },
-  "required": ["deploymentId", "instanceId", "session", "user"],
+  "required": ["connection", "session", "user"],
   "type": "object",
 } as const;
 
@@ -10183,36 +5885,19 @@ export const AuthSessionsRevokeResponseSchema = {
             "type": "integer",
           }, { "type": "null" }],
         },
-        "inboxPrefix": { "minLength": 1, "type": "string" },
-        "lastSeenAt": {
+        "lastAuthenticatedAt": {
           "maximum": 9007199254740991,
           "minimum": 0,
           "type": "integer",
         },
-        "participantArtifactDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
-        },
         "participantId": { "minLength": 1, "type": "string" },
         "participantKind": {
-          "anyOf": [
-            { "const": "service", "type": "string" },
-            { "const": "app", "type": "string" },
-            { "const": "device", "type": "string" },
-            { "const": "agent", "type": "string" },
-          ],
-        },
-        "participantNeedsDigest": {
-          "pattern": "^[A-Za-z0-9_-]{43}$",
-          "type": "string",
+          "anyOf": [{ "const": "app", "type": "string" }, {
+            "const": "agent",
+            "type": "string",
+          }],
         },
         "principalId": { "minLength": 1, "type": "string" },
-        "principalKind": {
-          "anyOf": [{ "const": "user", "type": "string" }, {
-            "const": "service",
-            "type": "string",
-          }, { "const": "device", "type": "string" }],
-        },
         "revokedAt": {
           "anyOf": [{
             "maximum": 9007199254740991,
@@ -10238,14 +5923,10 @@ export const AuthSessionsRevokeResponseSchema = {
       "required": [
         "createdAt",
         "expiresAt",
-        "inboxPrefix",
-        "lastSeenAt",
-        "participantArtifactDigest",
+        "lastAuthenticatedAt",
         "participantId",
         "participantKind",
-        "participantNeedsDigest",
         "principalId",
-        "principalKind",
         "revokedAt",
         "sessionId",
         "sessionKeyId",

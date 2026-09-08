@@ -129,17 +129,22 @@ fn run_install() -> Result<()> {
             trellis_cli::generate::generate_project(&project)?;
         }
     }
-    let compiled = ["runtime", "jobs-runtime", "eventlog-runtime"]
-        .into_iter()
-        .map(|name| {
-            let project = root.join("rust/crates").join(name);
-            let manifest = trellis_cli::project::read_manifest(&project.join("trellis.toml"))?;
-            Ok((
-                name,
-                trellis_cli::package::compile_project(&project, &manifest)?,
-            ))
-        })
-        .collect::<Result<std::collections::BTreeMap<_, _>>>()?;
+    let compiled = [
+        ("runtime", "rust/crates/runtime"),
+        ("jobs-runtime", "rust/crates/jobs-runtime"),
+        ("eventlog-runtime", "rust/crates/eventlog-runtime"),
+        ("web", "web"),
+    ]
+    .into_iter()
+    .map(|(name, path)| {
+        let project = root.join(path);
+        let manifest = trellis_cli::project::read_manifest(&project.join("trellis.toml"))?;
+        Ok((
+            name,
+            trellis_cli::package::compile_project(&project, &manifest)?,
+        ))
+    })
+    .collect::<Result<std::collections::BTreeMap<_, _>>>()?;
     for (project, api_id, module) in [
         ("runtime", "trellis.auth@v1", "auth"),
         ("runtime", "trellis.core@v1", "core"),
@@ -222,6 +227,26 @@ fn run_install() -> Result<()> {
         ),
     )
     .into_diagnostic()?;
+    let web = &compiled["web"];
+    for id in ["trellis-app.console@v1", "trellis-app.portal@v1"] {
+        std::fs::write(
+            root.join(format!("rust/crates/runtime-apis/src/{id}.api.json")),
+            format!("{}\n", web.apis[id].canonical_json().into_diagnostic()?),
+        )
+        .into_diagnostic()?;
+        let participant = web
+            .participants
+            .iter()
+            .find(|participant| participant.id() == id)
+            .expect("built-in web participant");
+        std::fs::write(
+            root.join(format!(
+                "rust/crates/runtime-apis/src/{id}.participant.json"
+            )),
+            format!("{}\n", participant.canonical_json().into_diagnostic()?),
+        )
+        .into_diagnostic()?;
+    }
     Ok(())
 }
 

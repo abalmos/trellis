@@ -82,8 +82,8 @@ pub(crate) fn signed_headers(
     let proof =
         auth.create_request_proof(context_digest, subject, reply, payload, iat, &request_id)?;
     let mut headers = HeaderMap::new();
-    headers.insert("session-key", auth.session_key.as_str());
     headers.insert("authorization-context", context_digest);
+    headers.insert("session-key", auth.session_key.as_str());
     headers.insert("proof", proof.as_str());
     headers.insert("iat", iat.to_string().as_str());
     headers.insert("request-id", request_id.as_str());
@@ -336,6 +336,8 @@ enum HealthHeartbeatServiceKind {
 pub(crate) async fn fetch_device_activation<C>(
     opts: &DeviceConnectOptions<'_, C>,
     session_auth: &SessionAuth,
+    connection_id: &str,
+    provisioning_secret: Option<&str>,
     challenge_digest: &str,
     confirmation_code: &str,
 ) -> Result<DeviceEnrollmentResponse, TrellisClientError> {
@@ -344,7 +346,7 @@ pub(crate) async fn fetch_device_activation<C>(
     let mut request = serde_json::json!({
         "requestId": new_request_id(),
         "iat": now_context_millis()?,
-        "connectionId": ulid::Ulid::new().to_string(),
+        "connectionId": connection_id,
         "identityKeyId": identity_auth.key_id(),
         "sessionKey": session_auth.session_key,
         "participantId": opts.participant_id,
@@ -352,6 +354,9 @@ pub(crate) async fn fetch_device_activation<C>(
         "challengeDigest": challenge_digest,
         "confirmationCode": confirmation_code,
     });
+    if let Some(provisioning_secret) = provisioning_secret {
+        request["provisioningSecret"] = serde_json::Value::String(provisioning_secret.to_owned());
+    }
     let input = SessionProofInput::device_enrollment(NativeBootstrapSessionProofInput {
         origin: origin.clone(),
         unsigned_request: request.clone(),
@@ -446,8 +451,8 @@ fn signed_event_headers(
     event: &PreparedTrellisEvent,
 ) -> Result<HeaderMap, TrellisClientError> {
     let mut headers = event.publish_headers();
-    headers.insert("session-key", auth.session_key.as_str());
     headers.insert("authorization-context", context_digest);
+    headers.insert("session-key", auth.session_key.as_str());
     headers.insert(
         "proof",
         auth.create_event_proof(
@@ -656,8 +661,13 @@ async fn connect_authorized_nats(
         tracing::debug!(event = ?event, "NATS client event");
     })
     .custom_inbox_prefix(runtime.inbox_prefix);
+    let native = runtime.transports.native.ok_or_else(|| {
+        TrellisClientError::AuthorizationUnavailable(
+            "bootstrap did not offer a native NATS transport".into(),
+        )
+    })?;
     options
-        .connect(runtime.transports.native.nats_servers)
+        .connect(native.nats_servers)
         .await
         .map_err(|error| TrellisClientError::NatsConnect(error.to_string()))
 }
@@ -681,7 +691,12 @@ pub(crate) async fn apply_native_runtime_refresh(
     if !credentials_changed && previous.transports == refreshed.transports {
         return Ok(());
     }
-    nats.set_server_pool(refreshed.transports.native.nats_servers.as_slice())
+    let native = refreshed.transports.native.as_ref().ok_or_else(|| {
+        TrellisClientError::AuthorizationUnavailable(
+            "bootstrap did not offer a native NATS transport".into(),
+        )
+    })?;
+    nats.set_server_pool(native.nats_servers.as_slice())
         .await
         .map_err(|error| TrellisClientError::NatsConnect(error.to_string()))?;
     let connects = nats.statistics().connects.load(Ordering::Relaxed);

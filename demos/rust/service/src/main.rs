@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use base64::Engine as _;
 use bytes::Bytes;
 use clap::Parser;
 use futures_util::future::BoxFuture;
@@ -15,7 +14,6 @@ use service_trellis::participants::demo_service::owned::Publisher;
 use service_trellis::participants::demo_service::{
     ConnectedService, ServiceConnectOptions, ServiceHandlerContext,
 };
-use trellis_rs::client::MemoryAuthorizationContextStore;
 use trellis_rs::jobs;
 use trellis_rs::service::{
     AcceptedOperation, DownloadTransferGrant, FileTransferInfo, InMemoryOperationRuntime, KvHandle,
@@ -76,16 +74,12 @@ struct Args {
     #[arg(long, env = "TRELLIS_SEED")]
     seed: Option<String>,
 
-    /// Provisioned service deployment id.
-    #[arg(long, env = "TRELLIS_DEPLOYMENT_ID")]
-    deployment_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RuntimeMode {
     Authenticated {
         trellis_url: String,
-        deployment_id: String,
         seed: String,
     },
     Idle,
@@ -386,11 +380,10 @@ async fn main() -> anyhow::Result<()> {
     match runtime_mode(&args)? {
         RuntimeMode::Authenticated {
             trellis_url,
-            deployment_id,
             seed,
         } => {
             tracing::info!(trellis_url = %trellis_url, "starting authenticated Rust demo service");
-            run_authenticated_service(&trellis_url, &deployment_id, &seed).await?
+            run_authenticated_service(&trellis_url, &seed).await?
         }
         RuntimeMode::Idle => {
             println!(
@@ -414,7 +407,7 @@ fn init_logging() {
 }
 
 fn runtime_mode(args: &Args) -> anyhow::Result<RuntimeMode> {
-    if args.trellis_url.is_some() || args.deployment_id.is_some() || args.seed.is_some() {
+    if args.trellis_url.is_some() || args.seed.is_some() {
         let trellis_url = args
             .trellis_url
             .clone()
@@ -423,13 +416,8 @@ fn runtime_mode(args: &Args) -> anyhow::Result<RuntimeMode> {
             .seed
             .clone()
             .ok_or_else(|| anyhow::anyhow!("--seed is required for authenticated mode"))?;
-        let deployment_id = args
-            .deployment_id
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("--deployment-id is required for authenticated mode"))?;
         return Ok(RuntimeMode::Authenticated {
             trellis_url,
-            deployment_id,
             seed,
         });
     }
@@ -437,22 +425,10 @@ fn runtime_mode(args: &Args) -> anyhow::Result<RuntimeMode> {
     Ok(RuntimeMode::Idle)
 }
 
-async fn run_authenticated_service(
-    trellis_url: &str,
-    deployment_id: &str,
-    seed: &str,
-) -> anyhow::Result<()> {
-    let session_seed =
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
-    let options = ServiceConnectOptions::new(
-        trellis_url,
-        SERVICE_NAME,
-        deployment_id,
-        seed,
-        &session_seed,
-        Arc::new(MemoryAuthorizationContextStore::default()),
-    )
-    .with_timeout_ms(REQUEST_TIMEOUT_MS);
+async fn run_authenticated_service(trellis_url: &str, seed: &str) -> anyhow::Result<()> {
+    let options = ServiceConnectOptions::new(trellis_url, seed)
+        .with_name(SERVICE_NAME)
+        .with_timeout_ms(REQUEST_TIMEOUT_MS);
     let mut service = service_trellis::participants::demo_service::connect(options).await?;
     let site_summaries = SiteSummaryStore(service.kv().site_summaries().await?);
     site_summaries.seed_missing_sample_sites().await?;

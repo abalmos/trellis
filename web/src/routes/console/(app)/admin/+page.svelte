@@ -1,8 +1,7 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
   import { type apis } from "trellis-web-generated";
-  import type { DeploymentAuthorityKind, DeploymentAuthorityPlan } from "@qlever-llc/trellis/auth";
-  import { base, resolve } from "$lib/console_paths";
+  import { resolve } from "$lib/console_paths";
   import { onMount } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
@@ -21,8 +20,6 @@
   type ServiceInstance = apis.auth.AuthServiceInstancesListOutput["entries"][number];
   type JobGroup = apis.jobs.JobsQueryOutput["groups"][number];
   type JobStats = apis.jobs.JobsQueryOutput["stats"];
-  type DeploymentAuthority = apis.auth.AuthDeploymentAuthorityListOutput["entries"][number];
-  type AuthorityPlan = apis.auth.AuthDeploymentAuthorityPlansListOutput["entries"][number];
   type DeviceReview = apis.auth.AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
   type OverviewInstance = {
     service: string;
@@ -41,7 +38,6 @@
   };
 
   const trellis = getTrellis();
-  const authorityPlanPreviewLimit = 10;
 
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -51,8 +47,6 @@
   let jobsUnavailableMessage = $state<string | null>(null);
   let jobGroups = $state.raw<JobGroup[]>([]);
   let jobStats = $state.raw<JobStats>({ byState: {}, total: 0 });
-  let deploymentAuthorities = $state.raw<DeploymentAuthority[]>([]);
-  let pendingAuthorityPlans = $state.raw<AuthorityPlan[]>([]);
   let pendingDeviceReviews = $state.raw<DeviceReview[]>([]);
 
   const activeInstances = $derived(instances.filter((instance) => instance.state === "active").length);
@@ -63,9 +57,7 @@
   const disabledTotal = $derived(disabledInstances);
   const activeJobCount = $derived(jobStats.byState.active ?? 0);
   const totalJobCount = $derived(jobStats.total);
-  const pendingWorkTotal = $derived(pendingDeviceReviews.length + pendingAuthorityPlans.length);
-  const serviceAuthorityTotal = $derived(deploymentAuthorities.filter((authority) => authority.materialization?.participantKind === "service" && authority.state === "accepted").length);
-  const deviceAuthorityTotal = $derived(deploymentAuthorities.filter((authority) => authority.materialization?.participantKind === "device" && authority.state === "accepted").length);
+  const pendingWorkTotal = $derived(pendingDeviceReviews.length);
 
   const topology = $derived([
     { icon: "box", label: "Service instances", value: serviceInstanceTotal, detail: `${activeInstances} enabled / ${disabledTotal} disabled`, tone: "text-neutral bg-base-300/60" },
@@ -145,25 +137,19 @@
     error = null;
     jobsUnavailableMessage = null;
     try {
-      const [sessionsRes, connectionsRes, instancesRes, authoritiesRes, authorityPlansRes, deviceReviewsRes] = await Promise.all([
+      const [sessionsRes, connectionsRes, instancesRes, deviceReviewsRes] = await Promise.all([
         trellis.authSessionsList({ limit: 100 }).take(),
         trellis.authConnectionsList({ limit: 100 }).take(),
         trellis.authServiceInstancesList({ limit: 100 }).take(),
-        trellis.authDeploymentAuthorityList({ limit: 100 }).take(),
-        trellis.authDeploymentAuthorityPlansList({ state: "pending", limit: authorityPlanPreviewLimit }).take(),
         trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 100 }).take(),
       ]);
       if (isErr(sessionsRes)) { error = errorMessage(sessionsRes); return; }
       if (isErr(connectionsRes)) { error = errorMessage(connectionsRes); return; }
       if (isErr(instancesRes)) { error = errorMessage(instancesRes); return; }
-      if (isErr(authoritiesRes)) { error = errorMessage(authoritiesRes); return; }
-      if (isErr(authorityPlansRes)) { error = errorMessage(authorityPlansRes); return; }
       if (isErr(deviceReviewsRes)) { error = errorMessage(deviceReviewsRes); return; }
       sessionCount = sessionsRes.entries?.length ?? 0;
       connectionCount = connectionsRes.entries?.length ?? 0;
       instances = instancesRes.entries ?? [];
-      deploymentAuthorities = authoritiesRes.entries ?? [];
-      pendingAuthorityPlans = authorityPlansRes.entries ?? [];
       pendingDeviceReviews = deviceReviewsRes.entries ?? [];
 
       const jobsData = await loadJobsPageData({
@@ -309,12 +295,10 @@
         <section class="trellis-section overflow-hidden bg-base-100">
           <div class="flex h-14 items-center justify-between border-b border-base-300 px-5"><h2 class="text-base font-semibold">Pending Work</h2><span class="badge badge-sm {pendingWorkTotal > 0 ? 'badge-warning' : 'badge-ghost'}">{pendingWorkTotal} pending</span></div>
           {#if pendingWorkTotal === 0}
-            <div class="px-5 py-3 text-sm text-base-content/60">No device activation reviews or authority plans waiting.</div>
+            <div class="px-5 py-3 text-sm text-base-content/60">No device activation reviews waiting.</div>
           {:else}
             <div class="divide-y divide-base-300 text-sm">
-              <a class="flex items-center justify-between px-5 py-2.5 hover:bg-base-200/50" href={`${base}/admin/authority/plans`}>Authority plans <span class="badge badge-warning badge-sm">{pendingAuthorityPlans.length}</span></a>
-              <a class="flex items-center justify-between px-5 py-2.5 hover:bg-base-200/50" href={resolve("/admin/services")}>Service deployment authority <span class="badge badge-outline badge-sm">{serviceAuthorityTotal}</span></a>
-              <a class="flex items-center justify-between px-5 py-2.5 hover:bg-base-200/50" href={resolve("/admin/devices")}>Device reviews / authority <span class="badge badge-outline badge-sm">{pendingDeviceReviews.length + deviceAuthorityTotal}</span></a>
+              <a class="flex items-center justify-between px-5 py-2.5 hover:bg-base-200/50" href={resolve("/admin/devices")}>Device activation reviews <span class="badge badge-warning badge-sm">{pendingDeviceReviews.length}</span></a>
             </div>
           {/if}
         </section>

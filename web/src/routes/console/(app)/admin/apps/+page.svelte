@@ -18,13 +18,13 @@
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let identityGrants = $state<apis.auth.AuthIdentityAuthorityListOutput["entries"]>([]);
+  let identityGrants = $state<apis.auth.AuthGrantsListOutput["entries"]>([]);
 
   async function load() {
     loading = true;
     error = null;
 
-    const res = await trellis.authIdentityAuthorityList({ limit: 100 }).take();
+    const res = await trellis.authGrantsList({ limit: 100, ownerKind: "user" }).take();
     loading = false;
     if (isErr(res)) {
       error = errorMessage(res);
@@ -83,14 +83,14 @@
             </tr>
           </thead>
           <tbody>
-            {#each identityGrants as entry (entry.authorityId)}
+            {#each identityGrants as entry (`${entry.ownerId}:${entry.participantId}`)}
               <tr>
-                <td class="font-medium">{entry.materialization?.participantKind ?? "app"}</td>
+                <td class="font-medium">{entry.ownerId}</td>
                 <td>
                   {entry.participantId}
                 </td>
                 <td class="trellis-identifier text-base-content/60">
-                  {entry.participantArtifactDigest.slice(0, 12)}…
+                  revision {entry.installedRevision}
                 </td>
                 <td class="text-base-content/60">
                   {formatDate(entry.createdAt)}
@@ -101,7 +101,7 @@
                         <a
                           class="text-error"
                           href={resolve(
-                            `/admin/apps/revoke?grant=${encodeURIComponent(entry.authorityId)}`,
+                            `/admin/apps/revoke?grant=${encodeURIComponent(`${entry.ownerId}:${entry.participantId}`)}`,
                           )}>Revoke</a
                         >
                       </li>

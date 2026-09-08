@@ -12,7 +12,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 use url::Url;
 
-use super::bootstrap::{device_bootstrap, service_bootstrap};
+use super::bootstrap::{device_bootstrap, device_enroll, service_bootstrap};
 use super::browser::{
     bind_flow, complete_admin_account, console_index, console_page, decide_approval,
     get_account_flow, get_flow, get_portal_flow, local_login, oidc_callback, portal_asset,
@@ -23,11 +23,13 @@ use super::security::{canonical_origin, security_headers};
 use super::well_known::{issuer_key, refresh_context};
 use super::{
     AccountRepository, AuthEphemeralRepository, AuthHttpOptions, AuthHttpState,
-    AuthorityEvidenceRepository, AuthorityRepository, AuthorizationStateError, ContextRepository,
-    DeploymentRepository, OutboxRepository, PortalRepository, ProvisioningRepository,
-    SessionRepository, WebSource, EMBEDDED_WEB_ASSETS, MAX_AUTH_REQUEST_BODY_BYTES,
+    AuthorityEvidenceRepository, AuthorizationStateError, ContextRepository, DeploymentRepository,
+    OutboxRepository, PortalRepository, ProvisioningRepository, SessionRepository, WebSource,
+    EMBEDDED_WEB_ASSETS, MAX_AUTH_REQUEST_BODY_BYTES,
 };
 use crate::config::WebSourceConfig;
+use crate::platform::auth::context::AuthorizationContextRepository;
+use crate::platform::auth::GrantRepository;
 
 const LOCAL_LOGIN_ROUTE: &str = "/auth/login/local";
 
@@ -42,6 +44,7 @@ enum RouteHandler {
     StartAuth,
     ServiceBootstrap,
     DeviceBootstrap,
+    DeviceEnroll,
     ContextRefresh,
     IssuerKey,
     GetFlow,
@@ -102,6 +105,11 @@ const ROUTES: &[RouteDefinition] = &[
         method: RouteMethod::Post,
         path: "/bootstrap/device",
         handler: RouteHandler::DeviceBootstrap,
+    },
+    RouteDefinition {
+        method: RouteMethod::Post,
+        path: "/auth/device/enroll",
+        handler: RouteHandler::DeviceEnroll,
     },
     RouteDefinition {
         method: RouteMethod::Post,
@@ -197,13 +205,14 @@ fn add_route<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
         + PortalRepository
         + ProvisioningRepository
         + SessionRepository
+        + AuthorizationContextRepository
         + Clone
         + Send
         + Sync
@@ -222,6 +231,9 @@ where
         }
         (RouteMethod::Post, RouteHandler::DeviceBootstrap) => {
             routes.route(route.path, post(device_bootstrap::<R, E>))
+        }
+        (RouteMethod::Post, RouteHandler::DeviceEnroll) => {
+            routes.route(route.path, post(device_enroll::<R, E>))
         }
         (RouteMethod::Post, RouteHandler::ContextRefresh) => {
             routes.route(route.path, post(refresh_context::<R, E>))
@@ -284,13 +296,14 @@ pub(crate) fn router<R, E>(
 where
     R: AccountRepository
         + AuthorityEvidenceRepository
-        + AuthorityRepository
+        + GrantRepository
         + ContextRepository
         + DeploymentRepository
         + OutboxRepository
         + PortalRepository
         + ProvisioningRepository
         + SessionRepository
+        + AuthorizationContextRepository
         + Clone
         + Send
         + Sync

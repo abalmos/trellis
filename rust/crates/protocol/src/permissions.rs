@@ -513,9 +513,6 @@ pub enum PlatformPrivilege {
     /// Global administration, including access across authorization owners.
     #[serde(rename = "trellis.auth::admin")]
     Admin,
-    /// Authority to assign access to another owner through administrative operations.
-    #[serde(rename = "trellis.auth::capabilities.delegate")]
-    Delegate,
 }
 
 /// Server-owned authorization owner shared by grant bindings and signed contexts.
@@ -635,6 +632,21 @@ fn validate_identifier(field: &'static str, value: &str) -> Result<(), ProtocolE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_admin_is_a_platform_privilege() {
+        assert_eq!(
+            serde_json::from_str::<PlatformPrivilege>(r#""trellis.auth::admin""#).unwrap(),
+            PlatformPrivilege::Admin
+        );
+        for value in [
+            "trellis.auth::capabilities.delegate",
+            "trellis.auth::users.manage",
+            "admin",
+        ] {
+            assert!(serde_json::from_value::<PlatformPrivilege>(serde_json::json!(value)).is_err());
+        }
+    }
 
     #[test]
     fn permission_atom_round_trips_and_accepts_current_names() {

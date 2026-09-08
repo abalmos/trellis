@@ -516,7 +516,6 @@ refresh_lead_seconds = 60
 refresh_jitter_seconds = 15
 minimum_context_lifetime_seconds = 76
 maximum_bootstrap_jwt_lifetime_seconds = 3600
-cleanup_grace_seconds = 3600
 allowed_clock_skew_seconds = 30
 maximum_context_bytes = 16384
 maximum_permissions = 4096

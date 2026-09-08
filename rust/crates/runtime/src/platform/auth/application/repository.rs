@@ -2,13 +2,12 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use super::super::{
-    AccountFlowKind, AccountFlowRecord, AuthorityDecisionRecord, AuthorityProposalRecord,
-    AuthorizationStateError, DeploymentProfileRecord, DeploymentRecord, DesiredAuthorityRecord,
+    AccountFlowKind, AccountFlowRecord, AuthorizationStateError, DeploymentProfileRecord,
     DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceDelegationRecord,
-    DeviceProvisioningSecretRecord, DeviceRecord, IdempotencyResultRecord, IdentityAuthorityRecord,
+    DeviceProvisioningSecretRecord, DeviceRecord, GrantBindingReplacement, IdempotencyResultRecord,
     LocalCredentialRecord, LoginPortalRecord, LoginSettingsRecord, PortalRouteRecord,
     PostCommitActionRecord, PrincipalRecord, ProviderIdentityLink, ProvisionedIdentityRecord,
-    RuntimeInstanceRecord, SessionRecord, SessionRuntimeBinding, UserProfileRecord,
+    RuntimeInstanceRecord, SessionRecord, UserProfileRecord,
 };
 
 /// Atomic deployment-profile creation.
@@ -82,12 +81,10 @@ pub(crate) struct PasswordResetCompletion {
     pub replacement: LocalCredentialRecord,
     /// Local identity installed atomically with a first credential.
     pub identity: Option<ProviderIdentityLink>,
-    /// Canonical authority to restore for bootstrap-administrator recovery.
-    pub authority: Option<IdentityAuthorityRecord>,
+    /// Canonical binding to restore for bootstrap-administrator recovery.
+    pub bindings: Vec<GrantBindingReplacement>,
     /// Optional profile replacement committed in the same transaction.
     pub profile: Option<UserProfileRecord>,
-    /// Expected current authority version when restoring authority.
-    pub expected_authority_version: Option<u64>,
     /// Completion time in Unix milliseconds.
     pub consumed_at: i64,
     /// Durable proof claim and replay result.
@@ -130,37 +127,10 @@ pub(crate) struct FirstAdminCompletion {
     pub credential: Option<LocalCredentialRecord>,
     /// New administrator authentication identity.
     pub identity: ProviderIdentityLink,
-    /// Accepted administrator authority.
-    pub authority: IdentityAuthorityRecord,
+    /// Explicit administrator binding committed with the account.
+    pub bindings: Vec<GrantBindingReplacement>,
     /// Completion time in Unix milliseconds.
     pub consumed_at: i64,
-    /// Durable proof claim and replay result.
-    pub idempotency: IdempotencyResultRecord,
-    /// Deterministic post-commit actions.
-    pub actions: Vec<PostCommitActionRecord>,
-}
-
-/// Atomic terminal authority-proposal decision.
-#[derive(Clone, Debug)]
-pub(crate) struct AuthorityProposalDecision {
-    /// Proposal ID to decide.
-    pub proposal_id: String,
-    /// Expected pending proposal version.
-    pub expected_version: u64,
-    /// Caller-observed authority version for optimistic acceptance; outer `None` skips the check.
-    pub expected_base_authority_version: Option<Option<u64>>,
-    /// Immutable terminal decision.
-    pub decision: AuthorityDecisionRecord,
-    /// Accepted desired authority, or `None` for rejection.
-    pub desired_authority: Option<DesiredAuthorityRecord>,
-    /// Deployment evidence installed atomically with initial deployment authority.
-    pub deployment: Option<DeploymentRecord>,
-    /// Portal provenance replacement for an identity authority; outer `None` preserves it.
-    pub portal_binding: Option<Option<super::super::PortalAuthorityBindingRecord>>,
-    /// Exact portal provenance expected before replacement; outer `None` skips the check.
-    pub expected_portal_binding: Option<Option<super::super::PortalAuthorityBindingRecord>>,
-    /// Exact trusted-portal policy versions that must still be current.
-    pub portal_policy_snapshot: Option<super::PortalPolicySnapshot>,
     /// Durable proof claim and replay result.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.
@@ -328,17 +298,11 @@ pub(crate) struct DeviceDelegationMutation {
     pub actions: Vec<PostCommitActionRecord>,
 }
 
-/// Atomic authenticated-session creation.
+/// Atomic user installation login creation or eligible same-key reuse.
 #[derive(Clone, Debug)]
 pub(crate) struct SessionCreation {
     /// New validated session record.
     pub session: SessionRecord,
-    /// Existing user session bound to the same public key, when rebinding.
-    pub previous_session: Option<SessionRecord>,
-    /// Optional exact identity authority for a user browser bind.
-    pub desired_authority: Option<DesiredAuthorityRecord>,
-    /// Required exact runtime binding for service and device sessions.
-    pub runtime_binding: Option<SessionRuntimeBinding>,
     /// Durable proof claim and replay result.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.
@@ -405,17 +369,6 @@ pub(crate) struct AccountFlowCreation {
     pub actions: Vec<PostCommitActionRecord>,
 }
 
-/// Atomic authority-proposal creation.
-#[derive(Clone, Debug)]
-pub(crate) struct AuthorityProposalCreation {
-    /// New immutable pending proposal.
-    pub proposal: AuthorityProposalRecord,
-    /// Durable proof claim and replay result.
-    pub idempotency: IdempotencyResultRecord,
-    /// Deterministic post-commit actions.
-    pub actions: Vec<PostCommitActionRecord>,
-}
-
 /// Atomic activation-review creation.
 #[derive(Clone, Debug)]
 pub(crate) struct ActivationReviewCreation {
@@ -476,12 +429,6 @@ pub(crate) trait AccountRepository: Send + Sync {
         &self,
         id: &str,
     ) -> Result<Option<PrincipalRecord>, AuthorizationStateError>;
-
-    /// Create a principal at authorization version one.
-    async fn create_principal(
-        &self,
-        record: PrincipalRecord,
-    ) -> Result<PrincipalRecord, AuthorizationStateError>;
 
     /// Load a provider identity by its exact provider and subject.
     async fn get_provider_identity(
@@ -643,16 +590,9 @@ pub(crate) trait PortalRepository: Send + Sync {
     ) -> Result<Vec<super::super::CapabilityGroupRecord>, AuthorizationStateError>;
 
     /// List durable trusted-portal authority provenance in stable order.
-    async fn list_portal_authority_bindings(
+    async fn list_portal_grant_bindings(
         &self,
-    ) -> Result<Vec<super::super::PortalAuthorityBindingRecord>, AuthorizationStateError>;
-
-    /// Remove stale portal provenance that has no authority to reconcile.
-    async fn remove_portal_authority_binding(
-        &self,
-        principal_id: &str,
-        participant_id: &str,
-    ) -> Result<bool, AuthorizationStateError>;
+    ) -> Result<Vec<super::super::PortalGrantBindingRecord>, AuthorizationStateError>;
 }
 
 /// Persistence contract for authenticated sessions and their runtime selection.
@@ -675,10 +615,6 @@ pub(crate) trait SessionRepository: Send + Sync {
         -> Result<Option<SessionRecord>, AuthorizationStateError>;
 
     /// Load the unique session bound to one session public key.
-    async fn get_session_by_public_key(
-        &self,
-        public_key: &str,
-    ) -> Result<Option<SessionRecord>, AuthorizationStateError>;
 
     /// List all sessions in stable session-id order.
     async fn list_sessions(&self) -> Result<Vec<SessionRecord>, AuthorizationStateError>;
@@ -714,6 +650,10 @@ pub(crate) trait DeploymentRepository: Send + Sync {
 /// Persistence contract for provisioned identities and runtime evidence.
 #[async_trait]
 pub(crate) trait ProvisioningRepository: Send + Sync {
+    async fn get_device_provisioning_secret_by_hash(
+        &self,
+        secret_hash: &str,
+    ) -> Result<Option<super::super::DeviceProvisioningSecretRecord>, AuthorizationStateError>;
     /// List provisioned identities in stable key order.
     async fn list_provisioned_identities(
         &self,
@@ -803,10 +743,6 @@ pub(crate) trait OutboxRepository: Send + Sync {
     ) -> Result<Option<IdempotencyResultRecord>, AuthorizationStateError>;
 
     /// Atomically record or replay a completed deterministic operation.
-    async fn record_idempotency_result(
-        &self,
-        record: IdempotencyResultRecord,
-    ) -> Result<IdempotentOutcome<Value>, AuthorizationStateError>;
 
     /// List dispatchable actions by next-attempt time and action ID.
     async fn list_ready_post_commit_actions(
@@ -822,6 +758,15 @@ pub(crate) trait OutboxRepository: Send + Sync {
         now: i64,
         claimed_until: i64,
     ) -> Result<Option<PostCommitActionRecord>, AuthorizationStateError>;
+
+    /// Persist or read the immutable delivery proof for one currently claimed event action.
+    async fn prepare_post_commit_event_delivery(
+        &self,
+        action_id: &str,
+        expected_claimed_until: i64,
+        expected_attempts: u32,
+        delivery: Value,
+    ) -> Result<Value, AuthorizationStateError>;
 
     /// Record a failed claimed attempt and schedule its retry.
     async fn fail_post_commit_action(

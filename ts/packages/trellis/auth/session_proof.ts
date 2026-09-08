@@ -17,24 +17,19 @@ export type SessionProofPurpose =
   | "deviceEnrollment"
   | "authorizationContextRefresh";
 
-type CommonInput = { requestId: string; issuedAt: number };
-
 /** Inputs validated and encoded by the Rust session-proof protocol. */
 export type SessionProofInput =
-  | CommonInput & {
+  | {
     purpose: "userAuthBind";
+    origin: string;
     flowId: string;
     sessionPublicKey: string;
-    requestDigest: string;
+    unsignedRequest: Record<string, unknown> & { issuedAt: number };
   }
-  | CommonInput & {
+  | {
     purpose: "userAuthRequest";
-    sessionPublicKey: string;
-    sessionNkey: string;
-    participantId: string;
-    participantDigest: string;
-    redirectTarget: string;
-    requestDigest: string;
+    origin: string;
+    unsignedRequest: Record<string, unknown> & { issuedAt: number };
   }
   | {
     purpose: "serviceBootstrap" | "deviceBootstrap" | "deviceEnrollment";
@@ -104,11 +99,13 @@ export async function signSessionProof(
     input,
     proof,
     signerPublicKey,
-    input.purpose === "authorizationContextRefresh"
-      ? input.unsignedRequest.issuedAt
-      : "unsignedRequest" in input
-      ? input.unsignedRequest.iat
-      : input.issuedAt,
+    Number(
+      input.purpose === "serviceBootstrap" ||
+        input.purpose === "deviceBootstrap" ||
+        input.purpose === "deviceEnrollment"
+        ? input.unsignedRequest.iat
+        : input.unsignedRequest.issuedAt,
+    ),
     { maximumAgeMs: 0, maximumFutureSkewMs: 0 },
   );
   return proof;

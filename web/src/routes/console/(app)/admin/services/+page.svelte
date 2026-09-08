@@ -16,8 +16,6 @@
 
   type Deployment = apis.auth.AuthDeploymentsListOutput["entries"][number];
   type ServiceInstance = apis.auth.AuthServiceInstancesListOutput["entries"][number];
-  type DeploymentAuthority = apis.auth.AuthDeploymentAuthorityListOutput["entries"][number];
-  type AuthorityPlan = apis.auth.AuthDeploymentAuthorityPlansListOutput["entries"][number];
   type ContractRef = { contractId: string; digest: string };
   type HealthParticipant = apis.health.HealthQueryOutput["entries"][number];
   const trellis = getTrellis();
@@ -28,30 +26,15 @@
   let subscriptionError = $state<string | null>(null);
   let deployments = $state.raw<Deployment[]>([]);
   let instances = $state.raw<ServiceInstance[]>([]);
-  let deploymentAuthorities = $state.raw<DeploymentAuthority[]>([]);
-  let pendingAuthorityPlans = $state.raw<AuthorityPlan[]>([]);
   let healthParticipants = $state.raw<HealthParticipant[]>([]);
   let search = $state("");
 
-  const serviceDeploymentIds = $derived(new Set(deployments.map((deployment) => deployment.deploymentId)));
-  const serviceAuthorityRows = $derived.by(() =>
-    deploymentAuthorities
-      .filter((authority) => authority.materialization?.participantKind === "service" && serviceDeploymentIds.has(authority.deploymentId))
-      .toSorted((left, right) => right.updatedAt - left.updatedAt)
-  );
   const filteredDeployments = $derived.by(() => {
     const term = search.trim().toLowerCase();
     if (!term) return deployments;
     return deployments.filter((deployment) => deployment.deploymentId.toLowerCase().includes(term));
   });
   const disabledCount = $derived(deployments.filter((deployment) => deployment.state === "disabled").length);
-  const pendingPlanCounts = $derived.by(() => {
-    const counts: Record<string, number> = {};
-    for (const plan of pendingAuthorityPlans) {
-      counts[plan.subjectId] = (counts[plan.subjectId] ?? 0) + 1;
-    }
-    return counts;
-  });
 
   function contractRefsForHealthService(service: HealthParticipant | null): ContractRef[] {
     return service?.contractDigests.map((digest) => ({
@@ -102,32 +85,18 @@
     return typeof mode === "string" ? mode : "strict";
   }
 
-  function plural(count: number, noun: string): string {
-    return `${count} ${noun}${count === 1 ? "" : "s"}`;
-  }
-
-  function authoritySummary(authority: DeploymentAuthority): string {
-    return plural(authority.desiredGrantSet.permissions.length, "permission");
-  }
-
   async function load() {
     loading = true;
     error = null;
     try {
-      const [deploymentsRes, instancesRes, authoritiesRes, plansRes] = await Promise.all([
+      const [deploymentsRes, instancesRes] = await Promise.all([
         trellis.authDeploymentsList({ kind: "service", limit: 100 }).take(),
         trellis.authServiceInstancesList({ limit: 100 }).take(),
-        trellis.authDeploymentAuthorityList({ limit: 100 }).take(),
-        trellis.authDeploymentAuthorityPlansList({ state: "pending", limit: 100 }).take(),
       ]);
       if (isErr(deploymentsRes)) { error = errorMessage(deploymentsRes); return; }
       if (isErr(instancesRes)) { error = errorMessage(instancesRes); return; }
-      if (isErr(authoritiesRes)) { error = errorMessage(authoritiesRes); return; }
-      if (isErr(plansRes)) { error = errorMessage(plansRes); return; }
       deployments = (deploymentsRes.entries ?? []).filter((deployment): deployment is Deployment => deployment.kind === "service");
       instances = instancesRes.entries ?? [];
-      deploymentAuthorities = authoritiesRes.entries ?? [];
-      pendingAuthorityPlans = plansRes.entries ?? [];
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -194,27 +163,6 @@
   {#if loading}
     <Panel><LoadingState label="Loading services" /></Panel>
   {:else}
-    {#if serviceAuthorityRows.length > 0}
-      <Panel title="Deployment authority" eyebrow={`${serviceAuthorityRows.length} service desired-state record${serviceAuthorityRows.length === 1 ? "" : "s"}`}>
-        <DataTable>
-          <thead><tr><th>Deployment</th><th>Desired version</th><th>Desired authority</th><th>Pending review</th><th>Status</th><th>Updated</th><th></th></tr></thead>
-          <tbody>
-            {#each serviceAuthorityRows as authority (authority.deploymentId)}
-              <tr class="hover:bg-base-200/60">
-                <td class="trellis-identifier font-medium">{authority.deploymentId}</td>
-                <td class="trellis-identifier text-xs text-base-content/60">{authority.version}</td>
-                <td>{authoritySummary(authority)}</td>
-                <td>{#if (pendingPlanCounts[authority.deploymentId] ?? 0) > 0}<span class="badge badge-warning badge-xs">{pendingPlanCounts[authority.deploymentId]} pending</span>{:else}<span class="text-xs text-base-content/40">none</span>{/if}</td>
-                <td><span class="badge badge-outline badge-xs">{authority.state}</span></td>
-                <td class="text-base-content/60">{formatDate(authority.updatedAt)}</td>
-                <td><a class="btn btn-warning btn-outline btn-xs" href={resolve("/(app)/admin/services/[deploymentId]", { deploymentId: authority.deploymentId })}>Inspect</a></td>
-              </tr>
-            {/each}
-          </tbody>
-        </DataTable>
-      </Panel>
-    {/if}
-
     <Panel>
       <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>

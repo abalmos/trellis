@@ -7,7 +7,6 @@ use super::AuthorizationStateError;
 mod account_flows;
 mod accounts;
 mod activation_review_notifier;
-mod authority;
 mod deployments;
 pub(crate) mod repository;
 mod service;
@@ -18,18 +17,11 @@ pub use service::{AuthService, AuthServiceConfig};
 
 pub use account_flows::{
     CompleteIdentityLinkInput, CreateAccountFlowInput, FirstAdminAuthorityTarget,
-    FirstAdminFederatedRegistration, FirstAdminRegistration,
+    FirstAdminBinding, FirstAdminFederatedRegistration, FirstAdminRegistration,
 };
 pub use accounts::{
     ChangePasswordInput, CompletePasswordResetInput, CreateFederatedUserInput,
     CreateLocalUserInput, CreateUserInput, LocalAuthentication, UpdateUserInput, UserAccount,
-};
-pub(crate) use authority::{
-    ApplyIdentityAuthoritySelectionInput, PortalAuthoritySource, PortalBindingMutation,
-    PortalPolicySnapshot,
-};
-pub use authority::{
-    CreateAuthorityProposalInput, DecideAuthorityProposalInput, PresentDeploymentAuthorityInput,
 };
 pub use deployments::{
     ClaimActivationReviewInput, CreateActivationReviewInput, DecideActivationReviewInput,
@@ -37,7 +29,7 @@ pub use deployments::{
 };
 pub use sessions::CreateSessionInput;
 
-fn bearer_secret_digest(value: &str) -> Result<String, AuthorizationStateError> {
+pub(crate) fn bearer_secret_digest(value: &str) -> Result<String, AuthorizationStateError> {
     let secret = URL_SAFE_NO_PAD.decode(value).map_err(|_| {
         AuthorizationStateError::InvalidRecord("secret is not canonical base64url".to_owned())
     })?;

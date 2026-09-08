@@ -1,4 +1,3 @@
-mod authority;
 mod deployments;
 mod devices;
 mod grants;
@@ -16,7 +15,7 @@ pub(super) async fn dispatch(
 ) -> Result<Value, AuthorizationStateError> {
     if subject.starts_with("rpc.v1.Auth.Grants.")
         || subject == "rpc.v1.Auth.Issuers.Revoke"
-        || subject == "rpc.v1.Auth.Participants.Install"
+        || subject.starts_with("rpc.v1.Auth.Participants.")
         || subject == "rpc.v1.Auth.Deployments.Apply"
     {
         grants::dispatch(processor, subject, payload, caller).await
@@ -31,7 +30,6 @@ pub(super) async fn dispatch(
     } else if subject.starts_with("rpc.v1.Auth.Users.")
         || subject.starts_with("rpc.v1.Auth.UserIdentities.")
         || subject.starts_with("rpc.v1.Auth.CapabilityGroups.")
-        || subject.starts_with("rpc.v1.Auth.IdentityGrants.")
     {
         users::dispatch(processor, subject, payload, caller).await
     } else if subject.starts_with("rpc.v1.Auth.Deployments.")
@@ -42,10 +40,6 @@ pub(super) async fn dispatch(
         || subject.starts_with("rpc.v1.Auth.DeviceUserAuthorities.")
     {
         devices::dispatch(processor, subject, payload, caller).await
-    } else if subject.starts_with("rpc.v1.Auth.DeploymentAuthority.")
-        || subject.starts_with("rpc.v1.Auth.IdentityAuthority.")
-    {
-        authority::dispatch(processor, subject, payload, caller).await
     } else {
         Err(AuthorizationStateError::InvalidRecord(format!(
             "Auth RPC is not implemented by Rust: {subject}"
@@ -65,7 +59,6 @@ mod tests {
         include_str!("users.rs"),
         include_str!("deployments.rs"),
         include_str!("devices.rs"),
-        include_str!("authority.rs"),
         include_str!("grants.rs"),
     );
 

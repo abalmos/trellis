@@ -42,9 +42,7 @@ export type AuthorizationIssuerKey = {
 };
 
 /** Meta-authority not represented by ordinary permission atoms. */
-export type PlatformPrivilege =
-  | "trellis.auth::admin"
-  | "trellis.auth::capabilities.delegate";
+export type PlatformPrivilege = "trellis.auth::admin";
 
 /** One exact API or participant-resource permission target. */
 export type PermissionTarget =
@@ -105,35 +103,8 @@ export type ResolvedParticipant = {
   authorityProposal: JsonObject;
 };
 
-/** Complete verified context metadata returned by request/event verification. */
-export type VerifiedAuthorizationContextProjection = {
-  ownerKind: "deployment" | "user";
-  ownerId: string;
-  grantRevision: number;
-  principalId: string;
-  principalKind: "user" | "service" | "device";
-  participantId: string;
-  identityKeyId: string | null;
-  loginSessionId: string | null;
-  deploymentId: string | null;
-  instanceId: string | null;
-  issuerKeyId: string;
-  connectionId: string;
-  sessionKey: string;
-  inboxPrefix: string;
-  issuedAt: number;
-  notBefore: number;
-  expiresAt: number;
-  grants: GrantSet;
-  grantDigest: string;
-  platformPrivileges: PlatformPrivilege[];
-  extensions: Record<string, unknown>;
-  contextDigest: string;
-};
-
 /** Verified request caller projection. */
-export type VerifiedAuthorizationRequestProjection =
-  VerifiedAuthorizationContextProjection;
+export type VerifiedAuthorizationRequestProjection = { contextDigest: string };
 
 /** Verified event publisher projection. */
 export type VerifiedAuthorizationEventPublisher = {
@@ -147,7 +118,7 @@ export type VerifiedAuthorizationEventPublisher = {
 
 /** Verified event publisher projection. */
 export type VerifiedAuthorizationEventProjection =
-  & VerifiedAuthorizationContextProjection
+  & VerifiedAuthorizationRequestProjection
   & {
     publisher: VerifiedAuthorizationEventPublisher;
   };
@@ -229,9 +200,25 @@ export type VerifiedAuthorizationContextTokenProjection = {
   contextDigest: string;
   refreshAt: number;
   context: Record<string, unknown> & {
+    ownerKind: "deployment" | "user";
+    ownerId: string;
+    grantRevision: number;
+    principalId: string;
+    principalKind: "user" | "service" | "device";
+    participantId: string;
+    identityKeyId: string | null;
+    loginSessionId: string | null;
+    deploymentId: string | null;
+    instanceId: string | null;
+    issuerKeyId: string;
+    connectionId: string;
+    sessionKey: string;
+    inboxPrefix: string;
     issuedAt: number;
     notBefore: number;
     expiresAt: number;
+    grants: GrantSet;
+    platformPrivileges: PlatformPrivilege[];
   };
 };
 

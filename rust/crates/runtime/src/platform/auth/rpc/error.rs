@@ -5,6 +5,11 @@ use super::super::AuthorizationStateError;
 
 pub(super) fn public_rpc_error(_subject: &str, error: &AuthorizationStateError) -> Value {
     let (error_type, code, message) = match error {
+        AuthorizationStateError::WrongPrincipalKind => (
+            "AuthError",
+            "wrong_principal_kind",
+            "This operation requires a user login.",
+        ),
         AuthorizationStateError::CurrentIssuerConflict => (
             "AuthError",
             "issuer_current",
@@ -31,6 +36,8 @@ pub(super) fn public_rpc_error(_subject: &str, error: &AuthorizationStateError) 
             "The requested identity was not found.",
         ),
         AuthorizationStateError::PrincipalMissing
+        | AuthorizationStateError::ParticipantMissing
+        | AuthorizationStateError::NotFound
         | AuthorizationStateError::IssuerMissing
         | AuthorizationStateError::SessionMissing
         | AuthorizationStateError::AuthorityMissing => (
@@ -63,5 +70,29 @@ pub(super) fn public_rpc_error(_subject: &str, error: &AuthorizationStateError) 
             "message": message,
             "context": { "code": code },
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permission_and_principal_kind_denials_are_not_malformed_requests() {
+        for (error, reason) in [
+            (AuthorizationStateError::NotAuthorized, "not_authorized"),
+            (
+                AuthorizationStateError::WrongPrincipalKind,
+                "wrong_principal_kind",
+            ),
+            (
+                AuthorizationStateError::InvalidRecord("malformed".into()),
+                "invalid_request",
+            ),
+        ] {
+            let response = public_rpc_error("rpc.v1.Auth.Sessions.Logout", &error);
+            assert_eq!(response["type"], "AuthError");
+            assert_eq!(response["reason"], reason);
+        }
     }
 }

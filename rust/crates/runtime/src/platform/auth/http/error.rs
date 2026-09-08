@@ -95,6 +95,8 @@ impl From<AuthorizationStateError> for HttpError {
             tracing::debug!(%error, "auth HTTP request denied");
         }
         match error {
+            AuthorizationStateError::NotAuthorized => Self::forbidden("not_authorized"),
+            AuthorizationStateError::WrongPrincipalKind => Self::forbidden("wrong_principal_kind"),
             AuthorizationStateError::InvalidRecord(message)
                 if message == "new password must differ from current password" =>
             {
@@ -105,6 +107,7 @@ impl From<AuthorizationStateError> for HttpError {
             AuthorizationStateError::SessionExpired => Self::unauthorized("session_expired"),
             AuthorizationStateError::SessionRevoked => Self::unauthorized("session_revoked"),
             AuthorizationStateError::PrincipalMissing => Self::not_found("user_not_found"),
+            AuthorizationStateError::NotFound => Self::not_found("not_found"),
             AuthorizationStateError::PrincipalInactive => Self::forbidden("user_inactive"),
             AuthorizationStateError::IdentityMissing => Self::not_found("identity_not_found"),
             AuthorizationStateError::ParticipantMissing => Self::not_found("participant_not_found"),

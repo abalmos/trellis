@@ -5,22 +5,15 @@
  */
 
 export {
-  type AuthorizationClientState,
   type AuthorizationContextBundle,
   AuthorizationContextBundleSchema,
   AuthorizationContextCache,
-  type AuthorizationContextPersistence,
   AuthorizationContextRefreshError,
-  type AuthorizationContextStore,
   AuthorizationProviderCache,
   type AuthorizationProviderEvent,
   type AuthorizationProviderRequest,
   type AuthorizationRoutingMaterial,
-  type AuthorizationSessionBinding,
-  type AuthorizationTrustBundle,
-  AuthorizationTrustBundleSchema,
-  type AuthorizationTrustState,
-  MemoryAuthorizationContextStore,
+  type AuthorizationRuntimeBinding,
   refreshAuthorizationContext,
   refreshAuthorizationContextWithMetadata,
   startAuthorizationContextRefresh,
@@ -45,22 +38,6 @@ export {
   portalRedirectLocation,
   submitPortalApproval,
 } from "./browser/portal.ts";
-export type {
-  AuthDeploymentAuthorityGetResponse,
-  DeploymentAuthority,
-  DeploymentAuthorityCapabilityNeed,
-  DeploymentAuthorityContractNeed,
-  DeploymentAuthorityKind,
-  DeploymentAuthorityMaterialization,
-  DeploymentAuthorityNeeds,
-  DeploymentAuthorityPlan,
-  DeploymentAuthorityPlanBreakingChange,
-  DeploymentAuthorityResourceNeed,
-  DeploymentAuthoritySurface,
-  DeploymentAuthoritySurfaceNeed,
-  PortalFlowInsufficientCapabilitiesState,
-  PortalFlowState,
-} from "./protocol.ts";
 export type {
   AuthDeviceUserAuthoritiesResolveOutput,
   AuthDeviceUserAuthoritiesResolveProgress,

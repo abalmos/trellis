@@ -34,9 +34,11 @@ There is no TypeScript contract-authoring execution step.
 
 Services import `TrellisService` from `@qlever-llc/trellis/service/deno` or
 `@qlever-llc/trellis/service/node`. Connect with the generated participant,
-provisioned identity, Trellis URL, and durable authorization-context store.
-`FileAuthorizationContextStore` lives on `@qlever-llc/trellis/auth/file`; it is
-not part of the browser-safe root. The complete setup and identity example is in
+provisioned identity seed, and Trellis URL. Deployment/instance assignment,
+installed participant/APIs, `GrantBinding`, resources, signed context, route
+JWT, and transport endpoints are resolved server-side. Authorization state is
+process-memory-only and refreshes on reconnect; no authorization-context store
+or client-supplied deployment/digest fields exist. The complete example is in
 `/guides/write-a-service/service-entrypoint`.
 
 For a participant declaring RPC `Orders.Create`, with matching generated input

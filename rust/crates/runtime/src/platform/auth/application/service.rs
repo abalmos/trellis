@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::super::account::hash_password;
-use super::super::{AuthorizationStateError, AuthorizationStateService};
+use super::super::AuthorizationStateError;
 use super::activation_review_notifier::{ActivationReviewNotifier, ActivationReviewWaiter};
 
 /// Security settings for the Rust-owned authentication service.
@@ -38,7 +38,6 @@ impl Default for AuthServiceConfig {
 #[derive(Clone, Debug)]
 pub struct AuthService<R> {
     pub(super) repository: R,
-    pub(super) authorization: AuthorizationStateService<R>,
     pub(super) config: AuthServiceConfig,
     pub(super) dummy_password_hash: Arc<str>,
     pub(super) activation_reviews: ActivationReviewNotifier,
@@ -74,18 +73,11 @@ where
             Some(config.password_min_length),
         )?;
         Ok(Self {
-            authorization: AuthorizationStateService::new(repository.clone()),
             repository,
             config,
             dummy_password_hash: dummy_password_hash.into(),
             activation_reviews: ActivationReviewNotifier::default(),
         })
-    }
-
-    /// Borrow the accepted authorization-state component.
-    #[must_use]
-    pub(crate) fn authorization(&self) -> &AuthorizationStateService<R> {
-        &self.authorization
     }
 
     /// Borrow the coherent auth repository set.

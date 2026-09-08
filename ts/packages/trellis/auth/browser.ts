@@ -17,7 +17,7 @@ export {
   portalRedirectLocation,
   submitPortalApproval,
 } from "./browser/portal.ts";
-export { BrowserAuthorizationContextStore } from "./browser/storage.ts";
+export { BrowserSessionStore } from "./browser/storage.ts";
 export {
   classifyBrowserAuthError,
   isRecoverableBrowserAuthError,

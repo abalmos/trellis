@@ -30,20 +30,15 @@ target_signing_seed_file = "./nats/trellis-target-signing.seed"
 xkey_seed_file = "./nats/auth-callout-xkey.seed"
 
 [auth.authorization]
-trust_root_file = "./auth/authorization-root.json"
-issuer_manifest_file = "./auth/authorization-issuer-manifest.json"
 issuer_signing_seed_file = "./auth/authorization-issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
 refresh_jitter_seconds = 15
 minimum_context_lifetime_seconds = 76
 maximum_bootstrap_jwt_lifetime_seconds = 3600
-cleanup_grace_seconds = 60
 allowed_clock_skew_seconds = 30
 maximum_context_bytes = 16384
 maximum_permissions = 4096
-maximum_capabilities = 256
-trust_bucket = "trellis_authorization_trust"
 context_bucket = "trellis_authorization_contexts"
 registry_replicas = 1
 
@@ -426,20 +421,15 @@ enabled = true
 password_min_length = 8
 
 [auth.authorization]
-trust_root_file = "./auth/authorization-root.json"
-issuer_manifest_file = "./auth/authorization-issuer-manifest.json"
 issuer_signing_seed_file = "./auth/authorization-issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
 refresh_jitter_seconds = 15
 minimum_context_lifetime_seconds = 76
 maximum_bootstrap_jwt_lifetime_seconds = 3600
-cleanup_grace_seconds = 60
 allowed_clock_skew_seconds = 30
 maximum_context_bytes = 16384
 maximum_permissions = 4096
-maximum_capabilities = 256
-trust_bucket = "trellis_authorization_trust"
 context_bucket = "trellis_authorization_contexts"
 registry_replicas = 1
 
@@ -581,20 +571,15 @@ type = "oidc"
 client_secret_file = "./secrets/google"
 
 [auth.authorization]
-trust_root_file = "./auth/root.json"
-issuer_manifest_file = "./auth/manifest.json"
 issuer_signing_seed_file = "./auth/issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
 refresh_jitter_seconds = 15
 minimum_context_lifetime_seconds = 76
 maximum_bootstrap_jwt_lifetime_seconds = 3600
-cleanup_grace_seconds = 60
 allowed_clock_skew_seconds = 30
 maximum_context_bytes = 16384
 maximum_permissions = 4096
-maximum_capabilities = 256
-trust_bucket = "trellis_authorization_trust"
 context_bucket = "trellis_authorization_contexts"
 registry_replicas = 1
 
@@ -634,8 +619,8 @@ path = "./data/platform.sqlite"
     );
     let authorization = config.resolve_authorization().expect("authorization");
     assert_eq!(
-        authorization.trust_root_file,
-        directory.path().join("./auth/root.json")
+        authorization.issuer_signing_seed_file,
+        directory.path().join("./auth/issuer.seed")
     );
 }
 
@@ -644,20 +629,15 @@ fn authorization_config_rejects_root_seed_and_invalid_policy() {
     let config = RuntimeConfig::from_toml_str(
         r#"
 [auth.authorization]
-trust_root_file = "root.json"
-issuer_manifest_file = "manifest.json"
 issuer_signing_seed_file = "issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 300
 refresh_jitter_seconds = 15
 minimum_context_lifetime_seconds = 76
 maximum_bootstrap_jwt_lifetime_seconds = 3600
-cleanup_grace_seconds = 60
 allowed_clock_skew_seconds = 30
 maximum_context_bytes = 16384
 maximum_permissions = 4096
-maximum_capabilities = 256
-trust_bucket = "trust"
 context_bucket = "contexts"
 registry_replicas = 1
 "#,
@@ -718,20 +698,15 @@ target_signing_seed_file = "./nats/trellis-target-signing.seed"
 xkey_seed_file = "./nats/auth-callout-xkey.seed"
 
 [auth.authorization]
-trust_root_file = "./auth/root.json"
-issuer_manifest_file = "./auth/manifest.json"
 issuer_signing_seed_file = "./auth/issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
 refresh_jitter_seconds = 15
 minimum_context_lifetime_seconds = 76
 maximum_bootstrap_jwt_lifetime_seconds = 3600
-cleanup_grace_seconds = 60
 allowed_clock_skew_seconds = 30
 maximum_context_bytes = 16384
 maximum_permissions = 4096
-maximum_capabilities = 256
-trust_bucket = "trellis_authorization_trust"
 context_bucket = "trellis_authorization_contexts"
 registry_replicas = 1
 
@@ -1072,20 +1047,15 @@ trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
 
 [auth.authorization]
-trust_root_file = "./auth/root.json"
-issuer_manifest_file = "./auth/manifest.json"
 issuer_signing_seed_file = "./auth/issuer.seed"
 context_lifetime_seconds = 300
 refresh_lead_seconds = 60
 refresh_jitter_seconds = 15
 minimum_context_lifetime_seconds = 76
 maximum_bootstrap_jwt_lifetime_seconds = 3600
-cleanup_grace_seconds = 60
 allowed_clock_skew_seconds = 30
 maximum_context_bytes = 16384
 maximum_permissions = 4096
-maximum_capabilities = 256
-trust_bucket = "trellis_authorization_trust"
 context_bucket = "trellis_authorization_contexts"
 registry_replicas = 1
 

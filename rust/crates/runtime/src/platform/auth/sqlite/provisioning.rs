@@ -29,10 +29,51 @@ use super::outbox::{insert_sql_idempotency_and_actions, sqlite_idempotency_repla
 use super::principals::load_principal;
 use super::validation::next_version;
 use super::SqliteAuthorizationStore;
+
+impl SqliteAuthorizationStore {
+    pub(crate) async fn install_runtime_identity(
+        &self,
+        instance: RuntimeInstanceRecord,
+        identity: ProvisionedIdentityRecord,
+    ) -> Result<(), AuthorizationStateError> {
+        self.run(move |connection| {
+            let transaction = connection.transaction().map_err(sql_error)?;
+            load_principal(&transaction, &instance.principal_id)?
+                .ok_or(AuthorizationStateError::PrincipalMissing)?;
+            let expected_kind = match identity.kind {
+                ProvisionedIdentityKind::Service => trellis_protocol::ParticipantKind::Service,
+                ProvisionedIdentityKind::Device => trellis_protocol::ParticipantKind::Device,
+            };
+            if load_deployment(&transaction, &instance.deployment_id)?
+                .is_none_or(|deployment| deployment.participant_kind != expected_kind)
+            {
+                return Err(AuthorizationStateError::InvalidRecord(
+                    "provisioned instance deployment kind does not match".to_owned(),
+                ));
+            }
+            if load_runtime_instance(&transaction, &instance.instance_id)?.is_some() {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
+            insert_sql_runtime_instance(&transaction, &instance)?;
+            validate_sql_identity_relationships(&transaction, &identity)?;
+            insert_sql_provisioned_identity(&transaction, &identity)?;
+            transaction.commit().map_err(sql_error)
+        })
+        .await
+    }
+}
 use crate::platform::auth::model::validate_provisioned_identity;
 
 #[async_trait]
 impl ProvisioningRepository for SqliteAuthorizationStore {
+    async fn get_device_provisioning_secret_by_hash(
+        &self,
+        secret_hash: &str,
+    ) -> Result<Option<DeviceProvisioningSecretRecord>, AuthorizationStateError> {
+        let secret_hash = secret_hash.to_owned();
+        self.run(move |connection| load_provisioning_secret_by_hash(&connection, &secret_hash))
+            .await
+    }
     async fn list_provisioned_identities(
         &self,
     ) -> Result<Vec<ProvisionedIdentityRecord>, AuthorizationStateError> {

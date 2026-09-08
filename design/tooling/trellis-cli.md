@@ -1,462 +1,145 @@
----
-title: Trellis CLI
-description: CLI design for the operator/runtime and package-manager `trellis` CLI.
-order: 10
----
-
 # Design: Trellis CLI
 
-## Prerequisites
+Status: authoritative command and project-tooling model after WO-02.
 
-- [../contracts/trellis-api-participants.md](./../contracts/trellis-api-participants.md) -
-  canonical contract and catalog model
-- [../contracts/trellis-idl.md](./../contracts/trellis-idl.md) - native IDL
-  authoring and compilation
-- [../contracts/trellis-rust-contract-libraries.md](./../contracts/trellis-rust-contract-libraries.md) -
-  Rust SDK and participant generation direction
+## Principles
 
-## Context
+- Commands expose current runtime operations directly; removed authorization
+  models do not survive as aliases or wrappers.
+- Machine-readable output uses `--format json` and reserves stdout for JSON.
+- Project compilation completes before generated output is replaced.
+- Locks and generated artifacts are exact, deterministic, and never hand-edited.
 
-Trellis needs clear command boundaries for:
-
-- operational bootstrap and admin commands
-- service deployment and upgrade flows that use locally generated keys
-- bootstrap-safe contract verification and SDK generation during repo builds
-
-The command model separates those concerns across:
-
-- an ad hoc Rust CLI for a few operational commands
-- a separate Rust verification binary for live catalog digest checks
-- TypeScript and Deno scripts for SDK generation
-
-That split made the system harder to understand, especially when normal users
-were shown machine-global generation commands that should really have stayed in
-repo-local build workflows.
-
-## Design
-
-Trellis uses one public `trellis` CLI for runtime, operator, and package-manager
-workflows. Contract generation is an internal library invoked by
-`trellis install` after locked dependencies are staged.
-
-Canonical native `trellis.api.v1` and `trellis.participant.v1` JSON remains an
-exchange artifact, but it is generated output rather than a committed source
-file.
-
-### Command structure
+## Project Commands
 
 ```text
-trellis <command> [subcommand] [options]
+trellis add <api> [--version <requirement>]
+trellis rm <api>
+trellis update
+trellis install
+trellis generate
+trellis publish
 ```
 
-Repository development uses the same package-manager boundary:
+`add`, `rm`, and `update` resolve the project API graph and write an exact
+`trellis.lock`. `install` recreates language outputs from that lock. `generate`
+compiles native Trellis IDL and stages all generated output before atomically
+replacing the last-good tree. `publish` pushes every project-owned canonical API
+to OCI with immutable version rules.
+
+Package references are declared in `trellis.toml`. Generated Rust and TypeScript
+modules consume exact locked API descriptors and participant artifacts;
+application code does not author wire schemas.
+
+## Authentication
 
 ```text
-cargo xtask install
-cd ts && deno task install
-cargo xtask build
-```
-
-`cargo xtask install` runs the repository's fixed project DAG.
-`cargo xtask
-build` installs first and then invokes the default Rust workspace
-build. Live client-library integration is language-owned and is run outside
-`cargo xtask build`: use ordinary `cargo test` and `deno test` commands from
-`integration/README.md`. Tests own their real infrastructure directly; there is
-no shared runner.
-
-Installation:
-
-- compile native IDL and resolve canonical API dependencies from paths or OCI
-- validate canonical native API artifacts against native `trellis.api.v1` and
-  `trellis.participant.v1`
-- compute canonical JSON and digests
-- generate language-specific SDK artifacts inside the consuming project
-- generate service/app-owned Cargo SDK crates that use the public `trellis`
-  facade and its internal generator/runtime support
-- use required contract `kind` metadata to decide discovery behavior: `service`
-  generates API, TypeScript, and Cargo artifacts; `app` generates API and
-  TypeScript artifacts; `agent` and `device` contracts are verified, with Rust
-  participant facades generated where applicable
-- discovery uses configured package/workspace entries and explicit contract
-  source inputs; it does not implicitly scan `src/lib` for contracts
-
-The CLI may accept explicit package and crate naming flags when the default name
-inference is not enough for a repository.
-
-### Operational commands
-
-The runtime/operator CLI uses a clean-break command model. Removed command
-families such as `auth`, `deploy`, `deployment`, `deployments`, `dep`, `d`,
-`bootstrap`, `self`, and `keygen` are not compatibility aliases. Public commands
-prefer operator-facing resources (`users`, `svc`, `dev`) over implementation
-namespaces.
-
-These command surfaces describe the intended operator model. The current Rust
-`trellis-server` HTTP runtime exposes only `/healthz` and `/readyz`; auth,
-portal, and CLI login flows require a runtime path that explicitly includes the
-auth and portal services.
-
-```text
-trellis login <url>
+trellis login [--server <url>]
 trellis logout
 trellis whoami
+```
 
-trellis users list
-trellis users show <user-id>
-trellis users create [--name <name>] [--email <email>] [--username <username>] [--inactive] [--capability <key>...] [--group <key>...]
-trellis users edit <user-id> [--active|--inactive] [--name <name>] [--email <email>] [--add-capability <key>...] [--remove-capability <key>...] [--set-capability <key>...] [--clear-capabilities] [--add-group <key>...] [--remove-group <key>...] [--set-group <key>...] [--clear-groups]
+Login uses the browser request/bind flow, then context refresh. Local CLI state
+retains the session signing seed and nullable login metadata required for
+continuity; authorization contexts, route JWTs, transports, grants, and issuer
+keys are process-memory-only. Logout revokes the real login and clears local
+credentials.
 
-trellis identity grants list [--user <user-id>] [--digest <contractDigest>]
-trellis identity grants revoke <identity-grant-id> [--user <user-id>]
+The CLI uses the installed `trellis-app.cli@v1` participant. First-admin setup
+creates its Admin `GrantBinding` atomically with the Console binding.
 
-trellis svc list [--disabled]
-trellis svc <id> show
-trellis svc <id> create [--namespace <ns>...]
-trellis svc <id> apply (--source <path> | --api <path> | --image <ref>)
-trellis svc <id> disable
-trellis svc <id> enable
-trellis svc <id> remove [-f] [--cascade] [--purge] [--purge-unused-contracts]
-trellis svc <id> instances [--disabled]
-trellis svc <id> provision [--instance-seed <seed>]
-trellis svc <id> authority show
-trellis svc <id> authority plan list [--state <pending|accepted|rejected|expired>] [--classification <update|migration>]
-trellis svc <id> authority plan show <PLAN_ID>
-trellis svc <id> authority accept-update <PLAN_ID> [--expected-desired-version <version>]
-trellis svc <id> authority accept-migration <PLAN_ID> --acknowledgement <text> [--expected-desired-version <version>]
-trellis svc <id> authority reject <PLAN_ID> [--reason <text>]
-trellis svc <id> authority reconcile [--desired-version <version>]
+## Authorization Administration
 
-trellis dev list [--disabled]
-trellis dev <id> show
-trellis dev <id> create [--review-mode <none|required>]
-trellis dev <id> apply (--source <path> | --api <path> | --image <ref>)
-trellis dev <id> disable
-trellis dev <id> enable
-trellis dev <id> remove [-f] [--cascade] [--purge] [--purge-unused-contracts]
-trellis dev <id> instances [--state <registered|activated|revoked|disabled>] [--show-metadata]
-trellis dev <id> provision [--name <name>] [--serial-number <serial>] [--model-number <model>] [--metadata <key=value>...]
-trellis dev <id> authority show
-trellis dev <id> authority plan list [--state <pending|accepted|rejected|expired>] [--classification <update|migration>]
-trellis dev <id> authority plan show <PLAN_ID>
-trellis dev <id> authority accept-update <PLAN_ID> [--expected-desired-version <version>]
-trellis dev <id> authority accept-migration <PLAN_ID> --acknowledgement <text> [--expected-desired-version <version>]
-trellis dev <id> authority reject <PLAN_ID> [--reason <text>]
-trellis dev <id> authority reconcile [--desired-version <version>]
-trellis dev <id> activations list [--instance <id>] [--state <activated|revoked>]
-trellis dev <id> activations revoke <instance-id>
-trellis dev <id> reviews list [--instance <id>] [--state <pending|approved|rejected>]
-trellis dev <id> reviews approve <review-id> [--reason <code>]
-trellis dev <id> reviews reject <review-id> [--reason <code>]
+```text
+trellis identity grants get <identity-id> <participant-id>
+trellis identity grants list [--identity <identity-id>]
+trellis identity grants set <identity-id> <participant-id> ...
+trellis identity grants revoke <identity-id> <participant-id> ...
 
-trellis init config --out <dir> [--name <name>] [--server-name <name>]
-trellis-server [--config <path>] [--system] [--local-nats[=<path>]] [--nats-download] [--dev] [--verbose] [--reset-admin] [all|platform|jobs|health|eventlog]
-trellis-server check [--config <path>] [--system] [--local-nats[=<path>]] [--nats-download] [--dev] [--verbose] [all|platform|jobs|health|eventlog]
-trellis infra trust init --out <dir> --authority <authority> [--force]
-trellis infra trust rotate-issuer --dir <dir> [--revoke <issuer-key-id>]
-trellis init admin --identity <provider>:<subject> [--db-path <path>]
-trellis keys new [--seed <seed>] [--out <path>] [--pubout <path>]
-trellis upgrade check [--prerelease]
-trellis upgrade install [--prerelease]
+trellis participants get <participant-id> [--revision <revision>]
+trellis participants install <project-or-artifact> ...
+
+trellis issuers list
+trellis issuers rotate ...
+trellis issuers revoke <issuer-key-id> ...
+```
+
+Grant commands call `Auth.Grants.*` and require explicit expected revisions for
+mutations. They operate on one identity/participant binding and may assign only
+declared atoms and finite platform privileges. Participant installation compiles
+or reads canonical artifacts in memory and calls `Auth.Participants.Install`; it
+does not grant authority as a side effect.
+
+Issuer commands manage the online signer. No `infra`, trust-root, certificate,
+manifest, trust-floor, offline-signing, or compatibility command exists.
+
+## Deployment Commands
+
+```text
+trellis svc create ...
+trellis svc apply <deployment-id> <project> ...
+trellis svc get <deployment-id>
+trellis svc provision <deployment-id> ...
+trellis svc enable|disable|remove ...
+
+trellis dev create ...
+trellis dev apply <deployment-id> <project> ...
+trellis dev get <deployment-id>
+trellis dev provision <deployment-id> ...
+trellis dev enable|disable|remove ...
+```
+
+Apply compiles the project source in memory, validates its participant kind and
+selected participant, installs the participant revision when needed, then calls
+the direct deployment mutation. Inspection uses `Auth.Deployments.Get`.
+
+There are no authority show/plan/propose/approve/reject/reconcile commands.
+Deployment changes and participant grant changes are distinct explicit
+operations.
+
+Provisioning returns one-use service/device material once. The CLI does not
+persist returned private identity material unless the caller explicitly directs
+output to a secure destination.
+
+## Users And Portals
+
+```text
+trellis users ...
+trellis portals ...
+```
+
+These commands retain current account, user identity, portal route, login
+setting, and portal grant-override operations. Portal grant overrides select
+concrete atoms from an installed participant revision and do not create a second
+authority model.
+
+## Utility Commands
+
+```text
+trellis init ...
+trellis keys ...
+trellis upgrade ...
 trellis version
 trellis completion <shell>
 ```
 
-Operational command behavior:
+Initialization creates ordinary secure directories only when absent and rejects
+unsafe paths. Key commands generate or derive the requested online issuer,
+identity, or session-compatible key material without introducing offline trust
+artifacts.
 
-- `trellis login <url>` is a normal contract-bearing client login, not a
-  bootstrap bypass; it enters the auth-owned browser flow and continues through
-  the resolved portal before storing local session material for later admin RPC
-  calls; runtime transport details are discovered from the bind flow and
-  persisted internally rather than exposed as normal CLI flags
-- normal authenticated CLI commands reconnect with freshly generated runtime
-  auth proofs derived from the stored session key, presented contract digest,
-  and `iat`; the contract digest is the presented contract identity, not a hash
-  of human-facing display metadata; when the local CLI contract digest changes,
-  the CLI starts the normal auth request flow with the full contract, may
-  complete immediately when existing identity authority already covers the new
-  requested needs, otherwise prints the detached portal login URL, may render a
-  QR code, does not auto-open a browser or start a localhost callback listener,
-  and completes by polling the auth-owned flow before reconnecting NATS and
-  issuing admin RPCs
-- generic NATS authorization failures during authenticated command reconnects do
-  not by themselves prove the stored local session was revoked; the CLI
-  preserves local session material unless auth returns an explicit
-  `session_not_found`, `revoked`, or `rejected` signal
-- `trellis whoami` shows the currently stored admin session, and
-  `trellis logout` revokes that session and clears local session state
-- `trellis users list`, `trellis users show`, `trellis users create`, and
-  `trellis users edit` manage Trellis users by Trellis `userId`; provider
-  identities are not the normal user-scoped administration key
-- `trellis users create` can seed direct capabilities and capability groups and
-  creates a local password reset/setup link for the new user when account setup
-  is required
-- `trellis users edit` supports explicit add/remove/set/clear semantics for
-  direct capabilities and capability groups so operators can make incremental or
-  replacement changes without ambiguous merge behavior
-- `trellis identity grants list` shows stored delegated identity grants for app
-  and CLI contracts from the `trellis` service; each row includes an
-  `identityGrantId` and presented contract digest, with optional filtering by
-  exact contract digest and by user for admin callers; the command pages through
-  the bounded identity-grant list RPC rather than requesting an unbounded list
-- `trellis identity grants revoke` revokes the addressed identity grant through
-  the identity-authority RPC surface and revokes matching active delegated
-  sessions in the `trellis` service; contract digest remains list/filter
-  evidence, not the revocation key
-- `trellis portals *` is the admin-oriented login portal surface. It reflects
-  the same `Auth.Portals.*` RPCs used by Console for listing visible portals,
-  creating, updating, or removing non-built-in portal records, updating the
-  built-in login portal policy, and managing login route selectors. The built-in
-  login portal is visible, non-deletable, and not replaceable through portal
-  upsert. Login settings include configured federated provider display and the
-  `allowedFederatedProviders` policy; route ids are internal RPC keys rather
-  than the primary operator-facing route shape.
-- `trellis svc` manages service deployments and `trellis dev` manages device
-  deployments. Both use resource-first command shape: the deployment ID appears
-  before the action for single-resource operations, for example
-  `trellis svc payments apply --api contract.json`.
-- `trellis svc <id> apply` and `trellis dev <id> apply` resolve a contract
-  proposal from source, native API, or OCI image, call
-  `Auth.DeploymentAuthority.Plan`, and require an explicit operator accept path
-  for updates that grant new capabilities or add resource aliases, plus strict
-  migrations. Safe updates and `mutable-dev` migrations may already be
-  auto-accepted by bootstrap, but accepted plans remain visible in history.
-  Accepting a plan mutates desired authority and schedules reconciliation;
-  reconciliation is the only path that materializes resource and binding
-  changes.
-- `trellis <svc|dev> <id> authority plan list` discovers pending and historical
-  authority plans, optionally filtered by `--state` or `--classification`, and
-  `trellis <svc|dev> <id> authority plan show <PLAN_ID>` shows one plan for
-  review before accepting or rejecting it.
-- the retired top-level `trellis grants` command tree is rejected. Trusted
-  browser authority is portal/application policy managed through
-  `Auth.Portals.GrantOverrides.*`; deployment authority changes continue through
-  immutable plan review and acceptance.
-- admin-triggered reconciliation uses `Auth.DeploymentAuthority.Reconcile` for
-  repair, retry, or manual convergence. It is not the normal happy-path
-  follow-up to every accept because accept already schedules reconciliation
-  after commit.
-- `trellis dev <id> provision` is the ergonomic provisioning path for device
-  development and deployment: it generates a root secret locally, derives the
-  device keys, registers the instance with auth using activation-only secret
-  material, optionally captures device metadata such as `name`, `serialNumber`,
-  `modelNumber`, and deployment-specific opaque keys, and emits the provisioning
-  bundle for the device or operator
-- `trellis svc <id> provision` provisions concrete service principals under one
-  service deployment, optionally from an operator-provided instance seed
-- `trellis svc <id> instances` and `trellis dev <id> instances` are the
-  lower-level instance inspection surfaces; the default device table promotes
-  `name`, `serial`, and `model` columns when present, while `--show-metadata`
-  reveals the remaining opaque metadata entries; instance and review list
-  commands must pass an explicit page size to the underlying admin list RPC and
-  may pass deployment/state filters
-- `trellis dev <id> reviews *` manages pending device review decisions and is
-  intended for `trellis.auth::device.review` automation services or admins
-- service deployments own deployment authority, namespace allowance, and
-  reversible deployment state; runtimes receive only reconciled materialized
-  authority
-- service instances are concrete service principals under one deployment,
-  including provisioning, inspection, and reversible lifecycle changes
-- deployment create flows are intentionally metadata-light; human-facing
-  contract names continue to come from reviewed contract metadata rather than
-  from a separate deployment-local `displayName` or `description`
-- deployments may rely on the built-in Trellis portal with no portal setup, or
-  register one or more custom portals, choose login portal selectors for
-  specific browser contracts and origins, and configure device portal routing
-  through device deployment metadata; install automation may offer convenience
-  wrappers, but the underlying actions remain explicit admin calls
-- `trellis init config` is the Trellis configuration/bootstrap generator. It
-  generates a runnable bundle containing Rust-native NATS operator/account/JWT
-  artifacts, Trellis/Auth service credentials, auth-callout signing and xkey
-  seeds, sentinel credentials, `config.toml`, and a SQLite data directory. It
-  generates this material in-process using Rust NATS JWT/NKEY libraries, without
-  shelling out to external generators. The generated Rust runtime config is
-  local-identity-first: it enables username/password login and does not require
-  federated identity provider setup for the first admin. The generated Trellis
-  config uses relative file paths so the bundle can be moved as a directory, and
-  command flags allow overriding the public Trellis origin plus native and
-  websocket NATS URLs when containers map ports dynamically. The generated
-  Trellis display name defaults to `Trellis`; the NATS operator name also
-  defaults to `Trellis`; the system account defaults to `SYS`; and the generated
-  NATS `server_name` defaults to a slug derived from the Trellis name, with
-  `--server-name` available for an explicit NATS server-name override. The
-  generated bundle also includes a private `session.seed` file (32-byte
-  event-session seed) at the bundle root, referenced from `config.toml`.
-- `trellis-server [OPTIONS] [MODE]` is the server process entrypoint; `trellis`
-  has no server subcommand. Plain startup uses `[nats].servers` from config and
-  never spawns or downloads NATS. `--local-nats` resolves `nats-server` from
-  `PATH`, `--local-nats=<path>` validates and uses that exact executable, and
-  `--nats-download` explicitly downloads and verifies the pinned release.
-  `--dev` selects user paths, PATH NATS, verbose attached output, and no weaker
-  security behavior. `--system` selects `/etc/trellis`, `/var/lib/trellis`,
-  `/var/cache/trellis`, `/run/trellis`, and `/var/log/trellis`; otherwise XDG
-  user paths apply. Read-only local NATS source lives under the config root,
-  while mutable state, runtime files, downloads, and logs use their
-  corresponding profile roots. Supported modes remain `all`, `platform`, `jobs`,
-  `health`, and `eventlog`.
-- the runtime OCI image ships the `trellis` CLI and the pinned nats-server baked
-  in at `/usr/local/bin/nats-server` (downloaded and checksum-verified at image
-  build time against `conformance/nats-binaries.json`, never at container
-  runtime); `nsc` is NOT in the image because the Rust bootstrap generates all
-  NATS material natively. The image's `ENTRYPOINT` stays `trellis-server` for
-  the external-NATS/quadlet deployment path, which is unchanged. Single-
-  container managed deployments run the server with a read-only config volume
-  and writable state volume:
+## Errors And Output
 
-  ```sh
-  docker volume create trellis-state
-  # Generate the bundle into the writable volume first (once), as the image's
-  # non-root user:
-  docker run --rm --user 10001:10001 --entrypoint trellis \
-    --volume trellis-state:/var/lib/trellis ghcr.io/qlever-llc/trellis:latest \
-    init config --out /var/lib/trellis/bundle
-  # The bundle's runtime SQLite dir must exist so it can overlay the read-only mount:
-  docker run --rm --user 10001:10001 --entrypoint mkdir \
-    --volume trellis-state:/var/lib/trellis ghcr.io/qlever-llc/trellis:latest \
-    -p /var/lib/trellis/bundle/data
-  docker run --rm --name trellis --read-only --tmpfs /tmp \
-    --tmpfs /run/trellis:uid=10001,gid=10001,mode=0700 \
-    --tmpfs /var/log/trellis:uid=10001,gid=10001,mode=0700 \
-    --user 10001:10001 --publish 3000:3000 \
-    --volume trellis-state:/var/lib/trellis \
-    --volume trellis-state/bundle:/etc/trellis:ro \
-    --volume trellis-state/bundle/data:/etc/trellis/data \
-    --entrypoint trellis-server ghcr.io/qlever-llc/trellis:latest \
-    --system all --local-nats=/usr/local/bin/nats-server
-  ```
+Human output is concise and actionable. JSON mode emits one documented value to
+stdout and sends tracing/progress to stderr. Expected Auth RPC errors retain
+their generated result codes, including stale binding/deployment revisions,
+invalid participant artifacts, denied Admin privilege, missing required
+evidence, and unavailable issuer/runtime dependencies.
 
-  The bundle is mounted read-only; omitted SQLite paths use the system profile's
-  `/var/lib/trellis` data root. All mutable NATS files go to
-  `/var/lib/trellis/nats`; the bundle's `nats/` directory (config, credentials,
-  resolver preloads) is only read. The image never downloads nats-server at
-  container runtime. Quadlet/external-NATS deployments keep running
-  `trellis-server` unchanged with their own NATS container.
-- runtime startup safely converges only the Trellis-owned resources selected by
-  its mode. Platform owns the canonical event stream and Auth KV registries,
-  Jobs owns its three streams, Health owns its transport stream, and Event Log
-  owns the canonical event stream. `all` converges their deduplicated union
-- `trellis-server check --config <path> <mode>` is the server-owned preflight
-  for the same positive mode-derived resource set. Missing selected-mode
-  resources fail; missing unrelated resources do not. The default mode is `all`,
-  and the JSON report contains the same selected checks used by startup
-- `trellis infra trust init` and `trellis infra trust rotate-issuer` remain
-  focused offline tooling for file-backed authorization roots, issuer
-  certificates, manifests, and immutable history. They do not apply or check
-  runtime streams, KV buckets, or databases
-- the normal first-admin path is the auth-owned admin bootstrap flow printed by
-  the Trellis server on first boot. That built-in portal creates a local
-  username/password admin and assigns `capabilityGroups: ["admin"]` with no
-  direct capabilities, so first-admin authority follows the same group model as
-  later users. `trellis init admin --identity <provider>:<subject>` remains an
-  offline initialization utility for explicit operator workflows, not the
-  beginner local setup path. The Rust Platform runtime owns the bootstrap route,
-  embedded portal, and first-admin account-flow completion.
-- `trellis keys new` remains an explicit offline utility for operators who want
-  to separate key generation from install
-- `trellis upgrade check` and `trellis upgrade install` replace the previous
-  `self` command family
-- the runtime/operator CLI no longer exposes direct transport flags like
-  `--servers` or `--creds` outside explicit infrastructure bootstrap flows
+## Removed Surface
 
-Normal authenticated CLI behavior is contract-governed in the same architectural
-sense as browser apps: the CLI presents a generated contract, an identity grant
-is stored in identity authority anchored to the CLI session public key, and
-Trellis auth does not create normal client sessions without a presented contract
-that fits that identity authority.
-
-### Explicitness rule
-
-The CLI prefers explicit commands over vague orchestration commands.
-
-Do not add commands like `trellis build project` with ambiguous behavior.
-
-### Project API dependency files
-
-The CLI project model reads `trellis.toml` API dependencies keyed by stable API
-ID, with a Semantic Version requirement and exactly one source: a local Trellis
-source project root or a named OCI registry. Registry configuration is a named
-host/repository prefix with an optional project default. `trellis.lock` records
-exact release and semantic API digests; remote entries also record the exact OCI
-manifest digest. Release and OCI distribution identity remain package metadata;
-runtime evidence remains stable API ID plus semantic digest.
-
-`trellis add`, `trellis rm`, and `trellis update` resolve local paths or the
-highest matching Semantic Version OCI tag and write an exact lock. Remote
-artifacts are canonical `trellis.api.v1` JSON layers in deterministic OCI image
-manifests. `trellis install` is lock-stable: remote installs pull by OCI digest,
-validate the manifest, layer, API identity, release, and semantic digest, and
-use a content-addressed global cache. Validated API values from that cache and
-direct local API compilation feed the same compiler and package renderers. Local
-dependencies contribute only requested APIs, without recursively resolving
-producer participants or manifests. Tooling never executes source-language
-modules or edits the consumer's language manifest. `trellis publish` consumes
-compiled project-owned API values directly, reuses Docker-compatible
-credentials, keeps release tags immutable, requires monotonically increasing
-releases, and uses `compare_api_replacement` to reject incompatible releases
-under an existing stable API ID. All canonical values stay in memory through
-resolution, compilation, and rendering. Participant evidence continues to pin
-only API ID plus semantic digest.
-
-## IDL boundary
-
-The developer-facing CLI boundary is native Trellis IDL.
-
-- project roots use `contract.trellis` or `contracts/*.trellis`
-- `trellis-idl` compiles all project sources before outputs are replaced
-- `trellis-protocol` validates and normalizes canonical API and participant
-  artifacts and remains authoritative for semantic digests and resolution
-- local dependencies compile from source; tooling supplies exact lock-verified
-  registry API values from the global cache to the compiler
-- `format = 1` selects the project manifest format; `name` identifies the local
-  generated package and is required only when a package is generated
-- root `Cargo.toml`, `package.json`, `deno.json`, and `deno.jsonc` markers
-  select languages; a single language defaults to `trellis/` with optional
-  `[generate].output`, while multiple languages require explicit
-  `[generate.rust].output` and `[generate.typescript].output`
-- each language produces one ordinary package at version `0.0.0`, with `apis`
-  and `participants` modules, never separate API or participant packages
-- TypeScript output is executable ESM JavaScript plus declarations; native Oxc
-  emission requires no Node, Deno, TypeScript, DNT, or repository build tooling
-- generated packages declare published runtime dependencies matching the CLI;
-  local runtime substitutions belong to ecosystem overrides, not `trellis.toml`
-- `trellis generate` is offline and never executes source-language modules
-- failed compilation or rendering preserves last-good output; short-lived
-  staging and backups protect publication without a persistent generation index
-
-Each generated package retains tooling JSON at `artifacts/apis` and
-`artifacts/participants`, including referenced API evidence. File-based
-deployment continues to consume these artifacts. Source-project deployment and
-authentication redesign remain deferred.
-
-## Implementation
-
-The Rust implementation uses:
-
-- `clap` for command parsing and help text
-- `clap_complete` for shell completions
-- `miette` for diagnostics
-- `tracing` and `tracing-subscriber` for logging
-- `comfy-table` for human-readable tabular output
-- Rust crates for operator flows, protocol validation, packing, and code
-  generation
-
-The CLI owns explicit operational and package-manager command execution.
-Repo-specific build workflows remain wrapper scripts or tasks around those
-explicit commands. Shared logic lives in the public `trellis` package plus
-dedicated internal workspace crates:
-
-- `trellis`
-- `trellis-idl`
-- `trellis-protocol`
-- `trellis-codegen-ts`
-- `trellis-codegen-rust`
-
-The current CLI implementation uses internal Trellis SDK modules plus local
-helper modules for command parsing, auth session storage, participant
-resolution, and self-update behavior.
-
-## References
-
-- `design/contracts/trellis-api-participants.md`
-- `design/contracts/trellis-rust-contract-libraries.md`
-- `design/contracts/trellis-idl.md`
+- offline trust infrastructure and `infra` commands;
+- authority proposals/plans and reconciliation;
+- desired/materialized authority inspection;
+- identity-grant IDs or contract-digest-scoped grant commands; and
+- client-side artifact/digest assertions during bootstrap.

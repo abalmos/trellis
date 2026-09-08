@@ -10,8 +10,6 @@ pub struct AuthenticatedUser {
     pub principal_id: String,
     /// Current lifecycle state.
     pub state: String,
-    /// Granted capabilities.
-    pub capabilities: Vec<String>,
     /// Profile email.
     pub email: Option<String>,
     /// Profile image URL.

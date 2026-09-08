@@ -1,6 +1,4 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
-import { fromSeed, Prefix } from "@nats-io/nkeys";
-import { Codec } from "@nats-io/nkeys/lib/codec.js";
 import { ulid } from "ulid";
 import {
   importEd25519PrivateKeyFromSeedBase64url,
@@ -161,11 +159,10 @@ Deno.test("browser request and final bind retain key, flow, redirect, and raw pa
   );
   const bind: SessionProofInput = {
     purpose: "userAuthBind",
-    requestId,
-    issuedAt: iat,
+    origin: "https://trellis.example",
     flowId: ulid(),
     sessionPublicKey: owner.publicKey,
-    requestDigest,
+    unsignedRequest: { requestId, issuedAt: iat, extra: request.extra },
   };
   const bound = await signSessionProof(bind, owner.privateKey, owner.publicKey);
   await verifySessionProof(bind, bound, owner.publicKey, iat);
@@ -176,10 +173,10 @@ Deno.test("browser request and final bind retain key, flow, redirect, and raw pa
     verifySessionProof(
       {
         ...bind,
-        requestDigest: await sessionProofRequestDigest({
-          ...request,
+        unsignedRequest: {
+          ...bind.unsignedRequest,
           extra: { a: 2, b: true },
-        }),
+        },
       },
       bound,
       owner.publicKey,
@@ -192,24 +189,28 @@ Deno.test("browser request and final bind retain key, flow, redirect, and raw pa
       extra: { counter: 9_007_199_254_740_992 },
     })
   );
-  const nkey = fromSeed(Codec.encodeSeed(Prefix.User, owner.seed))
-    .getPublicKey();
   const auth: SessionProofInput = {
     purpose: "userAuthRequest",
-    requestId,
-    issuedAt: iat,
-    sessionPublicKey: owner.publicKey,
-    sessionNkey: nkey,
-    participantId: "test.browser",
-    participantDigest: owner.keyId,
-    redirectTarget: "https://app.example/return",
-    requestDigest,
+    origin: "https://trellis.example",
+    unsignedRequest: {
+      requestId,
+      issuedAt: iat,
+      sessionPublicKey: owner.publicKey,
+      participantId: "test.browser",
+      redirectTarget: "https://app.example/return",
+    },
   };
   const proof = await signSessionProof(auth, owner.privateKey, owner.publicKey);
   await verifySessionProof(auth, proof, owner.publicKey, iat);
   await assertRejects(() =>
     verifySessionProof(
-      { ...auth, redirectTarget: "https://evil.example" },
+      {
+        ...auth,
+        unsignedRequest: {
+          ...auth.unsignedRequest,
+          redirectTarget: "https://evil.example",
+        },
+      },
       proof,
       owner.publicKey,
       iat,
@@ -217,7 +218,13 @@ Deno.test("browser request and final bind retain key, flow, redirect, and raw pa
   );
   await assertRejects(() =>
     verifySessionProof(
-      { ...auth, participantDigest: base64urlEncode(new Uint8Array(32)) },
+      {
+        ...auth,
+        unsignedRequest: {
+          ...auth.unsignedRequest,
+          participantId: "other.browser",
+        },
+      },
       proof,
       owner.publicKey,
       iat,
@@ -225,7 +232,13 @@ Deno.test("browser request and final bind retain key, flow, redirect, and raw pa
   );
   await assertRejects(() =>
     signSessionProof(
-      { ...auth, sessionPublicKey: `${owner.publicKey}=` },
+      {
+        ...auth,
+        unsignedRequest: {
+          ...auth.unsignedRequest,
+          sessionPublicKey: `${owner.publicKey}=`,
+        },
+      },
       owner.privateKey,
       owner.publicKey,
     )

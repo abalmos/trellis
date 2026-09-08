@@ -22,28 +22,28 @@ CREATE TABLE auth_provider_identities (
     PRIMARY KEY (provider, provider_subject)
 );
 
-CREATE TABLE auth_participant_bindings (
+CREATE TABLE auth_installed_participants (
     participant_id TEXT NOT NULL CHECK (length(participant_id) > 0),
+    revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
     participant_kind TEXT NOT NULL CHECK (participant_kind IN ('service', 'app', 'device', 'agent')),
     artifact_digest TEXT NOT NULL CHECK (length(artifact_digest) = 43),
     needs_digest TEXT NOT NULL CHECK (length(needs_digest) = 43),
     participant_json TEXT NOT NULL CHECK (json_valid(participant_json)),
     api_artifacts_json TEXT NOT NULL CHECK (json_valid(api_artifacts_json)),
-    resolved_at INTEGER NOT NULL CHECK (resolved_at BETWEEN 0 AND 9007199254740991),
-    state TEXT NOT NULL CHECK (state IN ('resolved', 'invalid')),
-    error TEXT,
-    CHECK ((state = 'resolved') = (error IS NULL)),
-    PRIMARY KEY (participant_id, artifact_digest)
+    installed_at INTEGER NOT NULL CHECK (installed_at BETWEEN 0 AND 9007199254740991),
+    PRIMARY KEY (participant_id, revision)
 );
+CREATE TRIGGER auth_installed_participant_is_immutable
+BEFORE UPDATE ON auth_installed_participants
+BEGIN
+    SELECT RAISE(ABORT, 'installed participant snapshots are immutable');
+END;
 
-CREATE TABLE auth_installed_participants (
-    participant_id TEXT NOT NULL,
-    revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
-    artifact_digest TEXT NOT NULL,
-    PRIMARY KEY (participant_id, revision),
-    FOREIGN KEY (participant_id, artifact_digest)
-        REFERENCES auth_participant_bindings(participant_id, artifact_digest)
-);
+CREATE TRIGGER auth_installed_participant_no_delete
+BEFORE DELETE ON auth_installed_participants
+BEGIN
+    SELECT RAISE(ABORT, 'installed participant snapshots are retained');
+END;
 
 CREATE TABLE auth_grant_bindings (
     owner_kind TEXT NOT NULL CHECK (owner_kind IN ('deployment', 'user')),
@@ -56,6 +56,8 @@ CREATE TABLE auth_grant_bindings (
     state TEXT NOT NULL CHECK (state IN ('active', 'revoked')),
     expires_at INTEGER CHECK (expires_at BETWEEN 0 AND 9007199254740991),
     provenance_json TEXT CHECK (provenance_json IS NULL OR json_valid(provenance_json)),
+    created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991),
+    updated_at INTEGER NOT NULL CHECK (updated_at BETWEEN 0 AND 9007199254740991),
     PRIMARY KEY (owner_kind, owner_id, participant_id),
     FOREIGN KEY (participant_id, installed_revision)
         REFERENCES auth_installed_participants(participant_id, revision),
@@ -63,82 +65,43 @@ CREATE TABLE auth_grant_bindings (
         json_array_length(grants_json, '$.permissions') = 0
         AND json_array_length(platform_privileges_json) = 0
     )),
-    CHECK (provenance_json IS NULL OR owner_kind = 'user')
+    CHECK (provenance_json IS NULL OR owner_kind = 'user'),
+    CHECK (updated_at >= created_at)
 );
 
 CREATE TABLE auth_sessions (
-    session_id TEXT PRIMARY KEY CHECK (length(session_id) > 0),
-    principal_id TEXT NOT NULL REFERENCES auth_principals(principal_id) ON DELETE CASCADE,
-    principal_kind TEXT NOT NULL CHECK (principal_kind IN ('user', 'service', 'device')),
-    participant_id TEXT NOT NULL,
-    participant_kind TEXT NOT NULL CHECK (participant_kind IN ('service', 'app', 'device', 'agent')),
-    participant_artifact_digest TEXT NOT NULL,
-    participant_needs_digest TEXT NOT NULL CHECK (length(participant_needs_digest) = 43),
-    session_public_key TEXT NOT NULL UNIQUE CHECK (length(session_public_key) = 43),
-    session_key_id TEXT NOT NULL UNIQUE CHECK (length(session_key_id) = 43),
-    inbox_prefix TEXT NOT NULL CHECK (length(inbox_prefix) > 0),
+    session_id TEXT PRIMARY KEY CHECK (length(session_id) = 26),
+    principal_id TEXT NOT NULL REFERENCES auth_principals(principal_id),
+    participant_id TEXT NOT NULL CHECK (length(participant_id) > 0),
+    participant_kind TEXT NOT NULL CHECK (participant_kind IN ('app', 'agent')),
+    session_public_key TEXT NOT NULL CHECK (length(session_public_key) = 43),
+    session_key_id TEXT NOT NULL CHECK (length(session_key_id) = 43),
     state TEXT NOT NULL CHECK (state IN ('active', 'expired', 'revoked')),
     created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991),
-    last_seen_at INTEGER NOT NULL CHECK (last_seen_at BETWEEN 0 AND 9007199254740991),
+    last_authenticated_at INTEGER NOT NULL CHECK (last_authenticated_at BETWEEN 0 AND 9007199254740991),
     expires_at INTEGER CHECK (expires_at BETWEEN 0 AND 9007199254740991),
     revoked_at INTEGER CHECK (revoked_at BETWEEN 0 AND 9007199254740991),
     version INTEGER NOT NULL CHECK (version BETWEEN 1 AND 9007199254740991),
-    FOREIGN KEY (participant_id, participant_artifact_digest)
-        REFERENCES auth_participant_bindings(participant_id, artifact_digest),
+    UNIQUE (participant_id, session_public_key),
+    UNIQUE (participant_id, session_key_id),
+    CHECK (last_authenticated_at >= created_at),
     CHECK (expires_at IS NULL OR expires_at >= created_at),
-    CHECK ((state = 'revoked') = (revoked_at IS NOT NULL)),
-    CHECK (
-        (principal_kind = 'user' AND participant_kind IN ('app', 'agent')) OR
-        (principal_kind = 'service' AND participant_kind = 'service') OR
-        (principal_kind = 'device' AND participant_kind = 'device')
-    )
+    CHECK ((state = 'revoked') = (revoked_at IS NOT NULL))
 );
 CREATE INDEX auth_sessions_principal_idx ON auth_sessions(principal_id);
 
-CREATE TABLE auth_identity_authorities (
-    authority_id TEXT PRIMARY KEY CHECK (length(authority_id) > 0),
-    principal_id TEXT NOT NULL REFERENCES auth_principals(principal_id) ON DELETE CASCADE,
-    participant_id TEXT NOT NULL,
-    participant_artifact_digest TEXT NOT NULL,
-    accepted_needs_digest TEXT NOT NULL CHECK (length(accepted_needs_digest) = 43),
-    desired_grant_set_json TEXT NOT NULL CHECK (json_valid(desired_grant_set_json)),
-    desired_capabilities_json TEXT NOT NULL CHECK (json_valid(desired_capabilities_json)),
-    state TEXT NOT NULL CHECK (state IN ('pending', 'accepted', 'rejected', 'revoked', 'stale')),
-    version INTEGER NOT NULL CHECK (version BETWEEN 1 AND 9007199254740991),
-    created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991),
-    updated_at INTEGER NOT NULL CHECK (updated_at BETWEEN 0 AND 9007199254740991),
-    expires_at INTEGER CHECK (expires_at BETWEEN 0 AND 9007199254740991),
-    decision_at INTEGER CHECK (decision_at BETWEEN 0 AND 9007199254740991),
-    decision_by TEXT,
-    decision_reason TEXT,
-    FOREIGN KEY (participant_id, participant_artifact_digest)
-        REFERENCES auth_participant_bindings(participant_id, artifact_digest),
-    CHECK ((decision_at IS NULL) = (decision_by IS NULL)),
-    UNIQUE (principal_id, participant_id)
-);
-
-CREATE TABLE auth_deployment_authorities (
-    authority_id TEXT PRIMARY KEY CHECK (length(authority_id) > 0),
-    deployment_id TEXT NOT NULL CHECK (length(deployment_id) > 0),
-    participant_id TEXT NOT NULL,
-    participant_kind TEXT NOT NULL CHECK (participant_kind IN ('service', 'device')),
-    participant_artifact_digest TEXT NOT NULL,
-    accepted_needs_digest TEXT NOT NULL CHECK (length(accepted_needs_digest) = 43),
-    desired_grant_set_json TEXT NOT NULL CHECK (json_valid(desired_grant_set_json)),
-    desired_capabilities_json TEXT NOT NULL CHECK (json_valid(desired_capabilities_json)),
-    state TEXT NOT NULL CHECK (state IN ('pending', 'accepted', 'rejected', 'revoked', 'stale')),
-    version INTEGER NOT NULL CHECK (version BETWEEN 1 AND 9007199254740991),
-    created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991),
-    updated_at INTEGER NOT NULL CHECK (updated_at BETWEEN 0 AND 9007199254740991),
-    expires_at INTEGER CHECK (expires_at BETWEEN 0 AND 9007199254740991),
-    decision_at INTEGER CHECK (decision_at BETWEEN 0 AND 9007199254740991),
-    decision_by TEXT,
-    decision_reason TEXT,
-    FOREIGN KEY (participant_id, participant_artifact_digest)
-        REFERENCES auth_participant_bindings(participant_id, artifact_digest),
-    CHECK ((decision_at IS NULL) = (decision_by IS NULL)),
-    UNIQUE (deployment_id, participant_id)
-);
+CREATE TRIGGER auth_sessions_immutable_identity BEFORE UPDATE ON auth_sessions
+WHEN NEW.session_id IS NOT OLD.session_id OR NEW.principal_id IS NOT OLD.principal_id
+  OR NEW.participant_id IS NOT OLD.participant_id OR NEW.participant_kind IS NOT OLD.participant_kind
+  OR NEW.session_public_key IS NOT OLD.session_public_key OR NEW.session_key_id IS NOT OLD.session_key_id
+  OR NEW.created_at IS NOT OLD.created_at OR NEW.expires_at IS NOT OLD.expires_at
+BEGIN SELECT RAISE(ABORT, 'login identity and absolute expiry are immutable'); END;
+CREATE TRIGGER auth_sessions_no_revival BEFORE UPDATE ON auth_sessions
+WHEN (OLD.state != 'active' AND NEW.state = 'active')
+  OR (OLD.state = 'revoked' AND (NEW.state != 'revoked' OR NEW.revoked_at IS NOT OLD.revoked_at))
+BEGIN SELECT RAISE(ABORT, 'terminal logins cannot be revived'); END;
+CREATE TRIGGER auth_sessions_no_delete BEFORE DELETE ON auth_sessions
+BEGIN SELECT RAISE(ABORT, 'login tombstones are retained'); END;
 
 CREATE TABLE auth_deployments (
     deployment_id TEXT PRIMARY KEY CHECK (length(deployment_id) > 0),
@@ -153,21 +116,19 @@ CREATE TABLE auth_instances (
     deployment_id TEXT NOT NULL REFERENCES auth_deployments(deployment_id) ON DELETE CASCADE,
     principal_id TEXT NOT NULL REFERENCES auth_principals(principal_id) ON DELETE CASCADE,
     state TEXT NOT NULL CHECK (state IN ('active', 'disabled', 'revoked', 'stale')),
+    created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991),
+    updated_at INTEGER NOT NULL CHECK (updated_at BETWEEN 0 AND 9007199254740991),
+    version INTEGER NOT NULL CHECK (version BETWEEN 1 AND 9007199254740991),
     UNIQUE (instance_id, deployment_id)
-);
-
-CREATE TABLE auth_session_runtime_bindings (
-    session_id TEXT PRIMARY KEY REFERENCES auth_sessions(session_id) ON DELETE CASCADE,
-    deployment_id TEXT NOT NULL REFERENCES auth_deployments(deployment_id) ON DELETE CASCADE,
-    instance_id TEXT NOT NULL,
-    FOREIGN KEY (instance_id, deployment_id)
-        REFERENCES auth_instances(instance_id, deployment_id)
 );
 
 CREATE TABLE auth_devices (
     principal_id TEXT NOT NULL REFERENCES auth_principals(principal_id) ON DELETE CASCADE,
     deployment_id TEXT NOT NULL REFERENCES auth_deployments(deployment_id) ON DELETE CASCADE,
-    state TEXT NOT NULL CHECK (state IN ('active', 'disabled', 'revoked')),
+    state TEXT NOT NULL CHECK (state IN ('pending', 'active', 'disabled', 'revoked')),
+    created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991),
+    updated_at INTEGER NOT NULL CHECK (updated_at BETWEEN 0 AND 9007199254740991),
+    version INTEGER NOT NULL CHECK (version BETWEEN 1 AND 9007199254740991),
     PRIMARY KEY (principal_id, deployment_id)
 );
 
@@ -182,30 +143,11 @@ CREATE TABLE auth_device_delegations (
         REFERENCES auth_devices(principal_id, deployment_id) ON DELETE CASCADE
 );
 
-CREATE TABLE auth_dependency_evidence (
-    authority_kind TEXT NOT NULL CHECK (authority_kind IN ('identity', 'deployment')),
-    authority_id TEXT NOT NULL CHECK (length(authority_id) > 0),
-    participant_id TEXT NOT NULL CHECK (length(participant_id) > 0),
-    participant_artifact_digest TEXT NOT NULL CHECK (length(participant_artifact_digest) = 43),
-    participant_needs_digest TEXT NOT NULL CHECK (length(participant_needs_digest) = 43),
-    alias TEXT NOT NULL CHECK (length(alias) > 0),
-    required INTEGER NOT NULL CHECK (required IN (0, 1)),
-    api_id TEXT NOT NULL CHECK (length(api_id) > 0),
-    api_digest TEXT NOT NULL CHECK (length(api_digest) = 43),
-    provider_participant_id TEXT NOT NULL CHECK (length(provider_participant_id) > 0),
-    provider_deployment_id TEXT,
-    provider_instance_id TEXT,
-    state TEXT NOT NULL CHECK (state IN ('available', 'unavailable', 'stale')),
-    observed_at INTEGER NOT NULL CHECK (observed_at BETWEEN 0 AND 9007199254740991),
-    PRIMARY KEY (authority_kind, authority_id, alias, required)
-);
-
 CREATE TABLE auth_resource_binding_evidence (
-    authority_kind TEXT NOT NULL CHECK (authority_kind IN ('identity', 'deployment')),
-    authority_id TEXT NOT NULL CHECK (length(authority_id) > 0),
+    owner_kind TEXT NOT NULL CHECK (owner_kind IN ('user', 'deployment')),
+    owner_id TEXT NOT NULL CHECK (length(owner_id) > 0),
     participant_id TEXT NOT NULL CHECK (length(participant_id) > 0),
-    participant_artifact_digest TEXT NOT NULL CHECK (length(participant_artifact_digest) = 43),
-    participant_needs_digest TEXT NOT NULL CHECK (length(participant_needs_digest) = 43),
+    installed_revision INTEGER NOT NULL CHECK (installed_revision BETWEEN 1 AND 9007199254740991),
     resource_kind TEXT NOT NULL CHECK (length(resource_kind) > 0),
     local_name TEXT NOT NULL CHECK (length(local_name) > 0),
     binding_id TEXT NOT NULL CHECK (length(binding_id) > 0),
@@ -213,60 +155,7 @@ CREATE TABLE auth_resource_binding_evidence (
     state TEXT NOT NULL CHECK (state IN ('available', 'unavailable', 'stale')),
     materialized_at INTEGER NOT NULL CHECK (materialized_at BETWEEN 0 AND 9007199254740991),
     error TEXT,
-    PRIMARY KEY (authority_kind, authority_id, resource_kind, local_name),
-    UNIQUE (authority_kind, authority_id, binding_id)
-);
-
-CREATE TABLE auth_materialized_authorities (
-    materialization_id TEXT NOT NULL UNIQUE CHECK (length(materialization_id) > 0),
-    authority_kind TEXT NOT NULL CHECK (authority_kind IN ('identity', 'deployment')),
-    authority_id TEXT NOT NULL CHECK (length(authority_id) > 0),
-    authority_version INTEGER NOT NULL CHECK (authority_version BETWEEN 1 AND 9007199254740991),
-    materialization_version INTEGER NOT NULL CHECK (materialization_version BETWEEN 1 AND 9007199254740991),
-    subject_id TEXT NOT NULL CHECK (length(subject_id) > 0),
-    participant_id TEXT NOT NULL,
-    participant_kind TEXT NOT NULL CHECK (participant_kind IN ('service', 'app', 'device', 'agent')),
-    participant_artifact_digest TEXT NOT NULL,
-    participant_needs_digest TEXT NOT NULL CHECK (length(participant_needs_digest) = 43),
-    effective_grant_set_json TEXT NOT NULL CHECK (json_valid(effective_grant_set_json)),
-    effective_capabilities_json TEXT NOT NULL CHECK (json_valid(effective_capabilities_json)),
-    state TEXT NOT NULL CHECK (state IN ('available', 'unavailable', 'error')),
-    reconciled_at INTEGER CHECK (reconciled_at BETWEEN 0 AND 9007199254740991),
-    error TEXT,
-    expires_at INTEGER CHECK (expires_at BETWEEN 0 AND 9007199254740991),
-    CHECK ((state = 'available') = (error IS NULL)),
-    PRIMARY KEY (authority_kind, authority_id)
-);
-
-CREATE TABLE auth_materialized_dependencies (
-    materialization_id TEXT NOT NULL REFERENCES auth_materialized_authorities(materialization_id) ON DELETE CASCADE,
-    alias TEXT NOT NULL,
-    required INTEGER NOT NULL CHECK (required IN (0, 1)),
-    api_id TEXT NOT NULL,
-    api_digest TEXT NOT NULL,
-    provider_participant_id TEXT NOT NULL,
-    provider_deployment_id TEXT,
-    provider_instance_id TEXT,
-    state TEXT NOT NULL,
-    observed_at INTEGER NOT NULL CHECK (observed_at BETWEEN 0 AND 9007199254740991),
-    PRIMARY KEY (materialization_id, alias, required)
-);
-
-CREATE TABLE auth_materialized_resource_bindings (
-    materialization_id TEXT NOT NULL REFERENCES auth_materialized_authorities(materialization_id) ON DELETE CASCADE,
-    resource_kind TEXT NOT NULL,
-    local_name TEXT NOT NULL,
-    binding_id TEXT NOT NULL,
-    owner_participant_id TEXT NOT NULL,
-    provider_identity TEXT NOT NULL,
-    state TEXT NOT NULL,
-    materialized_at INTEGER NOT NULL CHECK (materialized_at BETWEEN 0 AND 9007199254740991),
-    error TEXT,
-    PRIMARY KEY (materialization_id, resource_kind, local_name)
-);
-
-CREATE TABLE auth_transition_outbox (
-    event_id TEXT PRIMARY KEY CHECK (length(event_id) = 43),
-    transition_json TEXT NOT NULL CHECK (json_valid(transition_json)),
-    created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991)
+    PRIMARY KEY (owner_kind, owner_id, participant_id, installed_revision, resource_kind, local_name),
+    UNIQUE (owner_kind, owner_id, participant_id, installed_revision, binding_id),
+    FOREIGN KEY (participant_id, installed_revision) REFERENCES auth_installed_participants(participant_id, revision)
 );

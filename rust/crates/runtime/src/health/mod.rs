@@ -534,7 +534,6 @@ fn transition_headers(
     let mut headers = HeaderMap::new();
     headers.insert("Nats-Msg-Id", transition.event_id.as_str());
     headers.insert(EVENT_TIME_HEADER, event_time.as_str());
-    headers.insert("session-key", auth.session_key.as_str());
     headers.insert("authorization-context", context_digest);
     headers.insert(
         "proof",

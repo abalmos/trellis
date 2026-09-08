@@ -3,16 +3,13 @@
 //! Application workflows validate command shape before dispatch. SQLite keeps
 //! checks that depend on the current transaction and its optimistic versions.
 
-use serde_json::Value;
-
 use crate::platform::auth::application::repository::LocalLoginAttempt;
 use crate::platform::auth::domain::{
-    require_positive, AuthorityKind, AuthorityState, AuthorizationStateError,
-    DesiredAuthorityRecord, PrincipalKind, PrincipalRecord, PrincipalState, MAX_PROTOCOL_INTEGER,
+    require_positive, AuthorizationStateError, PrincipalKind, PrincipalRecord, PrincipalState,
+    MAX_PROTOCOL_INTEGER,
 };
 use crate::platform::auth::model::{
-    AuthorityDecisionOutcome, AuthorityProposalRecord, LocalCredentialRecord,
-    PostCommitActionRecord, UserProfileRecord,
+    LocalCredentialRecord, PostCommitActionRecord, UserProfileRecord,
 };
 
 pub(crate) fn local_login_attempt_result(
@@ -47,80 +44,6 @@ pub(crate) fn local_login_attempt_result(
         }
     }
     Ok(next)
-}
-
-pub(crate) fn validate_proposal_desired_authority(
-    proposal: &AuthorityProposalRecord,
-    outcome: AuthorityDecisionOutcome,
-    desired: Option<&DesiredAuthorityRecord>,
-) -> Result<(), AuthorizationStateError> {
-    match (outcome, desired) {
-        (AuthorityDecisionOutcome::Rejected, None) => return Ok(()),
-        (AuthorityDecisionOutcome::Accepted, Some(desired)) => {
-            let (
-                kind,
-                authority_id,
-                participant_id,
-                artifact_digest,
-                needs_digest,
-                grants,
-                capabilities,
-                state,
-            ) = match desired {
-                DesiredAuthorityRecord::Identity(record) => (
-                    AuthorityKind::Identity,
-                    &record.authority_id,
-                    &record.participant_id,
-                    &record.participant_artifact_digest,
-                    &record.accepted_needs_digest,
-                    &record.desired_grant_set,
-                    &record.desired_capabilities,
-                    record.state,
-                ),
-                DesiredAuthorityRecord::Deployment(record) => (
-                    AuthorityKind::Deployment,
-                    &record.authority_id,
-                    &record.participant_id,
-                    &record.participant_artifact_digest,
-                    &record.accepted_needs_digest,
-                    &record.desired_grant_set,
-                    &record.desired_capabilities,
-                    record.state,
-                ),
-            };
-            if proposal.authority_kind == kind
-                && proposal.authority_id == *authority_id
-                && proposal.participant_id == *participant_id
-                && proposal.participant_artifact_digest == *artifact_digest
-                && proposal.participant_needs_digest == *needs_digest
-                && proposal.proposed_grant_set == *grants
-                && proposal.proposed_capabilities == *capabilities
-                && matches!(state, AuthorityState::Accepted | AuthorityState::Revoked)
-            {
-                return Ok(());
-            }
-        }
-        _ => {}
-    }
-    Err(AuthorizationStateError::InvalidRecord(
-        "proposal outcome and desired authority do not match exactly".to_owned(),
-    ))
-}
-
-pub(crate) fn proposal_base_authority_version(
-    proposal: &AuthorityProposalRecord,
-) -> Result<Option<u64>, AuthorizationStateError> {
-    match proposal.payload.get("baseAuthorityVersion") {
-        Some(Value::Null) => Ok(None),
-        Some(Value::Number(value)) => value.as_u64().map(Some).ok_or_else(|| {
-            AuthorizationStateError::InvalidRecord(
-                "baseAuthorityVersion must be a protocol integer or null".to_owned(),
-            )
-        }),
-        _ => Err(AuthorizationStateError::InvalidRecord(
-            "proposal payload is missing baseAuthorityVersion".to_owned(),
-        )),
-    }
 }
 
 pub(crate) fn user_account_replacement(

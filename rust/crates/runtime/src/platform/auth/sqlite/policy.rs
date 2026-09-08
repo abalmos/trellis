@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::super::{
     AuthorizationStateError, CapabilityGroupRecord, IdempotencyResultRecord, IdempotentOutcome,
-    PortalAuthorityBindingRecord, PortalGrantOverrideRecord,
+    PortalGrantBindingRecord, PortalGrantOverrideRecord, PortalGrantProvenance,
 };
 use super::common::{decode_json, encode_json, map_write_error, sql_error};
 use super::outbox::{insert_sql_idempotency_and_actions, sqlite_idempotency_replay};
@@ -358,21 +358,20 @@ impl SqliteAuthorizationStore {
         .await
     }
 
-    pub(crate) async fn list_portal_authority_bindings(
+    pub(crate) async fn list_portal_grant_bindings(
         &self,
-    ) -> Result<Vec<PortalAuthorityBindingRecord>, AuthorizationStateError> {
+    ) -> Result<Vec<PortalGrantBindingRecord>, AuthorizationStateError> {
         self.run_read(|connection| {
             let mut statement = connection
                 .prepare(
-                    "SELECT principal_id, participant_id, authority_id, portal_id,
-                            provider_id, roles_json, effective_policy_digest,
-                            authority_version, updated_at
-                     FROM auth_portal_authority_bindings
-                     ORDER BY principal_id, participant_id",
+                    "SELECT owner_id, participant_id, provenance_json, revision, updated_at
+                     FROM auth_grant_bindings
+                     WHERE owner_kind = 'user' AND provenance_json IS NOT NULL
+                     ORDER BY owner_id, participant_id",
                 )
                 .map_err(sql_error)?;
             let records = statement
-                .query_map([], decode_portal_authority_binding)
+                .query_map([], decode_portal_grant_binding)
                 .map_err(sql_error)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(sql_error)?;
@@ -464,19 +463,19 @@ pub(super) fn load_portal_grant_overrides(
     Ok(records)
 }
 
-pub(super) fn decode_portal_authority_binding(
+pub(super) fn decode_portal_grant_binding(
     row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<PortalAuthorityBindingRecord> {
-    Ok(PortalAuthorityBindingRecord {
+) -> rusqlite::Result<PortalGrantBindingRecord> {
+    let provenance: PortalGrantProvenance = decode_json(row.get(2)?)?;
+    Ok(PortalGrantBindingRecord {
         principal_id: row.get(0)?,
         participant_id: row.get(1)?,
-        authority_id: row.get(2)?,
-        portal_id: row.get(3)?,
-        provider_id: row.get(4)?,
-        roles: decode_json(row.get(5)?)?,
-        effective_policy_digest: row.get(6)?,
-        authority_version: row.get(7)?,
-        updated_at: row.get(8)?,
+        portal_id: provenance.portal_id,
+        provider_id: provenance.provider_id,
+        roles: provenance.roles,
+        effective_policy_digest: provenance.effective_policy_digest,
+        grant_revision: row.get(3)?,
+        updated_at: row.get(4)?,
     })
 }
 

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -8,15 +7,25 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use trellis_protocol::{
-    parse_api, parse_participant, resolve_participant, ApiArtifact, AuthorizationAuthorityRef,
-    AuthorizationParticipant, AuthorizationPrincipal, GrantSet, ParticipantKind, PlatformPrivilege,
-    ResolvedParticipant,
+    parse_api, parse_participant, resolve_participant, ApiArtifact, GrantSet, ParticipantKind,
+    PlatformPrivilege, ResolvedParticipant,
 };
 
 /// Largest integer exactly representable by interoperable JSON security objects.
 pub const MAX_PROTOCOL_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub use trellis_protocol::GrantOwnerKind;
+
+#[derive(Clone, Debug)]
+pub(crate) struct MutationActor {
+    pub principal_id: String,
+    pub participant_id: String,
+    pub owner_kind: GrantOwnerKind,
+    pub owner_id: String,
+    pub grant_revision: u64,
+    pub login_session_id: Option<String>,
+    pub session_public_key: String,
+}
 
 /// Lifecycle of the retained current binding, including revocation tombstones.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -31,7 +40,7 @@ pub enum GrantBindingState {
 /// Verified portal/provider policy association for automatic user grants.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct GrantProvenance {
+pub struct PortalGrantProvenance {
     /// Registered trusted portal responsible for the verified login.
     pub portal_id: String,
     /// Verified identity provider, never a participant-supplied claim.
@@ -39,7 +48,7 @@ pub struct GrantProvenance {
     /// Verified provider roles used by the explicit grant transaction.
     pub roles: Vec<String>,
     /// Exact server policy used for that transaction.
-    pub policy_digest: String,
+    pub effective_policy_digest: String,
 }
 
 /// The sole current authority for `(ownerKind, ownerId, participantId)`.
@@ -65,7 +74,26 @@ pub struct GrantBinding {
     /// Optional absolute grant expiry in Unix milliseconds.
     pub expires_at: Option<i64>,
     /// Verified automatic-policy provenance; manual consent clears it.
-    pub provenance: Option<GrantProvenance>,
+    pub provenance: Option<PortalGrantProvenance>,
+    /// Original binding creation time in Unix milliseconds.
+    pub created_at: i64,
+    /// Last semantic replacement time in Unix milliseconds.
+    pub updated_at: i64,
+}
+
+/// Exact replacement intent; SQL owns the stored revision and timestamps.
+#[derive(Clone, Debug)]
+pub(crate) struct GrantBindingReplacement {
+    pub owner_kind: GrantOwnerKind,
+    pub owner_id: String,
+    pub participant_id: String,
+    pub installed_revision: u64,
+    pub grants: GrantSet,
+    pub platform_privileges: Vec<PlatformPrivilege>,
+    pub state: GrantBindingState,
+    pub expires_at: Option<i64>,
+    pub provenance: Option<PortalGrantProvenance>,
+    pub expected_revision: u64,
 }
 
 impl GrantBinding {
@@ -75,6 +103,13 @@ impl GrantBinding {
         require_nonempty("participantId", &self.participant_id)?;
         require_positive("installedRevision", self.installed_revision)?;
         require_positive("revision", self.revision)?;
+        require_protocol_timestamp("createdAt", self.created_at)?;
+        require_protocol_timestamp("updatedAt", self.updated_at)?;
+        if self.updated_at < self.created_at {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "updatedAt precedes createdAt".to_owned(),
+            ));
+        }
         if let Some(expires_at) = self.expires_at {
             require_protocol_timestamp("expiresAt", expires_at)?;
         }
@@ -95,7 +130,7 @@ impl GrantBinding {
             }
             require_nonempty("portalId", &provenance.portal_id)?;
             require_nonempty("providerId", &provenance.provider_id)?;
-            require_digest("policyDigest", &provenance.policy_digest)?;
+            require_digest("effectivePolicyDigest", &provenance.effective_policy_digest)?;
             for role in &provenance.roles {
                 require_nonempty("role", role)?;
             }
@@ -180,34 +215,26 @@ pub enum SessionState {
     Revoked,
 }
 
-/// Input accepted when creating a session.
+/// Input accepted when creating a user installation login.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewSession {
     /// Stable session ID.
     pub session_id: String,
     /// Stable principal ID.
     pub principal_id: String,
-    /// Principal class, repeated to make mismatches fail closed.
-    pub principal_kind: PrincipalKind,
     /// Stable participant ID.
     pub participant_id: String,
     /// Participant class.
     pub participant_kind: ParticipantKind,
-    /// Exact participant artifact digest.
-    pub participant_artifact_digest: String,
-    /// Exact accepted-needs digest.
-    pub participant_needs_digest: String,
     /// Canonical unpadded base64url Ed25519 public key.
     pub session_public_key: String,
-    /// Authoritative reply inbox prefix.
-    pub inbox_prefix: String,
     /// Creation time in Unix milliseconds.
     pub created_at: i64,
     /// Optional session expiry in Unix milliseconds.
     pub expires_at: Option<i64>,
 }
 
-/// Persisted authenticated-session record.
+/// Persisted user installation login, independent of transport connections.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRecord {
@@ -215,28 +242,20 @@ pub struct SessionRecord {
     pub session_id: String,
     /// Stable principal ID.
     pub principal_id: String,
-    /// Principal class.
-    pub principal_kind: PrincipalKind,
     /// Stable participant ID.
     pub participant_id: String,
     /// Participant class.
     pub participant_kind: ParticipantKind,
-    /// Exact participant artifact digest.
-    pub participant_artifact_digest: String,
-    /// Exact accepted-needs digest.
-    pub participant_needs_digest: String,
     /// Canonical unpadded base64url Ed25519 public key.
     pub session_public_key: String,
     /// SHA-256 key ID derived from the raw public key.
     pub session_key_id: String,
-    /// Authoritative reply inbox prefix.
-    pub inbox_prefix: String,
     /// Session lifecycle state.
     pub state: SessionState,
     /// Creation time in Unix milliseconds.
     pub created_at: i64,
-    /// Last liveness observation in Unix milliseconds.
-    pub last_seen_at: i64,
+    /// Last successful interactive authentication time in Unix milliseconds.
+    pub last_authenticated_at: i64,
     /// Optional session expiry in Unix milliseconds.
     pub expires_at: Option<i64>,
     /// Revocation time when revoked.
@@ -255,20 +274,21 @@ impl SessionRecord {
     /// creation, or the public key is not canonical unpadded base64url encoding
     /// of exactly 32 bytes.
     pub fn from_new(value: NewSession) -> Result<Self, AuthorizationStateError> {
-        require_nonempty("sessionId", &value.session_id)?;
+        let session_id = value.session_id.parse::<ulid::Ulid>().map_err(|_| {
+            AuthorizationStateError::InvalidRecord("sessionId must be a ULID".to_owned())
+        })?;
+        if session_id.to_string() != value.session_id {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "sessionId must be canonical".to_owned(),
+            ));
+        }
         require_nonempty("principalId", &value.principal_id)?;
         require_nonempty("participantId", &value.participant_id)?;
-        require_digest(
-            "participantArtifactDigest",
-            &value.participant_artifact_digest,
-        )?;
-        require_digest("participantNeedsDigest", &value.participant_needs_digest)?;
-        require_nonempty("inboxPrefix", &value.inbox_prefix)?;
         require_protocol_timestamp("createdAt", value.created_at)?;
         if let Some(expires_at) = value.expires_at {
             require_protocol_timestamp("expiresAt", expires_at)?;
         }
-        validate_principal_participant(value.principal_kind, value.participant_kind)?;
+        validate_principal_participant(PrincipalKind::User, value.participant_kind)?;
         if value
             .expires_at
             .is_some_and(|expires| expires < value.created_at)
@@ -282,17 +302,13 @@ impl SessionRecord {
         Ok(Self {
             session_id: value.session_id,
             principal_id: value.principal_id,
-            principal_kind: value.principal_kind,
             participant_id: value.participant_id,
             participant_kind: value.participant_kind,
-            participant_artifact_digest: value.participant_artifact_digest,
-            participant_needs_digest: value.participant_needs_digest,
             session_public_key: value.session_public_key,
             session_key_id,
-            inbox_prefix: value.inbox_prefix,
             state: SessionState::Active,
             created_at: value.created_at,
-            last_seen_at: value.created_at,
+            last_authenticated_at: value.created_at,
             expires_at: value.expires_at,
             revoked_at: None,
             version: 1,
@@ -300,7 +316,7 @@ impl SessionRecord {
     }
 }
 
-pub(super) fn validate_ed25519_public_key(
+pub(crate) fn validate_ed25519_public_key(
     field: &str,
     value: &str,
 ) -> Result<String, AuthorizationStateError> {
@@ -482,265 +498,6 @@ pub enum ParticipantBindingState {
     Resolved,
     /// Resolution failed and the binding cannot issue authority.
     Invalid,
-}
-
-/// Desired authority lifecycle state.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthorityState {
-    /// Awaiting an authority decision.
-    Pending,
-    /// Accepted and enforceable when all runtime evidence is current.
-    Accepted,
-    /// Explicitly rejected.
-    Rejected,
-    /// Durably revoked.
-    Revoked,
-    /// Bound participant or needs evidence no longer matches.
-    Stale,
-}
-
-/// Desired authority class.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthorityKind {
-    /// Authority delegated by a user identity.
-    Identity,
-    /// Authority owned by a service or device deployment.
-    Deployment,
-}
-
-/// Typed durable identity of one desired authority and its materialization.
-#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthorityTarget {
-    /// Desired authority class.
-    pub kind: AuthorityKind,
-    /// Stable desired authority ID within that class.
-    pub authority_id: String,
-}
-
-impl AuthorityTarget {
-    /// Construct and validate one typed authority target.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`AuthorizationStateError::InvalidRecord`] for an empty or
-    /// non-canonical authority ID.
-    pub fn new(
-        kind: AuthorityKind,
-        authority_id: impl Into<String>,
-    ) -> Result<Self, AuthorizationStateError> {
-        let authority_id = authority_id.into();
-        require_nonempty("authorityId", &authority_id)?;
-        Ok(Self { kind, authority_id })
-    }
-}
-
-/// Decision metadata for desired authority.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthorityDecision {
-    /// Decision time in Unix milliseconds.
-    pub decided_at: i64,
-    /// Stable principal or operator that made the decision.
-    pub decided_by: String,
-    /// Optional safe decision reason.
-    pub reason: Option<String>,
-}
-
-/// User-owned desired authority bound to one exact participant needs object.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IdentityAuthorityRecord {
-    /// Stable authority record ID.
-    pub authority_id: String,
-    /// User principal receiving the delegated authority.
-    pub principal_id: String,
-    /// App or agent participant ID.
-    pub participant_id: String,
-    /// Exact participant artifact digest.
-    pub participant_artifact_digest: String,
-    /// Exact accepted-needs digest.
-    pub accepted_needs_digest: String,
-    /// Exact accepted machine permissions.
-    pub desired_grant_set: GrantSet,
-    /// Canonical platform capability keys.
-    pub desired_capabilities: Vec<String>,
-    /// Desired-authority lifecycle state.
-    pub state: AuthorityState,
-    /// Positive desired-authority version.
-    pub version: u64,
-    /// Creation time in Unix milliseconds.
-    pub created_at: i64,
-    /// Last permission-bearing update in Unix milliseconds.
-    pub updated_at: i64,
-    /// Optional authority expiry in Unix milliseconds.
-    pub expires_at: Option<i64>,
-    /// Current decision metadata.
-    pub decision: Option<AuthorityDecision>,
-}
-
-/// Deployment-owned desired authority bound to one service or device deployment.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeploymentAuthorityRecord {
-    /// Stable authority record ID.
-    pub authority_id: String,
-    /// Authorized deployment ID.
-    pub deployment_id: String,
-    /// Service or device participant ID.
-    pub participant_id: String,
-    /// Participant class.
-    pub participant_kind: ParticipantKind,
-    /// Exact participant artifact digest.
-    pub participant_artifact_digest: String,
-    /// Exact accepted-needs digest.
-    pub accepted_needs_digest: String,
-    /// Exact accepted machine permissions.
-    pub desired_grant_set: GrantSet,
-    /// Canonical platform capability keys.
-    pub desired_capabilities: Vec<String>,
-    /// Desired-authority lifecycle state.
-    pub state: AuthorityState,
-    /// Positive desired-authority version.
-    pub version: u64,
-    /// Creation time in Unix milliseconds.
-    pub created_at: i64,
-    /// Last permission-bearing update in Unix milliseconds.
-    pub updated_at: i64,
-    /// Optional authority expiry in Unix milliseconds.
-    pub expires_at: Option<i64>,
-    /// Current decision metadata.
-    pub decision: Option<AuthorityDecision>,
-}
-
-/// Typed desired authority without conflating identity and deployment records.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "kind", content = "record")]
-pub enum DesiredAuthorityRecord {
-    /// User-owned delegated authority.
-    Identity(IdentityAuthorityRecord),
-    /// Deployment-owned service or device authority.
-    Deployment(DeploymentAuthorityRecord),
-}
-
-impl DesiredAuthorityRecord {
-    /// Return this record's typed durable target.
-    #[must_use]
-    pub fn target(&self) -> AuthorityTarget {
-        AuthorityTarget {
-            kind: match self {
-                Self::Identity(_) => AuthorityKind::Identity,
-                Self::Deployment(_) => AuthorityKind::Deployment,
-            },
-            authority_id: self.authority_id().to_owned(),
-        }
-    }
-
-    /// Return the authority-level principal or deployment subject ID.
-    #[must_use]
-    pub fn subject_id(&self) -> &str {
-        match self {
-            Self::Identity(value) => &value.principal_id,
-            Self::Deployment(value) => &value.deployment_id,
-        }
-    }
-
-    /// Return the stable participant ID.
-    #[must_use]
-    pub fn participant_id(&self) -> &str {
-        match self {
-            Self::Identity(value) => &value.participant_id,
-            Self::Deployment(value) => &value.participant_id,
-        }
-    }
-
-    /// Return the stable desired-authority ID.
-    #[must_use]
-    pub fn authority_id(&self) -> &str {
-        match self {
-            Self::Identity(value) => &value.authority_id,
-            Self::Deployment(value) => &value.authority_id,
-        }
-    }
-
-    /// Return the positive desired-authority version.
-    #[must_use]
-    pub fn version(&self) -> u64 {
-        match self {
-            Self::Identity(value) => value.version,
-            Self::Deployment(value) => value.version,
-        }
-    }
-
-    /// Return the desired-authority state.
-    #[must_use]
-    pub fn state(&self) -> AuthorityState {
-        match self {
-            Self::Identity(value) => value.state,
-            Self::Deployment(value) => value.state,
-        }
-    }
-
-    /// Return exact accepted grants.
-    #[must_use]
-    pub fn grant_set(&self) -> &GrantSet {
-        match self {
-            Self::Identity(value) => &value.desired_grant_set,
-            Self::Deployment(value) => &value.desired_grant_set,
-        }
-    }
-
-    /// Return accepted canonical platform capabilities.
-    #[must_use]
-    pub fn capabilities(&self) -> &[String] {
-        match self {
-            Self::Identity(value) => &value.desired_capabilities,
-            Self::Deployment(value) => &value.desired_capabilities,
-        }
-    }
-
-    /// Return the exact participant artifact digest.
-    #[must_use]
-    pub fn participant_artifact_digest(&self) -> &str {
-        match self {
-            Self::Identity(value) => &value.participant_artifact_digest,
-            Self::Deployment(value) => &value.participant_artifact_digest,
-        }
-    }
-
-    /// Return the exact accepted-needs digest.
-    #[must_use]
-    pub fn accepted_needs_digest(&self) -> &str {
-        match self {
-            Self::Identity(value) => &value.accepted_needs_digest,
-            Self::Deployment(value) => &value.accepted_needs_digest,
-        }
-    }
-
-    /// Return the optional authority expiry.
-    #[must_use]
-    pub fn expires_at(&self) -> Option<i64> {
-        match self {
-            Self::Identity(value) => value.expires_at,
-            Self::Deployment(value) => value.expires_at,
-        }
-    }
-}
-
-/// Exact authority and participant identity that scopes dependency and resource evidence.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthorityEvidenceScope {
-    /// Typed desired authority target.
-    pub target: AuthorityTarget,
-    /// Stable consuming participant ID.
-    pub participant_id: String,
-    /// Exact consuming participant artifact digest.
-    pub participant_artifact_digest: String,
-    /// Exact accepted participant-needs digest.
-    pub participant_needs_digest: String,
 }
 
 /// Authority-level deployment state used during deployment materialization.
@@ -1020,133 +777,29 @@ pub struct DelegationEvidence {
     pub expires_at: Option<i64>,
 }
 
-/// Principal-specific runtime eligibility evidence.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum RuntimeEvidence {
-    /// No deployment evidence is needed for a user app or agent.
-    User,
-    /// Service deployment and instance evidence.
-    Service(ServiceEvidence),
-    /// Device deployment, instance, and delegation evidence.
-    Device(DeviceEvidence),
-}
-
-/// Effective materialization lifecycle state.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MaterializationState {
-    /// Effective authority is current and issuable.
-    Available,
-    /// Expected evidence is absent or inactive.
-    Unavailable,
-    /// Materialization failed because stored input is invalid.
-    Error,
-}
-
-/// Distinct effective-authority projection.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MaterializedAuthorityRecord {
-    /// Stable materialization record ID.
-    pub materialization_id: String,
-    /// Desired authority class.
-    pub authority_kind: AuthorityKind,
-    /// Desired authority record ID.
-    pub authority_id: String,
-    /// Desired authority version used by this projection.
-    pub authority_version: u64,
-    /// Positive effective-state generation.
-    pub materialization_version: u64,
-    /// Authority-level subject ID: principal for identity authority, deployment otherwise.
-    pub subject_id: String,
-    /// Stable participant ID.
-    pub participant_id: String,
-    /// Participant class.
-    pub participant_kind: ParticipantKind,
-    /// Exact participant artifact digest.
-    pub participant_artifact_digest: String,
-    /// Exact accepted-needs digest.
-    pub participant_needs_digest: String,
-    /// Current exact effective permissions.
-    pub effective_grant_set: GrantSet,
-    /// Current canonical platform capabilities.
-    pub effective_capabilities: Vec<String>,
-    /// Effective-state lifecycle.
-    pub state: MaterializationState,
-    /// Reconciliation time in Unix milliseconds when a write occurred.
-    pub reconciled_at: Option<i64>,
-    /// Stable safe failure category.
-    pub error: Option<String>,
-    /// Tightest authority or deployment-level expiry in Unix milliseconds.
-    pub expires_at: Option<i64>,
-}
-
-/// Meaningful authorization transition published through the Event Log boundary.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthorizationTransition {
-    /// Deterministic logical event ID.
-    pub event_id: String,
-    /// Transition class.
-    pub kind: AuthorizationTransitionKind,
-    /// Desired authority class.
-    pub authority_kind: AuthorityKind,
-    /// Stable desired authority ID.
-    pub authority_id: String,
-    /// Current desired-authority version.
-    pub authority_version: u64,
-    /// Current materialization generation.
-    pub materialization_version: u64,
-    /// Current effective-state lifecycle.
-    pub state: MaterializationState,
-    /// Safe stable denial category when unavailable.
-    pub error: Option<String>,
-    /// Transition creation time in Unix milliseconds.
-    pub created_at: i64,
-}
-
-/// Durable transition waiting for a future Event Log publisher.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthorizationTransitionOutboxRecord {
-    /// Deterministic logical event ID.
-    pub event_id: String,
-    /// Serialized transition payload.
-    pub transition: AuthorizationTransition,
-    /// Durable enqueue time in Unix milliseconds.
-    pub created_at: i64,
-}
-
-/// Materialized-authority transition class.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthorizationTransitionKind {
-    /// Effective permissions or supporting evidence changed while available.
-    MaterializedChanged,
-    /// Effective authority became unavailable and stale grants were cleared.
-    MaterializedUnavailable,
-    /// Previously unavailable authority became available again.
-    MaterializedRestored,
-}
-
-/// Complete trusted unsigned state required by later context issuance.
+/// Current, eligible authority and exact installed resource interpretation for one connection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IssuableAuthorizationState {
-    /// Stable principal projected into the protocol context shape.
-    pub principal: AuthorizationPrincipal,
-    /// Stable session ID.
-    pub session_id: String,
+    /// Stable authenticated principal.
+    pub principal_id: String,
+    /// Authenticated principal class.
+    pub principal_kind: trellis_protocol::AuthorizationPrincipalKind,
+    /// Stable logical connection ID.
+    pub connection_id: String,
+    /// User installation login; absent for native callers.
+    pub login_session_id: Option<String>,
+    /// Provisioned identity; absent for user callers.
+    pub identity_key_id: Option<String>,
     /// Canonical session public key.
     pub session_public_key: String,
     /// Content-derived session key ID.
     pub session_key_id: String,
     /// Authoritative reply inbox prefix.
     pub inbox_prefix: String,
-    /// Exact participant and needs evidence.
-    pub participant: AuthorizationParticipant,
-    /// Desired authority record and version.
-    pub authority_ref: AuthorizationAuthorityRef,
+    /// Exact immutable installed definitions, used only by the server.
+    pub participant: ParticipantBindingRecord,
+    /// Current participant-scoped grant record.
+    pub binding: GrantBinding,
     /// Deployment ID for service/device principals.
     pub deployment_id: Option<String>,
     /// Runtime instance ID when required.
@@ -1155,16 +808,37 @@ pub struct IssuableAuthorizationState {
     pub grant_set: GrantSet,
     /// Exact available physical resource bindings supporting the grant set.
     pub resource_bindings: Vec<ResourceBindingEvidence>,
-    /// Canonical platform capabilities.
-    pub capabilities: Vec<String>,
-    /// Session expiry bound in Unix milliseconds.
-    pub session_expires_at: Option<i64>,
-    /// Effective materialized authority and deployment expiry bound in Unix milliseconds.
-    pub effective_authority_expires_at: Option<i64>,
-    /// Device delegation expiry bound in Unix milliseconds.
-    pub delegation_expires_at: Option<i64>,
-    /// Effective materialization generation.
-    pub materialization_version: u64,
+    /// Tightest credential, grant, deployment, and delegation expiry in Unix milliseconds.
+    pub expires_at: Option<i64>,
+}
+
+impl IssuableAuthorizationState {
+    /// Compare the signed projection to current eligibility; issuer and signature checks are separate.
+    pub(crate) fn matches_context(
+        &self,
+        context: &trellis_protocol::UnsignedAuthorizationContext,
+        installed_revision: u64,
+    ) -> bool {
+        context.principal_id == self.principal_id
+            && context.principal_kind == self.principal_kind
+            && context.participant_id == self.participant.participant_id
+            && context.owner_kind == self.binding.owner_kind
+            && context.owner_id == self.binding.owner_id
+            && context.grant_revision == self.binding.revision
+            && installed_revision == self.binding.installed_revision
+            && context.connection_id == self.connection_id
+            && context.login_session_id == self.login_session_id
+            && context.identity_key_id == self.identity_key_id
+            && context.deployment_id == self.deployment_id
+            && context.instance_id == self.instance_id
+            && context.session_key == self.session_public_key
+            && context.inbox_prefix == self.inbox_prefix
+            && context.grants == self.grant_set
+            && context.platform_privileges == self.binding.platform_privileges
+            && self
+                .expires_at
+                .is_none_or(|expiry| context.expires_at <= expiry.div_euclid(1_000))
+    }
 }
 
 /// Authorization-state denial, conflict, and storage categories.
@@ -1173,6 +847,15 @@ pub enum AuthorizationStateError {
     /// A record violates a durable domain invariant.
     #[error("invalid authorization record: {0}")]
     InvalidRecord(String),
+    /// Current verified authority does not permit the requested action or scope.
+    #[error("not authorized")]
+    NotAuthorized,
+    /// The operation requires a different authenticated principal kind.
+    #[error("wrong principal kind")]
+    WrongPrincipalKind,
+    /// The requested public object does not exist.
+    #[error("requested object is missing")]
+    NotFound,
     /// The requested session does not exist.
     #[error("session is missing")]
     SessionMissing,
@@ -1287,17 +970,6 @@ impl AuthorizationStateError {
                 | Self::Storage(_)
         )
     }
-}
-
-pub(crate) fn canonical_capabilities(
-    values: impl IntoIterator<Item = String>,
-) -> Result<Vec<String>, AuthorizationStateError> {
-    let mut output = BTreeSet::new();
-    for value in values {
-        require_nonempty("capability", &value)?;
-        output.insert(value);
-    }
-    Ok(output.into_iter().collect())
 }
 
 pub(crate) fn require_nonempty(field: &str, value: &str) -> Result<(), AuthorizationStateError> {
