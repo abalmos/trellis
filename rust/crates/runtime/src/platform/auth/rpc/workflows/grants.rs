@@ -163,9 +163,11 @@ pub(super) async fn dispatch(
                 .apply_deployment(
                     mutation_actor(&caller),
                     request.deployment_id,
-                    binding,
-                    request.optional_capabilities.unwrap_or_default(),
-                    resources,
+                    (
+                        binding,
+                        request.optional_capabilities.unwrap_or_default(),
+                        resources,
+                    ),
                     expected,
                     idempotency,
                 )

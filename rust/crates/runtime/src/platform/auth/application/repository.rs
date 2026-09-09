@@ -614,8 +614,6 @@ pub(crate) trait SessionRepository: Send + Sync {
     async fn get_session(&self, id: &str)
         -> Result<Option<SessionRecord>, AuthorizationStateError>;
 
-    /// Load the unique session bound to one session public key.
-
     /// List all sessions in stable session-id order.
     async fn list_sessions(&self) -> Result<Vec<SessionRecord>, AuthorizationStateError>;
 }
@@ -741,8 +739,6 @@ pub(crate) trait OutboxRepository: Send + Sync {
         signer_id: &str,
         request_id: &str,
     ) -> Result<Option<IdempotencyResultRecord>, AuthorizationStateError>;
-
-    /// Atomically record or replay a completed deterministic operation.
 
     /// List dispatchable actions by next-attempt time and action ID.
     async fn list_ready_post_commit_actions(

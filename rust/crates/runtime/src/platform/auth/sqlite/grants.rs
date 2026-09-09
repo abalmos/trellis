@@ -747,12 +747,15 @@ impl SqliteAuthorizationStore {
         &self,
         actor: MutationActor,
         deployment_id: String,
-        participant: ParticipantBindingRecord,
-        optional_capabilities: Vec<String>,
-        resource_evidence: Vec<ResourceBindingEvidence>,
+        deployment_evidence: (
+            ParticipantBindingRecord,
+            Vec<String>,
+            Vec<ResourceBindingEvidence>,
+        ),
         expected_revision: u64,
         mut idempotency: IdempotencyResultRecord,
     ) -> Result<Value, AuthorizationStateError> {
+        let (participant, optional_capabilities, resource_evidence) = deployment_evidence;
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
             require_current_actor(&transaction, &actor, true, idempotency.created_at)?;

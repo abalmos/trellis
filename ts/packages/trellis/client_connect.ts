@@ -1101,6 +1101,7 @@ export async function connectClientWithDeps<
     authorizationProviderCache = await AuthorizationProviderCache.attach(
       connectedNats,
       authorizationContexts.bundle().authorizationRegistry,
+      bootstrap.connectInfo.transport.inboxPrefix,
       authorizationContexts,
     );
     authorizationProviderCache.start();

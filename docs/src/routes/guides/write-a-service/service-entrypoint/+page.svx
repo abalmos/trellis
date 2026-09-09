@@ -44,9 +44,7 @@ const service = await TrellisService.connect({
   participant: participants.acmeOrdersService.participant,
   name: "orders-service",
   trellisUrl: requiredEnv("TRELLIS_URL"),
-  identity: {
-    seed: requiredEnv("TRELLIS_IDENTITY_SEED"),
-  },
+  seed: requiredEnv("TRELLIS_IDENTITY_SEED"),
 }).orThrow();
 
 const stop = () => {

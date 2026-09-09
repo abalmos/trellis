@@ -24,7 +24,6 @@ import type { TrellisServiceRuntimeDeps } from "./runtime.ts";
 import type {
   GeneratedServiceParticipant,
   ResourceBindings,
-  TrellisServiceConnectOpts,
 } from "./service.ts";
 
 type ServiceBootstrapConnectInfo = {
@@ -128,6 +127,7 @@ async function fetchServiceBootstrapInfoOnce(args: {
   identityAuth: SessionAuth;
   sessionAuth: SessionAuth;
   connectionId: string;
+  name?: string;
 }): Promise<{
   response: Response;
   payload: unknown;
@@ -146,7 +146,7 @@ async function fetchServiceBootstrapInfoOnce(args: {
     connectionId: args.connectionId,
     requestId,
     iat: issuedAt,
-    name: args.contractId,
+    ...(args.name === undefined ? {} : { name: args.name }),
   };
   const body = JSON.stringify({
     ...unsigned,
@@ -187,12 +187,12 @@ async function fetchServiceBootstrapInfoOnce(args: {
 export async function fetchServiceBootstrapInfo(args: {
   trellisUrl: string;
   serviceName: string;
+  name?: string;
   contractId: string;
   contractDigest: string;
   contract: GeneratedServiceParticipant<RuntimeApi, RuntimeApi | undefined>;
   identityAuth: SessionAuth;
   sessionAuth: SessionAuth;
-  identity: TrellisServiceConnectOpts["identity"];
   log: LoggerLike;
   connectionId?: string;
 }): Promise<ServiceBootstrapResponse> {

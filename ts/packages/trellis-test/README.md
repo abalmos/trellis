@@ -30,9 +30,7 @@ const service = await TrellisService.connect({
   trellisUrl: runtime.trellisUrl,
   participant: participants.provider.participant,
   name: "provider",
-  identity,
-  authorizationContextEphemeral: true,
-  telemetry: false,
+  seed: identity.seed,
 }).orThrow();
 const client = await runtime.connectClient({
   name: "caller",

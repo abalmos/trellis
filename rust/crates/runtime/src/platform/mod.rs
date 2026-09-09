@@ -33,7 +33,7 @@ use crate::{ResolvedRuntimeNatsConfig, RuntimeConfig, SubsystemName};
 use auth::rpc::{AuthRpcProcessor, AuthRpcRuntime};
 use auth_callout::{AuthCallout, CalloutKeys};
 use auth_operation::AuthOperationRuntime;
-use auth_post_commit::AuthPostCommitRuntime;
+use auth_post_commit::{AuthEventPublisher, AuthPostCommitRuntime};
 
 pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, RuntimeError> {
     let _owner = context.owner(crate::ownership::OwnerGroup::Platform)?;
@@ -236,10 +236,12 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         ephemeral.clone(),
         post_commit_nats,
         post_commit_system_nats,
-        auth_event_session,
-        event_identity_key_id,
-        event_connection_id,
-        event_context_digest,
+        AuthEventPublisher::new(
+            auth_event_session,
+            event_identity_key_id,
+            event_connection_id,
+            event_context_digest,
+        ),
         authorization_contexts.clone(),
     );
     ensure_first_admin(

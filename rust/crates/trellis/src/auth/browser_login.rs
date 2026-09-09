@@ -297,12 +297,12 @@ impl AgentLoginChallenge {
         } = self;
         let flow_id = poll_agent_flow_until_ready(
             trellis_url,
-            &flow_id,
+            flow_id,
             DETACHED_LOGIN_POLL_INTERVAL,
             Duration::from_secs(300),
         )
         .await?;
-        let bound = bind_session(trellis_url, &flow_id, &auth).await?;
+        let bound = bind_session(trellis_url, &flow_id, auth).await?;
         let expires_at = bound.expires_at;
         let state = AdminSessionState {
             login_session_id: bound.login_session_id,

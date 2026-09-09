@@ -43,16 +43,10 @@ Example payload for an application-declared health RPC:
 ```ts
 const service = await TrellisService.connect({
   trellisUrl: config.trellisUrl,
-  contract: graph,
+  participant: participants.graph.participant,
+  seed: config.seed,
   name: "graph",
-  sessionKeySeed: config.sessionKeySeed,
-  runtime: {
-    log,
-    healthChecks: {
-      db: () => db.ping(),
-    },
-  },
-});
+}).orThrow();
 
 service.health.setInfo({
   version: build.version,

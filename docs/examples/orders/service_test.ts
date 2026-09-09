@@ -24,7 +24,6 @@ Deno.test("orders caller invokes the real service", async () => {
       name: "orders-service",
       trellisUrl: runtime.trellisUrl,
       seed: identity.seed,
-      telemetry: false,
     }).orThrow();
     let exit: Promise<unknown> | undefined;
     try {

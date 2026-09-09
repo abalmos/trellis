@@ -730,6 +730,7 @@ export async function connectDeviceWithDeps<
     authorizationProviderCache = await AuthorizationProviderCache.attach(
       connectedNats,
       authorizationContexts.bundle().authorizationRegistry,
+      connectInfo.transport.inboxPrefix,
       authorizationContexts,
     );
     authorizationProviderCache.start();

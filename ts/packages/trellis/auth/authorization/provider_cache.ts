@@ -150,6 +150,7 @@ export class AuthorizationProviderCache {
   static async attach(
     nats: NatsConnection,
     binding: AuthorizationRegistryBinding,
+    inboxPrefix: string,
     cache: AuthorizationContextCache,
     options: AuthorizationProviderCacheOptions = {},
   ): Promise<AuthorizationProviderCache> {
@@ -160,7 +161,11 @@ export class AuthorizationProviderCache {
       throw new Error("authorization registry binding does not match");
     }
     return new AuthorizationProviderCache(
-      await AuthorizationRegistryReader.open(nats, binding),
+      await AuthorizationRegistryReader.open(
+        nats,
+        binding,
+        inboxPrefix,
+      ),
       cache,
       options,
     );
@@ -463,24 +468,22 @@ export class AuthorizationProviderCache {
         watch: watch.iterator,
         closeWatch: watch.close,
       };
-      entry.covered = true;
       watchOwned = true;
-      void this.#watchRevocation(entry, watch.iterator);
-      const revocation = await this.#registryIo(
-        "authorization revocation registry is unavailable",
-        () => this.#registry.getRevocation(contextDigest),
-      );
-      if (revocation) {
-        this.#revocationRevision = Math.max(
-          this.#revocationRevision,
-          revocation.revision,
+      while (true) {
+        const result = await this.#registryIo(
+          "authorization revocation watch is unavailable",
+          () => watch.iterator.next(),
         );
-        this.#lastUpdateAt = this.#now();
-        entry.revokedAt = Math.max(
-          entry.revokedAt ?? 0,
-          parseRevocation(revocation.value),
-        );
+        if (result.done) {
+          throw new AuthorizationProviderUnavailableError(
+            "authorization revocation watch ended during initialization",
+          );
+        }
+        if (result.value.operation === "initialized") break;
+        this.#applyRevocation(entry, result.value);
       }
+      entry.covered = true;
+      void this.#watchRevocation(entry, watch.iterator);
       const verified = await this.#verified(entry, historical);
       if (verified.verified.contextDigest !== contextDigest) {
         throw new Error(
@@ -513,6 +516,7 @@ export class AuthorizationProviderCache {
       while (entry.covered && !entry.disposed) {
         const result = await iterator.next();
         if (result.done) return;
+        if (result.value.operation === "initialized") continue;
         this.#applyRevocation(entry, result.value);
       }
     } catch {
@@ -529,7 +533,7 @@ export class AuthorizationProviderCache {
 
   #applyRevocation(
     entry: ProviderContextEntry,
-    event: RegistryWatchEntry,
+    event: Exclude<RegistryWatchEntry, { operation: "initialized" }>,
   ): void {
     this.#revocationRevision = Math.max(
       this.#revocationRevision,

@@ -84,8 +84,8 @@ const participant = participants.acmeService.participant;
 const service = await TrellisService.connect({
   trellisUrl: config.trellisUrl,
   participant,
-  name: "<name>",
-  identity: config.identity,
+  seed: config.seed,
+  name: "<optional-display-name>",
 }).orThrow();
 
 // Names come from this example's declared RPC and event.

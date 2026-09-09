@@ -3,6 +3,7 @@ import { jetstreamManager } from "@nats-io/jetstream";
 import { connect } from "@nats-io/transport-node";
 import { assertEquals } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
+import { participants as webParticipants } from "trellis-web-generated";
 
 import { participants } from "../../integration/fixtures/runtime/packages/runtime-trellis/index.js";
 
@@ -100,6 +101,95 @@ Deno.test("Rust durable events match registrations and retain unhandled messages
             consumer.config.filter_subjects?.includes("events.v1.Alpha")
           );
         assertEquals(consumers.length, 1);
+        const admin = await runtime.connectClient({
+          name: "events-admin",
+          contract: webParticipants.appConsole.participant,
+        });
+        const existingSessions = new Set(
+          (await admin.authSessionsList({
+            participantId: participants.testAlpha.participant.id,
+            state: "active",
+          }).orThrow()).entries.map((entry) => entry.sessionId),
+        );
+        const revokedAlpha = await runtime.connectClient({
+          name: "cold-revoked-alpha",
+          contract: participants.testAlpha.participant,
+        });
+        const revokedSession = (await admin.authSessionsList({
+          participantId: participants.testAlpha.participant.id,
+          state: "active",
+        }).orThrow()).entries.find((entry) =>
+          !existingSessions.has(entry.sessionId)
+        );
+        if (!revokedSession) throw new Error("revoked alpha session missing");
+        await manager.consumers.pause(
+          eventStream.config.name,
+          consumers[0].name,
+          new Date(Date.now() + 60_000),
+        );
+        await revokedAlpha.publishAlpha({
+          site: "revoked",
+          value: "cold-revoked",
+        }).orThrow();
+        const revokedEvent = await manager.streams.getMessage(
+          eventStream.config.name,
+          { last_by_subj: "events.v1.Alpha" },
+        );
+        const revokedDigest = revokedEvent?.header?.get("authorization-context");
+        if (!revokedEvent || !revokedDigest) {
+          throw new Error("cold revoked Rust event context missing");
+        }
+        await admin.authSessionsRevoke({
+          sessionId: revokedSession.sessionId,
+          expectedVersion: revokedSession.version,
+          idempotencyKey: crypto.randomUUID(),
+          reason: "cold Rust provider acceptance",
+        }).orThrow();
+        let contextStream: string | undefined;
+        let contextSubjectPrefix: string | undefined;
+        for (const stream of streams) {
+          for (const subject of stream.config.subjects ?? []) {
+            if (!subject.startsWith("$KV.") || !subject.endsWith(">")) continue;
+            const prefix = subject.slice(0, -1);
+            try {
+              const stored = await manager.streams.getMessage(
+                stream.config.name,
+                { last_by_subj: `${prefix}${revokedDigest}` },
+              );
+              if (!stored) continue;
+              contextStream = stream.config.name;
+              contextSubjectPrefix = prefix;
+              break;
+            } catch {
+              // This KV stream does not own authorization contexts.
+            }
+          }
+          if (contextStream) break;
+        }
+        if (!contextStream || !contextSubjectPrefix) {
+          throw new Error("authorization context stream missing");
+        }
+        await runtime.waitFor(async () =>
+          Boolean(
+            await manager.streams.getMessage(contextStream, {
+              last_by_subj: `${contextSubjectPrefix}revocation.${revokedDigest}`,
+            }),
+          )
+        );
+        await manager.consumers.resume(
+          eventStream.config.name,
+          consumers[0].name,
+        );
+        await runtime.waitFor(async () =>
+          (await manager.consumers.info(
+            eventStream.config.name,
+            consumers[0].name,
+          )).ack_floor.stream_seq >= revokedEvent.seq
+        );
+        assertEquals(
+          (await alpha.observed({}).orThrow()).values.includes("cold-revoked"),
+          false,
+        );
         await alpha.dropAlpha({}).orThrow();
         await alpha.publishAlpha({ site: "one", value: "unhandled" }).orThrow();
         await beta.publishBeta({ site: "three", value: "beta-after-drop" })

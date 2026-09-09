@@ -28,6 +28,7 @@ constructor does not impose that route-specific rule.
 `POST /bootstrap/service` accepts exactly:
 
 - `identityKeyId`;
+- optional `name`;
 - `sessionKey`;
 - `connectionId`;
 - `requestId`;

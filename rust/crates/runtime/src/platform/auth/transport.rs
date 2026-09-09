@@ -56,22 +56,13 @@ pub(crate) fn compile_transport_permissions(
     }
 
     let mut publish = BTreeSet::new();
-    let mut subscribe = BTreeSet::from([format!("{}.>", context.inbox_prefix)]);
-
-    // Contexts and exact revocation watches are public protocol evidence, not
-    // participant resources. Issuer keys are resolved over the configured HTTPS origin.
-    publish.insert("$JS.API.INFO".to_owned());
-    let context_stream = format!("KV_{}", registry.context_bucket);
-    publish.insert(format!("$JS.FC.{context_stream}.>"));
-    publish.insert(format!(
-        "$JS.API.DIRECT.GET.{context_stream}.$KV.{}.*",
-        registry.context_bucket
-    ));
-    publish.insert(format!(
-        "$JS.API.DIRECT.GET.{context_stream}.$KV.{}.revocation.*",
-        registry.context_bucket
-    ));
-    subscribe.insert(format!("$KV.{}.revocation.*", registry.context_bucket));
+    let mut subscribe = BTreeSet::new();
+    compile_authorization_registry_transport(
+        &context.inbox_prefix,
+        &registry.context_bucket,
+        &mut publish,
+        &mut subscribe,
+    );
     if matches!(
         context.principal_kind,
         AuthorizationPrincipalKind::Service | AuthorizationPrincipalKind::Device
@@ -170,6 +161,27 @@ pub(crate) fn compile_transport_permissions(
         publish: publish.into_iter().collect(),
         subscribe: subscribe.into_iter().collect(),
     })
+}
+
+fn compile_authorization_registry_transport(
+    inbox_prefix: &str,
+    context_bucket: &str,
+    publish: &mut BTreeSet<String>,
+    subscribe: &mut BTreeSet<String>,
+) {
+    // Contexts and exact revocation watches are public protocol evidence, not
+    // participant resources. Issuer keys are resolved over the configured HTTPS origin.
+    let context_stream = format!("KV_{context_bucket}");
+    publish.insert("$JS.API.INFO".to_owned());
+    publish.insert(format!("$JS.FC.{context_stream}.>"));
+    publish.insert(format!(
+        "$JS.API.DIRECT.GET.{context_stream}.$KV.{context_bucket}.*"
+    ));
+    publish.insert(format!(
+        "$JS.API.CONSUMER.CREATE.{context_stream}.*.$KV.{context_bucket}.revocation.*"
+    ));
+    publish.insert(format!("$JS.API.CONSUMER.INFO.{context_stream}.*"));
+    subscribe.insert(format!("{inbox_prefix}.>"));
 }
 
 fn compile_api_surface(
@@ -416,12 +428,37 @@ fn invalid_error(message: impl Into<String>) -> AuthorizationStateError {
 
 #[cfg(test)]
 mod tests {
-    use super::compile_resource;
+    use super::{compile_authorization_registry_transport, compile_resource};
     use crate::platform::auth::{
         ResourceBindingEvidence, ResourceBindingState, ResourceProviderIdentity,
     };
     use std::collections::BTreeSet;
     use trellis_protocol::PermissionAction;
+
+    #[test]
+    fn authorization_registry_transport_is_exact() {
+        let mut publish = BTreeSet::new();
+        let mut subscribe = BTreeSet::new();
+
+        compile_authorization_registry_transport(
+            "_INBOX.session",
+            "contexts",
+            &mut publish,
+            &mut subscribe,
+        );
+
+        assert_eq!(
+            publish,
+            BTreeSet::from([
+                "$JS.API.CONSUMER.CREATE.KV_contexts.*.$KV.contexts.revocation.*".to_owned(),
+                "$JS.API.CONSUMER.INFO.KV_contexts.*".to_owned(),
+                "$JS.API.DIRECT.GET.KV_contexts.$KV.contexts.*".to_owned(),
+                "$JS.API.INFO".to_owned(),
+                "$JS.FC.KV_contexts.>".to_owned(),
+            ])
+        );
+        assert_eq!(subscribe, BTreeSet::from(["_INBOX.session.>".to_owned()]));
+    }
 
     #[test]
     fn job_process_update_subscription_is_resource_exact() {

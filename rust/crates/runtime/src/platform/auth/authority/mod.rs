@@ -30,7 +30,7 @@ pub(crate) struct IssuanceConnection {
 pub(crate) enum IssuanceCredentialRecord {
     Login(SessionRecord),
     Native {
-        identity: super::ProvisionedIdentityRecord,
+        identity: Box<super::ProvisionedIdentityRecord>,
         instance: RuntimeInstanceRecord,
         deployment: DeploymentRecord,
         device: Option<DeviceRecord>,

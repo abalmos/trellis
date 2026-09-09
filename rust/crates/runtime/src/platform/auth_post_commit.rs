@@ -29,11 +29,27 @@ pub(crate) struct AuthPostCommitRuntime {
     contexts: AuthorizationContextService,
 }
 
-struct AuthEventPublisher {
+pub(crate) struct AuthEventPublisher {
     session: SessionAuth,
     identity_key_id: String,
     connection_id: String,
     context_digest: String,
+}
+
+impl AuthEventPublisher {
+    pub(crate) fn new(
+        session: SessionAuth,
+        identity_key_id: String,
+        connection_id: String,
+        context_digest: String,
+    ) -> Self {
+        Self {
+            session,
+            identity_key_id,
+            connection_id,
+            context_digest,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -52,10 +68,7 @@ impl AuthPostCommitRuntime {
         ephemeral: NatsAuthEphemeralRepository,
         auth_client: async_nats::Client,
         system_client: async_nats::Client,
-        event_session: SessionAuth,
-        event_identity_key_id: String,
-        event_connection_id: String,
-        event_context_digest: String,
+        event_publisher: AuthEventPublisher,
         contexts: AuthorizationContextService,
     ) -> Self {
         Self {
@@ -63,12 +76,7 @@ impl AuthPostCommitRuntime {
             ephemeral,
             auth_client,
             system_client,
-            event_publisher: tokio::sync::Mutex::new(AuthEventPublisher {
-                session: event_session,
-                identity_key_id: event_identity_key_id,
-                connection_id: event_connection_id,
-                context_digest: event_context_digest,
-            }),
+            event_publisher: tokio::sync::Mutex::new(event_publisher),
             contexts,
         }
     }

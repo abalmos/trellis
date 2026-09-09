@@ -1835,19 +1835,19 @@ mod tests {
             policy: &policy,
             required_permissions: &permissions,
         };
-        verify_authorization_request(request.clone()).unwrap();
+        verify_authorization_request(request).unwrap();
         for changed in [
             AuthorizationRequestVerificationInput {
                 reply_subject: Some("_INBOX.other.reply"),
-                ..request.clone()
+                ..request
             },
             AuthorizationRequestVerificationInput {
                 raw_payload: b"tampered",
-                ..request.clone()
+                ..request
             },
             AuthorizationRequestVerificationInput {
                 subject: "rpc.v1.Other.Get",
-                ..request.clone()
+                ..request
             },
         ] {
             assert!(verify_authorization_request(changed).is_err());
@@ -1915,7 +1915,7 @@ mod tests {
             required_permissions: &permissions,
             revoked_at: None,
         };
-        verify_authorization_event(event.clone()).unwrap();
+        verify_authorization_event(event).unwrap();
         assert!(
             verify_authorization_event(AuthorizationEventVerificationInput {
                 revoked_at: Some(1_350),

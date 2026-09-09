@@ -11,7 +11,6 @@ function requiredEnv(name: string): string {
 
 const service = await TrellisService.connect({
   participant: participants.acmeOrdersService.participant,
-  name: "orders-service",
   trellisUrl: requiredEnv("TRELLIS_URL"),
   seed: requiredEnv("TRELLIS_IDENTITY_SEED"),
 }).orThrow();

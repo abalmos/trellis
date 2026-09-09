@@ -295,8 +295,11 @@ where
                 .await?
                 .ok_or(AuthorizationStateError::ParticipantMissing)?;
             let consent = browser_consent_proposal(&participant)?;
+            let Some(policy) = batch.policy.as_ref() else {
+                unreachable!("portal policy was checked above")
+            };
             let selection = resolve_portal_authority_selection(
-                batch.policy.as_ref().expect("checked above"),
+                policy,
                 &batch.groups,
                 &consent,
                 &ProviderLoginAttributes {

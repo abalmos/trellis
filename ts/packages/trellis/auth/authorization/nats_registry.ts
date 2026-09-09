@@ -1,5 +1,12 @@
-import { type DirectStreamAPI, jetstreamManager } from "@nats-io/jetstream";
-import type { NatsConnection } from "@nats-io/nats-core";
+import {
+  AckPolicy,
+  DeliverPolicy,
+  type DirectStreamAPI,
+  jetstream,
+  type JetStreamClient,
+  jetstreamManager,
+} from "@nats-io/jetstream";
+import { createInbox, type NatsConnection } from "@nats-io/nats-core";
 
 import type { AuthorizationRegistryBinding } from "./types.ts";
 
@@ -8,8 +15,6 @@ const REVOCATION_PREFIX = "revocation.";
 /** Registry I/O counters observed since provider-cache start. */
 export type AuthorizationRegistryIoCounters = {
   contextGets: number;
-  revocationGets: number;
-  revocationWatchInitializations: number;
   watchStarts: number;
 };
 
@@ -22,39 +27,47 @@ export type RegistryEntry = {
 /** One exact revocation-key update observed after subscription flush. */
 export type RegistryWatchEntry =
   | { operation: "put"; key: string; value: Uint8Array; revision: number }
-  | { operation: "delete"; key: string; revision: number };
+  | { operation: "delete"; key: string; revision: number }
+  | { operation: "initialized" };
 
 /** Connected NATS KV reader for authorization evidence. */
 export class AuthorizationRegistryReader {
   readonly #nats: NatsConnection;
+  readonly #jetstream: JetStreamClient;
   readonly #direct: DirectStreamAPI;
   readonly #binding: AuthorizationRegistryBinding;
+  readonly #inboxPrefix: string;
   #contextGets = 0;
-  #revocationGets = 0;
-  #revocationWatchInitializations = 0;
   #watchStarts = 0;
 
   private constructor(
     nats: NatsConnection,
+    jetstreamClient: JetStreamClient,
     direct: DirectStreamAPI,
     binding: AuthorizationRegistryBinding,
+    inboxPrefix: string,
   ) {
     this.#nats = nats;
+    this.#jetstream = jetstreamClient;
     this.#direct = direct;
     this.#binding = binding;
+    this.#inboxPrefix = inboxPrefix;
   }
 
   /** Open the exact registry buckets from bootstrap-owned internal metadata. */
   static async open(
     nats: NatsConnection,
     binding: AuthorizationRegistryBinding,
+    inboxPrefix: string,
   ): Promise<AuthorizationRegistryReader> {
     validateBinding(binding);
     const manager = await jetstreamManager(nats);
     return new AuthorizationRegistryReader(
       nats,
+      jetstream(nats),
       manager.direct,
       binding,
+      inboxPrefix,
     );
   }
 
@@ -62,8 +75,6 @@ export class AuthorizationRegistryReader {
   ioCounters(): AuthorizationRegistryIoCounters {
     return {
       contextGets: this.#contextGets,
-      revocationGets: this.#revocationGets,
-      revocationWatchInitializations: this.#revocationWatchInitializations,
       watchStarts: this.#watchStarts,
     };
   }
@@ -78,16 +89,6 @@ export class AuthorizationRegistryReader {
     );
   }
 
-  /** Read one revocation marker by its exact context digest key. */
-  async getRevocation(digest: string): Promise<RegistryEntry | null> {
-    assertRegistryKey(digest, "authorization context digest");
-    this.#revocationGets += 1;
-    return await this.#putOrNull(
-      this.#binding.contextBucket,
-      `${REVOCATION_PREFIX}${digest}`,
-    );
-  }
-
   /** Subscribe only to the active context's revocation key. */
   async watchRevocation(contextDigest: string): Promise<{
     iterator: AsyncIterator<RegistryWatchEntry>;
@@ -95,47 +96,107 @@ export class AuthorizationRegistryReader {
   }> {
     assertRegistryKey(contextDigest, "authorization context digest");
     this.#watchStarts += 1;
-    this.#revocationWatchInitializations += 1;
     const key = `${REVOCATION_PREFIX}${contextDigest}`;
-    const subscription = this.#nats.subscribe(
-      `$KV.${this.#binding.contextBucket}.${key}`,
+    const stream = `KV_${this.#binding.contextBucket}`;
+    const filterSubject = `$KV.${this.#binding.contextBucket}.${key}`;
+    const deliverSubject = createInbox(this.#inboxPrefix);
+    const name = `TrellisAuth${deliverSubject.split(".").at(-1) ?? ""}`;
+    const manager = await this.#jetstream.jetstreamManager();
+    await manager.consumers.add(stream, {
+      ack_policy: AckPolicy.None,
+      deliver_policy: DeliverPolicy.LastPerSubject,
+      deliver_subject: deliverSubject,
+      filter_subject: filterSubject,
+      flow_control: true,
+      idle_heartbeat: 5_000_000_000,
+      inactive_threshold: 10_000_000_000,
+      mem_storage: true,
+      name,
+      num_replicas: 1,
+    });
+    const consumer = await this.#jetstream.consumers.getPushConsumer(
+      stream,
+      name,
     );
-    try {
-      await this.#nats.flush();
-    } catch (error) {
-      subscription.unsubscribe();
-      throw error;
-    }
-    const reader = this;
-    const entries = (async function* (): AsyncGenerator<RegistryWatchEntry> {
-      try {
-        for await (const message of subscription) {
-          const operation = message.headers?.get("KV-Operation") || "PUT";
-          if (operation !== "PUT") {
-            yield { operation: "delete", key, revision: 0 };
-            continue;
-          }
-          reader.#revocationGets += 1;
-          const entry = await reader.#putOrNull(
-            reader.#binding.contextBucket,
-            key,
+    const messages = await consumer.consume();
+    await this.#nats.flush();
+    const info = await consumer.info();
+    const initialBoundary = info.delivered.consumer_seq + info.num_pending;
+    const status = messages.status();
+    let statusError: Error | undefined;
+    const statusTask = (async () => {
+      for await (const event of status) {
+        if (
+          event.type === "heartbeats_missed" ||
+          event.type === "consumer_deleted" ||
+          event.type === "stream_not_found" ||
+          event.type === "consumer_not_found" ||
+          event.type === "no_responders" ||
+          event.type === "reset" ||
+          event.type === "ordered_consumer_recreated"
+        ) {
+          statusError = new Error(
+            `authorization revocation watch lost coverage: ${event.type}`,
           );
-          if (entry) {
+          messages.stop();
+          return;
+        }
+      }
+    })();
+    const entries = (async function* (): AsyncGenerator<RegistryWatchEntry> {
+      let delivered = 0;
+      let initialized = false;
+      let lastStreamRevision = 0;
+      const subject = filterSubject;
+      try {
+        if (initialBoundary === 0) {
+          initialized = true;
+          yield { operation: "initialized" };
+        }
+        for await (const message of messages) {
+          const current = message.info.deliverySequence;
+          const streamRevision = message.info.streamSequence;
+          if (
+            message.subject !== subject || current !== delivered + 1 ||
+            streamRevision <= lastStreamRevision
+          ) {
+            throw new Error("authorization revocation watch sequence gap");
+          }
+          delivered = current;
+          lastStreamRevision = streamRevision;
+          const operation = message.headers?.has("KV-Operation")
+            ? message.headers.get("KV-Operation")
+            : "PUT";
+          if (operation === "DEL" || operation === "PURGE") {
+            yield {
+              operation: "delete",
+              key,
+              revision: streamRevision,
+            };
+          } else if (operation === "PUT") {
             yield {
               operation: "put",
               key,
-              value: entry.value,
-              revision: entry.revision,
+              value: message.data,
+              revision: streamRevision,
             };
+          } else {
+            throw new Error("authorization revocation operation is invalid");
+          }
+          if (!initialized && delivered >= initialBoundary) {
+            initialized = true;
+            yield { operation: "initialized" };
           }
         }
+        throw statusError ?? new Error("authorization revocation watch ended");
       } finally {
-        subscription.unsubscribe();
+        await messages.close();
+        await statusTask;
       }
     })();
     return {
       iterator: entries,
-      close: () => subscription.unsubscribe(),
+      close: () => messages.stop(),
     };
   }
 

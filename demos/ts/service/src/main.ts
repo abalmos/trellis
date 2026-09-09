@@ -18,7 +18,7 @@ async function main(): Promise<void> {
     trellisUrl,
     participant: participants.demoService.participant,
     name: "field-ops-demo-service",
-    identity: { seed },
+    seed,
   }).orThrow();
   const deps: FieldOpsDeps = {
     transferIssuer: service,

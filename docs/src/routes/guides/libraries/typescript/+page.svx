@@ -30,8 +30,8 @@ configuration and never edits the consumer's manifest. Commit output when clones
 should build without regeneration or the Trellis API cache.
 
 Use `@qlever-llc/trellis/service/deno` or `/service/node` for service bootstrap.
-Pass `participant` and the immutable provisioned `identity` to
-`TrellisService.connect(...)`, plus a durable authorization-context store. Use
+Pass `participant` and the immutable provisioned identity `seed` to
+`TrellisService.connect(...)`. Use
 the connected service's generated handlers and `kv`, `store`, and `jobs` handles.
 The browser-safe root does not expose native filesystem helpers.
 

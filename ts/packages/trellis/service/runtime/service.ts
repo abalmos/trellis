@@ -96,9 +96,9 @@ import {
   annotateHandlerBoundaryError,
   createTrellisInternal,
 } from "../../session.ts";
-import type { NatsConnectOpts, TrellisServiceRuntimeDeps } from "./runtime.ts";
+import type { TrellisServiceRuntimeDeps } from "./runtime.ts";
 import { ServiceTransfer } from "./transfer.ts";
-import { logger as noopLogger, type LoggerLike } from "../../globals.ts";
+import type { LoggerLike } from "../../globals.ts";
 import {
   createProviderRuntime,
   PROVIDER_CALLER,
@@ -188,11 +188,6 @@ import {
   fetchServiceBootstrapInfo,
   loadDefaultServiceRuntimeDeps,
 } from "./bootstrap.ts";
-
-type ExtraNatsConnectOpts = Omit<
-  NatsConnectOpts,
-  "servers" | "token" | "inboxPrefix" | "authenticator"
->;
 
 type ResourceBindingJobsQueue = {
   queueType: string;
@@ -311,35 +306,9 @@ type TrellisServiceRuntimeCreateOpts<
   TOwnedApi extends RuntimeApi,
   TTrellisApi extends RuntimeApi | undefined = TOwnedApi,
 > = {
-  log?: LoggerLike | false;
-  timeout?: number;
-  stream?: string;
-  noResponderRetry?: { maxAttempts?: number; baseDelayMs?: number };
   api: TOwnedApi;
   trellisApi?: TTrellisApi;
-  version?: string;
-  health?: TrellisServiceHealthOpts;
 };
-
-export type TrellisServiceHealthOpts = {
-  publishIntervalMs?: number;
-};
-
-export type TrellisServiceRuntimeOpts = {
-  log?: LoggerLike | false;
-  timeout?: number;
-  stream?: string;
-  noResponderRetry?: { maxAttempts?: number; baseDelayMs?: number };
-  health?: TrellisServiceHealthOpts;
-};
-
-function resolveServiceLogger(log?: LoggerLike | false): LoggerLike {
-  if (log === false) {
-    return noopLogger;
-  }
-
-  return log ?? serviceRuntimeLogger;
-}
 
 function surfaceGroupName(key: string): string {
   return lowerCamelIdent(key.split(".")[0] ?? key);
@@ -393,12 +362,6 @@ const storeHandleConstructorToken: unique symbol = Symbol(
 const trellisServiceConstructorToken: unique symbol = Symbol(
   "TrellisService.constructorToken",
 );
-
-function automaticTelemetryEnabled(
-  telemetry: TrellisServiceConnectTelemetryOpts | undefined,
-): boolean {
-  return telemetry !== false && telemetry?.enabled !== false;
-}
 
 export abstract class StoreHandle {
   abstract readonly binding: ResourceBindingStore;
@@ -495,61 +458,15 @@ async function openServiceKvBindings<TKv extends ParticipantKvMetadata>(args: {
   return Object.fromEntries(entries) as ServiceKvFacade<TKv>;
 }
 
-type TrellisServiceRuntimeConnectOpts<
-  TOwnedApi extends RuntimeApi = RuntimeApi,
-  TTrellisApi extends RuntimeApi = TOwnedApi,
-> = {
-  /**
-   * Session key seed (base64url Ed25519 private key seed) used to derive the service session key.
-   * If you already have a `TrellisAuth` object, pass it via `auth` instead.
-   */
-  sessionKeySeed?: string;
-
-  /**
-   * Pre-created session-key auth (typically from `@qlever-llc/trellis/auth.createAuth`).
-   * If omitted, `sessionKeySeed` is required.
-   */
-  auth?: SessionAuth;
-
-  nats: {
-    servers: string | string[];
-
-    /** Custom NATS authenticator for this internal runtime connection. */
-    authenticator: NatsConnectOpts["authenticator"];
-
-    /**
-     * Additional NATS connection options (reconnect, timeouts, etc).
-     * `servers`, `token`, `inboxPrefix`, and `authenticator` are controlled by this helper.
-     */
-    options?: ExtraNatsConnectOpts;
-  };
-
-  runtime: TrellisServiceRuntimeCreateOpts<TOwnedApi, TTrellisApi>;
-};
-
 export type TrellisServiceConnectOpts<
   TOwnedApi extends RuntimeApi = RuntimeApi,
   TTrellisApi extends RuntimeApi | undefined = TOwnedApi,
 > = {
   trellisUrl: string;
   participant: GeneratedServiceParticipant<TOwnedApi, TTrellisApi>;
-  name: string;
+  name?: string;
   /** Immutable provisioned service identity. */
-  identity: {
-    seed: string;
-  };
-  /**
-   * Controls automatic telemetry initialization for this service connection.
-   * Enabled by default; pass `false` or `{ enabled: false }` to disable it.
-   */
-  telemetry?: TrellisServiceConnectTelemetryOpts;
-  runtime?: TrellisServiceRuntimeOpts;
-};
-
-/** Controls automatic telemetry initialization for `TrellisService.connect()`. */
-export type TrellisServiceConnectTelemetryOpts = false | {
-  /** Whether automatic telemetry initialization is enabled. Defaults to `true`. */
-  enabled?: boolean;
+  seed: string;
 };
 
 type ServiceKvFacade<TKv extends ParticipantKvMetadata> = {
@@ -1242,17 +1159,9 @@ export type TrellisServiceConnectArgs<
 > = {
   trellisUrl: string;
   participant: TContract;
-  name: string;
+  name?: string;
   /** Immutable provisioned service identity. */
-  identity: {
-    seed: string;
-  };
-  /**
-   * Controls automatic telemetry initialization for this service connection.
-   * Enabled by default; pass `false` or `{ enabled: false }` to disable it.
-   */
-  telemetry?: TrellisServiceConnectTelemetryOpts;
-  runtime?: TrellisServiceRuntimeOpts;
+  seed: string;
 };
 
 /** Connected provider runtime inferred from a service contract. */
@@ -1272,22 +1181,6 @@ export type ConnectedTrellisService<
     ParticipantKvOf<TContract>
   >
 >;
-
-export type TrellisServiceInternalConnectArgs<
-  TOwnedApi extends RuntimeApi = RuntimeApi,
-  TTrellisApi extends RuntimeApi = TOwnedApi,
-  TKv extends ParticipantKvMetadata = {},
-> = TrellisServiceRuntimeConnectOpts<TOwnedApi, TTrellisApi> & {
-  identity?: TrellisServiceConnectOpts["identity"];
-  contractId?: string;
-  contractDigest: string;
-  authorizationContextDigest: string;
-  contractKv?: TKv;
-  healthIdentity?: {
-    instanceId: string;
-    deploymentId: string;
-  };
-};
 
 /**
  * @internal Shared by Trellis-owned service bootstrap paths.
@@ -1320,7 +1213,7 @@ export async function createConnectedService<
   ];
   authorizationProviderCache?: AuthorizationProviderCache;
 }): Promise<TrellisServiceSession<TOwnedApi, TTrellisApi, TJobs, TKv>> {
-  const resolvedLog = resolveServiceLogger(args.runtime.log);
+  const resolvedLog = serviceRuntimeLogger;
   const connection = observeNatsTrellisConnection({
     kind: "service",
     nc: args.nc,
@@ -1354,9 +1247,6 @@ export async function createConnectedService<
     },
     {
       log: resolvedLog,
-      timeout: args.runtime.timeout,
-      stream: args.runtime.stream,
-      noResponderRetry: args.runtime.noResponderRetry,
       api: runtimeApi,
       contractId: args.contractId,
       contractDigest: args.contractDigest,
@@ -1366,7 +1256,6 @@ export async function createConnectedService<
           getTransfer().createOperationUpload(transferArgs),
       },
       operationStoreId: args.healthIdentity?.instanceId,
-      version: args.runtime.version,
     },
   );
 
@@ -1381,9 +1270,6 @@ export async function createConnectedService<
     },
     {
       log: resolvedLog,
-      timeout: args.runtime.timeout,
-      stream: args.runtime.stream,
-      noResponderRetry: args.runtime.noResponderRetry,
       api: runtimeApi,
       contractId: args.contractId,
       contractDigest: args.contractDigest,
@@ -1447,7 +1333,7 @@ export async function createConnectedService<
     instanceId: args.healthIdentity?.instanceId,
     contractId: args.contractId ?? "unknown",
     contractDigest: args.participantDigest ?? "unknown",
-    publishIntervalMs: args.runtime.health?.publishIntervalMs ?? 30_000,
+    publishIntervalMs: 30_000,
   });
   health.add("nats", () => ({
     status: args.nc.isClosed() ? "failed" : "ok",
@@ -2745,28 +2631,27 @@ export function connectTrellisServiceWithRuntimeDeps<
         ...(await loadDefaultServiceRuntimeDeps()),
         ...deps,
       } satisfies TrellisServiceRuntimeDeps;
-      if (automaticTelemetryEnabled(args.telemetry)) {
-        runtimeDeps.initTelemetry?.(args.name);
-      }
+      const serviceName = args.name ?? args.participant.id;
+      runtimeDeps.initTelemetry?.(serviceName);
       const identityAuth = await createAuth({
-        sessionKeySeed: args.identity.seed,
+        sessionKeySeed: args.seed,
       });
       const sessionAuth = await createAuth({
         sessionKeySeed: base64urlEncode(
           crypto.getRandomValues(new Uint8Array(32)),
         ),
       });
-      const bootstrapLog = resolveServiceLogger(args.runtime?.log);
+      const bootstrapLog = serviceRuntimeLogger;
       const bootstrapStartedAt = performance.now();
       const bootstrap = await fetchServiceBootstrapInfo({
         trellisUrl: args.trellisUrl,
-        serviceName: args.name,
+        serviceName,
+        name: args.name,
         contractId: args.participant.id,
         contractDigest: args.participant.digest,
         contract: args.participant,
         identityAuth,
         sessionAuth,
-        identity: args.identity,
         log: bootstrapLog,
       });
       recordTrellisDuration(
@@ -2831,6 +2716,7 @@ export function connectTrellisServiceWithRuntimeDeps<
         authorizationProviderCache = await AuthorizationProviderCache.attach(
           connectedNats,
           authorizationContexts.bundle().authorizationRegistry,
+          inboxPrefix,
           authorizationContexts,
         );
         authorizationProviderCache.start();
@@ -2884,7 +2770,6 @@ export function connectTrellisServiceWithRuntimeDeps<
       try {
         const contractRuntime = getParticipantRuntime(args.participant);
         const runtime = {
-          ...(args.runtime ?? {}),
           api: contractRuntime.ownedApi as TOwnedApi,
           trellisApi: contractRuntime.api as TTrellisApi,
         };
@@ -2895,7 +2780,7 @@ export function connectTrellisServiceWithRuntimeDeps<
           ParticipantJobsOf<TContract>,
           ParticipantKvOf<TContract>
         >({
-          name: args.name,
+          name: serviceName,
           auth: serviceAuth,
           nc,
           inboxPrefix,
@@ -2932,13 +2817,13 @@ export function connectTrellisServiceWithRuntimeDeps<
             try {
               const next = await fetchServiceBootstrapInfo({
                 trellisUrl: args.trellisUrl,
-                serviceName: args.name,
+                serviceName,
+                name: args.name,
                 contractId: args.participant.id,
                 contractDigest: args.participant.digest,
                 contract: args.participant,
                 identityAuth,
                 sessionAuth,
-                identity: args.identity,
                 log: bootstrapLog,
                 connectionId: bootstrap.connectInfo.connectionId,
               });

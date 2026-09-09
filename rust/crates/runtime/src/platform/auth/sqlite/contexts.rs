@@ -99,7 +99,7 @@ pub(in crate::platform::auth) fn sqlite_issuance_snapshot(
             let participant_id = deployment.participant_id.clone();
             (
                 IssuanceCredentialRecord::Native {
-                    identity,
+                    identity: Box::new(identity),
                     instance,
                     deployment,
                     device,

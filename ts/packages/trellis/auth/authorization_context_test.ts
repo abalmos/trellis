@@ -17,6 +17,7 @@ import {
   AuthorizationProviderUnavailableError,
   integrationTestResolvedContexts,
 } from "./authorization/provider_cache.ts";
+import { AuthorizationRegistryReader } from "./authorization/nats_registry.ts";
 import {
   type AuthorizationContextBundle,
   AuthorizationContextCache,
@@ -186,10 +187,13 @@ type Registry = {
   contexts: Map<string, string>;
   revocations?: Map<string, number>;
   deletedRevocations?: Set<string>;
+  revocationOperations?: Map<string, string>;
   reads: string[];
   contextReadBarrier?: Promise<void>;
   watchUnavailable?: boolean;
   watchCloses?: number;
+  watchClosed?: Promise<void>;
+  putWatches?: (revokedAt: number) => void;
   deleteWatches?: () => void;
   closeWatches?: () => void;
 };
@@ -202,7 +206,14 @@ function providerNats(registry: Registry): NatsConnection {
     stream: string;
     name: string;
     config: Record<string, unknown>;
-    pending: Array<{ key: string; value: Uint8Array; revision: number }>;
+    pending: Array<{
+      key: string;
+      value: Uint8Array;
+      revision: number;
+      removed?: boolean;
+      operation?: string;
+    }>;
+    delivered: number;
   };
   const consumers = new Map<string, TestConsumer>();
   const subscriptions = new Map<string, TestSubscription>();
@@ -219,9 +230,23 @@ function providerNats(registry: Registry): NatsConnection {
         ? undefined
         : JSON.stringify({ revokedAt: registry.revocations?.get(digest) })
       : registry.contexts.get(digest);
-    return value === undefined
-      ? undefined
-      : { key, value: encoder.encode(value), revision: ++revision };
+    if (
+      key.startsWith("revocation.") && registry.deletedRevocations?.has(digest)
+    ) {
+      return {
+        key,
+        value: new Uint8Array(),
+        revision: ++revision,
+        removed: true,
+      };
+    }
+    const operation = registry.revocationOperations?.get(digest);
+    return value === undefined && operation === undefined ? undefined : {
+      key,
+      value: encoder.encode(value ?? ""),
+      revision: ++revision,
+      ...(operation === undefined ? {} : { operation }),
+    };
   };
   const response = (value: unknown): Msg => {
     const data = encoder.encode(JSON.stringify(value));
@@ -241,18 +266,30 @@ function providerNats(registry: Registry): NatsConnection {
     });
   const message = (
     consumer: TestConsumer,
-    item: { key: string; value: Uint8Array; revision: number },
-  ): Msg => ({
-    subject: `$KV.contexts.${item.key}`,
-    sid: 1,
-    data: item.value,
-    reply:
-      `$JS.ACK._.account.${consumer.stream}.${consumer.name}.1.${item.revision}.1.1.0`,
-    headers: natsHeaders(),
-    respond: () => true,
-    json: <T>() => JSON.parse(decoder.decode(item.value)) as T,
-    string: () => decoder.decode(item.value),
-  });
+    item: {
+      key: string;
+      value: Uint8Array;
+      revision: number;
+      removed?: boolean;
+      operation?: string;
+    },
+  ): Msg => {
+    const headers = natsHeaders();
+    if (item.operation !== undefined) {
+      headers.set("KV-Operation", item.operation);
+    } else if (item.removed) headers.set("KV-Operation", "DEL");
+    return {
+      subject: `$KV.contexts.${item.key}`,
+      sid: 1,
+      data: item.value,
+      reply:
+        `$JS.ACK._.account.${consumer.stream}.${consumer.name}.1.${item.revision}.${consumer.delivered}.1.0`,
+      headers,
+      respond: () => true,
+      json: <T>() => JSON.parse(decoder.decode(item.value)) as T,
+      string: () => decoder.decode(item.value),
+    };
+  };
   const status = () => {
     let done = false;
     let wake: (() => void) | undefined;
@@ -308,21 +345,41 @@ function providerNats(registry: Registry): NatsConnection {
       const closedPromise = new Promise<void>((resolve) =>
         resolveClosed = resolve
       );
-      const revocationWatch = subject.startsWith("$KV.contexts.revocation.");
+      const watchConsumer = [...consumers.values()].find((consumer) =>
+        consumer.config.deliver_subject === subject
+      );
+      const revocationWatch = watchConsumer !== undefined;
       if (revocationWatch) {
+        registry.watchClosed = closedPromise;
+        registry.putWatches = (revokedAt) => {
+          watchConsumer.delivered += 1;
+          const filter = watchConsumer.config.filter_subject ??
+            (watchConsumer.config.filter_subjects as string[] | undefined)
+              ?.[0] ??
+            "";
+          subscription.deliver(message(watchConsumer, {
+            key: String(filter).replace("$KV.contexts.", ""),
+            value: encoder.encode(JSON.stringify({ revokedAt })),
+            revision: ++revision,
+          }));
+        };
         registry.deleteWatches = () => {
+          watchConsumer.delivered += 1;
           const headers = natsHeaders();
           headers.set("KV-Operation", "DEL");
-          queued.push({
-            subject,
-            sid: 1,
-            data: new Uint8Array(),
-            headers,
-            respond: () => true,
-            json: <T>() => undefined as T,
-            string: () => "",
-          });
-          wake();
+          const filter = watchConsumer.config.filter_subject ??
+            (watchConsumer.config.filter_subjects as string[] | undefined)
+              ?.[0] ??
+            "";
+          const item = {
+            key: String(filter).replace(
+              "$KV.contexts.",
+              "",
+            ),
+            value: new Uint8Array(),
+            revision: ++revision,
+          };
+          subscription.deliver({ ...message(watchConsumer, item), headers });
         };
       }
       const close = () => {
@@ -380,6 +437,7 @@ function providerNats(registry: Registry): NatsConnection {
         for (const consumer of consumers.values()) {
           if (consumer.config.deliver_subject !== subject) continue;
           for (const item of consumer.pending.splice(0)) {
+            consumer.delivered += 1;
             subscription.deliver(message(consumer, item));
           }
         }
@@ -449,7 +507,9 @@ function providerNats(registry: Registry): NatsConnection {
           ".",
         )[0] ?? "";
         const name = String(body.config.name ?? `consumer-${consumers.size}`);
-        const key = String(body.config.filter_subject ?? "").replace(
+        const filter = body.config.filter_subject ??
+          (body.config.filter_subjects as string[] | undefined)?.[0] ?? "";
+        const key = String(filter).replace(
           "$KV.contexts.",
           "",
         );
@@ -459,6 +519,7 @@ function providerNats(registry: Registry): NatsConnection {
           name,
           config: body.config,
           pending: pending ? [pending] : [],
+          delivered: 0,
         });
         return response({
           stream_name: stream,
@@ -477,6 +538,10 @@ function providerNats(registry: Registry): NatsConnection {
             stream_name: stream,
             name,
             config: consumer.config,
+            delivered: {
+              consumer_seq: consumer.delivered,
+              stream_seq: revision,
+            },
             num_pending: consumer.pending.length,
           })
           : noMessage();
@@ -513,6 +578,7 @@ async function provider(
   const value = await AuthorizationProviderCache.attach(
     providerNats(registry),
     cache.bundle().authorizationRegistry,
+    "_INBOX.test",
     cache,
     { now: () => policy.nowUnixSeconds },
   );
@@ -573,6 +639,7 @@ Deno.test("provider resolves a cold context once and reuses the verified hot ent
   } finally {
     value.stop();
   }
+  await registry.watchClosed;
   assertEquals(registry.watchCloses, 1);
 });
 
@@ -731,10 +798,66 @@ Deno.test("provider invalidates coverage when revocation evidence disappears", a
   }
 });
 
+Deno.test("provider observes revocation after watch initialization", async () => {
+  const registry: Registry = {
+    contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
+    reads: [],
+  };
+  const value = await provider(registry);
+  try {
+    await value.resolveContext(chain.contextDigest);
+    registry.putWatches?.(1_150);
+    let result = await value.verifyRequest(request());
+    for (let attempt = 0; result.ok && attempt < 100; attempt += 1) {
+      await Promise.resolve();
+      result = await value.verifyRequest(request());
+    }
+    assert(!result.ok);
+    assertEquals(result.error.code, "PermissionDenied");
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("revocation watch accepts consecutive ordered updates", async () => {
+  const registry: Registry = { contexts: new Map(), reads: [] };
+  const reader = await AuthorizationRegistryReader.open(
+    providerNats(registry),
+    { contextBucket: "contexts" },
+    "_INBOX.test",
+  );
+  const watch = await reader.watchRevocation(chain.contextDigest);
+  try {
+    assertEquals((await watch.iterator.next()).value?.operation, "initialized");
+    registry.putWatches?.(1_150);
+    assertEquals((await watch.iterator.next()).value?.operation, "put");
+    registry.putWatches?.(1_151);
+    assertEquals((await watch.iterator.next()).value?.operation, "put");
+  } finally {
+    watch.close();
+  }
+});
+
 Deno.test("provider treats an existing revocation tombstone as unavailable", async () => {
   const value = await provider({
     contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
     deletedRevocations: new Set([chain.contextDigest]),
+    reads: [],
+  });
+  try {
+    await assertRejects(
+      () => value.resolveContext(chain.contextDigest),
+      AuthorizationProviderUnavailableError,
+    );
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider treats an invalid revocation operation as unavailable", async () => {
+  const value = await provider({
+    contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
+    revocationOperations: new Map([[chain.contextDigest, "UNKNOWN"]]),
     reads: [],
   });
   try {

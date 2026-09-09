@@ -71,7 +71,7 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
         secret_hash: &str,
     ) -> Result<Option<DeviceProvisioningSecretRecord>, AuthorizationStateError> {
         let secret_hash = secret_hash.to_owned();
-        self.run(move |connection| load_provisioning_secret_by_hash(&connection, &secret_hash))
+        self.run(move |connection| load_provisioning_secret_by_hash(connection, &secret_hash))
             .await
     }
     async fn list_provisioned_identities(

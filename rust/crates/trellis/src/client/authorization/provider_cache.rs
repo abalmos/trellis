@@ -14,7 +14,9 @@ use trellis_protocol::{
 use super::super::TrellisClientError;
 use super::bootstrap_http::BootstrapHttp;
 use super::own_context::{system_now_millis, AuthorizationContextCache};
-use super::registry::{validate_digest_key, AuthorizationRegistryReader, REVOCATION_PREFIX};
+use super::registry::{
+    validate_digest_key, AuthorizationRegistryReader, RegistryWatchEvent, REVOCATION_PREFIX,
+};
 use super::types::AuthorizationRegistryBinding;
 
 #[cfg(feature = "runtime-internals")]
@@ -569,6 +571,40 @@ impl AuthorizationProviderCache {
         let live = issuer.state == AuthorizationIssuerState::Active
             && signed.unsigned.not_before <= now
             && signed.unsigned.expires_at > now;
+        let mut watch = self.registry.watch_revocation(digest).await?;
+        loop {
+            match watch.next().await {
+                Some(Ok(RegistryWatchEvent::Initialized)) => break,
+                Some(Ok(RegistryWatchEvent::Entry(entry)))
+                    if !entry.removed
+                        && entry.revision > 0
+                        && entry.key == format!("{REVOCATION_PREFIX}{digest}") =>
+                {
+                    self.observe_revocation(digest, parse_revocation_record(&entry.value)?)?;
+                }
+                Some(Ok(RegistryWatchEvent::Entry(_))) => {
+                    return Err(TrellisClientError::AuthorizationUnavailable(
+                        "authorization revocation evidence is unusable".into(),
+                    ));
+                }
+                Some(Err(error)) => return Err(error),
+                None => {
+                    return Err(TrellisClientError::AuthorizationUnavailable(
+                        "authorization revocation watch ended during initialization".into(),
+                    ));
+                }
+            }
+        }
+        if self.revocation_time(digest)?.is_some() {
+            return Err(TrellisClientError::Bootstrap(
+                "authorization context is revoked".into(),
+            ));
+        }
+        if !self.health()?.healthy || self.epoch() != epoch {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "connection changed during context resolution".into(),
+            ));
+        }
         let purpose = if historical {
             AuthorizationContextPurpose::HistoricalEvent
         } else {
@@ -580,20 +616,6 @@ impl AuthorizationProviderCache {
         if !historical && !live {
             return Err(TrellisClientError::Bootstrap(
                 "authorization context is not current".into(),
-            ));
-        }
-        let mut watch = self.registry.watch_revocation(digest).await?;
-        if let Some(value) = self.registry.get_revocation(digest).await? {
-            self.observe_revocation(digest, parse_revocation_record(&value)?)?;
-        }
-        if self.revocation_time(digest)?.is_some() {
-            return Err(TrellisClientError::Bootstrap(
-                "authorization context is revoked".into(),
-            ));
-        }
-        if !self.health()?.healthy || self.epoch() != epoch {
-            return Err(TrellisClientError::AuthorizationUnavailable(
-                "connection changed during context resolution".into(),
             ));
         }
         let covered = Arc::new(AtomicBool::new(true));
@@ -609,47 +631,14 @@ impl AuthorizationProviderCache {
                 self.verification_policy.allowed_clock_skew_seconds,
             ));
         // The task owns only weak cache references; dropping the entry aborts it.
-        let task = tokio::spawn(async move {
-            let entry = watch.next().await;
-            watch_covered.store(false, Ordering::Release);
-            let revoked_at = match entry {
-                Some(Ok(entry))
-                    if !entry.removed
-                        && entry.key == format!("{REVOCATION_PREFIX}{watch_digest}") =>
-                {
-                    parse_revocation_record(&entry.value).ok()
-                }
-                _ => None,
-            };
-            if let Some(state) = weak_state.upgrade() {
-                if let Ok(mut state) = state.write() {
-                    if let Some(at) = revoked_at {
-                        state
-                            .revocations
-                            .insert(watch_digest.clone(), (at, revocation_deadline));
-                    }
-                    if state.contexts.get(&watch_digest).is_some_and(|entry| {
-                        Arc::ptr_eq(&entry.covered, &watch_covered)
-                            && entry.leases.load(Ordering::Acquire) == 0
-                    }) {
-                        state.contexts.remove(&watch_digest);
-                    }
-                }
-            }
-            if revoked_at.is_some() {
-                if let Some(own) = own.and_then(|own| own.upgrade()) {
-                    if own
-                        .context_digest()
-                        .is_ok_and(|digest| digest == watch_digest)
-                    {
-                        if let Err(error) = own.clear() {
-                            tracing::warn!(%error, "cannot discard revoked own context");
-                        }
-                        own.request_refresh();
-                    }
-                }
-            }
-        });
+        let task = tokio::spawn(observe_context_revocation(
+            watch,
+            weak_state,
+            own,
+            watch_covered,
+            watch_digest,
+            revocation_deadline,
+        ));
         let mut verifications = CachedVerifications::default();
         if historical {
             verifications.historical = Some(verified.clone());
@@ -790,6 +779,56 @@ impl AuthorizationProviderCache {
         self.state.write().map_err(|_| {
             TrellisClientError::AuthorizationUnavailable("provider state lock poisoned".into())
         })
+    }
+}
+
+async fn observe_context_revocation(
+    mut watch: impl futures_util::Stream<Item = Result<RegistryWatchEvent, TrellisClientError>> + Unpin,
+    weak_state: Weak<RwLock<ProviderState>>,
+    own: Option<Weak<AuthorizationContextCache>>,
+    watch_covered: Arc<AtomicBool>,
+    watch_digest: String,
+    revocation_deadline: i64,
+) {
+    let entry = watch.next().await;
+    watch_covered.store(false, Ordering::Release);
+    let revoked_at = match entry {
+        Some(Ok(RegistryWatchEvent::Entry(entry)))
+            if !entry.removed
+                && entry.revision > 0
+                && entry.key == format!("{REVOCATION_PREFIX}{watch_digest}") =>
+        {
+            parse_revocation_record(&entry.value).ok()
+        }
+        _ => None,
+    };
+    if let Some(state) = weak_state.upgrade() {
+        if let Ok(mut state) = state.write() {
+            if let Some(at) = revoked_at {
+                state
+                    .revocations
+                    .insert(watch_digest.clone(), (at, revocation_deadline));
+            }
+            if state.contexts.get(&watch_digest).is_some_and(|entry| {
+                Arc::ptr_eq(&entry.covered, &watch_covered)
+                    && entry.leases.load(Ordering::Acquire) == 0
+            }) {
+                state.contexts.remove(&watch_digest);
+            }
+        }
+    }
+    if revoked_at.is_some() {
+        if let Some(own) = own.and_then(|own| own.upgrade()) {
+            if own
+                .context_digest()
+                .is_ok_and(|digest| digest == watch_digest)
+            {
+                if let Err(error) = own.clear() {
+                    tracing::warn!(%error, "cannot discard revoked own context");
+                }
+                own.request_refresh();
+            }
+        }
     }
 }
 
@@ -957,6 +996,41 @@ mod wire_tests {
     }
 
     #[tokio::test]
+    async fn initialized_watch_put_revokes_cached_context() {
+        let (signed, issuer, verified) = test_context();
+        let entry = test_entry(&signed, &issuer, &verified, 0, Arc::default());
+        let covered = entry.covered.clone();
+        let state = Arc::new(RwLock::new(ProviderState::default()));
+        state
+            .write()
+            .unwrap()
+            .contexts
+            .insert("digest".into(), entry);
+
+        observe_context_revocation(
+            futures_util::stream::iter([Ok(RegistryWatchEvent::Entry(
+                super::super::registry::RegistryWatchEntry {
+                    key: "revocation.digest".into(),
+                    value: br#"{"revokedAt":1150}"#.to_vec(),
+                    removed: false,
+                    revision: 2,
+                },
+            ))]),
+            Arc::downgrade(&state),
+            None,
+            covered.clone(),
+            "digest".into(),
+            2_000,
+        )
+        .await;
+
+        assert!(!covered.load(Ordering::Acquire));
+        let state = state.read().unwrap();
+        assert_eq!(state.revocation_time("digest"), Ok(Some(1_150)));
+        assert!(!state.contexts.contains_key("digest"));
+    }
+
+    #[tokio::test]
     async fn bounded_lru_retains_leased_revoked_context_until_release() {
         let (signed, issuer, verified) = test_context();
         let cancellations = (0..=MAX_CACHED_CONTEXTS)
@@ -970,7 +1044,12 @@ mod wire_tests {
             entry: first.clone(),
             context: verified.clone(),
         };
-        for index in 1..MAX_CACHED_CONTEXTS {
+        for (index, cancellation) in cancellations
+            .iter()
+            .enumerate()
+            .take(MAX_CACHED_CONTEXTS)
+            .skip(1)
+        {
             assert!(state
                 .insert_context(
                     index.to_string(),
@@ -979,7 +1058,7 @@ mod wire_tests {
                         &issuer,
                         &verified,
                         index as u64,
-                        cancellations[index].clone(),
+                        cancellation.clone(),
                     ),
                 )
                 .is_ok());

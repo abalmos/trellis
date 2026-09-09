@@ -81,13 +81,24 @@ Deno.test("generated runtime workflows", async (t) => {
       name: "provider",
       contract: participants.testProvider.participant,
     });
+    const wrongSeed = `${identity.seed.slice(0, -1)}${
+      identity.seed.endsWith("A") ? "B" : "A"
+    }`;
+    assert((await TrellisService.connect({
+      trellisUrl: runtime.trellisUrl,
+      participant: participants.testProvider.participant,
+      seed: wrongSeed,
+    })).isErr());
+    assert((await TrellisService.connect({
+      trellisUrl: runtime.trellisUrl,
+      participant: participants.testAdminService.participant,
+      seed: identity.seed,
+    })).isErr());
     const service = await TrellisService.connect({
       trellisUrl: runtime.trellisUrl,
       participant: participants.testProvider.participant,
       name: "provider",
-      identity,
-      telemetry: false,
-      runtime: {},
+      seed: identity.seed,
     }).orThrow();
     let cancelled = false;
     let serviceExit: Promise<unknown> | undefined;
@@ -117,8 +128,10 @@ Deno.test("generated runtime workflows", async (t) => {
       });
       let received: string | undefined;
       let coverageRecoveryEffects = 0;
+      let coldRevokedEffects = 0;
       await service.onChanged(({ event }) => {
         if (event.value === "coverage-recovery") coverageRecoveryEffects += 1;
+        if (event.value === "cold-revoked") coldRevokedEffects += 1;
         received = event.value;
         return Result.ok(undefined);
       }).orThrow();
@@ -202,6 +215,66 @@ Deno.test("generated runtime workflows", async (t) => {
             if (!contextStream || !contextSubjectPrefix) {
               throw new Error("authorization context stream missing");
             }
+            const revokedIdentity = await runtime.services.createInstance({
+              name: "cold-revoked-publisher",
+              contract: participants.testProvider.participant,
+            });
+            const revokedPublisher = await TrellisService.connect({
+              trellisUrl: runtime.trellisUrl,
+              participant: participants.testProvider.participant,
+              seed: revokedIdentity.seed,
+            }).orThrow();
+            const revokedPublisherExit = revokedPublisher.wait().catch((
+              error,
+            ) => error);
+            await manager.consumers.pause(
+              eventStream.config.name,
+              eventConsumer.name,
+              new Date(Date.now() + 60_000),
+            );
+            await revokedPublisher.publishChanged({ value: "cold-revoked" })
+              .orThrow();
+            const revokedEvent = await manager.streams.getMessage(
+              eventStream.config.name,
+              { last_by_subj: "events.v1.Changed" },
+            );
+            const revokedDigest = revokedEvent?.header?.get(
+              "authorization-context",
+            );
+            if (!revokedEvent || !revokedDigest) {
+              throw new Error("cold revoked event context missing");
+            }
+            await revokedPublisher.stop();
+            assertEquals(await revokedPublisherExit, undefined);
+            const coverageAdmin = await runtime.connectClient({
+              name: "coverage-admin",
+              contract: webParticipants.appConsole.participant,
+            });
+            await coverageAdmin.authServiceInstancesDisable({
+              instanceId: revokedIdentity.instanceId,
+              expectedVersion: 1,
+              idempotencyKey: crypto.randomUUID(),
+              reason: "cold revocation acceptance",
+            }).orThrow();
+            await runtime.waitFor(async () =>
+              Boolean(
+                await manager.streams.getMessage(contextStream, {
+                  last_by_subj:
+                    `${contextSubjectPrefix}revocation.${revokedDigest}`,
+                }),
+              )
+            );
+            await manager.consumers.resume(
+              eventStream.config.name,
+              eventConsumer.name,
+            );
+            await runtime.waitFor(async () =>
+              (await manager.consumers.info(
+                eventStream.config.name,
+                eventConsumer.name,
+              )).ack_floor.stream_seq >= revokedEvent.seq
+            );
+            assertEquals(coldRevokedEffects, 0);
             const coldIdentity = await runtime.services.createInstance({
               name: "cold-event-publisher",
               contract: participants.testProvider.participant,
@@ -210,9 +283,7 @@ Deno.test("generated runtime workflows", async (t) => {
               trellisUrl: runtime.trellisUrl,
               participant: participants.testProvider.participant,
               name: "cold-event-publisher",
-              identity: coldIdentity,
-              telemetry: false,
-              runtime: {},
+              seed: coldIdentity.seed,
             }).orThrow();
             const coldPublisherExit = coldPublisher.wait().catch((error) =>
               error
@@ -386,9 +457,7 @@ Deno.test("generated runtime workflows", async (t) => {
             trellisUrl: runtime.trellisUrl,
             participant: participants.testAdminService.participant,
             name: "native-admin",
-            identity: nativeKey,
-            telemetry: false,
-            runtime: {},
+            seed: nativeKey.seed,
           }).orThrow();
           let nativeAdminExit = nativeAdmin.wait().catch((error: unknown) =>
             error
@@ -437,18 +506,14 @@ Deno.test("generated runtime workflows", async (t) => {
             trellisUrl: runtime.trellisUrl,
             participant: participants.testAdminService.participant,
             name: "native-admin",
-            identity: nativeKey,
-            telemetry: false,
-            runtime: {},
+            seed: nativeKey.seed,
           }).orThrow();
           nativeAdminExit = nativeAdmin.wait().catch((error: unknown) => error);
           const nativeSibling = await TrellisService.connect({
             trellisUrl: runtime.trellisUrl,
             participant: participants.testAdminService.participant,
             name: "native-admin-sibling",
-            identity: nativeSiblingKey,
-            telemetry: false,
-            runtime: {},
+            seed: nativeSiblingKey.seed,
           }).orThrow();
           const nativeSiblingExit = nativeSibling.wait().catch(
             (error: unknown) => error,
@@ -479,9 +544,7 @@ Deno.test("generated runtime workflows", async (t) => {
               trellisUrl: runtime.trellisUrl,
               participant: participants.testAdminService.participant,
               name: "disabled-native-admin",
-              identity: nativeKey,
-              telemetry: false,
-              runtime: {},
+              seed: nativeKey.seed,
             });
             assert(disabledReconnect.isErr());
             await nativeSibling.authGrantsGet({

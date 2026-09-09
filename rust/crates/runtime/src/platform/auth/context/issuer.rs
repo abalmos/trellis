@@ -328,7 +328,7 @@ impl AuthorizationContextService {
                 break;
             }
             for context in &contexts {
-                self.publish(&context, now_seconds).await?;
+                self.publish(context, now_seconds).await?;
             }
             after = contexts
                 .last()

@@ -370,7 +370,7 @@ where
                     directory.display()
                 )));
             }
-            WebSource::Embedded if EMBEDDED_WEB_ASSETS.is_empty() => {
+            WebSource::Embedded if matches!(EMBEDDED_WEB_ASSETS, []) => {
                 return Err(AuthorizationStateError::InvalidRecord(
                     "embedded web assets are unavailable".to_owned(),
                 ));
