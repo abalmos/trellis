@@ -13,11 +13,11 @@ import vectors from "../../../../conformance/authorization-context/vectors.json"
 };
 import type { PermissionAtom as DescriptorPermissionAtom } from "../participant_runtime/api.ts";
 import { type VerifiedCaller, verifyLocalAuthorization } from "../session.ts";
-import { AuthorizationRegistryReader } from "./authorization/nats_registry.ts";
 import {
   AuthorizationProviderUnavailableError,
   integrationTestResolvedContexts,
 } from "./authorization/provider_cache.ts";
+import { AuthorizationRegistryReader } from "./authorization/nats_registry.ts";
 import {
   type AuthorizationContextBundle,
   AuthorizationContextCache,

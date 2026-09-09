@@ -4,16 +4,17 @@ import {
   type NatsConnection,
   type Subscription,
 } from "@nats-io/nats-core";
+import type { StoreError } from "../../errors/index.ts";
+import { TypedKV } from "../../kv.ts";
 import {
-  AsyncResult,
-  type BaseError,
-  isErr,
-  type MaybeAsync,
-  Result,
-} from "@qlever-llc/result";
-import { Value } from "typebox/value";
-import { ulid } from "ulid";
-
+  type StoreWaitOptions,
+  TypedStore,
+  type TypedStoreEntry,
+} from "../../store.ts";
+import {
+  TrellisServiceRuntime,
+  type TrellisServiceRuntimeFor,
+} from "./core.ts";
 import {
   base64urlEncode,
   createAuth,
@@ -26,76 +27,47 @@ import {
   startAuthorizationContextRefresh,
 } from "../../auth/authorization_context.ts";
 import { TrellisHttpError } from "../../auth/http_error.ts";
-import { parseSchema } from "../../codec.ts";
-import {
-  observeNatsTrellisConnection,
-  type TrellisConnection,
-} from "../../connection.ts";
-import type { StoreError } from "../../errors/index.ts";
-import {
-  type TransferError,
-  TransportError,
-  UnexpectedError,
-  ValidationError,
-} from "../../errors/index.ts";
-import { logger as noopLogger, type LoggerLike } from "../../globals.ts";
-import { publishHealthHeartbeatSample } from "../../health_transport.ts";
-import {
-  ActiveJob as PublicActiveJob,
-  decodeJobUpdateEnvelope,
-  type JobHandlerOptions,
-  type JobLogEntry,
-  JobNotEnqueuedError,
-  type JobProgress,
-  JobRef,
-  type JobSnapshot,
-  type JobSubmitOutcome,
-  type JobUpdatesOptions,
-  type JobUpdateSubscription,
-  JobWorkerHostAdapter,
-  RetryJobError,
-  type TerminalJob,
-} from "../../jobs.ts";
-import { TypedKV } from "../../kv.ts";
 import type { InferSchemaType } from "../../participant.ts";
-import type { EventDesc } from "../../participant.ts";
 import type {
   PermissionAtom,
   RuntimeApi,
 } from "../../participant_runtime/api.ts";
 import type { GeneratedParticipantEvidence } from "../../participant_runtime/artifacts.ts";
-import type { ActionDescriptor } from "../../participant_runtime/descriptors.ts";
-import { isJsonValue } from "../../participant_runtime/json.ts";
 import type {
   ParticipantJobsMetadata,
   ParticipantKvMetadata,
 } from "../../participant_runtime/metadata.ts";
+import type { ContractEventConsumers } from "../../participant_runtime/schemas.ts";
+import {
+  type GeneratedParticipant,
+  getParticipantRuntime,
+} from "../../participant_runtime/participant.ts";
+import type { ActionDescriptor } from "../../participant_runtime/descriptors.ts";
+import {
+  type ConnectedActionName,
+  lowerCamelSurfaceName,
+} from "../../participant_runtime/surface_names.ts";
 import {
   PARTICIPANT_EVENT_CONSUMERS_METADATA,
   PARTICIPANT_JOBS_METADATA,
   PARTICIPANT_KV_METADATA,
 } from "../../participant_runtime/metadata.ts";
 import {
-  type GeneratedParticipant,
-  getParticipantRuntime,
-} from "../../participant_runtime/participant.ts";
-import type { ContractEventConsumers } from "../../participant_runtime/schemas.ts";
+  AsyncResult,
+  type BaseError,
+  isErr,
+  type MaybeAsync,
+  Result,
+} from "@qlever-llc/result";
+import { Value } from "typebox/value";
 import {
-  type ConnectedActionName,
-  lowerCamelSurfaceName,
-} from "../../participant_runtime/surface_names.ts";
-import {
-  createProviderRuntime,
-  PROVIDER_CALLER,
-  type ProviderCaller,
-  type ProviderHandlerClient,
-  type ProviderRuntime,
-} from "../../provider.ts";
-import {
-  DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
-  DEFAULT_SERVICE_RUNTIME_WAIT_ON_FIRST_CONNECT,
-  selectRuntimeTransportServers,
-} from "../../runtime_transport.ts";
+  type ServiceHealth,
+  type ServiceHealthCheckFn,
+  type ServiceHealthInfoFn,
+  ServiceHealthRuntime,
+} from "./health.ts";
+import { publishHealthHeartbeatSample } from "../../health_transport.ts";
+import type { EventDesc } from "../../participant.ts";
 import type {
   AcceptedOperation,
   ActiveEventFacade,
@@ -124,13 +96,79 @@ import {
   annotateHandlerBoundaryError,
   createTrellisInternal,
 } from "../../session.ts";
+import type { TrellisServiceRuntimeDeps } from "./runtime.ts";
+import { ServiceTransfer } from "./transfer.ts";
+import { logger as noopLogger, type LoggerLike } from "../../globals.ts";
 import {
-  type StoreWaitOptions,
-  TypedStore,
-  type TypedStoreEntry,
-} from "../../store.ts";
-import { recordTrellisDuration } from "../../telemetry/mod.ts";
+  createProviderRuntime,
+  PROVIDER_CALLER,
+  type ProviderCaller,
+  type ProviderHandlerClient,
+  type ProviderRuntime,
+} from "../../provider.ts";
+import {
+  DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
+  DEFAULT_SERVICE_RUNTIME_WAIT_ON_FIRST_CONNECT,
+  selectRuntimeTransportServers,
+} from "../../runtime_transport.ts";
+import { serviceRuntimeLogger } from "./logger.ts";
+import {
+  type TransferError,
+  TransportError,
+  UnexpectedError,
+  ValidationError,
+} from "../../errors/index.ts";
 import type { ReceiveTransferGrant } from "../../transfer.ts";
+import {
+  ActiveJob as PublicActiveJob,
+  decodeJobUpdateEnvelope,
+  type JobHandlerOptions,
+  type JobLogEntry,
+  JobNotEnqueuedError,
+  type JobProgress,
+  JobRef,
+  type JobSnapshot,
+  type JobSubmitOutcome,
+  type JobUpdatesOptions,
+  type JobUpdateSubscription,
+  JobWorkerHostAdapter,
+  RetryJobError,
+  type TerminalJob,
+} from "../../jobs.ts";
+import { parseSchema } from "../../codec.ts";
+import { isJsonValue } from "../../participant_runtime/json.ts";
+import { ulid } from "ulid";
+import {
+  JobManager as InternalJobManager,
+  JobProcessError as InternalJobProcessError,
+  prepareJobSubmission,
+} from "./internal_jobs/job-manager.ts";
+import { startNatsWorkerHostFromBinding } from "./internal_jobs/runtime-worker.ts";
+import {
+  createNatsJobKeyCoordinator,
+  normalizeJobKeyPolicy,
+} from "./internal_jobs/key-coordinator.ts";
+import type {
+  JobKeyConcurrencyBinding,
+  JobQueuePolicyBinding,
+} from "./internal_jobs/key-coordinator.ts";
+import type {
+  JobsBinding,
+  JobsQueueBinding,
+} from "./internal_jobs/bindings.ts";
+import type { ActiveJob as InternalActiveJob } from "./internal_jobs/active-job.ts";
+import {
+  type JobContext as InternalJobContext,
+  type JobEvent as InternalJobEvent,
+  JobEventSchema,
+  type PreparedJobSubmission as InternalPreparedJobSubmission,
+  PreparedJobSubmissionSchema,
+} from "./internal_jobs/types.ts";
+import {
+  observeNatsTrellisConnection,
+  type TrellisConnection,
+} from "../../connection.ts";
+import { recordTrellisDuration } from "../../telemetry/mod.ts";
 import {
   defaultSqlOutboxTables,
   OutboxDispatcher,
@@ -150,45 +188,6 @@ import {
   fetchServiceBootstrapInfo,
   loadDefaultServiceRuntimeDeps,
 } from "./bootstrap.ts";
-import {
-  TrellisServiceRuntime,
-  type TrellisServiceRuntimeFor,
-} from "./core.ts";
-import {
-  type ServiceHealth,
-  type ServiceHealthCheckFn,
-  type ServiceHealthInfoFn,
-  ServiceHealthRuntime,
-} from "./health.ts";
-import type { ActiveJob as InternalActiveJob } from "./internal_jobs/active-job.ts";
-import type {
-  JobsBinding,
-  JobsQueueBinding,
-} from "./internal_jobs/bindings.ts";
-import {
-  JobManager as InternalJobManager,
-  JobProcessError as InternalJobProcessError,
-  prepareJobSubmission,
-} from "./internal_jobs/job-manager.ts";
-import {
-  createNatsJobKeyCoordinator,
-  normalizeJobKeyPolicy,
-} from "./internal_jobs/key-coordinator.ts";
-import type {
-  JobKeyConcurrencyBinding,
-  JobQueuePolicyBinding,
-} from "./internal_jobs/key-coordinator.ts";
-import { startNatsWorkerHostFromBinding } from "./internal_jobs/runtime-worker.ts";
-import {
-  type JobContext as InternalJobContext,
-  type JobEvent as InternalJobEvent,
-  JobEventSchema,
-  type PreparedJobSubmission as InternalPreparedJobSubmission,
-  PreparedJobSubmissionSchema,
-} from "./internal_jobs/types.ts";
-import { serviceRuntimeLogger } from "./logger.ts";
-import type { TrellisServiceRuntimeDeps } from "./runtime.ts";
-import { ServiceTransfer } from "./transfer.ts";
 
 type ResourceBindingJobsQueue = {
   queueType: string;
