@@ -4,19 +4,19 @@ use std::time::Duration;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use clap::Parser;
-use futures_util::StreamExt;
+use device_trellis::apis::demo_service::types::{
+    AssignmentsListRequest, EvidenceDownloadRequest, EvidenceListRequest, EvidenceUploadInput,
+    ReportsGenerateInput, SitesListRequest, SitesListResponseEntriesItem,
+};
 use device_trellis::participants::demo_device::state::{DraftInspectionState, SelectedSiteState};
 use device_trellis::participants::demo_device::ConnectedClient;
+use futures_util::StreamExt;
 use trellis_rs::{
     auth::{
         check_device_activation, derive_device_identity, wait_for_device_activation,
         DeviceActivationOptions, DeviceActivationStatus,
     },
     client::download_transfer_grant_from_value,
-};
-use device_trellis::apis::demo_service::types::{
-    AssignmentsListRequest, EvidenceDownloadRequest, EvidenceListRequest, EvidenceUploadInput,
-    ReportsGenerateInput, SitesListRequest, SitesListResponseEntriesItem,
 };
 
 const DEMO_TIMESTAMP: &str = "2026-04-30T16:00:00.000Z";
@@ -36,6 +36,10 @@ struct Args {
     /// Base64url device root secret printed by `trellis deploy provision`.
     #[arg(long, env = "TRELLIS_DEVICE_ROOT_SECRET")]
     device_root_secret: Option<String>,
+
+    /// Optional one-use provisioning secret printed by `trellis deploy provision`.
+    #[arg(long, env = "TRELLIS_PROVISIONING_SECRET")]
+    provisioning_secret: Option<String>,
 }
 
 #[tokio::main]
@@ -74,10 +78,9 @@ async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<Conn
     )?;
     let identity = derive_device_identity(&root_secret)?;
     let activation = DeviceActivationOptions::new(
-        trellis_rs::client::DeviceConnectOptions::<device_trellis::participants::demo_device::Participant>::new(
-            trellis_url,
-            &identity.identity_seed_base64url,
-        )
+        trellis_rs::client::DeviceConnectOptions::<
+            device_trellis::participants::demo_device::Participant,
+        >::new(trellis_url, &identity.identity_seed_base64url)
         .with_timeout_ms(10_000),
         &identity.activation_key_base64url,
     );
@@ -109,10 +112,7 @@ async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
         }
     });
 
-    let mut evidence = client
-        .field_ops()
-        .subscribe_evidence_uploaded()
-        .await?;
+    let mut evidence = client.field_ops().subscribe_evidence_uploaded().await?;
     tokio::spawn(async move {
         while let Some(event) = evidence.next().await {
             match event {
@@ -122,10 +122,7 @@ async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
         }
     });
 
-    let mut reports = client
-        .field_ops()
-        .subscribe_reports_published()
-        .await?;
+    let mut reports = client.field_ops().subscribe_reports_published().await?;
     tokio::spawn(async move {
         while let Some(event) = reports.next().await {
             match event {

@@ -13,11 +13,11 @@ import vectors from "../../../../conformance/authorization-context/vectors.json"
 };
 import type { PermissionAtom as DescriptorPermissionAtom } from "../participant_runtime/api.ts";
 import { type VerifiedCaller, verifyLocalAuthorization } from "../session.ts";
+import { AuthorizationRegistryReader } from "./authorization/nats_registry.ts";
 import {
   AuthorizationProviderUnavailableError,
   integrationTestResolvedContexts,
 } from "./authorization/provider_cache.ts";
-import { AuthorizationRegistryReader } from "./authorization/nats_registry.ts";
 import {
   type AuthorizationContextBundle,
   AuthorizationContextCache,
@@ -191,9 +191,11 @@ type Registry = {
   reads: string[];
   contextReadBarrier?: Promise<void>;
   watchUnavailable?: boolean;
+  flushUnavailable?: boolean;
   watchCloses?: number;
   watchClosed?: Promise<void>;
   putWatches?: (revokedAt: number) => void;
+  heartbeatWatches?: (lastConsumerSequence: number) => void;
   deleteWatches?: () => void;
   closeWatches?: () => void;
 };
@@ -362,6 +364,28 @@ function providerNats(registry: Registry): NatsConnection {
             value: encoder.encode(JSON.stringify({ revokedAt })),
             revision: ++revision,
           }));
+        };
+        registry.heartbeatWatches = (lastConsumerSequence) => {
+          const headers = natsHeaders(100, "Idle Heartbeat");
+          headers.set("Nats-Last-Consumer", String(lastConsumerSequence));
+          headers.set("Nats-Last-Stream", String(revision));
+          subscription.deliver({
+            ...response({}),
+            subject,
+            data: new Uint8Array(),
+            headers,
+          });
+        };
+        registry.heartbeatWatches = (lastConsumerSequence) => {
+          const headers = natsHeaders(100, "Idle Heartbeat");
+          headers.set("Nats-Last-Consumer", String(lastConsumerSequence));
+          headers.set("Nats-Last-Stream", String(revision));
+          subscription.deliver({
+            ...response({}),
+            subject,
+            data: new Uint8Array(),
+            headers,
+          });
         };
         registry.deleteWatches = () => {
           watchConsumer.delivered += 1;
@@ -549,7 +573,10 @@ function providerNats(registry: Registry): NatsConnection {
       return response({});
     },
     requestMany: () => Promise.resolve((async function* () {})()),
-    flush: () => Promise.resolve(),
+    flush: () =>
+      registry.flushUnavailable
+        ? Promise.reject(new Error("flush unavailable"))
+        : Promise.resolve(),
     drain: () => Promise.resolve(),
     isClosed: () => false,
     isDraining: () => false,
@@ -725,12 +752,16 @@ Deno.test("provider rejects a registry key whose signed context has another dige
 });
 
 Deno.test("provider treats a missing context registry entry as unavailable", async () => {
-  const value = await provider({ contexts: new Map(), reads: [] });
+  const registry: Registry = { contexts: new Map(), reads: [] };
+  const value = await provider(registry);
   try {
-    await assertRejects(
-      () => value.resolveContext(chain.contextDigest),
-      AuthorizationProviderUnavailableError,
-    );
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await assertRejects(
+        () => value.resolveContext(chain.contextDigest),
+        AuthorizationProviderUnavailableError,
+      );
+    }
+    assertEquals(registry.watchCloses, 3);
   } finally {
     value.stop();
   }
@@ -838,6 +869,67 @@ Deno.test("revocation watch accepts consecutive ordered updates", async () => {
   }
 });
 
+Deno.test("revocation watch rejects heartbeat progress without received data", async () => {
+  const registry: Registry = { contexts: new Map(), reads: [] };
+  const reader = await AuthorizationRegistryReader.open(
+    providerNats(registry),
+    { contextBucket: "contexts" },
+    "_INBOX.test",
+  );
+  const watch = await reader.watchRevocation(chain.contextDigest);
+  try {
+    assertEquals((await watch.iterator.next()).value?.operation, "initialized");
+    registry.heartbeatWatches?.(1);
+    await assertRejects(
+      () => watch.iterator.next(),
+      Error,
+      "sequence gap",
+    );
+  } finally {
+    await watch.close();
+  }
+});
+
+Deno.test("revocation watch accepts heartbeat progress for received queued data", async () => {
+  const registry: Registry = { contexts: new Map(), reads: [] };
+  const reader = await AuthorizationRegistryReader.open(
+    providerNats(registry),
+    { contextBucket: "contexts" },
+    "_INBOX.test",
+  );
+  const watch = await reader.watchRevocation(chain.contextDigest);
+  try {
+    assertEquals((await watch.iterator.next()).value?.operation, "initialized");
+    registry.putWatches?.(1_150);
+    registry.heartbeatWatches?.(1);
+    registry.putWatches?.(1_151);
+    assertEquals((await watch.iterator.next()).value?.operation, "put");
+    assertEquals((await watch.iterator.next()).value?.operation, "put");
+  } finally {
+    await watch.close();
+  }
+});
+
+Deno.test("revocation watch cleans up when setup fails after consumption", async () => {
+  const registry: Registry = {
+    contexts: new Map(),
+    reads: [],
+    flushUnavailable: true,
+  };
+  const reader = await AuthorizationRegistryReader.open(
+    providerNats(registry),
+    { contextBucket: "contexts" },
+    "_INBOX.test",
+  );
+  await assertRejects(
+    () => reader.watchRevocation(chain.contextDigest),
+    Error,
+    "flush unavailable",
+  );
+  await registry.watchClosed;
+  assertEquals(registry.watchCloses, 1);
+});
+
 Deno.test("provider treats an existing revocation tombstone as unavailable", async () => {
   const value = await provider({
     contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
@@ -897,8 +989,12 @@ Deno.test("provider retries a temporary issuer outage without poisoning the dige
     issuerSeed,
   );
   let fetches = 0;
+  const registry: Registry = {
+    contexts: new Map([[contextDigest, context]]),
+    reads: [],
+  };
   const value = await provider(
-    { contexts: new Map([[contextDigest, context]]), reads: [] },
+    registry,
     () => {
       fetches += 1;
       if (fetches === 1) return Promise.reject(new Error("issuer offline"));
@@ -937,11 +1033,14 @@ Deno.test("provider retries a temporary issuer outage without poisoning the dige
       () => value.resolveContext(contextDigest),
       AuthorizationProviderUnavailableError,
     );
+    assertEquals(registry.watchCloses, 4);
     await value.resolveContext(contextDigest);
     assertEquals(fetches, 5);
   } finally {
     value.stop();
   }
+  await registry.watchClosed;
+  assertEquals(registry.watchCloses, 5);
 });
 
 Deno.test("provider treats a missing local verification policy as unavailable", async () => {

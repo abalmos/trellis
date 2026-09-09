@@ -135,7 +135,9 @@ Deno.test("Rust durable events match registrations and retain unhandled messages
           eventStream.config.name,
           { last_by_subj: "events.v1.Alpha" },
         );
-        const revokedDigest = revokedEvent?.header?.get("authorization-context");
+        const revokedDigest = revokedEvent?.header?.get(
+          "authorization-context",
+        );
         if (!revokedEvent || !revokedDigest) {
           throw new Error("cold revoked Rust event context missing");
         }
@@ -172,7 +174,8 @@ Deno.test("Rust durable events match registrations and retain unhandled messages
         await runtime.waitFor(async () =>
           Boolean(
             await manager.streams.getMessage(contextStream, {
-              last_by_subj: `${contextSubjectPrefix}revocation.${revokedDigest}`,
+              last_by_subj:
+                `${contextSubjectPrefix}revocation.${revokedDigest}`,
             }),
           )
         );

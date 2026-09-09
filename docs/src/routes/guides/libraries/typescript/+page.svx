@@ -31,7 +31,10 @@ should build without regeneration or the Trellis API cache.
 
 Use `@qlever-llc/trellis/service/deno` or `/service/node` for service bootstrap.
 Pass `participant` and the immutable provisioned identity `seed` to
-`TrellisService.connect(...)`. Use
+`TrellisService.connect(...)`; `name` is optional. Automatic telemetry can be
+disabled with `telemetry: false`, while `runtime` configures service logging,
+default request timeout, event stream selection, no-responder retry, and health
+heartbeat interval. Use
 the connected service's generated handlers and `kv`, `store`, and `jobs` handles.
 The browser-safe root does not expose native filesystem helpers.
 

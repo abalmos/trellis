@@ -34,7 +34,11 @@ There is no TypeScript contract-authoring execution step.
 
 Services import `TrellisService` from `@qlever-llc/trellis/service/deno` or
 `@qlever-llc/trellis/service/node`. Connect with the generated participant,
-provisioned identity seed, and Trellis URL. Deployment/instance assignment,
+provisioned identity seed, and Trellis URL; `name` is optional. Set
+`telemetry: false` to disable automatic telemetry. Optional `runtime` controls
+service logging (including `false` to disable it), default request timeout,
+event stream selection, no-responder retry, and health heartbeat interval.
+Deployment/instance assignment,
 installed participant/APIs, `GrantBinding`, resources, signed context, route
 JWT, and transport endpoints are resolved server-side. Authorization state is
 process-memory-only and refreshes on reconnect; no authorization-context store

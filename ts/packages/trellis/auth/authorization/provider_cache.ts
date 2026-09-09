@@ -83,7 +83,7 @@ type ProviderContextEntry = {
   revokedAt?: number;
   leases: number;
   watch?: AsyncIterator<RegistryWatchEntry>;
-  closeWatch?: () => void;
+  closeWatch?: () => Promise<void>;
   live?: Promise<{
     handle: AuthorizationContextHandle;
     verified: VerifiedAuthorizationContextTokenProjection;
@@ -502,7 +502,7 @@ export class AuthorizationProviderCache {
       if (entry) {
         this.#invalidate(entry);
       } else if (!watchOwned) {
-        watch.close();
+        await watch.close();
       }
       throw error;
     }
@@ -703,7 +703,7 @@ export class AuthorizationProviderCache {
   #invalidate(entry: ProviderContextEntry): void {
     entry.covered = false;
     entry.disposed = true;
-    entry.closeWatch?.();
+    void entry.closeWatch?.();
     entry.closeWatch = undefined;
     if (this.#contexts.get(entry.contextDigest) === entry) {
       this.#contexts.delete(entry.contextDigest);

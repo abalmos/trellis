@@ -40,6 +40,7 @@ export {
   type SqlOutboxTransactionRunner,
   TrellisService,
   type TrellisServiceConnectOpts,
+  type TrellisServiceConnectTelemetryOpts,
   type TrellisServiceSqlOutboxCommonOptions,
   type TrellisServiceSqlOutboxExecutorOptions,
   type TrellisServiceSqlOutboxOptions,

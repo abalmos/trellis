@@ -30,6 +30,58 @@ export type RegistryWatchEntry =
   | { operation: "delete"; key: string; revision: number }
   | { operation: "initialized" };
 
+class RegistryWatchQueue implements AsyncIterator<RegistryWatchEntry> {
+  readonly #values: RegistryWatchEntry[] = [];
+  #waiting?: {
+    resolve: (result: IteratorResult<RegistryWatchEntry>) => void;
+    reject: (error: unknown) => void;
+  };
+  #closed = false;
+  #error?: Error;
+
+  push(value: RegistryWatchEntry): void {
+    if (this.#closed) return;
+    if (this.#waiting) {
+      const waiting = this.#waiting;
+      this.#waiting = undefined;
+      waiting.resolve({ done: false, value });
+    } else if (this.#values.length < 2) {
+      this.#values.push(value);
+    } else {
+      throw new Error("authorization revocation watch queue overflow");
+    }
+  }
+
+  fail(error: Error): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#error = error;
+    this.#values.length = 0;
+    this.#waiting?.reject(error);
+    this.#waiting = undefined;
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#values.length = 0;
+    this.#waiting?.resolve({ done: true, value: undefined });
+    this.#waiting = undefined;
+  }
+
+  next(): Promise<IteratorResult<RegistryWatchEntry>> {
+    if (this.#error) return Promise.reject(this.#error);
+    if (this.#closed) {
+      return Promise.resolve({ done: true, value: undefined });
+    }
+    const value = this.#values.shift();
+    if (value) return Promise.resolve({ done: false, value });
+    return new Promise((resolve, reject) =>
+      this.#waiting = { resolve, reject }
+    );
+  }
+}
+
 /** Connected NATS KV reader for authorization evidence. */
 export class AuthorizationRegistryReader {
   readonly #nats: NatsConnection;
@@ -92,7 +144,7 @@ export class AuthorizationRegistryReader {
   /** Subscribe only to the active context's revocation key. */
   async watchRevocation(contextDigest: string): Promise<{
     iterator: AsyncIterator<RegistryWatchEntry>;
-    close: () => void;
+    close: () => Promise<void>;
   }> {
     assertRegistryKey(contextDigest, "authorization context digest");
     this.#watchStarts += 1;
@@ -118,85 +170,140 @@ export class AuthorizationRegistryReader {
       stream,
       name,
     );
-    const messages = await consumer.consume();
-    await this.#nats.flush();
-    const info = await consumer.info();
-    const initialBoundary = info.delivered.consumer_seq + info.num_pending;
-    const status = messages.status();
-    let statusError: Error | undefined;
-    const statusTask = (async () => {
-      for await (const event of status) {
-        if (
-          event.type === "heartbeats_missed" ||
-          event.type === "consumer_deleted" ||
-          event.type === "stream_not_found" ||
-          event.type === "consumer_not_found" ||
-          event.type === "no_responders" ||
-          event.type === "reset" ||
-          event.type === "ordered_consumer_recreated"
-        ) {
-          statusError = new Error(
-            `authorization revocation watch lost coverage: ${event.type}`,
-          );
-          messages.stop();
-          return;
-        }
+    const queue = new RegistryWatchQueue();
+    let receivedConsumerSequence = 0;
+    let lastStreamRevision = 0;
+    let initialBoundary: number | undefined;
+    let initialized = false;
+    let stopped = false;
+    const initialize = () => {
+      if (
+        !initialized && initialBoundary !== undefined &&
+        receivedConsumerSequence >= initialBoundary
+      ) {
+        initialized = true;
+        queue.push({ operation: "initialized" });
       }
-    })();
-    const entries = (async function* (): AsyncGenerator<RegistryWatchEntry> {
-      let delivered = 0;
-      let initialized = false;
-      let lastStreamRevision = 0;
-      const subject = filterSubject;
-      try {
-        if (initialBoundary === 0) {
-          initialized = true;
-          yield { operation: "initialized" };
-        }
-        for await (const message of messages) {
+    };
+    let stop = (error?: Error) => {
+      stopped = true;
+      if (error) queue.fail(error);
+      else queue.close();
+    };
+    const messages = await consumer.consume({
+      callback: (message) => {
+        try {
           const current = message.info.deliverySequence;
           const streamRevision = message.info.streamSequence;
           if (
-            message.subject !== subject || current !== delivered + 1 ||
+            message.subject !== filterSubject ||
+            current !== receivedConsumerSequence + 1 ||
             streamRevision <= lastStreamRevision
           ) {
             throw new Error("authorization revocation watch sequence gap");
           }
-          delivered = current;
+          receivedConsumerSequence = current;
           lastStreamRevision = streamRevision;
           const operation = message.headers?.has("KV-Operation")
             ? message.headers.get("KV-Operation")
             : "PUT";
           if (operation === "DEL" || operation === "PURGE") {
-            yield {
-              operation: "delete",
-              key,
-              revision: streamRevision,
-            };
+            queue.push({ operation: "delete", key, revision: streamRevision });
           } else if (operation === "PUT") {
-            yield {
+            queue.push({
               operation: "put",
               key,
               value: message.data,
               revision: streamRevision,
-            };
+            });
           } else {
             throw new Error("authorization revocation operation is invalid");
           }
-          if (!initialized && delivered >= initialBoundary) {
-            initialized = true;
-            yield { operation: "initialized" };
+          initialize();
+        } catch (error) {
+          stop(error instanceof Error ? error : new Error(String(error)));
+        }
+      },
+    });
+    stop = (error?: Error) => {
+      if (stopped) return;
+      stopped = true;
+      if (error) queue.fail(error);
+      else queue.close();
+      messages.stop(error);
+    };
+    const status = messages.status();
+    const statusTask = (async () => {
+      try {
+        for await (const event of status) {
+          if (
+            event.type === "heartbeat" &&
+            event.lastConsumerSequence > receivedConsumerSequence
+          ) {
+            stop(new Error("authorization revocation watch sequence gap"));
+            return;
+          }
+          if (
+            event.type === "heartbeats_missed" ||
+            event.type === "consumer_deleted" ||
+            event.type === "stream_not_found" ||
+            event.type === "consumer_not_found" ||
+            event.type === "no_responders" ||
+            event.type === "reset" ||
+            event.type === "ordered_consumer_recreated"
+          ) {
+            stop(
+              new Error(
+                `authorization revocation watch lost coverage: ${event.type}`,
+              ),
+            );
+            return;
           }
         }
-        throw statusError ?? new Error("authorization revocation watch ended");
+      } catch (error) {
+        stop(error instanceof Error ? error : new Error(String(error)));
       } finally {
-        await messages.close();
-        await statusTask;
+        if (!stopped) {
+          stop(new Error("authorization revocation watch status ended"));
+        }
       }
     })();
+    const settled = async () => {
+      await messages.closed();
+      await statusTask;
+    };
+    try {
+      await this.#nats.flush();
+      const info = await consumer.info();
+      initialBoundary = info.delivered.consumer_seq + info.num_pending;
+      initialize();
+    } catch (error) {
+      stop(error instanceof Error ? error : new Error(String(error)));
+      await settled();
+      throw error;
+    }
+    void messages.closed().then((error) => {
+      if (!stopped) {
+        stop(
+          error instanceof Error
+            ? error
+            : new Error("authorization revocation watch ended"),
+        );
+      }
+    });
     return {
-      iterator: entries,
-      close: () => messages.stop(),
+      iterator: {
+        next: () => queue.next(),
+        return: async () => {
+          stop();
+          await settled();
+          return { done: true, value: undefined };
+        },
+      },
+      close: async () => {
+        stop();
+        await settled();
+      },
     };
   }
 
