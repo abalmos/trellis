@@ -7,10 +7,12 @@ use crate::platform::auth::application::repository::{
 };
 use crate::platform::auth::{
     AuthorizationStateError, DeploymentProfileRecord, DeploymentProfileState,
-    IdempotencyResultRecord, LocalCredentialRecord, PostCommitActionKind, PostCommitActionRecord,
-    PrincipalKind, PrincipalRecord, PrincipalState, ProviderIdentityLink, SqliteAuthorizationStore,
+    GrantBindingReplacement, GrantBindingState, GrantOwnerKind, IdempotencyResultRecord,
+    LocalCredentialRecord, PostCommitActionKind, PostCommitActionRecord, PrincipalKind,
+    PrincipalRecord, PrincipalState, ProviderIdentityLink, SqliteAuthorizationStore,
     UserProfileRecord,
 };
+use trellis_protocol::{GrantSet, PlatformPrivilege};
 
 pub(super) async fn exercise_accounts(
     store: SqliteAuthorizationStore,
@@ -286,6 +288,25 @@ pub(super) async fn exercise_accounts(
         ]
     );
 
+    let mutation_actor = super::fixtures::install_login_mutation_actor(&store, NOW).await?;
+    store
+        .set_grant_binding(
+            GrantBindingReplacement {
+                owner_kind: GrantOwnerKind::User,
+                owner_id: managed_user.principal_id.clone(),
+                participant_id: mutation_actor.participant_id.clone(),
+                installed_revision: 1,
+                grants: GrantSet::new(Vec::new()),
+                platform_privileges: vec![PlatformPrivilege::Admin],
+                state: GrantBindingState::Active,
+                expires_at: None,
+                provenance: None,
+                expected_revision: 0,
+                expected_current_installed_revision: None,
+            },
+            proof(103, "target.admin"),
+        )
+        .await?;
     let account_update_action = action(100, "account.updated");
     let mut disabled_user = managed_user.clone();
     disabled_user.state = PrincipalState::Disabled;
@@ -296,10 +317,10 @@ pub(super) async fn exercise_accounts(
     updated_profile.updated_at = NOW + 5;
     updated_profile.version = 2;
     let account_update = UserAccountMutation {
+        actor: mutation_actor.clone(),
         principal: disabled_user,
         profile: updated_profile,
         expected_version: 1,
-        allow_admin_target: true,
         idempotency: proof(104, "account.update"),
         actions: vec![account_update_action.clone()],
     };
@@ -329,10 +350,10 @@ pub(super) async fn exercise_accounts(
     assert_eq!(
         store
             .update_user_account(UserAccountMutation {
+                actor: mutation_actor.clone(),
                 principal: disabled_user,
                 profile: rollback_profile,
                 expected_version: 2,
-                allow_admin_target: true,
                 idempotency: account_update_rollback_proof.clone(),
                 actions: vec![PostCommitActionRecord {
                     payload: json!({ "different": true }),
@@ -354,5 +375,19 @@ pub(super) async fn exercise_accounts(
         )
         .await?
         .is_none());
+    store
+        .revoke_grant_binding(
+            mutation_actor.clone(),
+            GrantOwnerKind::User,
+            mutation_actor.principal_id.clone(),
+            mutation_actor.participant_id.clone(),
+            1,
+            proof(107, "actor.revoke"),
+        )
+        .await?;
+    assert_eq!(
+        store.update_user_account(account_update).await,
+        Err(AuthorizationStateError::NotAuthorized)
+    );
     Ok(())
 }

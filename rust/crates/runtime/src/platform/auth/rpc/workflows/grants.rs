@@ -7,25 +7,12 @@ use trellis_runtime_apis::auth::types::{
 };
 
 use super::super::{
-    now_millis, require_admin, rpc_idempotency, AuthRpcProcessor, ValidatedRequest,
+    mutation_actor, now_millis, require_admin, rpc_idempotency, AuthRpcProcessor, ValidatedRequest,
 };
 use crate::platform::auth::domain::GrantBindingReplacement;
 use crate::platform::auth::{
-    AuthorizationStateError, GrantBindingState, GrantOwnerKind, MutationActor,
-    ParticipantBindingRecord,
+    AuthorizationStateError, GrantBindingState, GrantOwnerKind, ParticipantBindingRecord,
 };
-
-fn mutation_actor(caller: &ValidatedRequest) -> MutationActor {
-    MutationActor {
-        principal_id: caller.principal_id.clone(),
-        participant_id: caller.context.participant_id().to_owned(),
-        owner_kind: caller.context.owner_kind(),
-        owner_id: caller.context.owner_id().to_owned(),
-        grant_revision: caller.context.grant_revision(),
-        login_session_id: caller.context.login_session_id().map(str::to_owned),
-        session_public_key: caller.session_public_key.clone(),
-    }
-}
 
 pub(super) async fn dispatch(
     processor: &AuthRpcProcessor,
@@ -219,6 +206,7 @@ pub(super) async fn dispatch(
                         grants,
                         platform_privileges,
                         expected_revision: expected,
+                        expected_current_installed_revision: None,
                         state: GrantBindingState::Active,
                         expires_at: request.expires_at,
                         provenance: None,

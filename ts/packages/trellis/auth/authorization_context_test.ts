@@ -1,10 +1,10 @@
-import {
-  headers as natsHeaders,
-  type Msg,
-  type NatsConnection,
-  type Payload,
-  type Subscription,
+import type {
+  Msg,
+  NatsConnection,
+  Payload,
+  Subscription,
 } from "@nats-io/nats-core";
+import { headers as natsHeaders } from "@nats-io/nats-core";
 import { isErr } from "@qlever-llc/result";
 import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 
@@ -13,7 +13,10 @@ import vectors from "../../../../conformance/authorization-context/vectors.json"
 };
 import type { PermissionAtom as DescriptorPermissionAtom } from "../participant_runtime/api.ts";
 import { type VerifiedCaller, verifyLocalAuthorization } from "../session.ts";
-import { integrationTestResolvedContexts } from "./authorization/provider_cache.ts";
+import {
+  AuthorizationProviderUnavailableError,
+  integrationTestResolvedContexts,
+} from "./authorization/provider_cache.ts";
 import {
   type AuthorizationContextBundle,
   AuthorizationContextCache,
@@ -27,6 +30,7 @@ import {
 import type { PermissionAtom } from "./protocol_wasm.ts";
 import { createAuth } from "./session_auth.ts";
 import {
+  base64urlDecode,
   base64urlEncode,
   canonicalizeJsonValue,
   sha256,
@@ -148,13 +152,20 @@ function event(): AuthorizationProviderEvent {
   };
 }
 
-async function signedContext(connectionId: string): Promise<[string, string]> {
+async function signedContext(
+  connectionId: string,
+  issuerSeed = chain.issuerSeed,
+): Promise<[string, string]> {
   const context = JSON.parse(chain.contextCanonicalJson) as Record<
     string,
     unknown
   >;
   delete context.signature;
   context.connectionId = connectionId;
+  const issuer = await createAuth({ sessionKeySeed: issuerSeed });
+  context.issuerKeyId = base64urlEncode(
+    await sha256(base64urlDecode(issuer.sessionKey)),
+  );
   const domain = utf8("trellis.authorization-context.v1");
   const canonical = utf8(canonicalizeJsonValue(context));
   const input = new Uint8Array(8 + domain.length + canonical.length);
@@ -163,7 +174,6 @@ async function signedContext(connectionId: string): Promise<[string, string]> {
   input.set(domain, 4);
   view.setUint32(4 + domain.length, canonical.length);
   input.set(canonical, 8 + domain.length);
-  const issuer = await createAuth({ sessionKeySeed: chain.issuerSeed });
   const signed = {
     ...context,
     signature: base64urlEncode(await issuer.sign(await sha256(input))),
@@ -175,7 +185,13 @@ async function signedContext(connectionId: string): Promise<[string, string]> {
 type Registry = {
   contexts: Map<string, string>;
   revocations?: Map<string, number>;
+  deletedRevocations?: Set<string>;
   reads: string[];
+  contextReadBarrier?: Promise<void>;
+  watchUnavailable?: boolean;
+  watchCloses?: number;
+  deleteWatches?: () => void;
+  closeWatches?: () => void;
 };
 
 function providerNats(registry: Registry): NatsConnection {
@@ -261,6 +277,12 @@ function providerNats(registry: Registry): NatsConnection {
     return iterator as ReturnType<NatsConnection["status"]>;
   };
 
+  registry.closeWatches = () => {
+    for (const subscription of subscriptions.values()) {
+      subscription.unsubscribe();
+    }
+  };
+
   return {
     info: undefined,
     options: { inboxPrefix: "_INBOX.test" },
@@ -273,14 +295,43 @@ function providerNats(registry: Registry): NatsConnection {
       subject: string,
       options?: { callback?: (error: Error | null, message: Msg) => void },
     ) => {
+      if (
+        registry.watchUnavailable &&
+        subject.startsWith("$KV.contexts.revocation.")
+      ) {
+        throw new Error("watch unavailable");
+      }
       let closed = false;
+      const queued: Msg[] = [];
+      let wake = () => {};
       let resolveClosed = () => {};
       const closedPromise = new Promise<void>((resolve) =>
         resolveClosed = resolve
       );
+      const revocationWatch = subject.startsWith("$KV.contexts.revocation.");
+      if (revocationWatch) {
+        registry.deleteWatches = () => {
+          const headers = natsHeaders();
+          headers.set("KV-Operation", "DEL");
+          queued.push({
+            subject,
+            sid: 1,
+            data: new Uint8Array(),
+            headers,
+            respond: () => true,
+            json: <T>() => undefined as T,
+            string: () => "",
+          });
+          wake();
+        };
+      }
       const close = () => {
         if (closed) return;
         closed = true;
+        if (revocationWatch) {
+          registry.watchCloses = (registry.watchCloses ?? 0) + 1;
+        }
+        wake();
         resolveClosed();
       };
       const subscription: TestSubscription = {
@@ -303,7 +354,25 @@ function providerNats(registry: Registry): NatsConnection {
         getPending: () => 0,
         getID: () => 1,
         getMax: () => undefined,
-        [Symbol.asyncIterator]: async function* () {},
+        [Symbol.asyncIterator]: () => {
+          const iterator: AsyncIterableIterator<Msg> = {
+            next: async () => {
+              while (!closed && queued.length === 0) {
+                await new Promise<void>((resolve) => wake = resolve);
+              }
+              const value = queued.shift();
+              return value === undefined
+                ? { done: true, value: undefined }
+                : { done: false, value };
+            },
+            return: async () => {
+              close();
+              return { done: true, value: undefined };
+            },
+            [Symbol.asyncIterator]: () => iterator,
+          };
+          return iterator;
+        },
         deliver: (value) => options?.callback?.(null, value),
       };
       subscriptions.set(subject, subscription);
@@ -325,6 +394,21 @@ function providerNats(registry: Registry): NatsConnection {
           ? ""
           : subject.slice(marker + ".$KV.contexts.".length);
         registry.reads.push(key);
+        if (!key.startsWith("revocation.")) {
+          await registry.contextReadBarrier;
+        }
+        const deletedDigest = key.startsWith("revocation.")
+          ? key.slice("revocation.".length)
+          : undefined;
+        if (deletedDigest && registry.deletedRevocations?.has(deletedDigest)) {
+          const headers = natsHeaders();
+          headers.set("Nats-Stream", "KV_contexts");
+          headers.set("Nats-Sequence", String(++revision));
+          headers.set("Nats-Time-Stamp", new Date(0).toISOString());
+          headers.set("Nats-Subject", `$KV.contexts.${key}`);
+          headers.set("KV-Operation", "DEL");
+          return { ...response({}), data: new Uint8Array(), headers };
+        }
         const item = record(key);
         if (!item) {
           return { ...response({}), headers: natsHeaders(404, "No Messages") };
@@ -355,6 +439,9 @@ function providerNats(registry: Registry): NatsConnection {
           : noMessage();
       }
       if (subject.startsWith("$JS.API.CONSUMER.CREATE.")) {
+        if (registry.watchUnavailable) {
+          throw new Error("revocation registry unavailable");
+        }
         const body = JSON.parse(decoder.decode(payload as Uint8Array)) as {
           config: Record<string, unknown>;
         };
@@ -415,14 +502,18 @@ function providerNats(registry: Registry): NatsConnection {
   } as NatsConnection;
 }
 
-async function provider(registry: Registry) {
-  const installed = await installedCache(() => {
+async function provider(
+  registry: Registry,
+  issuerFetch: typeof globalThis.fetch = () => {
     throw new Error("unexpected issuer fetch");
-  });
+  },
+  installed?: AuthorizationContextCache,
+) {
+  const cache = installed ?? await installedCache(issuerFetch);
   const value = await AuthorizationProviderCache.attach(
     providerNats(registry),
-    installed.bundle().authorizationRegistry,
-    installed,
+    cache.bundle().authorizationRegistry,
+    cache,
     { now: () => policy.nowUnixSeconds },
   );
   value.start();
@@ -482,6 +573,7 @@ Deno.test("provider resolves a cold context once and reuses the verified hot ent
   } finally {
     value.stop();
   }
+  assertEquals(registry.watchCloses, 1);
 });
 
 Deno.test("provider reconnect resolves a fresh context and revocation watch", async () => {
@@ -496,6 +588,255 @@ Deno.test("provider reconnect resolves a fresh context and revocation watch", as
     value.observeConnectionPhase("connected");
     await value.resolveContext(chain.contextDigest);
     assertEquals(value.ioCounters().contextGets, 2);
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider coalesces one pending context resolution", async () => {
+  const registry: Registry = {
+    contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
+    reads: [],
+  };
+  const value = await provider(registry);
+  try {
+    await Promise.all(
+      Array.from(
+        { length: 16 },
+        () => value.resolveContext(chain.contextDigest),
+      ),
+    );
+    assertEquals(value.ioCounters().contextGets, 1);
+    assertEquals(value.ioCounters().contextVerifications, 1);
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider discards a pending resolution from an old connection generation", async () => {
+  let release = () => {};
+  const registry: Registry = {
+    contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
+    reads: [],
+    contextReadBarrier: new Promise<void>((resolve) => release = resolve),
+  };
+  const value = await provider(registry);
+  try {
+    const stale = value.resolveContext(chain.contextDigest);
+    while (!registry.reads.includes(chain.contextDigest)) {
+      await Promise.resolve();
+    }
+    value.observeConnectionPhase("disconnected");
+    value.observeConnectionPhase("connected");
+    release();
+    await assertRejects(
+      () => stale,
+      AuthorizationProviderUnavailableError,
+    );
+    registry.contextReadBarrier = undefined;
+    await value.resolveContext(chain.contextDigest);
+    assertEquals(value.ioCounters().contextGets, 2);
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider rejects a registry key whose signed context has another digest", async () => {
+  const [otherDigest, otherContext] = await signedContext("other-connection");
+  assert(otherDigest !== chain.contextDigest);
+  const value = await provider({
+    contexts: new Map([[chain.contextDigest, otherContext]]),
+    reads: [],
+  });
+  try {
+    const error = await value.verifyRequest(request());
+    assert(!error.ok);
+    assertEquals(error.error.code, "InvalidInput");
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider treats a missing context registry entry as unavailable", async () => {
+  const value = await provider({ contexts: new Map(), reads: [] });
+  try {
+    await assertRejects(
+      () => value.resolveContext(chain.contextDigest),
+      AuthorizationProviderUnavailableError,
+    );
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider rejects a malformed context digest before registry I/O", async () => {
+  const registry: Registry = { contexts: new Map(), reads: [] };
+  const value = await provider(registry);
+  try {
+    await assertRejects(
+      () => value.resolveContext("short"),
+      Error,
+      "authorization context digest is invalid",
+    );
+    assertEquals(registry.reads, []);
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider fails unavailable after watch loss and resynchronizes", async () => {
+  const registry: Registry = {
+    contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
+    reads: [],
+  };
+  const value = await provider(registry);
+  try {
+    await value.resolveContext(chain.contextDigest);
+    registry.watchUnavailable = true;
+    registry.closeWatches?.();
+    while (integrationTestResolvedContexts(value).length !== 0) {
+      await Promise.resolve();
+    }
+    await assertRejects(
+      () => value.resolveContext(chain.contextDigest),
+      AuthorizationProviderUnavailableError,
+    );
+    registry.watchUnavailable = false;
+    await value.resolveContext(chain.contextDigest);
+    assertEquals(value.ioCounters().contextGets, 2);
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider invalidates coverage when revocation evidence disappears", async () => {
+  const registry: Registry = {
+    contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
+    reads: [],
+  };
+  const value = await provider(registry);
+  try {
+    await value.resolveContext(chain.contextDigest);
+    registry.watchUnavailable = true;
+    registry.deleteWatches?.();
+    while (integrationTestResolvedContexts(value).length !== 0) {
+      await Promise.resolve();
+    }
+    await assertRejects(
+      () => value.resolveContext(chain.contextDigest),
+      AuthorizationProviderUnavailableError,
+    );
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider treats an existing revocation tombstone as unavailable", async () => {
+  const value = await provider({
+    contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
+    deletedRevocations: new Set([chain.contextDigest]),
+    reads: [],
+  });
+  try {
+    await assertRejects(
+      () => value.resolveContext(chain.contextDigest),
+      AuthorizationProviderUnavailableError,
+    );
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider treats a non-positive revocation time as unavailable", async () => {
+  const value = await provider({
+    contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
+    revocations: new Map([[chain.contextDigest, 0]]),
+    reads: [],
+  });
+  try {
+    await assertRejects(
+      () => value.resolveContext(chain.contextDigest),
+      AuthorizationProviderUnavailableError,
+    );
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider retries a temporary issuer outage without poisoning the digest", async () => {
+  const issuerSeed = base64urlEncode(new Uint8Array(32).fill(3));
+  const issuerAuth = await createAuth({ sessionKeySeed: issuerSeed });
+  const issuerKeyId = base64urlEncode(
+    await sha256(base64urlDecode(issuerAuth.sessionKey)),
+  );
+  const [contextDigest, context] = await signedContext(
+    "foreign-issuer",
+    issuerSeed,
+  );
+  let fetches = 0;
+  const value = await provider(
+    { contexts: new Map([[contextDigest, context]]), reads: [] },
+    () => {
+      fetches += 1;
+      if (fetches === 1) return Promise.reject(new Error("issuer offline"));
+      if (fetches === 2) {
+        return Promise.resolve(new Response(null, { status: 404 }));
+      }
+      if (fetches === 3) return Promise.resolve(new Response("{"));
+      if (fetches === 4) {
+        return Promise.resolve(Response.json({
+          keyId: "A".repeat(43),
+          publicKey: issuerAuth.sessionKey,
+          state: "active",
+        }));
+      }
+      return Promise.resolve(Response.json({
+        keyId: issuerKeyId,
+        publicKey: issuerAuth.sessionKey,
+        state: "active",
+      }));
+    },
+  );
+  try {
+    await assertRejects(
+      () => value.resolveContext(contextDigest),
+      AuthorizationProviderUnavailableError,
+    );
+    await assertRejects(
+      () => value.resolveContext(contextDigest),
+      AuthorizationProviderUnavailableError,
+    );
+    await assertRejects(
+      () => value.resolveContext(contextDigest),
+      AuthorizationProviderUnavailableError,
+    );
+    await assertRejects(
+      () => value.resolveContext(contextDigest),
+      AuthorizationProviderUnavailableError,
+    );
+    await value.resolveContext(contextDigest);
+    assertEquals(fetches, 5);
+  } finally {
+    value.stop();
+  }
+});
+
+Deno.test("provider treats a missing local verification policy as unavailable", async () => {
+  const installed = await installedCache();
+  const value = await provider(
+    {
+      contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
+      reads: [],
+    },
+    undefined,
+    installed,
+  );
+  try {
+    await installed.clear();
+    await assertRejects(
+      () => value.verifyEvent(event()),
+      AuthorizationProviderUnavailableError,
+    );
   } finally {
     value.stop();
   }
@@ -593,15 +934,29 @@ Deno.test("provider LRU stays at 256 entries and evicts the oldest context", asy
     const [digest, context] = await signedContext(`connection-${index}`);
     contexts.set(digest, context);
   }
-  const value = await provider({ contexts, reads: [] });
+  let release = () => {};
+  const registry: Registry = {
+    contexts,
+    reads: [],
+    contextReadBarrier: new Promise<void>((resolve) => release = resolve),
+  };
+  const value = await provider(registry);
   try {
-    for (const digest of contexts.keys()) {
-      await value.resolveContext(digest);
-    }
     const digests = [...contexts.keys()];
     const first = digests[0];
     const last = digests.at(-1);
     assert(first && last);
+    const pending = digests.slice(0, 256).map((digest) =>
+      value.resolveContext(digest)
+    );
+    await assertRejects(
+      () => value.resolveContext(last),
+      AuthorizationProviderUnavailableError,
+    );
+    release();
+    await Promise.all(pending);
+    registry.contextReadBarrier = undefined;
+    await value.resolveContext(last);
     const resolved = integrationTestResolvedContexts(value).map((entry) =>
       entry.contextDigest
     );

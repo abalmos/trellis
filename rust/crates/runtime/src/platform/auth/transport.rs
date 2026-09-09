@@ -62,7 +62,6 @@ pub(crate) fn compile_transport_permissions(
     // participant resources. Issuer keys are resolved over the configured HTTPS origin.
     publish.insert("$JS.API.INFO".to_owned());
     let context_stream = format!("KV_{}", registry.context_bucket);
-    publish.insert(format!("$JS.API.STREAM.INFO.{context_stream}"));
     publish.insert(format!("$JS.FC.{context_stream}.>"));
     publish.insert(format!(
         "$JS.API.DIRECT.GET.{context_stream}.$KV.{}.*",
@@ -72,11 +71,7 @@ pub(crate) fn compile_transport_permissions(
         "$JS.API.DIRECT.GET.{context_stream}.$KV.{}.revocation.*",
         registry.context_bucket
     ));
-    publish.insert(format!(
-        "$JS.API.CONSUMER.CREATE.{context_stream}.*.$KV.{}.revocation.*",
-        registry.context_bucket
-    ));
-    publish.insert(format!("$JS.API.CONSUMER.INFO.{context_stream}.*"));
+    subscribe.insert(format!("$KV.{}.revocation.*", registry.context_bucket));
     if matches!(
         context.principal_kind,
         AuthorizationPrincipalKind::Service | AuthorizationPrincipalKind::Device

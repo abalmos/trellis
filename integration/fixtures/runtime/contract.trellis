@@ -52,6 +52,20 @@ participant "test.denied" app {
     use optional runtime "test.runtime@v1" { call rpc "Echo"; }
 }
 
+api "test.admin-service@v1" {
+    version "1.0.0";
+    display_name "Native administrator acceptance";
+    description "Native administrative mutation fixture.";
+}
+
+participant "test.admin-service" service {
+    implements "test.admin-service@v1";
+    use required auth "trellis.auth@v1" {
+        call rpc "Auth.Grants.Get";
+        call rpc "Auth.Grants.Revoke";
+    }
+}
+
 api "test.events@v1" {
     version "1.0.0";
     display_name "Durable event acceptance";

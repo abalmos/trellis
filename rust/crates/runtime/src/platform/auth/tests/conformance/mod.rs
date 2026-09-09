@@ -1,5 +1,5 @@
 mod accounts;
-mod fixtures;
+pub(crate) mod fixtures;
 mod portals;
 
 use crate::platform::auth::SqliteAuthorizationStore;

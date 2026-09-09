@@ -10,3 +10,7 @@ output = "packages/runtime-trellis"
 [apis."trellis.state@v1"]
 version = "^1.0"
 path = "../../../rust/crates/runtime"
+
+[apis."trellis.auth@v1"]
+version = "^1.0"
+path = "../../../rust/crates/runtime"

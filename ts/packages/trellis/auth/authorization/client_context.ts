@@ -85,6 +85,15 @@ export class AuthorizationContextCache {
     return structuredClone(this.#bundle);
   }
 
+  /** Return the current compact verifier policy without cloning the context bundle. */
+  verificationPolicy(nowUnixSeconds = this.correctedNowSeconds()) {
+    if (!this.#bundle) throw new Error("no authorization context is installed");
+    return authorizationContextVerificationPolicy(
+      this.#bundle.policy,
+      nowUnixSeconds,
+    );
+  }
+
   shouldRefresh(nowUnixSeconds = this.correctedNowSeconds()): boolean {
     this.current(nowUnixSeconds);
     return nowUnixSeconds >= this.routingRefreshAt();

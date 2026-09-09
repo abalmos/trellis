@@ -533,17 +533,16 @@ impl AuthorizationProviderCache {
         })?;
         let mut policy = self.policy()?;
         if value.len() > policy.maximum_context_bytes {
-            return Err(TrellisClientError::Bootstrap(
+            return Err(TrellisClientError::AuthorizationUnavailable(
                 "authorization context exceeds size limit".into(),
             ));
         }
-        let json = serde_json::from_slice(&value)?;
-        let signed = parse_authorization_context(&json)
-            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        if signed
-            .digest()
-            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?
-            != digest
+        let signed = parse_registry_context(&value)?;
+        if signed.digest().map_err(|error| {
+            TrellisClientError::AuthorizationUnavailable(format!(
+                "authorization context registry entry is malformed: {error}"
+            ))
+        })? != digest
         {
             return Err(TrellisClientError::Bootstrap(
                 "authorization context digest does not match its registry key".into(),
@@ -813,6 +812,19 @@ fn classify_event_resolution_failure(
     }
 }
 
+fn parse_registry_context(value: &[u8]) -> Result<SignedAuthorizationContext, TrellisClientError> {
+    let json = serde_json::from_slice(value).map_err(|error| {
+        TrellisClientError::AuthorizationUnavailable(format!(
+            "authorization context registry entry is malformed: {error}"
+        ))
+    })?;
+    parse_authorization_context(&json).map_err(|error| {
+        TrellisClientError::AuthorizationUnavailable(format!(
+            "authorization context registry entry is malformed: {error}"
+        ))
+    })
+}
+
 fn parse_revocation_record(value: &[u8]) -> Result<i64, TrellisClientError> {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -932,6 +944,16 @@ mod wire_tests {
             classify_event_resolution_failure(validate_digest_key("invalid").unwrap_err()),
             crate::service::EventVerificationFailure::Rejected(_)
         ));
+    }
+
+    #[test]
+    fn malformed_registry_context_is_unavailable() {
+        for value in [br#"{"#.as_slice(), br#"{}"#.as_slice()] {
+            assert!(matches!(
+                parse_registry_context(value),
+                Err(TrellisClientError::AuthorizationUnavailable(_))
+            ));
+        }
     }
 
     #[tokio::test]

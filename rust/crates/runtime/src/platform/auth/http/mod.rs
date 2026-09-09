@@ -23,7 +23,6 @@ use openidconnect::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
-use trellis_protocol::PlatformPrivilege;
 use trellis_protocol::{
     parse_session_proof, session_proof_request_digest, verify_session_proof, GrantSet,
     NativeBootstrapSessionProofInput, SessionProofInput, SessionProofPolicy,

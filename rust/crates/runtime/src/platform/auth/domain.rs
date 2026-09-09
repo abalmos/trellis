@@ -18,6 +18,7 @@ pub use trellis_protocol::GrantOwnerKind;
 
 #[derive(Clone, Debug)]
 pub(crate) struct MutationActor {
+    pub context_digest: String,
     pub principal_id: String,
     pub participant_id: String,
     pub owner_kind: GrantOwnerKind,
@@ -94,6 +95,7 @@ pub(crate) struct GrantBindingReplacement {
     pub expires_at: Option<i64>,
     pub provenance: Option<PortalGrantProvenance>,
     pub expected_revision: u64,
+    pub expected_current_installed_revision: Option<u64>,
 }
 
 impl GrantBinding {

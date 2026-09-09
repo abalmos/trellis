@@ -286,11 +286,12 @@ export async function verifyLocalAuthorization(
       result = await args.cache.verifyEvent(event);
     }
   } catch (error) {
-    if (
-      args.kind === "event" &&
-      error instanceof AuthorizationProviderUnavailableError
-    ) {
-      return err(new EventVerificationAuthError(true));
+    if (error instanceof AuthorizationProviderUnavailableError) {
+      return err(
+        args.kind === "event"
+          ? new EventVerificationAuthError(true)
+          : new AuthError({ reason: "authorization_unavailable" }),
+      );
     }
     return err(new AuthError({ reason: "invalid_signature" }));
   }

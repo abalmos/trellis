@@ -1129,3 +1129,546 @@ pub(in crate::platform::auth) fn load_activation_review(
     .optional()
     .map_err(sql_error)
 }
+
+#[cfg(test)]
+mod tests {
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    use ed25519_dalek::SigningKey;
+    use serde_json::json;
+    use sha2::{Digest as _, Sha256};
+    use trellis_protocol::{
+        canonicalize_json, sign_authorization_context, AuthorizationPrincipalKind, GrantOwnerKind,
+        GrantSet, ParticipantKind, UnsignedAuthorizationContext, AUTHORIZATION_CONTEXT_FORMAT_V1,
+    };
+
+    use super::*;
+    use crate::platform::auth::{
+        authority::AuthorityEvidenceRepository,
+        builtins,
+        context::{AuthorizationContextRepository, AuthorizationContextState},
+        DeploymentRecord, IdempotencyResultRecord, ProvisionedIdentityState,
+    };
+
+    const NOW: i64 = 1_800_000_000_000;
+
+    fn idempotency(request_id: &str) -> IdempotencyResultRecord {
+        IdempotencyResultRecord {
+            scope_key: URL_SAFE_NO_PAD.encode(Sha256::digest(request_id.as_bytes())),
+            purpose: "provisioning-regression".to_owned(),
+            signer_id: "test-signer".to_owned(),
+            request_id: request_id.to_owned(),
+            request_digest: URL_SAFE_NO_PAD.encode(Sha256::digest(request_id.as_bytes())),
+            result: json!({ "requestId": request_id }),
+            created_at: NOW,
+            expires_at: NOW + 60_000,
+        }
+    }
+
+    #[tokio::test]
+    async fn revoking_one_service_instance_preserves_its_history_and_its_sibling() {
+        let store = SqliteAuthorizationStore::open_in_memory().expect("open sqlite auth store");
+        let participant = builtins::auth_runtime_participant_binding(NOW)
+            .expect("build service participant evidence");
+        let participant_id = participant.participant_id.clone();
+        store
+            .put_participant_binding(participant)
+            .await
+            .expect("install service participant evidence");
+        let deployment_id = ulid::Ulid::new().to_string();
+        let first_principal_id = ulid::Ulid::new().to_string();
+        let first_instance_id = ulid::Ulid::new().to_string();
+        let second_principal_id = ulid::Ulid::new().to_string();
+        let second_instance_id = ulid::Ulid::new().to_string();
+        store
+            .run({
+                let deployment_id = deployment_id.clone();
+                let participant_id = participant_id.clone();
+                move |connection| {
+                    super::super::evidence::put_sql_deployment_evidence(
+                        connection,
+                        DeploymentRecord {
+                            deployment_id,
+                            participant_id: participant_id.clone(),
+                            participant_kind: ParticipantKind::Service,
+                            active: true,
+                            expires_at: None,
+                        },
+                    )
+                }
+            })
+            .await
+            .expect("install deployment evidence");
+
+        let signing_key = SigningKey::from_bytes(&[7; 32]);
+        let identity_public_key = URL_SAFE_NO_PAD.encode(signing_key.verifying_key().as_bytes());
+        let identity_key_id =
+            URL_SAFE_NO_PAD.encode(Sha256::digest(signing_key.verifying_key().as_bytes()));
+        let first = ServiceIdentityProvisioning {
+            principal: PrincipalRecord {
+                principal_id: first_principal_id.clone(),
+                kind: PrincipalKind::Service,
+                state: PrincipalState::Active,
+                created_at: NOW,
+                updated_at: NOW,
+                version: 1,
+                disabled_at: None,
+                revoked_at: None,
+            },
+            instance: RuntimeInstanceRecord {
+                instance_id: first_instance_id.clone(),
+                deployment_id: deployment_id.clone(),
+                principal_id: first_principal_id.clone(),
+                state: RuntimeInstanceState::Active,
+                created_at: NOW,
+                updated_at: NOW,
+                version: 1,
+            },
+            identity: ProvisionedIdentityRecord {
+                identity_key_id,
+                identity_public_key,
+                principal_id: first_principal_id.clone(),
+                deployment_id: deployment_id.clone(),
+                instance_id: first_instance_id.clone(),
+                kind: ProvisionedIdentityKind::Service,
+                state: ProvisionedIdentityState::Active,
+                created_at: NOW,
+                revoked_at: None,
+            },
+            idempotency: idempotency("provision-first"),
+            actions: Vec::new(),
+        };
+        let second_key = SigningKey::from_bytes(&[8; 32]);
+        let second_public_key = URL_SAFE_NO_PAD.encode(second_key.verifying_key().as_bytes());
+        let second = ServiceIdentityProvisioning {
+            principal: PrincipalRecord {
+                principal_id: second_principal_id.clone(),
+                ..first.principal.clone()
+            },
+            instance: RuntimeInstanceRecord {
+                instance_id: second_instance_id.clone(),
+                principal_id: second_principal_id.clone(),
+                ..first.instance.clone()
+            },
+            identity: ProvisionedIdentityRecord {
+                identity_key_id: URL_SAFE_NO_PAD
+                    .encode(Sha256::digest(second_key.verifying_key().as_bytes())),
+                identity_public_key: second_public_key,
+                principal_id: second_principal_id.clone(),
+                instance_id: second_instance_id.clone(),
+                ..first.identity.clone()
+            },
+            idempotency: idempotency("provision-second"),
+            actions: Vec::new(),
+        };
+        store
+            .provision_service_identity(first.clone())
+            .await
+            .expect("provision first service");
+        store
+            .provision_service_identity(second.clone())
+            .await
+            .expect("provision second service");
+
+        for (byte, service) in [(1_u8, &first), (2, &second)] {
+            let context_key = SigningKey::from_bytes(&[byte; 32]);
+            let public_key = URL_SAFE_NO_PAD.encode(context_key.verifying_key().as_bytes());
+            let connection_id = ulid::Ulid::new().to_string();
+            let unsigned = UnsignedAuthorizationContext {
+                format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
+                issuer_key_id: URL_SAFE_NO_PAD
+                    .encode(Sha256::digest(context_key.verifying_key().as_bytes())),
+                connection_id: connection_id.clone(),
+                session_key: public_key.clone(),
+                principal_id: service.principal.principal_id.clone(),
+                principal_kind: AuthorizationPrincipalKind::Service,
+                participant_id: participant_id.clone(),
+                owner_kind: GrantOwnerKind::Deployment,
+                owner_id: deployment_id.clone(),
+                grant_revision: 1,
+                identity_key_id: Some(service.identity.identity_key_id.clone()),
+                login_session_id: None,
+                deployment_id: Some(deployment_id.clone()),
+                instance_id: Some(service.instance.instance_id.clone()),
+                inbox_prefix: format!("_INBOX.{connection_id}"),
+                issued_at: NOW / 1_000,
+                not_before: NOW / 1_000,
+                expires_at: NOW / 1_000 + 3_600,
+                grants: GrantSet::new(Vec::new()),
+                platform_privileges: Vec::new(),
+                extensions: serde_json::Map::new(),
+                critical: Vec::new(),
+            };
+            let signed = sign_authorization_context(unsigned.clone(), &context_key)
+                .expect("sign authorization context");
+            let digest = signed.digest().expect("digest authorization context");
+            let signed_json = canonicalize_json(
+                &serde_json::to_value(signed).expect("serialize authorization context"),
+            )
+            .expect("canonicalize authorization context");
+            store
+                .run(move |connection| {
+                    connection.execute(
+                        "INSERT INTO auth_authorization_contexts (
+                            context_digest, connection_id, session_public_key, inbox_prefix, principal_id,
+                            principal_kind, participant_id, owner_kind, owner_id, grant_revision,
+                            installed_revision, identity_key_id, login_session_id, issuer_key_id,
+                            signed_context_json, issuance_snapshot_token, issued_at, not_before, refresh_at,
+                            expires_at, state, published_at, revoked_at, revocation_reason, version
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, 'service', ?6, 'deployment', ?7, 1, 1,
+                            ?8, NULL, ?9, ?10, ?11, ?12, ?12, ?12, ?13, 'active', ?12, NULL, NULL, 1)",
+                        params![digest, connection_id, public_key, unsigned.inbox_prefix,
+                            unsigned.principal_id, unsigned.participant_id, unsigned.owner_id,
+                            unsigned.identity_key_id, unsigned.issuer_key_id, signed_json,
+                            URL_SAFE_NO_PAD.encode([byte; 32]), unsigned.issued_at, unsigned.expires_at],
+                    ).map_err(sql_error)?;
+                    Ok(())
+                })
+                .await
+                .expect("retain authorization context");
+        }
+
+        let mut revoked_instance = first.instance.clone();
+        revoked_instance.state = RuntimeInstanceState::Revoked;
+        revoked_instance.updated_at = NOW + 1_000;
+        revoked_instance.version = 2;
+        let mut revoked_identity = first.identity.clone();
+        revoked_identity.state = ProvisionedIdentityState::Revoked;
+        revoked_identity.revoked_at = Some(NOW + 1_000);
+        assert!(matches!(
+            store
+                .mutate_provisioned_instance(ProvisionedInstanceMutation {
+                    instance: revoked_instance.clone(),
+                    device: None,
+                    identity: Some(revoked_identity.clone()),
+                    expected_version: 1,
+                    idempotency: idempotency("revoke-first"),
+                    actions: Vec::new(),
+                })
+                .await
+                .expect("revoke first service"),
+            IdempotentOutcome::Applied(value) if value == revoked_instance
+        ));
+
+        assert_eq!(
+            store
+                .get_runtime_instance(&first_instance_id)
+                .await
+                .expect("read first instance"),
+            Some(revoked_instance)
+        );
+        assert_eq!(
+            store
+                .get_provisioned_identity(&first.identity.identity_key_id)
+                .await
+                .expect("read first identity"),
+            Some(revoked_identity)
+        );
+        assert_eq!(
+            store
+                .get_runtime_instance(&second_instance_id)
+                .await
+                .expect("read second instance"),
+            Some(second.instance.clone())
+        );
+        assert_eq!(
+            store
+                .get_provisioned_identity(&second.identity.identity_key_id)
+                .await
+                .expect("read second identity"),
+            Some(second.identity.clone())
+        );
+
+        let contexts = store
+            .list_contexts(None, 10)
+            .await
+            .expect("list retained contexts");
+        let first_context = contexts
+            .iter()
+            .find(|context| context.principal_id == first_principal_id)
+            .expect("first context remains in history");
+        assert_eq!(first_context.state, AuthorizationContextState::Revoked);
+        assert_eq!(first_context.revoked_at, Some((NOW + 1_000) / 1_000));
+        assert_eq!(
+            first_context.revocation_reason,
+            Some(AuthorizationContextRevocationReason::InstanceChanged)
+        );
+        assert_eq!(
+            contexts
+                .iter()
+                .find(|context| context.principal_id == second_principal_id)
+                .expect("second context remains in history")
+                .state,
+            AuthorizationContextState::Active
+        );
+    }
+
+    #[tokio::test]
+    async fn disabling_one_device_instance_preserves_its_history_and_its_sibling() {
+        let store = SqliteAuthorizationStore::open_in_memory().expect("open sqlite auth store");
+        let deployment_id = ulid::Ulid::new().to_string();
+        let participant =
+            builtins::auth_runtime_participant_binding(NOW).expect("build participant evidence");
+        let participant_id = participant.participant_id.clone();
+        store
+            .put_participant_binding(participant)
+            .await
+            .expect("install participant evidence");
+        store
+            .run({
+                let deployment_id = deployment_id.clone();
+                let participant_id = participant_id.clone();
+                move |connection| {
+                    super::super::evidence::put_sql_deployment_evidence(
+                        connection,
+                        DeploymentRecord {
+                            deployment_id,
+                            participant_id,
+                            participant_kind: ParticipantKind::Device,
+                            active: true,
+                            expires_at: None,
+                        },
+                    )
+                }
+            })
+            .await
+            .expect("install device deployment evidence");
+
+        let mut devices = Vec::new();
+        for byte in [11_u8, 12] {
+            let principal_id = ulid::Ulid::new().to_string();
+            let instance_id = ulid::Ulid::new().to_string();
+            let identity_key = SigningKey::from_bytes(&[byte; 32]);
+            let identity_public_key =
+                URL_SAFE_NO_PAD.encode(identity_key.verifying_key().as_bytes());
+            let identity_key_id =
+                URL_SAFE_NO_PAD.encode(Sha256::digest(identity_key.verifying_key().as_bytes()));
+            let principal = PrincipalRecord {
+                principal_id: principal_id.clone(),
+                kind: PrincipalKind::Device,
+                state: PrincipalState::Active,
+                created_at: NOW,
+                updated_at: NOW,
+                version: 1,
+                disabled_at: None,
+                revoked_at: None,
+            };
+            let instance = RuntimeInstanceRecord {
+                instance_id,
+                deployment_id: deployment_id.clone(),
+                principal_id: principal_id.clone(),
+                state: RuntimeInstanceState::Active,
+                created_at: NOW,
+                updated_at: NOW,
+                version: 1,
+            };
+            let device = DeviceRecord {
+                principal_id: principal_id.clone(),
+                deployment_id: deployment_id.clone(),
+                state: DeviceState::Pending,
+                created_at: NOW,
+                updated_at: NOW,
+                version: 1,
+            };
+            let identity = ProvisionedIdentityRecord {
+                identity_key_id,
+                identity_public_key,
+                principal_id,
+                deployment_id: deployment_id.clone(),
+                instance_id: instance.instance_id.clone(),
+                kind: ProvisionedIdentityKind::Device,
+                state: ProvisionedIdentityState::Active,
+                created_at: NOW,
+                revoked_at: None,
+            };
+            let request_id = ulid::Ulid::new().to_string();
+            store
+                .provision_device(DeviceProvisioning {
+                    principal,
+                    instance: instance.clone(),
+                    device: device.clone(),
+                    identity: Some(identity.clone()),
+                    secret: DeviceProvisioningSecretRecord {
+                        secret_id: ulid::Ulid::new().to_string(),
+                        instance_id: instance.instance_id.clone(),
+                        secret_hash: URL_SAFE_NO_PAD.encode(Sha256::digest([byte])),
+                        state: ProvisioningSecretState::Consumed,
+                        created_at: NOW,
+                        expires_at: NOW + 60_000,
+                        consumed_at: Some(NOW),
+                        version: 1,
+                    },
+                    idempotency: idempotency(&request_id),
+                    actions: Vec::new(),
+                })
+                .await
+                .expect("provision device");
+
+            let active_instance = RuntimeInstanceRecord {
+                updated_at: NOW + 1_000,
+                version: 2,
+                ..instance
+            };
+            let active_device = DeviceRecord {
+                state: DeviceState::Active,
+                updated_at: NOW + 1_000,
+                version: 2,
+                ..device
+            };
+            let request_id = ulid::Ulid::new().to_string();
+            store
+                .mutate_provisioned_instance(ProvisionedInstanceMutation {
+                    instance: active_instance.clone(),
+                    device: Some(active_device.clone()),
+                    identity: Some(identity.clone()),
+                    expected_version: 1,
+                    idempotency: idempotency(&request_id),
+                    actions: Vec::new(),
+                })
+                .await
+                .expect("activate device");
+            devices.push((active_instance, active_device, identity));
+        }
+
+        for (byte, (instance, device, identity)) in [21_u8, 22].into_iter().zip(&devices) {
+            let context_key = SigningKey::from_bytes(&[byte; 32]);
+            let public_key = URL_SAFE_NO_PAD.encode(context_key.verifying_key().as_bytes());
+            let connection_id = ulid::Ulid::new().to_string();
+            let unsigned = UnsignedAuthorizationContext {
+                format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
+                issuer_key_id: URL_SAFE_NO_PAD
+                    .encode(Sha256::digest(context_key.verifying_key().as_bytes())),
+                connection_id: connection_id.clone(),
+                session_key: public_key.clone(),
+                principal_id: device.principal_id.clone(),
+                principal_kind: AuthorizationPrincipalKind::Device,
+                participant_id: participant_id.clone(),
+                owner_kind: GrantOwnerKind::Deployment,
+                owner_id: deployment_id.clone(),
+                grant_revision: 1,
+                identity_key_id: Some(identity.identity_key_id.clone()),
+                login_session_id: None,
+                deployment_id: Some(deployment_id.clone()),
+                instance_id: Some(instance.instance_id.clone()),
+                inbox_prefix: format!("_INBOX.{connection_id}"),
+                issued_at: NOW / 1_000,
+                not_before: NOW / 1_000,
+                expires_at: NOW / 1_000 + 3_600,
+                grants: GrantSet::new(Vec::new()),
+                platform_privileges: Vec::new(),
+                extensions: serde_json::Map::new(),
+                critical: Vec::new(),
+            };
+            let signed = sign_authorization_context(unsigned.clone(), &context_key)
+                .expect("sign device authorization context");
+            let digest = signed
+                .digest()
+                .expect("digest device authorization context");
+            let signed_json = canonicalize_json(
+                &serde_json::to_value(signed).expect("serialize device authorization context"),
+            )
+            .expect("canonicalize device authorization context");
+            store
+                .run(move |connection| {
+                    connection.execute(
+                        "INSERT INTO auth_authorization_contexts (
+                            context_digest, connection_id, session_public_key, inbox_prefix, principal_id,
+                            principal_kind, participant_id, owner_kind, owner_id, grant_revision,
+                            installed_revision, identity_key_id, login_session_id, issuer_key_id,
+                            signed_context_json, issuance_snapshot_token, issued_at, not_before, refresh_at,
+                            expires_at, state, published_at, revoked_at, revocation_reason, version
+                         ) VALUES (?1, ?2, ?3, ?4, ?5, 'device', ?6, 'deployment', ?7, 1, 1,
+                            ?8, NULL, ?9, ?10, ?11, ?12, ?12, ?12, ?13, 'active', ?12, NULL, NULL, 1)",
+                        params![digest, connection_id, public_key, unsigned.inbox_prefix,
+                            unsigned.principal_id, unsigned.participant_id, unsigned.owner_id,
+                            unsigned.identity_key_id, unsigned.issuer_key_id, signed_json,
+                            URL_SAFE_NO_PAD.encode([byte; 32]), unsigned.issued_at, unsigned.expires_at],
+                    ).map_err(sql_error)?;
+                    Ok(())
+                })
+                .await
+                .expect("retain device authorization context");
+        }
+
+        let (first_instance, first_device, first_identity) = &devices[0];
+        let disabled_instance = RuntimeInstanceRecord {
+            state: RuntimeInstanceState::Disabled,
+            updated_at: NOW + 2_000,
+            version: 3,
+            ..first_instance.clone()
+        };
+        let disabled_device = DeviceRecord {
+            state: DeviceState::Disabled,
+            updated_at: NOW + 2_000,
+            version: 3,
+            ..first_device.clone()
+        };
+        let request_id = ulid::Ulid::new().to_string();
+        assert!(matches!(
+            store
+                .mutate_provisioned_instance(ProvisionedInstanceMutation {
+                    instance: disabled_instance.clone(),
+                    device: Some(disabled_device.clone()),
+                    identity: Some(first_identity.clone()),
+                    expected_version: 2,
+                    idempotency: idempotency(&request_id),
+                    actions: Vec::new(),
+                })
+                .await
+                .expect("disable first device"),
+            IdempotentOutcome::Applied(value) if value == disabled_instance
+        ));
+
+        assert_eq!(
+            store
+                .get_device(&first_device.principal_id, &deployment_id)
+                .await
+                .expect("read disabled device"),
+            Some(disabled_device)
+        );
+        let (second_instance, second_device, second_identity) = &devices[1];
+        assert_eq!(
+            store
+                .get_runtime_instance(&second_instance.instance_id)
+                .await
+                .expect("read sibling instance"),
+            Some(second_instance.clone())
+        );
+        assert_eq!(
+            store
+                .get_device(&second_device.principal_id, &deployment_id)
+                .await
+                .expect("read sibling device"),
+            Some(second_device.clone())
+        );
+        assert_eq!(
+            store
+                .get_provisioned_identity(&second_identity.identity_key_id)
+                .await
+                .expect("read sibling identity"),
+            Some(second_identity.clone())
+        );
+
+        let contexts = store
+            .list_contexts(None, 10)
+            .await
+            .expect("list retained device contexts");
+        let disabled_context = contexts
+            .iter()
+            .find(|context| context.principal_id == first_device.principal_id)
+            .expect("disabled device context remains in history");
+        assert_eq!(disabled_context.state, AuthorizationContextState::Revoked);
+        assert_eq!(disabled_context.revoked_at, Some((NOW + 2_000) / 1_000));
+        assert_eq!(
+            disabled_context.revocation_reason,
+            Some(AuthorizationContextRevocationReason::InstanceChanged)
+        );
+        assert_eq!(
+            contexts
+                .iter()
+                .find(|context| context.principal_id == second_device.principal_id)
+                .expect("sibling device context remains in history")
+                .state,
+            AuthorizationContextState::Active
+        );
+    }
+}

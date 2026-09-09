@@ -550,6 +550,7 @@ async fn ensure_auth_event_session(
                     grants,
                     platform_privileges: Vec::new(),
                     expected_revision,
+                    expected_current_installed_revision: None,
                     state: auth::GrantBindingState::Active,
                     expires_at: None,
                     provenance: None,

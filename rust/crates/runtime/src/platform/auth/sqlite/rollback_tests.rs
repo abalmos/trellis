@@ -60,10 +60,17 @@ async fn user_update_rolls_back_when_real_outbox_constraint_fails() {
         })
         .await
         .expect("create user account");
+    let actor = crate::platform::auth::tests::conformance::fixtures::install_login_mutation_actor(
+        &repository,
+        NOW,
+    )
+    .await
+    .expect("install mutation actor");
 
     let update_idempotency = idempotency('C', "account.update", "update-user", 'D');
     let error = repository
         .update_user_account(UserAccountMutation {
+            actor,
             principal: PrincipalRecord {
                 updated_at: NOW + 1,
                 version: 2,
@@ -77,7 +84,6 @@ async fn user_update_rolls_back_when_real_outbox_constraint_fails() {
                 ..profile.clone()
             },
             expected_version: 1,
-            allow_admin_target: true,
             idempotency: update_idempotency.clone(),
             actions: vec![PostCommitActionRecord {
                 predecessor_action_id: None,

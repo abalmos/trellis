@@ -5,9 +5,9 @@ use super::super::{
     AccountFlowKind, AccountFlowRecord, AuthorizationStateError, DeploymentProfileRecord,
     DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceDelegationRecord,
     DeviceProvisioningSecretRecord, DeviceRecord, GrantBindingReplacement, IdempotencyResultRecord,
-    LocalCredentialRecord, LoginPortalRecord, LoginSettingsRecord, PortalRouteRecord,
-    PostCommitActionRecord, PrincipalRecord, ProviderIdentityLink, ProvisionedIdentityRecord,
-    RuntimeInstanceRecord, SessionRecord, UserProfileRecord,
+    LocalCredentialRecord, LoginPortalRecord, LoginSettingsRecord, MutationActor,
+    PortalRouteRecord, PostCommitActionRecord, PrincipalRecord, ProviderIdentityLink,
+    ProvisionedIdentityRecord, RuntimeInstanceRecord, SessionRecord, UserProfileRecord,
 };
 
 /// Atomic deployment-profile creation.
@@ -344,14 +344,14 @@ pub(crate) struct AccountCreation {
 /// Atomic user principal and profile replacement.
 #[derive(Clone, Debug)]
 pub(crate) struct UserAccountMutation {
+    /// Verified caller state to recheck in the write transaction.
+    pub actor: MutationActor,
     /// Complete replacement principal.
     pub principal: PrincipalRecord,
     /// Complete replacement profile.
     pub profile: UserProfileRecord,
     /// Expected current version shared by the principal and profile.
     pub expected_version: u64,
-    /// Whether the caller may mutate a principal with accepted administrator authority.
-    pub allow_admin_target: bool,
     /// Durable proof claim and replay result.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.

@@ -10,10 +10,12 @@ use trellis_runtime_apis::auth::types::{
     AuthGrantsListRequestOwnerKind, AuthGrantsListRequestState,
 };
 
+use super::super::authority::{IssuanceConnection, IssuanceCredential};
 use super::super::context::{
-    revoke_sql_contexts, AuthorizationContextRevocationReason, AuthorizationContextSelector,
+    load_sql_context_by_digest, revoke_sql_contexts, AuthorizationContextRevocationReason,
+    AuthorizationContextSelector, AuthorizationContextState,
 };
-use super::super::domain::GrantBindingReplacement;
+use super::super::domain::{require_protocol_timestamp, GrantBindingReplacement};
 use super::super::{
     AuthorizationStateError, GrantBinding, GrantBindingState, GrantOwnerKind,
     IdempotencyResultRecord, MutationActor, ParticipantBindingRecord, PostCommitActionKind,
@@ -26,51 +28,60 @@ pub(super) fn require_current_actor(
     require_admin: bool,
     now: i64,
 ) -> Result<(), AuthorizationStateError> {
-    let principal = super::principals::load_principal(connection, &actor.principal_id)?
-        .ok_or(AuthorizationStateError::PrincipalMissing)?;
-    if principal.state != super::super::PrincipalState::Active {
-        return Err(AuthorizationStateError::PrincipalInactive);
-    }
-    let binding = load_grant_binding(
-        connection,
-        actor.owner_kind,
-        &actor.owner_id,
-        &actor.participant_id,
-    )?
-    .ok_or(AuthorizationStateError::NotAuthorized)?;
-    if binding.state != GrantBindingState::Active
-        || binding.revision != actor.grant_revision
-        || binding
-            .expires_at
-            .is_some_and(|expires_at| expires_at <= now)
-        || (require_admin
-            && !binding
-                .platform_privileges
-                .contains(&PlatformPrivilege::Admin))
+    require_protocol_timestamp("now", now)?;
+    let context = load_sql_context_by_digest(connection, &actor.context_digest)?
+        .ok_or(AuthorizationStateError::NotAuthorized)?;
+    let now_seconds = now.div_euclid(1_000);
+    if context.state != AuthorizationContextState::Active
+        || context.revoked_at.is_some()
+        || context.not_before > now_seconds
+        || context.expires_at <= now_seconds
+        || context.principal_id != actor.principal_id
+        || context.participant_id != actor.participant_id
+        || context.owner_kind != actor.owner_kind
+        || context.owner_id != actor.owner_id
+        || context.grant_revision != actor.grant_revision
+        || context.login_session_id != actor.login_session_id
+        || context.session_public_key != actor.session_public_key
     {
         return Err(AuthorizationStateError::NotAuthorized);
     }
-    let login_session_id = actor
-        .login_session_id
-        .as_ref()
-        .ok_or(AuthorizationStateError::NotAuthorized)?;
-    let session: Option<(String, String, String, Option<i64>)> = connection
-        .query_row(
-            "SELECT principal_id, session_public_key, state, expires_at
-             FROM auth_sessions WHERE session_id = ?1 AND participant_id = ?2",
-            params![login_session_id, actor.participant_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )
-        .optional()
-        .map_err(sql_error)?;
-    if !matches!(
-        session,
-        Some((principal_id, session_public_key, state, expires_at))
-            if principal_id == actor.principal_id
-                && session_public_key == actor.session_public_key
-                && state == "active"
-                && expires_at.is_none_or(|expires_at| expires_at > now)
-    ) {
+    let credential = match (&context.login_session_id, &context.identity_key_id) {
+        (Some(login_session_id), None) => IssuanceCredential::Login(login_session_id.clone()),
+        (None, Some(identity_key_id)) => IssuanceCredential::Native(identity_key_id.clone()),
+        _ => return Err(AuthorizationStateError::NotAuthorized),
+    };
+    let mut snapshot = super::contexts::sqlite_issuance_snapshot(
+        connection,
+        &IssuanceConnection {
+            credential,
+            connection_id: context.connection_id.clone(),
+            session_public_key: context.session_public_key.clone(),
+        },
+    )?;
+    snapshot.issuer = super::contexts::load_eligible_authorization_issuer(
+        connection,
+        &context.issuer_key_id,
+        now,
+    )?;
+    let current = super::super::issuance::resolve_snapshot(snapshot, now)?;
+    if current.principal_id != context.principal_id
+        || current.binding.owner_kind != context.owner_kind
+        || current.binding.owner_id != context.owner_id
+        || current.participant.participant_id != context.participant_id
+        || current.binding.revision != context.grant_revision
+        || current.binding.installed_revision != context.installed_revision
+        || current.session_public_key != context.session_public_key
+        || current.login_session_id != context.login_session_id
+    {
+        return Err(AuthorizationStateError::NotAuthorized);
+    }
+    if require_admin
+        && !current
+            .binding
+            .platform_privileges
+            .contains(&PlatformPrivilege::Admin)
+    {
         return Err(AuthorizationStateError::NotAuthorized);
     }
     Ok(())
@@ -336,6 +347,24 @@ pub(in crate::platform::auth) fn replace_grant_binding(
             current: revision,
         });
     }
+    if let Some(expected) = replacement.expected_current_installed_revision {
+        let current_installed_revision = connection
+            .query_row(
+                "SELECT revision FROM auth_installed_participants
+                 WHERE participant_id = ?1 ORDER BY revision DESC LIMIT 1",
+                [&replacement.participant_id],
+                |row| row.get::<_, u64>(0),
+            )
+            .optional()
+            .map_err(sql_error)?
+            .unwrap_or(0);
+        if current_installed_revision != expected {
+            return Err(AuthorizationStateError::RevisionConflict {
+                expected,
+                current: current_installed_revision,
+            });
+        }
+    }
     let (installed_revision, participant) = load_installed_participant(
         connection,
         &replacement.participant_id,
@@ -357,23 +386,6 @@ pub(in crate::platform::auth) fn replace_grant_binding(
         updated_at: current.as_ref().map_or(now, |binding| binding.updated_at),
     };
     binding.validate()?;
-    let resolved = participant.resolve()?;
-    let allowed = resolved
-        .proposal()
-        .required()
-        .grant_set()
-        .permissions()
-        .iter()
-        .chain(resolved.proposal().optional().grant_set().permissions())
-        .collect::<Vec<_>>();
-    if binding
-        .grants
-        .permissions()
-        .iter()
-        .any(|permission| !allowed.iter().any(|allowed| *allowed == permission))
-    {
-        return Err(AuthorizationStateError::NotAuthorized);
-    }
     match binding.owner_kind {
         GrantOwnerKind::Deployment => {
             let deployment = load_deployment(connection, &binding.owner_id)?
@@ -793,6 +805,7 @@ impl SqliteAuthorizationStore {
                 grants,
                 platform_privileges: current.as_ref().map_or_else(Vec::new, |binding| binding.platform_privileges.clone()),
                 expected_revision,
+                expected_current_installed_revision: None,
                 state: GrantBindingState::Active,
                 expires_at: current.as_ref().and_then(|binding| binding.expires_at),
                 provenance: None,
@@ -925,6 +938,7 @@ impl SqliteAuthorizationStore {
                     expires_at: binding.expires_at,
                     provenance: binding.provenance,
                     expected_revision,
+                    expected_current_installed_revision: None,
                 },
                 idempotency.created_at,
             )?;
@@ -1057,8 +1071,9 @@ impl super::super::GrantRepository for SqliteAuthorizationStore {
                     platform_privileges: Vec::new(),
                     state: GrantBindingState::Revoked,
                     expires_at: binding.expires_at,
-                    provenance: None,
+                    provenance: binding.provenance,
                     expected_revision,
+                    expected_current_installed_revision: None,
                 },
                 idempotency.created_at,
             )?;

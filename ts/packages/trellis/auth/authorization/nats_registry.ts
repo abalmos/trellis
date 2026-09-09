@@ -1,10 +1,8 @@
 import { type DirectStreamAPI, jetstreamManager } from "@nats-io/jetstream";
-import { type KV, Kvm, type KvWatchEntry } from "@nats-io/kv";
 import type { NatsConnection } from "@nats-io/nats-core";
 
 import type { AuthorizationRegistryBinding } from "./types.ts";
 
-const MAX_REGISTRY_KEY_BYTES = 256;
 const REVOCATION_PREFIX = "revocation.";
 
 /** Registry I/O counters observed since provider-cache start. */
@@ -21,9 +19,14 @@ export type RegistryEntry = {
   operation: string;
 };
 
+/** One exact revocation-key update observed after subscription flush. */
+export type RegistryWatchEntry =
+  | { operation: "put"; key: string; value: Uint8Array; revision: number }
+  | { operation: "delete"; key: string; revision: number };
+
 /** Connected NATS KV reader for authorization evidence. */
 export class AuthorizationRegistryReader {
-  readonly #contexts: KV;
+  readonly #nats: NatsConnection;
   readonly #direct: DirectStreamAPI;
   readonly #binding: AuthorizationRegistryBinding;
   #contextGets = 0;
@@ -32,11 +35,11 @@ export class AuthorizationRegistryReader {
   #watchStarts = 0;
 
   private constructor(
-    contexts: KV,
+    nats: NatsConnection,
     direct: DirectStreamAPI,
     binding: AuthorizationRegistryBinding,
   ) {
-    this.#contexts = contexts;
+    this.#nats = nats;
     this.#direct = direct;
     this.#binding = binding;
   }
@@ -47,11 +50,9 @@ export class AuthorizationRegistryReader {
     binding: AuthorizationRegistryBinding,
   ): Promise<AuthorizationRegistryReader> {
     validateBinding(binding);
-    const kvm = new Kvm(nats);
-    const contexts = await kvm.open(binding.contextBucket);
     const manager = await jetstreamManager(nats);
     return new AuthorizationRegistryReader(
-      contexts,
+      nats,
       manager.direct,
       binding,
     );
@@ -89,17 +90,52 @@ export class AuthorizationRegistryReader {
 
   /** Subscribe only to the active context's revocation key. */
   async watchRevocation(contextDigest: string): Promise<{
-    iterator: AsyncIterator<KvWatchEntry>;
-    initialPending: number;
+    iterator: AsyncIterator<RegistryWatchEntry>;
+    close: () => void;
   }> {
+    assertRegistryKey(contextDigest, "authorization context digest");
     this.#watchStarts += 1;
     this.#revocationWatchInitializations += 1;
-    const watcher = await this.#contexts.watch({
-      key: `${REVOCATION_PREFIX}${contextDigest}`,
-    });
+    const key = `${REVOCATION_PREFIX}${contextDigest}`;
+    const subscription = this.#nats.subscribe(
+      `$KV.${this.#binding.contextBucket}.${key}`,
+    );
+    try {
+      await this.#nats.flush();
+    } catch (error) {
+      subscription.unsubscribe();
+      throw error;
+    }
+    const reader = this;
+    const entries = (async function* (): AsyncGenerator<RegistryWatchEntry> {
+      try {
+        for await (const message of subscription) {
+          const operation = message.headers?.get("KV-Operation") || "PUT";
+          if (operation !== "PUT") {
+            yield { operation: "delete", key, revision: 0 };
+            continue;
+          }
+          reader.#revocationGets += 1;
+          const entry = await reader.#putOrNull(
+            reader.#binding.contextBucket,
+            key,
+          );
+          if (entry) {
+            yield {
+              operation: "put",
+              key,
+              value: entry.value,
+              revision: entry.revision,
+            };
+          }
+        }
+      } finally {
+        subscription.unsubscribe();
+      }
+    })();
     return {
-      iterator: watcher[Symbol.asyncIterator](),
-      initialPending: watcher.getPending(),
+      iterator: entries,
+      close: () => subscription.unsubscribe(),
     };
   }
 
@@ -118,25 +154,11 @@ export class AuthorizationRegistryReader {
     }
     if (!entry) return null;
     const operation = entry.header?.get("KV-Operation") || "PUT";
-    return operation === "PUT"
-      ? { value: entry.data, revision: entry.seq, operation }
-      : null;
+    if (operation !== "PUT") {
+      throw new Error("authorization registry evidence disappeared");
+    }
+    return { value: entry.data, revision: entry.seq, operation };
   }
-}
-
-/** Map a KV watch entry to a PUT or delete operation. */
-export function registryWatchEntry(entry: KvWatchEntry):
-  | { operation: "put"; key: string; value: Uint8Array; revision: number }
-  | { operation: "delete"; key: string; revision: number } {
-  if (entry.operation === "PUT") {
-    return {
-      operation: "put",
-      key: entry.key,
-      value: new Uint8Array(entry.value),
-      revision: entry.revision,
-    };
-  }
-  return { operation: "delete", key: entry.key, revision: entry.revision };
 }
 
 function validateBinding(binding: AuthorizationRegistryBinding): void {
@@ -158,6 +180,5 @@ function assertRegistryKey(value: string, name: string): void {
 }
 
 function isRegistryKey(value: string): boolean {
-  return value.length > 0 && value.length <= MAX_REGISTRY_KEY_BYTES &&
-    /^[A-Za-z0-9_-]+$/.test(value);
+  return value.length === 43 && /^[A-Za-z0-9_-]+$/.test(value);
 }

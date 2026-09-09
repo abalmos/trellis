@@ -9,6 +9,7 @@ pub(crate) use issuer::{AuthorizationContextIssueRequest, AuthorizationContextSe
 pub(crate) use registry::{
     AuthorizationContextBundle, AuthorizationContextRegistry, AuthorizationRegistryBinding,
 };
+pub(in crate::platform::auth) use repository::load_sql_context_by_digest;
 pub(crate) use repository::{
     revoke_sql_contexts, AuthorizationContextCommit, AuthorizationContextRecord,
     AuthorizationContextRepository, AuthorizationContextRevocationReason,

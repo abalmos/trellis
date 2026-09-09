@@ -71,6 +71,19 @@ struct ValidatedRequest {
     platform_privileges: Vec<trellis_protocol::PlatformPrivilege>,
 }
 
+fn mutation_actor(caller: &ValidatedRequest) -> super::MutationActor {
+    super::MutationActor {
+        context_digest: caller.context.context_digest().to_owned(),
+        principal_id: caller.principal_id.clone(),
+        participant_id: caller.context.participant_id().to_owned(),
+        owner_kind: caller.context.owner_kind(),
+        owner_id: caller.context.owner_id().to_owned(),
+        grant_revision: caller.context.grant_revision(),
+        login_session_id: caller.context.login_session_id().map(str::to_owned),
+        session_public_key: caller.session_public_key.clone(),
+    }
+}
+
 impl AuthRpcRuntime {
     pub(crate) async fn start(
         processor: AuthRpcProcessor,
@@ -2607,13 +2620,13 @@ impl AuthRpcProcessor {
         let outcome = self
             .service
             .update_user(UpdateUserInput {
+                actor: mutation_actor(validated),
                 principal_id: principal_id.to_owned(),
                 expected_version,
                 name: nullable_string(&input, "name")?,
                 email: nullable_string(&input, "email")?,
                 image: nullable_string(&input, "image")?,
                 state,
-                allow_admin_target: caller_is_admin(validated),
                 updated_at: now,
                 idempotency: rpc_idempotency(
                     "Auth.Users.Update",

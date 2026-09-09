@@ -115,23 +115,23 @@ impl AccountRepository for SqliteAuthorizationStore {
     {
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
-            if let Some(result) = sqlite_idempotency_replay(&transaction, &command.idempotency)? {
-                return Ok(IdempotentOutcome::Replayed(result));
-            }
             let current_principal = load_principal(&transaction, &command.principal.principal_id)?
                 .ok_or(AuthorizationStateError::PrincipalMissing)?;
             let current_profile = load_user_profile(&transaction, &command.principal.principal_id)?
                 .ok_or(AuthorizationStateError::StorageConflict)?;
-            if !command.allow_admin_target
-                && principal_has_accepted_admin_authority(
-                    &transaction,
-                    &command.principal.principal_id,
-                    command.principal.updated_at,
-                )?
-            {
-                return Err(AuthorizationStateError::InvalidRecord(
-                    "trellis.auth::admin capability is required".to_owned(),
-                ));
+            let target_is_admin = principal_has_accepted_admin_authority(
+                &transaction,
+                &command.principal.principal_id,
+                command.principal.updated_at,
+            )?;
+            super::grants::require_current_actor(
+                &transaction,
+                &command.actor,
+                target_is_admin,
+                command.principal.updated_at,
+            )?;
+            if let Some(result) = sqlite_idempotency_replay(&transaction, &command.idempotency)? {
+                return Ok(IdempotentOutcome::Replayed(result));
             }
             let (principal, profile) = user_account_replacement(
                 &current_principal,

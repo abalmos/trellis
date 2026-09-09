@@ -150,6 +150,41 @@ pub(in crate::platform::auth) fn sqlite_issuance_snapshot(
     })
 }
 
+pub(in crate::platform::auth) fn load_eligible_authorization_issuer(
+    connection: &Connection,
+    key_id: &str,
+    now_ms: i64,
+) -> Result<trellis_protocol::AuthorizationIssuerKey, AuthorizationStateError> {
+    let issuer = connection
+        .query_row(
+            "SELECT public_key, is_current, live_until_seconds, revoked_at FROM auth_authorization_issuers WHERE key_id = ?1",
+            [key_id],
+            |row| {
+                let state = if row.get::<_, Option<i64>>(3)?.is_some() {
+                    trellis_protocol::AuthorizationIssuerState::Revoked
+                } else if row.get::<_, bool>(1)?
+                    || row.get::<_, i64>(2)? >= now_ms.div_euclid(1_000)
+                {
+                    trellis_protocol::AuthorizationIssuerState::Active
+                } else {
+                    trellis_protocol::AuthorizationIssuerState::Retired
+                };
+                Ok(trellis_protocol::AuthorizationIssuerKey {
+                    key_id: key_id.to_owned(),
+                    public_key: row.get(0)?,
+                    state,
+                })
+            },
+        )
+        .optional()
+        .map_err(sql_error)?
+        .ok_or(AuthorizationStateError::IssuerMissing)?;
+    issuer
+        .verifying_key()
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    Ok(issuer)
+}
+
 pub(in crate::platform::auth) fn load_resource_bindings(
     connection: &Connection,
     owner_kind: super::super::GrantOwnerKind,

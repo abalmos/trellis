@@ -134,6 +134,7 @@ where
                 grants: grant_set,
                 platform_privileges,
                 expected_revision: flow.target_grant_revision,
+                expected_current_installed_revision: Some(flow.installed_revision),
                 state: GrantBindingState::Active,
                 expires_at: None,
                 provenance: None,
@@ -288,13 +289,6 @@ where
                 "effectivePolicyDigest": selection.effective_policy_digest,
             }))
             .map_err(|_| HttpError::internal("portal_policy_digest"))?;
-            let platform_privileges = selection
-                .capabilities
-                .iter()
-                .filter_map(|capability| {
-                    (capability == "trellis.auth::admin").then_some(PlatformPrivilege::Admin)
-                })
-                .collect();
             let result = state
                 .service
                 .repository()
@@ -305,8 +299,9 @@ where
                         participant_id: flow.participant_id.clone(),
                         installed_revision: flow.installed_revision,
                         grants: selection.grant_set,
-                        platform_privileges,
+                        platform_privileges: selection.platform_privileges,
                         expected_revision: flow.target_grant_revision,
+                        expected_current_installed_revision: Some(flow.installed_revision),
                         state: GrantBindingState::Active,
                         expires_at: None,
                         provenance: Some(PortalGrantProvenance {
@@ -514,10 +509,230 @@ fn automatic_approval_allowed(require_explicit_approval: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::platform::auth::{builtins, sqlite::SqliteAuthorizationStore};
+    use trellis_protocol::PlatformPrivilege;
+
     #[test]
     fn administrator_account_continuation_requires_explicit_approval() {
         assert!(!super::automatic_approval_allowed(true));
         assert!(super::automatic_approval_allowed(false));
+    }
+
+    #[tokio::test]
+    async fn approval_is_fenced_by_installed_and_grant_revisions(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let store = SqliteAuthorizationStore::open_in_memory()?;
+        let now = 1_700_000_000_000;
+        let actor =
+            crate::platform::auth::tests::conformance::fixtures::install_login_mutation_actor(
+                &store, now,
+            )
+            .await?;
+        let principal_id = actor.principal_id.clone();
+        let participant_v1 = builtins::console_participant_binding(now)?;
+        let participant_id = participant_v1.participant_id.clone();
+        assert_eq!(
+            store
+                .put_participant_binding(participant_v1.clone())
+                .await?,
+            1
+        );
+        let consent = browser_consent(&participant_v1).expect("built-in consent is valid");
+        let (grants, _, _) =
+            select_browser_authority(&consent, &[]).expect("required authority is valid");
+        let approval = GrantBindingReplacement {
+            owner_kind: GrantOwnerKind::User,
+            owner_id: principal_id.clone(),
+            participant_id: participant_id.clone(),
+            installed_revision: 1,
+            grants: grants.clone(),
+            platform_privileges: Vec::new(),
+            state: GrantBindingState::Active,
+            expires_at: None,
+            provenance: None,
+            expected_revision: 0,
+            expected_current_installed_revision: Some(1),
+        };
+        let approval_idempotency = idempotency(
+            "flow-r1",
+            "browser.grant.accept",
+            "browser-signer",
+            "flow-r1",
+            &digest_parts(&["approval-r1"]),
+            now,
+        )
+        .expect("test idempotency is valid");
+        let approved = store
+            .set_grant_binding(approval.clone(), approval_idempotency.clone())
+            .await?;
+        assert_eq!(
+            store
+                .set_grant_binding(approval, approval_idempotency)
+                .await?,
+            approved
+        );
+        assert_eq!(
+            store.list_ready_post_commit_actions(now, 10).await?.len(),
+            1
+        );
+
+        let mut participant_value: Value = serde_json::from_str(&participant_v1.participant_json)?;
+        participant_value["displayName"] = json!("Trellis Console R2");
+        let participant = trellis_protocol::parse_participant(&participant_value)?;
+        let mut participant_v2 = participant_v1;
+        participant_v2.artifact_digest = participant.digest()?;
+        participant_v2.participant_json = participant.canonical_json()?;
+        participant_v2.resolved_at = now + 1;
+        assert_eq!(store.put_participant_binding(participant_v2).await?, 2);
+
+        let stale_approval = GrantBindingReplacement {
+            owner_kind: GrantOwnerKind::User,
+            owner_id: principal_id.clone(),
+            participant_id: participant_id.clone(),
+            installed_revision: 1,
+            grants: grants.clone(),
+            platform_privileges: Vec::new(),
+            state: GrantBindingState::Active,
+            expires_at: None,
+            provenance: None,
+            expected_revision: 1,
+            expected_current_installed_revision: Some(1),
+        };
+        assert_eq!(
+            store
+                .set_grant_binding(
+                    stale_approval,
+                    idempotency(
+                        "flow-stale-install",
+                        "browser.grant.accept",
+                        "browser-signer",
+                        "flow-stale-install",
+                        &digest_parts(&["approval-stale-install"]),
+                        now + 2,
+                    )
+                    .expect("test idempotency is valid"),
+                )
+                .await,
+            Err(AuthorizationStateError::RevisionConflict {
+                expected: 1,
+                current: 2,
+            })
+        );
+        let unchanged = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                principal_id.clone(),
+                participant_id.clone(),
+            )
+            .await?
+            .unwrap();
+        assert_eq!(unchanged.revision, 1);
+        assert_eq!(unchanged.installed_revision, 1);
+        assert_eq!(unchanged.grants, grants);
+        assert_eq!(
+            store
+                .list_ready_post_commit_actions(now + 2, 10)
+                .await?
+                .len(),
+            1
+        );
+
+        let fresh_approval = GrantBindingReplacement {
+            owner_kind: GrantOwnerKind::User,
+            owner_id: principal_id.clone(),
+            participant_id: participant_id.clone(),
+            installed_revision: 2,
+            grants: grants.clone(),
+            platform_privileges: Vec::new(),
+            state: GrantBindingState::Active,
+            expires_at: None,
+            provenance: None,
+            expected_revision: 1,
+            expected_current_installed_revision: Some(2),
+        };
+        store
+            .set_grant_binding(
+                fresh_approval,
+                idempotency(
+                    "flow-r2",
+                    "browser.grant.accept",
+                    "browser-signer",
+                    "flow-r2",
+                    &digest_parts(&["approval-r2"]),
+                    now + 3,
+                )
+                .expect("test idempotency is valid"),
+            )
+            .await?;
+
+        store
+            .admin_set_grant_binding(
+                actor,
+                GrantBindingReplacement {
+                    owner_kind: GrantOwnerKind::User,
+                    owner_id: principal_id.clone(),
+                    participant_id: participant_id.clone(),
+                    installed_revision: 2,
+                    grants: grants.clone(),
+                    platform_privileges: vec![PlatformPrivilege::Admin],
+                    state: GrantBindingState::Active,
+                    expires_at: None,
+                    provenance: None,
+                    expected_revision: 2,
+                    expected_current_installed_revision: None,
+                },
+                idempotency(
+                    "admin-replacement",
+                    "Auth.Grants.Set",
+                    "admin-signer",
+                    "admin-replacement",
+                    &digest_parts(&["admin-replacement"]),
+                    now + 4,
+                )
+                .expect("test idempotency is valid"),
+            )
+            .await?;
+        assert!(matches!(
+            store
+                .set_grant_binding(
+                    GrantBindingReplacement {
+                        owner_kind: GrantOwnerKind::User,
+                        owner_id: principal_id,
+                        participant_id,
+                        installed_revision: 2,
+                        grants,
+                        platform_privileges: Vec::new(),
+                        state: GrantBindingState::Active,
+                        expires_at: None,
+                        provenance: None,
+                        expected_revision: 2,
+                        expected_current_installed_revision: Some(2),
+                    },
+                    idempotency(
+                        "flow-stale-binding",
+                        "browser.grant.accept",
+                        "browser-signer",
+                        "flow-stale-binding",
+                        &digest_parts(&["approval-stale-binding"]),
+                        now + 5,
+                    )
+                    .expect("test idempotency is valid"),
+                )
+                .await,
+            Err(AuthorizationStateError::RevisionConflict {
+                expected: 2,
+                current: 3,
+            })
+        ));
+        assert_eq!(
+            store
+                .list_ready_post_commit_actions(now + 5, 10)
+                .await?
+                .len(),
+            3
+        );
+        Ok(())
     }
 }
 

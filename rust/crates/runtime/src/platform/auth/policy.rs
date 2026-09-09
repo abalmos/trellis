@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use trellis_protocol::GrantSet;
+use trellis_protocol::{GrantSet, PlatformPrivilege};
 
 use super::{
     ephemeral::BrowserConsentProposal, AuthorizationStateError, CapabilityGroupRecord,
@@ -177,6 +177,7 @@ pub(crate) struct ProviderLoginAttributes {
 pub(crate) struct PortalAuthoritySelection {
     pub grant_set: GrantSet,
     pub capabilities: Vec<String>,
+    pub platform_privileges: Vec<PlatformPrivilege>,
     pub effective_policy_digest: String,
 }
 
@@ -252,6 +253,10 @@ pub(crate) fn resolve_portal_authority_selection(
     Ok(PortalAuthoritySelection {
         grant_set,
         capabilities,
+        platform_privileges: admin_marker_selected
+            .then_some(PlatformPrivilege::Admin)
+            .into_iter()
+            .collect(),
         effective_policy_digest,
     })
 }

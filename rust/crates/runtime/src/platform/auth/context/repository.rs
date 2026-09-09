@@ -507,7 +507,7 @@ fn insert_sql_context(
     Ok(())
 }
 
-fn load_sql_context_by_digest(
+pub(in crate::platform::auth) fn load_sql_context_by_digest(
     connection: &rusqlite::Connection,
     context_digest: &str,
 ) -> Result<Option<AuthorizationContextRecord>, AuthorizationStateError> {
@@ -609,7 +609,7 @@ pub(crate) fn revoke_sql_contexts(
         AuthorizationContextSelector::Instance(id) => query_sql_contexts(
             connection,
             "state != 'revoked' AND principal_id IN (
-                SELECT principal_id FROM auth_runtime_instances WHERE instance_id = ?1
+                SELECT principal_id FROM auth_instances WHERE instance_id = ?1
              ) ORDER BY context_digest",
             &[id],
         )?,

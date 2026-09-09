@@ -238,6 +238,20 @@ where
         batch: Arc<PortalPolicyBatch>,
         _materialize_immediately: bool,
     ) -> Result<(), AuthorizationStateError> {
+        if current.state == GrantBindingState::Revoked {
+            return Ok(());
+        }
+        let Some(current_provenance) = current.provenance.as_ref() else {
+            return Ok(());
+        };
+        if binding.grant_revision != current.revision
+            || current_provenance.portal_id != binding.portal_id
+            || current_provenance.provider_id != binding.provider_id
+            || current_provenance.roles != binding.roles
+            || current_provenance.effective_policy_digest != binding.effective_policy_digest
+        {
+            return Ok(());
+        }
         let provider_allowed = super::policy::portal_allows_authenticated_provider(
             &batch.portal,
             &batch.settings,
@@ -296,9 +310,22 @@ where
                 roles: binding.roles.clone(),
                 effective_policy_digest: selection.effective_policy_digest.clone(),
             };
-            if current.state == GrantBindingState::Active
-                && current.grants == selection.grant_set
-                && current.platform_privileges.is_empty()
+            let grants = trellis_protocol::GrantSet::new(
+                selection
+                    .grant_set
+                    .permissions()
+                    .iter()
+                    .filter(|permission| current.grants.permissions().contains(permission))
+                    .cloned()
+                    .collect(),
+            );
+            let platform_privileges = selection
+                .platform_privileges
+                .into_iter()
+                .filter(|privilege| current.platform_privileges.contains(privilege))
+                .collect::<Vec<_>>();
+            if current.grants == grants
+                && current.platform_privileges == platform_privileges
                 && current.provenance.as_ref() == Some(&provenance)
             {
                 return Ok(());
@@ -319,12 +346,13 @@ where
                         owner_id: binding.principal_id,
                         participant_id: binding.participant_id,
                         installed_revision: current.installed_revision,
-                        grants: selection.grant_set,
-                        platform_privileges: Vec::new(),
+                        grants,
+                        platform_privileges,
                         state: GrantBindingState::Active,
                         expires_at: current.expires_at,
                         provenance: Some(provenance),
                         expected_revision: current.revision,
+                        expected_current_installed_revision: None,
                     },
                     batch.snapshot.clone(),
                     idempotency("portal.policy.replace", &request_digest, &request, now)?,
@@ -335,10 +363,15 @@ where
         if matches!(
             result,
             Err(AuthorizationStateError::StorageConflict
-                | AuthorizationStateError::PortalPolicyChanged)
+                | AuthorizationStateError::PortalPolicyChanged
+                | AuthorizationStateError::RevisionConflict { .. })
         ) {
             tokio::time::sleep(Duration::from_millis(100)).await;
             self.handle.notify_portal(&retry_portal_id).await;
+            return Ok(());
+        }
+        if result == Err(AuthorizationStateError::NotAuthorized) {
+            // The protected bootstrap administrator cannot be demoted by policy.
             return Ok(());
         }
         result?;
@@ -364,4 +397,358 @@ fn idempotency(
         created_at: now,
         expires_at: now.saturating_add(86_400_000),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::auth::application::repository::{
+        AccountCreation, LoginPortalMutation, PortalRepository,
+    };
+    use crate::platform::auth::{
+        builtins, AuthServiceConfig, GrantBindingReplacement, LocalCredentialRecord, PrincipalKind,
+        PrincipalRecord, PrincipalState, SqliteAuthorizationStore, UserProfileRecord,
+    };
+    use serde_json::json;
+    use trellis_protocol::PlatformPrivilege;
+
+    #[tokio::test]
+    async fn reconciliation_only_narrows_matching_portal_authority() {
+        const NOW: i64 = 1_700_000_000_000;
+        let proof = |purpose: &str| IdempotencyResultRecord {
+            scope_key: trellis_protocol::digest_json(&json!([purpose])).unwrap(),
+            purpose: purpose.to_owned(),
+            signer_id: "test".to_owned(),
+            request_id: purpose.to_owned(),
+            request_digest: trellis_protocol::digest_json(&json!({ "purpose": purpose })).unwrap(),
+            result: Value::Null,
+            created_at: NOW,
+            expires_at: NOW + 60_000,
+        };
+        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
+        store.ensure_admin_capability_group(NOW).await.unwrap();
+        let participant = builtins::cli_participant_binding(NOW).unwrap();
+        let participant_id = participant.participant_id.clone();
+        store
+            .run(move |connection| {
+                super::super::sqlite::grants::install_participant(connection, &participant, None)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        store
+            .create_user_account(AccountCreation {
+                principal: PrincipalRecord {
+                    principal_id: "usr_reconcile".to_owned(),
+                    kind: PrincipalKind::User,
+                    state: PrincipalState::Active,
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                    disabled_at: None,
+                    revoked_at: None,
+                },
+                profile: UserProfileRecord {
+                    principal_id: "usr_reconcile".to_owned(),
+                    display_name: None,
+                    email: None,
+                    image_url: None,
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                },
+                credential: None::<LocalCredentialRecord>,
+                identity: None,
+                idempotency: proof("account.create"),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let portal = LoginPortalRecord {
+            portal_id: "portal".to_owned(),
+            display_name: "Portal".to_owned(),
+            entry_url: None,
+            builtin: false,
+            disabled: false,
+            removed: false,
+            local_registration_enabled: false,
+            provider_ids: vec!["oidc".to_owned()],
+            created_at: NOW,
+            updated_at: NOW,
+            version: 1,
+        };
+        let settings = LoginSettingsRecord {
+            portal_id: portal.portal_id.clone(),
+            default_provider_id: Some("oidc".to_owned()),
+            local_login_enabled: false,
+            federated_registration_enabled: true,
+            provider_selection_enabled: false,
+            updated_at: NOW,
+            version: 1,
+        };
+        store
+            .put_login_portal(LoginPortalMutation {
+                portal: portal.clone(),
+                settings: settings.clone(),
+                expected_version: None,
+                idempotency: proof("portal.create"),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        let (_, installed) = store
+            .get_installed_participant_record(participant_id.clone(), Some(1))
+            .await
+            .unwrap()
+            .unwrap();
+        let consent = browser_consent_proposal(&installed).unwrap();
+        let mut optional = consent
+            .optional_capability_definitions
+            .keys()
+            .take(2)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(optional.len(), 2);
+        let first = optional.remove(0);
+        let second = optional.remove(0);
+        let mut policy = PortalGrantOverrideRecord {
+            portal_id: portal.portal_id.clone(),
+            participant_id: participant_id.clone(),
+            direct_capabilities: vec![first.clone()],
+            capability_group_keys: vec!["admin".to_owned()],
+            role_mappings: Vec::new(),
+            created_at: NOW,
+            updated_at: NOW,
+            version: 1,
+        };
+        store
+            .put_portal_grant_override(policy.clone(), None, proof("policy.1"))
+            .await
+            .unwrap();
+        let groups = store
+            .list_capability_groups()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|group| (group.group_key.clone(), group))
+            .collect();
+        let selection = resolve_portal_authority_selection(
+            &policy,
+            &groups,
+            &consent,
+            &ProviderLoginAttributes {
+                provider_id: "oidc".to_owned(),
+                roles: Vec::new(),
+            },
+        )
+        .unwrap();
+        let expires_at = Some(NOW + 30_000);
+        store
+            .set_grant_binding(
+                GrantBindingReplacement {
+                    owner_kind: GrantOwnerKind::User,
+                    owner_id: "usr_reconcile".to_owned(),
+                    participant_id: participant_id.clone(),
+                    installed_revision: 1,
+                    grants: selection.grant_set.clone(),
+                    platform_privileges: selection.platform_privileges.clone(),
+                    state: GrantBindingState::Active,
+                    expires_at,
+                    provenance: Some(PortalGrantProvenance {
+                        portal_id: "portal".to_owned(),
+                        provider_id: "oidc".to_owned(),
+                        roles: Vec::new(),
+                        effective_policy_digest: selection.effective_policy_digest,
+                    }),
+                    expected_revision: 0,
+                    expected_current_installed_revision: None,
+                },
+                proof("binding.create"),
+            )
+            .await
+            .unwrap();
+        let service = AuthService::new(store.clone(), AuthServiceConfig::default()).unwrap();
+        let (_, worker) = portal_policy_reconciliation(service);
+
+        policy.direct_capabilities.insert(1, second);
+        policy.updated_at += 1;
+        policy.version += 1;
+        store
+            .put_portal_grant_override(policy.clone(), Some(1), proof("policy.2"))
+            .await
+            .unwrap();
+        worker.reconcile_startup().await.unwrap();
+        let widened = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                "usr_reconcile".to_owned(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(widened.grants, selection.grant_set);
+        assert_eq!(widened.platform_privileges, [PlatformPrivilege::Admin]);
+        assert_eq!(widened.installed_revision, 1);
+        assert_eq!(widened.expires_at, expires_at);
+
+        policy.direct_capabilities.clear();
+        policy.updated_at += 1;
+        policy.version += 1;
+        store
+            .put_portal_grant_override(policy.clone(), Some(2), proof("policy.3"))
+            .await
+            .unwrap();
+        worker.reconcile_startup().await.unwrap();
+        let narrowed = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                "usr_reconcile".to_owned(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(narrowed.grants.permissions().len() < widened.grants.permissions().len());
+        assert_eq!(narrowed.platform_privileges, [PlatformPrivilege::Admin]);
+        assert_eq!(narrowed.installed_revision, 1);
+        assert_eq!(narrowed.expires_at, expires_at);
+
+        store
+            .run(|connection| {
+                connection
+                    .execute(
+                        "INSERT INTO auth_bootstrap_administrator (singleton, principal_id, created_at) VALUES (1, 'usr_reconcile', ?1)",
+                        [NOW],
+                    )
+                    .map(|_| ())
+                    .map_err(|error| AuthorizationStateError::Storage(error.to_string()))
+            })
+            .await
+            .unwrap();
+
+        policy.direct_capabilities.clear();
+        policy.capability_group_keys.clear();
+        policy.updated_at += 1;
+        policy.version += 1;
+        store
+            .put_portal_grant_override(policy.clone(), Some(3), proof("policy.4"))
+            .await
+            .unwrap();
+        worker.reconcile_startup().await.unwrap();
+        assert_eq!(
+            store
+                .get_grant_binding(
+                    GrantOwnerKind::User,
+                    "usr_reconcile".to_owned(),
+                    participant_id.clone(),
+                )
+                .await
+                .unwrap(),
+            Some(narrowed.clone())
+        );
+        store
+            .run(|connection| {
+                connection
+                    .execute("DELETE FROM auth_bootstrap_administrator", [])
+                    .map(|_| ())
+                    .map_err(|error| AuthorizationStateError::Storage(error.to_string()))
+            })
+            .await
+            .unwrap();
+        worker.reconcile_startup().await.unwrap();
+        let without_admin = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                "usr_reconcile".to_owned(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(without_admin.platform_privileges.is_empty());
+        assert_eq!(without_admin.installed_revision, 1);
+        assert_eq!(without_admin.expires_at, expires_at);
+
+        store
+            .remove_portal_grant_override("portal", &participant_id, 4, proof("policy.remove"))
+            .await
+            .unwrap();
+        worker.reconcile_startup().await.unwrap();
+        let policy_revoked = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                "usr_reconcile".to_owned(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(policy_revoked.state, GrantBindingState::Revoked);
+        assert!(policy_revoked.provenance.is_some());
+
+        policy.direct_capabilities = vec![first.clone()];
+        policy.capability_group_keys = vec!["admin".to_owned()];
+        policy.created_at += 1;
+        policy.updated_at += 1;
+        policy.version = 1;
+        store
+            .put_portal_grant_override(policy.clone(), None, proof("policy.restore"))
+            .await
+            .unwrap();
+        worker.reconcile_startup().await.unwrap();
+        assert_eq!(
+            store
+                .get_grant_binding(
+                    GrantOwnerKind::User,
+                    "usr_reconcile".to_owned(),
+                    participant_id.clone(),
+                )
+                .await
+                .unwrap(),
+            Some(policy_revoked.clone())
+        );
+
+        store
+            .set_grant_binding(
+                GrantBindingReplacement {
+                    owner_kind: GrantOwnerKind::User,
+                    owner_id: "usr_reconcile".to_owned(),
+                    participant_id: participant_id.clone(),
+                    installed_revision: 1,
+                    grants: without_admin.grants.clone(),
+                    platform_privileges: Vec::new(),
+                    state: GrantBindingState::Active,
+                    expires_at,
+                    provenance: None,
+                    expected_revision: policy_revoked.revision,
+                    expected_current_installed_revision: None,
+                },
+                proof("binding.manual"),
+            )
+            .await
+            .unwrap();
+        let manual = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                "usr_reconcile".to_owned(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        worker.reconcile_startup().await.unwrap();
+        assert_eq!(
+            store
+                .get_grant_binding(
+                    GrantOwnerKind::User,
+                    "usr_reconcile".to_owned(),
+                    participant_id.clone(),
+                )
+                .await
+                .unwrap(),
+            Some(manual.clone())
+        );
+    }
 }

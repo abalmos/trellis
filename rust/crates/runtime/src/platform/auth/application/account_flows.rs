@@ -220,6 +220,7 @@ where
                     platform_privileges: requested.platform_privileges.clone(),
                     expires_at: input.authority_expires_at,
                     expected_revision: current.as_ref().map_or(0, |binding| binding.revision),
+                    expected_current_installed_revision: None,
                     state: GrantBindingState::Active,
                     provenance: None,
                 });
@@ -308,6 +309,7 @@ where
                 platform_privileges: requested.platform_privileges,
                 expires_at: input.authority_expires_at,
                 expected_revision: 0,
+                expected_current_installed_revision: None,
                 state: GrantBindingState::Active,
                 provenance: None,
             })
@@ -406,6 +408,7 @@ where
                 platform_privileges: requested.platform_privileges,
                 expires_at: input.authority_expires_at,
                 expected_revision: 0,
+                expected_current_installed_revision: None,
                 state: GrantBindingState::Active,
                 provenance: None,
             })

@@ -1,7 +1,4 @@
-use async_nats::jetstream::{
-    self, consumer,
-    kv::{Operation, Store},
-};
+use async_nats::jetstream::{self, stream};
 use futures_util::StreamExt;
 
 use super::super::TrellisClientError;
@@ -16,8 +13,9 @@ pub(crate) struct RegistryWatchEntry {
 }
 
 pub(crate) struct RegistryWatch {
-    subscription: consumer::push::Messages,
-    prefix: String,
+    subscription: async_nats::Subscriber,
+    subject: String,
+    key: String,
 }
 
 impl futures_util::Stream for RegistryWatch {
@@ -28,15 +26,8 @@ impl futures_util::Stream for RegistryWatch {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         match self.subscription.poll_next_unpin(cx) {
-            std::task::Poll::Ready(Some(Ok(message))) => {
-                if let Err(error) = message.info() {
-                    return std::task::Poll::Ready(Some(Err(
-                        TrellisClientError::AuthorizationUnavailable(format!(
-                            "authorization watch metadata is invalid: {error}"
-                        )),
-                    )));
-                }
-                let Some(key) = message.subject.strip_prefix(&self.prefix) else {
+            std::task::Poll::Ready(Some(message)) => {
+                if message.subject.as_str() != self.subject {
                     return std::task::Poll::Ready(Some(Err(
                         TrellisClientError::AuthorizationUnavailable(
                             "authorization watch subject is invalid".into(),
@@ -49,15 +40,10 @@ impl futures_util::Stream for RegistryWatch {
                         .is_some_and(|value| matches!(value.as_str(), "DEL" | "PURGE"))
                 });
                 std::task::Poll::Ready(Some(Ok(RegistryWatchEntry {
-                    key: key.to_owned(),
+                    key: self.key.clone(),
                     value: message.payload.to_vec(),
                     removed,
                 })))
-            }
-            std::task::Poll::Ready(Some(Err(error))) => {
-                std::task::Poll::Ready(Some(Err(TrellisClientError::AuthorizationUnavailable(
-                    format!("authorization watch failed: {error}"),
-                ))))
             }
             std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
             std::task::Poll::Pending => std::task::Poll::Pending,
@@ -69,8 +55,7 @@ impl futures_util::Stream for RegistryWatch {
 #[derive(Clone)]
 pub(crate) struct AuthorizationRegistryReader {
     nats: async_nats::Client,
-    jetstream: jetstream::Context,
-    contexts: Store,
+    contexts: stream::Stream<()>,
     binding: AuthorizationRegistryBinding,
 }
 
@@ -86,7 +71,7 @@ impl AuthorizationRegistryReader {
         }
         let jetstream = jetstream::new(nats.clone());
         let contexts = jetstream
-            .get_key_value(binding.context_bucket.clone())
+            .get_stream_no_info(format!("KV_{}", binding.context_bucket))
             .await
             .map_err(|error| {
                 TrellisClientError::AuthorizationUnavailable(format!(
@@ -95,7 +80,6 @@ impl AuthorizationRegistryReader {
             })?;
         Ok(Self {
             nats,
-            jetstream,
             contexts,
             binding: binding.clone(),
         })
@@ -106,15 +90,24 @@ impl AuthorizationRegistryReader {
         digest: &str,
     ) -> Result<Option<Vec<u8>>, TrellisClientError> {
         validate_digest_key(digest)?;
-        self.contexts
-            .get(digest.to_owned())
-            .await
-            .map(|value| value.map(|value| value.to_vec()))
-            .map_err(|error| {
-                TrellisClientError::AuthorizationUnavailable(format!(
-                    "cannot read authorization context: {error}"
-                ))
-            })
+        let subject = format!("$KV.{}.{digest}", self.binding.context_bucket);
+        match self.contexts.direct_get_last_for_subject(&subject).await {
+            Ok(message)
+                if message
+                    .headers
+                    .get("KV-Operation")
+                    .is_none_or(|value| value.as_str() == "PUT") =>
+            {
+                Ok(Some(message.payload.to_vec()))
+            }
+            Ok(_) => Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization context was removed".into(),
+            )),
+            Err(error) if matches!(error.kind(), stream::DirectGetErrorKind::NotFound) => Ok(None),
+            Err(error) => Err(TrellisClientError::AuthorizationUnavailable(format!(
+                "cannot read authorization context: {error}"
+            ))),
+        }
     }
 
     pub(crate) async fn get_revocation(
@@ -122,21 +115,26 @@ impl AuthorizationRegistryReader {
         digest: &str,
     ) -> Result<Option<Vec<u8>>, TrellisClientError> {
         validate_digest_key(digest)?;
-        let entry = self
-            .contexts
-            .entry(format!("{REVOCATION_PREFIX}{digest}"))
-            .await
-            .map_err(|error| {
-                TrellisClientError::AuthorizationUnavailable(format!(
-                    "cannot read authorization revocation: {error}"
-                ))
-            })?;
-        match entry {
-            None => Ok(None),
-            Some(entry) if entry.operation == Operation::Put => Ok(Some(entry.value.to_vec())),
-            Some(_) => Err(TrellisClientError::AuthorizationUnavailable(
+        let subject = format!(
+            "$KV.{}.{REVOCATION_PREFIX}{digest}",
+            self.binding.context_bucket
+        );
+        match self.contexts.direct_get_last_for_subject(&subject).await {
+            Ok(message)
+                if message
+                    .headers
+                    .get("KV-Operation")
+                    .is_none_or(|value| value.as_str() == "PUT") =>
+            {
+                Ok(Some(message.payload.to_vec()))
+            }
+            Ok(_) => Err(TrellisClientError::AuthorizationUnavailable(
                 "authorization revocation was removed".into(),
             )),
+            Err(error) if matches!(error.kind(), stream::DirectGetErrorKind::NotFound) => Ok(None),
+            Err(error) => Err(TrellisClientError::AuthorizationUnavailable(format!(
+                "cannot read authorization revocation: {error}"
+            ))),
         }
     }
 
@@ -145,39 +143,20 @@ impl AuthorizationRegistryReader {
         digest: &str,
     ) -> Result<RegistryWatch, TrellisClientError> {
         validate_digest_key(digest)?;
-        let stream = self
-            .jetstream
-            .get_stream_no_info(format!("KV_{}", self.binding.context_bucket))
+        let subject = format!(
+            "$KV.{}.{REVOCATION_PREFIX}{digest}",
+            self.binding.context_bucket
+        );
+        let key = format!("{REVOCATION_PREFIX}{digest}");
+        let subscription = self
+            .nats
+            .subscribe(subject.clone())
             .await
             .map_err(|error| {
                 TrellisClientError::AuthorizationUnavailable(format!(
-                    "cannot open authorization registry stream: {error}"
+                    "cannot subscribe to authorization revocation watch: {error}"
                 ))
             })?;
-        let prefix = format!("$KV.{}.", self.binding.context_bucket);
-        let consumer = stream
-            .create_consumer(consumer::push::Config {
-                deliver_subject: self.nats.new_inbox(),
-                name: Some(format!("TRELLIS_AUTH_{}", ulid::Ulid::new())),
-                description: Some("trellis exact context revocation watch".into()),
-                filter_subject: format!("{prefix}{REVOCATION_PREFIX}{digest}"),
-                deliver_policy: consumer::DeliverPolicy::LastPerSubject,
-                ack_policy: consumer::AckPolicy::None,
-                idle_heartbeat: std::time::Duration::from_secs(5),
-                inactive_threshold: std::time::Duration::from_secs(10),
-                ..Default::default()
-            })
-            .await
-            .map_err(|error| {
-                TrellisClientError::AuthorizationUnavailable(format!(
-                    "cannot create authorization revocation watch: {error}"
-                ))
-            })?;
-        let subscription = consumer.messages().await.map_err(|error| {
-            TrellisClientError::AuthorizationUnavailable(format!(
-                "cannot consume authorization revocation watch: {error}"
-            ))
-        })?;
         // Establish subscription interest before the caller's exact revocation read.
         self.nats.flush().await.map_err(|error| {
             TrellisClientError::AuthorizationUnavailable(format!(
@@ -186,7 +165,8 @@ impl AuthorizationRegistryReader {
         })?;
         Ok(RegistryWatch {
             subscription,
-            prefix,
+            subject,
+            key,
         })
     }
 }

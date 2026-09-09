@@ -119,6 +119,8 @@ pub struct CreateFederatedUserInput {
 /// Administrator input for an optimistic user-account replacement.
 #[derive(Clone, Debug)]
 pub struct UpdateUserInput {
+    /// Verified caller state to recheck in the write transaction.
+    pub(crate) actor: MutationActor,
     /// Stable user principal ID.
     pub principal_id: String,
     /// Expected principal and profile version.
@@ -131,8 +133,6 @@ pub struct UpdateUserInput {
     pub image: Option<String>,
     /// Requested active, disabled, or revoked lifecycle state.
     pub state: PrincipalState,
-    /// Whether the caller may mutate a principal with accepted administrator authority.
-    pub allow_admin_target: bool,
     /// Update time in Unix milliseconds.
     pub updated_at: i64,
     /// Durable request proof and replay result.
@@ -938,10 +938,10 @@ where
         match self
             .repository
             .update_user_account(UserAccountMutation {
+                actor: input.actor,
                 principal: principal.clone(),
                 profile: profile.clone(),
                 expected_version: input.expected_version,
-                allow_admin_target: input.allow_admin_target,
                 idempotency: input.idempotency,
                 actions: input.actions,
             })

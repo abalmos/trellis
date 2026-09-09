@@ -1,5 +1,11 @@
 format = 1
-manifest-digest = "WMBrGfob8D4Qx8PaFv3OziBrxPgJoCAIzhcyyRob0ug"
+manifest-digest = "s0l4aBY4kIGNJzieyD4Bn-izv6EOugI5fkntD8dzHhY"
+
+[[api]]
+id = "trellis.auth@v1"
+version = "1.0.0"
+api-digest = "2SIHWPDpaMZDtLkeROx_n12RMcraO2dUcqk-GVstWgQ"
+path = "../../../rust/crates/runtime"
 
 [[api]]
 id = "trellis.state@v1"
