@@ -126,13 +126,12 @@ pub fn prepare_event<D>(event: &D::Event) -> Result<PreparedTrellisEvent, Subjec
 where
     D: EventDescriptor,
 {
-    let value = serde_json::to_value(event)?;
-    crate::service::validate_input_schema(D::EVENT_SCHEMA_JSON, &value)
+    let value = crate::generated::Codec::encode(event)
         .map_err(|error| SubjectError::InvalidPayload(error.to_string()))?;
     let subject = D::publish_subject(event)?;
     Ok(PreparedTrellisEvent::new(
         subject,
-        Bytes::from(serde_json::to_vec(event)?),
+        Bytes::from(serde_json::to_vec(&value)?),
     ))
 }
 
@@ -783,6 +782,8 @@ mod tests {
     impl EventDescriptor for TestDescriptorWithoutDomainHeader {
         type Event = TestEventWithoutDomainHeader;
 
+        const API_ID: &'static str = "test@v1";
+        const DESCRIPTOR_NAME: &'static str = "event.EventWithoutDomainHeader";
         const KEY: &'static str = "Test.EventWithoutDomainHeader";
         const SUBJECT: &'static str = "events.v1.Test.EventWithoutDomainHeader";
         const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];
@@ -794,6 +795,8 @@ mod tests {
     impl EventDescriptor for TestDescriptor {
         type Event = TestEvent;
 
+        const API_ID: &'static str = "test@v1";
+        const DESCRIPTOR_NAME: &'static str = "event.Event";
         const KEY: &'static str = "Test.Event";
         const SUBJECT: &'static str = "events.v1.Test.Event";
         const PUBLISH_CAPABILITIES: &'static [&'static str] = &[];

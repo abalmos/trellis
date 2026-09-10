@@ -1,9 +1,12 @@
-format = 1
+[package]
 name = "trellis-test-generated"
+version = "0.12.0"
 
-[apis]
-"trellis.auth@v1" = { version = "1.0.0", path = "../../../rust/crates/runtime" }
-"trellis.eventlog@v1" = { version = "1.0.0", path = "../../../rust/crates/eventlog-runtime" }
-"trellis.health@v1" = { version = "1.0.0", path = "../../../rust/crates/runtime" }
-"trellis.jobs@v1" = { version = "1.0.0", path = "../../../rust/crates/jobs-runtime" }
-"trellis.state@v1" = { version = "1.0.0", path = "../../../rust/crates/runtime" }
+[sources]
+admin = "contract.trellis"
+
+[dependencies]
+trellis = { package = "trellis", path = "../../../rust/crates/runtime" }
+
+[generate.typescript]
+output = "trellis"

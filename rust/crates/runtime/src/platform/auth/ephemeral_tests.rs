@@ -35,12 +35,12 @@ fn browser_flow() -> AuthBrowserFlow {
         target_grant_revision: 0,
         consent: BrowserConsentProposal {
             participant_id: "app-1".to_owned(),
-            participant_artifact_digest: DIGEST.to_owned(),
+            participant_digest: DIGEST.to_owned(),
             participant_needs_digest: DIGEST.to_owned(),
             consent_view_digest: trellis_protocol::digest_json(&consent_view).unwrap(),
             proposal_digest: trellis_protocol::digest_json(&serde_json::json!({
                 "participantId": "app-1",
-                "participantArtifactDigest": DIGEST,
+                "participantDigest": DIGEST,
                 "participantNeedsDigest": DIGEST,
                 "requiredGrantSet": required_grant_set,
                 "optionalGrantBundles": optional_grant_bundles,

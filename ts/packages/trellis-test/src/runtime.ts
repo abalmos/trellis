@@ -158,22 +158,22 @@ export class TrellisTestRuntime implements AsyncDisposable {
   };
   readonly devices: {
     provision(
-      input: import("../trellis/index.js").apis.auth.AuthDevicesProvisionInput,
+      input: import("../trellis/index.js").apis.auth.DevicesProvisionInput,
     ): Promise<
-      import("../trellis/index.js").apis.auth.AuthDevicesProvisionOutput
+      import("../trellis/index.js").apis.auth.DevicesProvisionOutput
     >;
   };
   readonly state: {
     adminGet(
-      input: import("../trellis/index.js").apis.state.StateAdminGetInput,
-    ): Promise<import("../trellis/index.js").apis.state.StateAdminGetOutput>;
+      input: import("../trellis/index.js").apis.state.AdminGetInput,
+    ): Promise<import("../trellis/index.js").apis.state.AdminGetOutput>;
     adminList(
-      input: import("../trellis/index.js").apis.state.StateAdminListInput,
-    ): Promise<import("../trellis/index.js").apis.state.StateAdminListOutput>;
+      input: import("../trellis/index.js").apis.state.AdminListInput,
+    ): Promise<import("../trellis/index.js").apis.state.AdminListOutput>;
     adminDelete(
-      input: import("../trellis/index.js").apis.state.StateAdminDeleteInput,
+      input: import("../trellis/index.js").apis.state.AdminDeleteInput,
     ): Promise<
-      import("../trellis/index.js").apis.state.StateAdminDeleteOutput
+      import("../trellis/index.js").apis.state.AdminDeleteOutput
     >;
   };
   #controlPlane: TrellisProcessHandle | undefined;
@@ -382,8 +382,8 @@ export class TrellisTestRuntime implements AsyncDisposable {
     name: string;
     contract: TrellisTestClientParticipant;
   }): Promise<TrellisTestClientKey> {
-    const participantId = args.contract.id;
-    if (!participantId.startsWith("trellis-app.")) {
+    const participantId = args.contract.identity;
+    if (!participantId.startsWith("trellis.")) {
       await this.#admin.installParticipant({ contract: args.contract });
     }
     const seed = generateSessionSeed();

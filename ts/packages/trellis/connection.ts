@@ -47,6 +47,7 @@ export type TrellisConnectionStatusTransport = {
 export type TrellisConnectionOptions = {
   kind: TrellisConnectionKind;
   initialStatus?: TrellisConnectionStatus;
+  availability?: TrellisAvailability;
   close?: () => Promise<void>;
   stopObserving?: () => void;
   log?: LoggerLike | false;
@@ -59,6 +60,7 @@ export type ObserveTrellisConnectionOptions = {
   transportName?: string;
   log?: LoggerLike | false;
   lifecycleLog?: TrellisConnectionLifecycleLogOptions;
+  availability?: TrellisAvailability;
 };
 
 /** Options for observing a NATS-backed Trellis connection lifecycle. */
@@ -67,6 +69,7 @@ export type ObserveNatsTrellisConnectionOptions = {
   nc: NatsConnection;
   log?: LoggerLike | false;
   lifecycleLog?: TrellisConnectionLifecycleLogOptions;
+  availability?: TrellisAvailability;
 };
 
 /** Options for logging transport lifecycle events with Trellis runtime context. */
@@ -74,6 +77,27 @@ export type TrellisConnectionLifecycleLogOptions = {
   log: LoggerLike;
   context: Record<string, unknown>;
 };
+
+/** Immutable installed availability for optional participant surfaces. */
+export type TrellisAvailability = Readonly<{
+  capabilities: Readonly<Record<string, boolean>>;
+  resources: Readonly<Record<string, boolean>>;
+}>;
+
+const EMPTY_AVAILABILITY: TrellisAvailability = Object.freeze({
+  capabilities: Object.freeze({}),
+  resources: Object.freeze({}),
+});
+const installAvailability = Symbol("installAvailability");
+
+function immutableAvailability(
+  availability: TrellisAvailability,
+): TrellisAvailability {
+  return Object.freeze({
+    capabilities: Object.freeze({ ...availability.capabilities }),
+    resources: Object.freeze({ ...availability.resources }),
+  });
+}
 
 /**
  * Framework-neutral Trellis connection lifecycle handle.
@@ -85,6 +109,10 @@ export type TrellisConnectionLifecycleLogOptions = {
 export class TrellisConnection {
   #status: TrellisConnectionStatus;
   #listeners = new Set<TrellisConnectionStatusListener>();
+  #availability: TrellisAvailability;
+  #availabilityListeners = new Set<
+    (availability: TrellisAvailability) => void
+  >();
   #closeTransport: () => Promise<void>;
   #stopObserving: () => void;
   #log: LoggerLike;
@@ -97,11 +125,57 @@ export class TrellisConnection {
     this.#closeTransport = options.close ?? (async () => {});
     this.#stopObserving = options.stopObserving ?? (() => {});
     this.#log = options.log === false ? noopLogger : options.log ?? noopLogger;
+    this.#availability = options.availability
+      ? immutableAvailability(options.availability)
+      : EMPTY_AVAILABILITY;
   }
 
   /** Returns the latest observed connection status. */
   get status(): TrellisConnectionStatus {
     return this.#status;
+  }
+
+  /** Returns the current immutable installed availability snapshot. */
+  availability(): TrellisAvailability {
+    return this.#availability;
+  }
+
+  /** Yields the current availability and each subsequent installed replacement. */
+  watchAvailability(): AsyncIterable<TrellisAvailability> {
+    const connection = this;
+    return {
+      async *[Symbol.asyncIterator]() {
+        const pending = [connection.#availability];
+        let wake: (() => void) | undefined;
+        const listener = (availability: TrellisAvailability) => {
+          pending.push(availability);
+          wake?.();
+          wake = undefined;
+        };
+        connection.#availabilityListeners.add(listener);
+        try {
+          while (true) {
+            if (pending.length === 0) {
+              await new Promise<void>((resolve) => {
+                wake = resolve;
+              });
+            }
+            const next = pending.shift();
+            if (next) yield next;
+          }
+        } finally {
+          connection.#availabilityListeners.delete(listener);
+        }
+      },
+    };
+  }
+
+  [installAvailability](availability: TrellisAvailability): void {
+    if (availability === this.#availability) return;
+    this.#availability = immutableAvailability(availability);
+    for (const listener of this.#availabilityListeners) {
+      listener(this.#availability);
+    }
   }
 
   /**
@@ -165,6 +239,14 @@ export class TrellisConnection {
   }
 }
 
+/** @internal Installs one immutable availability snapshot after bootstrap verification. */
+export function installConnectionAvailability(
+  connection: TrellisConnection,
+  availability: TrellisAvailability,
+): void {
+  connection[installAvailability](availability);
+}
+
 /** Observes a narrow transport status stream as a Trellis connection lifecycle. */
 export function observeTrellisConnection(
   options: ObserveTrellisConnectionOptions,
@@ -172,6 +254,7 @@ export function observeTrellisConnection(
   let stopped = false;
   const connection = new TrellisConnection({
     kind: options.kind,
+    availability: options.availability,
     close: () => options.transport.close(),
     stopObserving: () => {
       stopped = true;
@@ -246,6 +329,7 @@ export function observeNatsTrellisConnection(
     transportName: "nats",
     log: options.log,
     lifecycleLog: options.lifecycleLog,
+    availability: options.availability,
   });
 }
 

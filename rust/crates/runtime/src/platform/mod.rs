@@ -25,7 +25,6 @@ use base64::Engine as _;
 use serde_json::Value;
 use trellis_rs::client::SessionAuth;
 use trellis_rs::service::Router;
-use trellis_runtime_apis::auth as trellis_sdk_auth;
 
 use crate::shutdown::StopHandle;
 use crate::supervisor::{NatsEndpointOverride, RuntimeContext, RuntimeError, SubsystemHandle};
@@ -218,7 +217,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         verifier.clone(),
     );
     let mut auth_rpc_routes = Router::new();
-    trellis_sdk_auth::api::register_rpc_metadata(&mut auth_rpc_routes);
+    trellis_runtime_apis::apis::trellis_auth_v1::register_rpc_metadata(&mut auth_rpc_routes);
     let auth_rpc = AuthRpcRuntime::start(AuthRpcProcessor {
         client: rpc_nats,
         system_client: rpc_system_nats,

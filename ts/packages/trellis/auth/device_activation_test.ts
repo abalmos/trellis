@@ -80,8 +80,18 @@ function bootstrapWaitArgs(
     instanceId: "dev_123",
     principalId: "device_123",
     participantId: "acme.reader@v1",
-    participantArtifactDigest: PARTICIPANT_DIGEST,
-    participantNeedsDigest: PARTICIPANT_DIGEST,
+    packageEvidence: {
+      rootPackage: "acme",
+      rootDigest: PARTICIPANT_DIGEST,
+      packages: [{
+        name: "acme",
+        version: "1.0.0",
+        digest: PARTICIPANT_DIGEST,
+        source: "package acme@1.0.0;",
+      }],
+    },
+    participantPath: "reader@v1",
+    packageDigest: PARTICIPANT_DIGEST,
     nonce: "nonce_123",
   };
 }
@@ -122,14 +132,16 @@ Deno.test("device activation wait retries the bootstrap route until ready", asyn
   const waitArgs = bootstrapWaitArgs(identity);
   const urls: string[] = [];
   const sessionKeys: string[] = [];
+  const requests: Record<string, unknown>[] = [];
   let calls = 0;
 
   try {
     globalThis.fetch = ((input: URL | Request | string, init?: RequestInit) => {
       urls.push(String(input));
+      const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push(request);
       sessionKeys.push(
-        (JSON.parse(String(init?.body)) as { sessionKey?: string })
-          .sessionKey ?? "",
+        typeof request.sessionKey === "string" ? request.sessionKey : "",
       );
       calls += 1;
       const body = calls === 1
@@ -160,6 +172,18 @@ Deno.test("device activation wait retries the bootstrap route until ready", asyn
       "/bootstrap/device",
     ]);
     assertEquals(sessionKeys[0], sessionKeys[1]);
+    assertEquals(
+      requests.map(({ packageEvidence, participantPath, packageDigest }) => ({
+        packageEvidence,
+        participantPath,
+        packageDigest,
+      })),
+      Array(3).fill({
+        packageEvidence: waitArgs.packageEvidence,
+        participantPath: waitArgs.participantPath,
+        packageDigest: waitArgs.packageDigest,
+      }),
+    );
     assertEquals(ready.sessionIdentity.sessionKey, sessionKeys[0]);
     assertEquals(ready.bundle.state, "ready");
   } finally {

@@ -14,6 +14,17 @@ pub(crate) trait GrantRepository: Send + Sync {
         revision: Option<u64>,
     ) -> Result<Option<(u64, ParticipantBindingRecord)>, AuthorizationStateError>;
 
+    async fn accept_presented_package(
+        &self,
+        input: super::evidence::PackageEvidenceInput,
+        now: i64,
+    ) -> Result<ParticipantBindingRecord, AuthorizationStateError>;
+
+    async fn get_credential_participant_assignment(
+        &self,
+        identity_key_id: String,
+    ) -> Result<Option<String>, AuthorizationStateError>;
+
     async fn get_grant_binding(
         &self,
         owner_kind: GrantOwnerKind,

@@ -41,15 +41,17 @@ import { estimateMidpointClockOffsetMs } from "./auth/time.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import type { ClientOpts } from "./client.ts";
 import {
+  installConnectionAvailability,
   observeNatsTrellisConnection,
   type TrellisConnection,
 } from "./connection.ts";
-import { getParticipantRuntime } from "./participant_runtime/participant.ts";
 import {
-  PARTICIPANT_STATE_METADATA,
-  type ParticipantStateMetadata,
-} from "./participant_runtime/metadata.ts";
-import type { GeneratedParticipantEvidence } from "./participant_runtime/artifacts.ts";
+  type GeneratedParticipant,
+  getParticipantRuntime,
+  participantAvailability,
+  participantEvidence,
+} from "./participant_runtime/participant.ts";
+import type { ContractResourceBindings } from "./participant_runtime/schemas.ts";
 import type { RuntimeApi } from "./participant_runtime/api.ts";
 import { TransportError } from "./errors/index.ts";
 import {
@@ -63,9 +65,7 @@ import {
 } from "./session.ts";
 import { recordTrellisDuration } from "./telemetry/mod.ts";
 
-type ClientContract = GeneratedParticipantEvidence & {
-  readonly [PARTICIPANT_STATE_METADATA]?: ParticipantStateMetadata;
-};
+type ClientContract = GeneratedParticipant;
 
 /** Browser caller runtime whose lifecycle owner can revoke and end its session. */
 export type ConnectedTrellisClient<TContract extends ClientContract> =
@@ -255,6 +255,8 @@ const ClientBootstrapReadySchema = Type.Object({
 
 type ClientBootstrapReady = StaticDecode<typeof ClientBootstrapReadySchema> & {
   readonly serverClockOffsetMs?: number;
+  readonly apiBindings: Readonly<Record<string, unknown>>;
+  readonly resourceBindings: ContractResourceBindings;
 };
 type ClientBootstrapAuthRequired = {
   status: "auth_required";
@@ -569,7 +571,7 @@ async function bindClientFlow(args: {
   }
   if (
     parsed.session.sessionKey !== args.identity.sessionKey ||
-    parsed.session.participantId !== args.participant.id
+    parsed.session.participantId !== args.participant.identity
   ) {
     throw new Error("Trellis returned a login for another installation");
   }
@@ -652,11 +654,12 @@ async function recoverClientBootstrapWithRetry(args: {
       return {
         status: "ready",
         serverNow: result.response.serverNow / 1_000,
+        apiBindings: result.response.apiBindings,
+        resourceBindings: result.response.authorization.resourceRuntime,
         connectInfo: {
           sessionId: session.loginSessionId!,
           participantId: session.participantId,
-          participantDigest:
-            result.response.authorization.participantArtifactDigest,
+          participantDigest: result.response.authorization.participantDigest,
           transports: nats.transports,
           transport: {
             inboxPrefix: session.inboxPrefix,
@@ -761,7 +764,7 @@ function bootstrapTargetsRequestedContract<
   args: ClientConnectArgsFor<TContract>,
 ): boolean {
   return bootstrap.status === "ready" &&
-    bootstrap.connectInfo.participantId === args.participant.id;
+    bootstrap.connectInfo.participantId === args.participant.identity;
 }
 
 async function buildSessionKeyLoginUrl(args: {
@@ -779,7 +782,8 @@ async function buildSessionKeyLoginUrl(args: {
     requestId,
     issuedAt,
     sessionPublicKey: args.identity.sessionKey,
-    participantId: args.participant.id,
+    participantId: args.participant.identity,
+    ...participantEvidence(args.participant),
     redirectTarget: args.redirectTo,
   };
   const response = await fetch(`${args.trellisUrl}/auth/requests`, {
@@ -853,7 +857,7 @@ export async function connectClientWithDeps<
   const trellisUrl = normalizeTrellisUrl(args.trellisUrl);
   const trustScope = browserInstallationScope(
     trellisUrl,
-    args.participant.id,
+    args.participant.identity,
   );
   const browserInstallation = args.auth?.mode === "session_key"
     ? undefined
@@ -1149,6 +1153,11 @@ export async function connectClientWithDeps<
     kind: "client",
     nc,
     log: false,
+    availability: participantAvailability(
+      args.participant,
+      bootstrap.apiBindings,
+      bootstrap.resourceBindings,
+    ),
     ...(args.log
       ? {
         lifecycleLog: {
@@ -1166,6 +1175,24 @@ export async function connectClientWithDeps<
     sessionId: runtimeState.sessionId,
     auth: identity.auth,
     cache: authorizationContexts,
+    refresh: async (shouldInstall) => {
+      const result = await refreshAuthorizationContextWithMetadata({
+        trellisUrl: args.trellisUrl,
+        sessionId: runtimeState.sessionId,
+        auth: identity.auth,
+        cache: authorizationContexts,
+        shouldInstall,
+      });
+      installConnectionAvailability(
+        connection,
+        participantAvailability(
+          args.participant,
+          result.response.apiBindings,
+          result.response.authorization.resourceRuntime,
+        ),
+      );
+      return result.context;
+    },
     onRefresh: () => {
       nc.setServers(
         selectClientRuntimeTransportServers(
@@ -1184,7 +1211,7 @@ export async function connectClientWithDeps<
   void nc.closed().then(stopContextRefresh, stopContextRefresh);
 
   const api = getParticipantRuntime(args.participant).usedApi as RuntimeApi;
-  const state = args.participant[PARTICIPANT_STATE_METADATA] as TrellisOpts<
+  const state = getParticipantRuntime(args.participant).state as TrellisOpts<
     RuntimeApi
   >["state"];
 

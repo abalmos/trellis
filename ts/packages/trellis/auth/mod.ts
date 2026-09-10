@@ -39,9 +39,9 @@ export {
   submitPortalApproval,
 } from "./browser/portal.ts";
 export type {
-  AuthDeviceUserAuthoritiesResolveOutput,
-  AuthDeviceUserAuthoritiesResolveProgress,
-} from "../internal_sdk/generated/auth/mod.ts";
+  DeviceUserAuthoritiesResolveOutput,
+  DeviceUserAuthoritiesResolveProgress,
+} from "../internal_sdk/generated/apis/auth/mod.js";
 // Context-bound proof helpers for local signing and signature verification.
 export {
   buildEventProofInput,

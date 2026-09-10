@@ -151,10 +151,15 @@ pub(super) fn resolve_snapshot(
             }
         };
     let resolved = participant.resolve()?;
-    let required = resolved.proposal().required().grant_set().permissions();
+    let required = resolved.required_grants.permissions();
     let allowed = required
         .iter()
-        .chain(resolved.proposal().optional().grant_set().permissions())
+        .chain(
+            resolved
+                .optional_grant_bundles
+                .values()
+                .flat_map(|grant| grant.permissions()),
+        )
         .collect::<Vec<_>>();
     let mut selected_permissions = Vec::new();
     let mut selected_resources = Vec::new();

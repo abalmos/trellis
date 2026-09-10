@@ -18,8 +18,6 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use trellis_protocol::AuthorizationPrincipalKind;
 use trellis_rs::service::Router;
-#[cfg(test)]
-use trellis_runtime_apis::auth as trellis_sdk_auth;
 use ulid::Ulid;
 
 use super::context::AuthorizationContextRepository;
@@ -458,13 +456,7 @@ impl AuthRpcProcessor {
             return Err(AuthorizationStateError::StorageConflict);
         }
         if profile.participant_id.is_none() {
-            profile.participant_id = requested_participant_id.or_else(|| {
-                input
-                    .get("participantArtifact")
-                    .and_then(|value| value.get("id"))
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned)
-            });
+            profile.participant_id = requested_participant_id;
             if profile.participant_id.is_none() {
                 return Err(AuthorizationStateError::InvalidRecord(
                     "participantId is required before provisioning".to_owned(),
@@ -1811,21 +1803,36 @@ impl AuthRpcProcessor {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let source_api = input.get("sourceApi").and_then(Value::as_str);
-        let artifact: Value = serde_json::from_str(include_str!("../../../../trellis.api.json"))
-            .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
-        let entries = if source_api.is_none_or(|value| value == "trellis.auth@v1") {
-            artifact
-                .get("capabilities")
-                .and_then(Value::as_object)
-                .into_iter()
-                .flat_map(|capabilities| capabilities.iter())
+        let entries = if source_api
+            .is_none_or(|value| value == trellis_runtime_apis::apis::trellis_auth_v1::API_ID)
+        {
+            let (_, participant) = self
+                .service
+                .repository()
+                .get_installed_participant_record(
+                    super::builtins::AUTH_RUNTIME_PARTICIPANT_ID.to_owned(),
+                    None,
+                )
+                .await?
+                .ok_or(AuthorizationStateError::ParticipantMissing)?;
+            participant
+                .projection
+                .implemented_apis
+                .get(trellis_runtime_apis::apis::trellis_auth_v1::API_ID)
+                .ok_or_else(|| {
+                    AuthorizationStateError::InvalidRecord(
+                        "installed Auth API projection is absent".to_owned(),
+                    )
+                })?
+                .capabilities
+                .iter()
                 .map(|(capability, definition)| {
                     json!({
                         "capability": capability,
-                        "displayName": capability,
-                        "description": format!("trellis.auth@v1 {capability} capability"),
-                        "allows": definition.get("allows").cloned().unwrap_or_else(|| json!([])),
-                        "sourceApi": "trellis.auth@v1",
+                        "displayName": definition.display_name,
+                        "description": definition.description,
+                        "allows": definition.allows,
+                        "sourceApi": trellis_runtime_apis::apis::trellis_auth_v1::API_ID,
                     })
                 })
                 .collect()
@@ -2022,12 +2029,13 @@ impl AuthRpcProcessor {
         payload: &[u8],
         caller: &ValidatedRequest,
     ) -> Result<Value, AuthorizationStateError> {
-        let request: trellis_runtime_apis::auth::types::AuthSessionsListRequest =
+        let request: trellis_runtime_apis::types::AuthSessionsListRequest =
             serde_json::from_slice(payload)
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         if request
             .limit
-            .is_some_and(|limit| !(1..=100).contains(&limit))
+            .as_ref()
+            .is_some_and(|limit| !(1..=100).contains(&limit.0 .0))
         {
             return Err(AuthorizationStateError::InvalidRecord(
                 "invalid page limit".into(),
@@ -2740,7 +2748,11 @@ fn deployment_state_wire(state: DeploymentProfileState) -> &'static str {
 fn paginate_values(entries: Vec<Value>, input: &Value) -> Value {
     let limit = input
         .get("limit")
-        .and_then(Value::as_i64)
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str()?.parse::<i64>().ok())
+        })
         .unwrap_or(100)
         .clamp(1, 500) as usize;
     let offset = input
@@ -2778,7 +2790,11 @@ fn offset_page(entries: Vec<Value>, input: &Value) -> Value {
 fn paginate_sessions(entries: Vec<SessionRecord>, input: &Value) -> Value {
     let limit = input
         .get("limit")
-        .and_then(Value::as_i64)
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str()?.parse::<i64>().ok())
+        })
         .unwrap_or(100)
         .clamp(1, 500) as usize;
     let offset = input
@@ -3030,54 +3046,6 @@ mod tests {
             sort_and_validate_role_mappings(&mut mappings),
             Err(AuthorizationStateError::InvalidRecord(_))
         ));
-    }
-
-    #[test]
-    fn every_auth_rpc_subject_has_an_explicit_handler() {
-        let artifact: Value =
-            serde_json::from_str(include_str!("../../../../trellis.api.json")).unwrap();
-        let sources = [
-            include_str!("workflows/grants.rs"),
-            include_str!("workflows/deployments.rs"),
-            include_str!("workflows/devices.rs"),
-            include_str!("workflows/portals.rs"),
-            include_str!("workflows/sessions.rs"),
-            include_str!("workflows/users.rs"),
-        ];
-        let rpc = artifact.get("rpc").and_then(Value::as_object).unwrap();
-        for (name, descriptor) in rpc {
-            let version = descriptor.get("version").and_then(Value::as_str).unwrap();
-            let subject = format!("\"rpc.{version}.{name}\"");
-            assert!(
-                sources.iter().any(|source| source.contains(&subject)),
-                "missing Auth RPC handler for {name}"
-            );
-        }
-    }
-
-    #[test]
-    fn generated_router_resolves_every_auth_rpc_subject_exactly() {
-        let mut routes = Router::new();
-        trellis_sdk_auth::api::register_rpc_metadata(&mut routes);
-        let artifact: Value =
-            serde_json::from_str(include_str!("../../../../trellis.api.json")).unwrap();
-        let rpc = artifact.get("rpc").and_then(Value::as_object).unwrap();
-        for (name, descriptor) in rpc {
-            let version = descriptor.get("version").and_then(Value::as_str).unwrap();
-            let subject = format!("rpc.{version}.{name}");
-            assert!(
-                routes
-                    .required_permission(&subject, b"{}")
-                    .unwrap()
-                    .is_some(),
-                "missing exact route permission for {name}"
-            );
-        }
-        // Unknown subjects never resolve, without any registry or SQLite lookup.
-        assert!(routes.required_permission("$JS.API.INFO", b"{}").is_err());
-        assert!(routes
-            .required_permission("rpc.v1.Unknown.Surface", b"{}")
-            .is_err());
     }
 
     #[test]

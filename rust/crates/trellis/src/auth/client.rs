@@ -1,22 +1,19 @@
 use super::{AdminSessionState, TrellisAuthError};
 use crate::client::{SessionAuth, UserConnectOptions, UserSessionCredentials};
-use crate::generated::Caller;
+use crate::generated::Client;
 
 /// Connect an authenticated admin client from stored session state.
 pub async fn connect_admin_client_async(
     state: &AdminSessionState,
-) -> Result<Caller, TrellisAuthError> {
-    let participant: serde_json::Value =
-        serde_json::from_str(include_str!("../../artifacts/trellis.cli.participant.json"))?;
-    let participant = trellis_protocol::parse_participant(&participant)?;
-    Ok(Caller::connect_user(UserConnectOptions::new(
+) -> Result<Client, TrellisAuthError> {
+    Ok(Client::connect_user(UserConnectOptions::new(
         &state.trellis_url,
         5_000,
         UserSessionCredentials {
             login_session_id: &state.login_session_id,
             session_key_seed_base64url: &state.session_seed,
         },
-        participant.id(),
+        &state.participant_id,
     ))
     .await?)
 }

@@ -222,7 +222,7 @@ pub struct DevCreateArgs {
 #[derive(Debug, Clone, Eq, PartialEq, Args)]
 /// Compile and apply one participant definition from a project.
 pub struct ApplyArgs {
-    /// Trellis project root containing contract.trellis and trellis.lock.
+    /// Trellis source-package root containing trellis.toml and trellis.lock.
     #[arg(long)]
     pub source: PathBuf,
 

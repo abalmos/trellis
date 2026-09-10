@@ -3,11 +3,11 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use crate::{
-    identifiers::{api_error, validate_logical_name, validate_version},
+    identifiers::{validate_logical_name, validate_version},
     ProtocolError,
 };
 
-/// Subjects derived for every communication surface in one API artifact.
+/// Subjects derived for a set of communication surfaces.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DerivedApiSubjects {
@@ -37,7 +37,7 @@ pub struct DerivedEventSubjects {
 ///
 /// # Errors
 ///
-/// Returns [`ProtocolError::ApiValidation`] for an invalid `vN` version or
+/// Returns [`ProtocolError::InvalidIdentifier`] for an invalid `vN` version or
 /// logical surface name.
 pub fn derive_rpc_subject(version: &str, logical_name: &str) -> Result<String, ProtocolError> {
     derive_subject("rpc", version, logical_name)
@@ -47,7 +47,7 @@ pub fn derive_rpc_subject(version: &str, logical_name: &str) -> Result<String, P
 ///
 /// # Errors
 ///
-/// Returns [`ProtocolError::ApiValidation`] for an invalid `vN` version or
+/// Returns [`ProtocolError::InvalidIdentifier`] for an invalid `vN` version or
 /// logical surface name.
 pub fn derive_operation_subject(
     version: &str,
@@ -60,7 +60,7 @@ pub fn derive_operation_subject(
 ///
 /// # Errors
 ///
-/// Returns [`ProtocolError::ApiValidation`] for an invalid `vN` version or
+/// Returns [`ProtocolError::InvalidIdentifier`] for an invalid `vN` version or
 /// logical surface name.
 pub fn derive_event_subject(version: &str, logical_name: &str) -> Result<String, ProtocolError> {
     derive_subject("events", version, logical_name)
@@ -68,12 +68,12 @@ pub fn derive_event_subject(version: &str, logical_name: &str) -> Result<String,
 
 /// Derive an event subscription subject with one wildcard per parameter.
 ///
-/// Parameter order is defined by the event artifact; this function appends one
+/// Parameter order is defined by the semantic API; this function appends one
 /// wildcard token for each parameter without reordering it.
 ///
 /// # Errors
 ///
-/// Returns [`ProtocolError::ApiValidation`] for an invalid `vN` version or
+/// Returns [`ProtocolError::InvalidIdentifier`] for an invalid `vN` version or
 /// logical surface name.
 pub fn derive_event_wildcard_subject(
     version: &str,
@@ -91,10 +91,24 @@ pub fn derive_event_wildcard_subject(
 ///
 /// # Errors
 ///
-/// Returns [`ProtocolError::ApiValidation`] for an invalid `vN` version or
+/// Returns [`ProtocolError::InvalidIdentifier`] for an invalid `vN` version or
 /// logical surface name.
 pub fn derive_feed_subject(version: &str, logical_name: &str) -> Result<String, ProtocolError> {
     derive_subject("feed", version, logical_name)
+}
+
+/// Return whether two tokenized event subject patterns can match the same subject.
+///
+/// `*` matches one token. Patterns with different token counts cannot overlap.
+#[must_use]
+pub fn event_patterns_overlap(left: &str, right: &str) -> bool {
+    let left = left.split('.').collect::<Vec<_>>();
+    let right = right.split('.').collect::<Vec<_>>();
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left == &"*" || right == "*" || left == &right)
 }
 
 fn derive_subject(
@@ -102,14 +116,14 @@ fn derive_subject(
     version: &str,
     logical_name: &str,
 ) -> Result<String, ProtocolError> {
-    validate_version("/version", version, api_error)?;
-    validate_logical_name("/name", logical_name, api_error)?;
+    validate_version(version)?;
+    validate_logical_name(logical_name)?;
     Ok(format!("{family}.{version}.{logical_name}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::derive_rpc_subject;
+    use super::{derive_rpc_subject, event_patterns_overlap};
 
     #[test]
     fn subject_versions_use_canonical_positive_decimals() {
@@ -123,5 +137,21 @@ mod tests {
         );
         assert!(derive_rpc_subject("v01", "Documents.Get").is_err());
         assert!(derive_rpc_subject("v00", "Documents.Get").is_err());
+    }
+
+    #[test]
+    fn event_patterns_overlap_by_token() {
+        assert!(event_patterns_overlap(
+            "events.v1.Sites.Changed.*",
+            "events.v1.Sites.Changed.eu"
+        ));
+        assert!(!event_patterns_overlap(
+            "events.v1.Sites.Changed.*",
+            "events.v1.Sites.Changed.eu.extra"
+        ));
+        assert!(!event_patterns_overlap(
+            "events.v1.Sites.Changed.us",
+            "events.v1.Sites.Changed.eu"
+        ));
     }
 }

@@ -7,11 +7,15 @@ use trellis_rs::service::{
     AcceptedOperation, OperationRefData, OperationSnapshot, OperationState, RequestContext, Router,
     ServerError, ServiceOperationProvider,
 };
-use trellis_runtime_apis::auth::operations::AuthDeviceUserAuthoritiesResolveOperation;
-use trellis_runtime_apis::auth::types::{
-    AuthDeviceUserAuthoritiesResolveInput, AuthDeviceUserAuthoritiesResolveOutput,
+use trellis_runtime_apis::apis::trellis_auth_v1::operations::DeviceUserAuthoritiesResolve;
+use trellis_runtime_apis::types::{
     AuthDeviceUserAuthoritiesResolveProgress,
+    AuthDeviceUserAuthoritiesResolveRequest as AuthDeviceUserAuthoritiesResolveInput,
+    AuthDeviceUserAuthoritiesResolveResponse as AuthDeviceUserAuthoritiesResolveOutput,
 };
+
+type AuthDeviceUserAuthoritiesResolveOperation =
+    trellis_rs::generated::OperationAdapter<DeviceUserAuthoritiesResolve>;
 
 use super::auth::{
     AuthService, AuthorityEvidenceRepository, ClaimActivationReviewInput,
@@ -94,7 +98,7 @@ impl ServiceOperationProvider<AuthDeviceUserAuthoritiesResolveOperation> for Aut
             Ok(AcceptedOperation {
                 kind: "accepted".to_owned(),
                 operation_ref: OperationRefData {
-                    id: input.flow_id,
+                    id: input.flow_id.to_string(),
                     service: "trellis.auth@v1".to_owned(),
                     operation: OPERATION.to_owned(),
                 },

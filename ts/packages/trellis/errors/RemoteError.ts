@@ -13,8 +13,6 @@ import type {
   OperationNotFoundErrorData,
 } from "./OperationLifecycleError.ts";
 import type { StoreErrorData } from "./StoreError.ts";
-import type { TrellisErrorData } from "../models/trellis/TrellisError.ts";
-import { TrellisErrorDataSchema } from "../models/trellis/TrellisError.ts";
 import type { TransportErrorData } from "./TransportError.ts";
 import type { TransferErrorData } from "./TransferError.ts";
 import { TrellisError } from "./TrellisError.ts";
@@ -30,6 +28,15 @@ export const RemoteErrorDataSchema = Type.Object({
   traceId: Type.Optional(Type.String()),
 });
 export type RemoteErrorData = Static<typeof RemoteErrorDataSchema>;
+
+export const TrellisErrorDataSchema = Type.Object({
+  id: Type.String(),
+  type: Type.String(),
+  message: Type.String(),
+  context: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  traceId: Type.Optional(Type.String()),
+}, { additionalProperties: true });
+export type TrellisErrorData = Static<typeof TrellisErrorDataSchema>;
 
 export type TransportableTrellisErrorData =
   | UnexpectedErrorData

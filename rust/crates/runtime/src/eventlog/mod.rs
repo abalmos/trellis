@@ -8,13 +8,20 @@ use trellis_eventlog_runtime::{
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, RequestValidator, ServerError,
 };
+use trellis_runtime_apis::apis::trellis_events_v1::{self as events, feeds, rpc};
 
 use crate::shutdown::StopHandle;
 use crate::supervisor::{RuntimeContext, RuntimeError, SubsystemHandle};
 use crate::{StorageBackend, SubsystemName};
 
-const EVENTLOG_SUBJECTS: &[&str] = &["rpc.v1.EventLog.>", "feed.v1.EventLog.>"];
-const EVENTLOG_API_ID: &str = "trellis.eventlog@v1";
+const EVENTLOG_SUBJECTS: &[&str] = &[
+    rpc::ConsumersInspect::SUBJECT,
+    rpc::ConsumersQuery::SUBJECT,
+    rpc::Inspect::SUBJECT,
+    rpc::Metrics::SUBJECT,
+    rpc::Query::SUBJECT,
+    feeds::Watch::SUBJECT,
+];
 
 fn runtime_error(error: ServerError) -> RuntimeError {
     RuntimeError::Nats(error.to_string())
@@ -99,7 +106,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         let _owner = owner;
         let api_loop = run_builtin_authenticated_router(
             nats,
-            EVENTLOG_API_ID,
+            events::API_ID,
             EVENTLOG_SUBJECTS,
             router,
             validator,

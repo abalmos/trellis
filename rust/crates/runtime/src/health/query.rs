@@ -2,16 +2,22 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::params;
 use serde::{de::DeserializeOwned, Serialize};
-use trellis_runtime_apis::health::types::{
-    HealthHeartbeatSampleChecksItem, HealthInspectRequest, HealthInspectResponse,
-    HealthInspectResponseHistoryItem, HealthInspectResponseHistoryItemChecksItem,
-    HealthInspectResponseInstancesItem, HealthInspectResponseInstancesItemLatestSample,
-    HealthInspectResponseParticipant, HealthInspectResponseProjection, HealthMetricsRequest,
-    HealthMetricsResponse, HealthMetricsResponseProjection, HealthMetricsResponseSeriesItem,
-    HealthMetricsResponseSeriesItemBucketsItem,
-    HealthMetricsResponseSeriesItemBucketsItemChecksItem, HealthMetricsResponseSummary,
-    HealthQueryRequest, HealthQueryResponse, HealthQueryResponseEntriesItem,
-    HealthQueryResponseProjection,
+use trellis_runtime_apis::__types::trellis::HealthHeartbeatSamplechecksItem as HealthHeartbeatSampleChecksItem;
+use trellis_runtime_apis::types::{
+    HealthInspectRequest, HealthInspectResponse,
+    HealthInspectResponsehistoryItem as HealthInspectResponseHistoryItem,
+    HealthInspectResponsehistoryItemchecksItem as HealthInspectResponseHistoryItemChecksItem,
+    HealthInspectResponseinstancesItem as HealthInspectResponseInstancesItem,
+    HealthInspectResponseinstancesItemlatestSample as HealthInspectResponseInstancesItemLatestSample,
+    HealthInspectResponseparticipant as HealthInspectResponseParticipant,
+    HealthInspectResponseprojection as HealthInspectResponseProjection, HealthMetricsRequest,
+    HealthMetricsResponse, HealthMetricsResponseprojection as HealthMetricsResponseProjection,
+    HealthMetricsResponseseriesItem as HealthMetricsResponseSeriesItem,
+    HealthMetricsResponseseriesItembucketsItem as HealthMetricsResponseSeriesItemBucketsItem,
+    HealthMetricsResponseseriesItembucketsItemchecksItem as HealthMetricsResponseSeriesItemBucketsItemChecksItem,
+    HealthMetricsResponsesummary as HealthMetricsResponseSummary, HealthQueryRequest,
+    HealthQueryResponse, HealthQueryResponseentriesItem as HealthQueryResponseEntriesItem,
+    HealthQueryResponseprojection as HealthQueryResponseProjection, Int64, Number, Uint64,
 };
 
 use super::store::{rfc3339, HealthStore, HealthStoreError};
@@ -128,7 +134,10 @@ impl HealthStore {
             group.runtimes.insert(row.runtime);
         }
 
-        let search = request.search.as_deref().map(str::to_lowercase);
+        let search = request
+            .search
+            .as_ref()
+            .map(|value| value.as_ref().to_lowercase());
         let mut entries = groups
             .into_values()
             .filter(|group| {
@@ -145,10 +154,12 @@ impl HealthStore {
                     contract_id: group.contract_id,
                     participant_name: group.participant_name,
                     effective_status: wire(effective_status)?,
-                    deployment_ids: group.deployment_ids.into_iter().collect(),
-                    contract_digests: group.contract_digests.into_iter().collect(),
-                    online_instances: group.online_instances,
-                    offline_instances: group.offline_instances,
+                    deployment_ids: group.deployment_ids.into_iter().map(Into::into).collect(),
+                    contract_digests: group.contract_digests.into_iter().map(Into::into).collect(),
+                    online_instances: Uint64(group.online_instances.try_into().unwrap_or_default()),
+                    offline_instances: Uint64(
+                        group.offline_instances.try_into().unwrap_or_default(),
+                    ),
                     last_seen_at: rfc3339(group.last_seen_at_ns)?,
                     versions: group.versions.into_iter().collect(),
                     runtimes: group.runtimes.into_iter().collect(),
@@ -162,8 +173,12 @@ impl HealthStore {
                 .then_with(|| left.contract_id.cmp(&right.contract_id))
         });
         let count = i64::try_from(entries.len()).unwrap_or(i64::MAX);
-        let limit = request.limit.unwrap_or(100).clamp(1, 200);
-        let offset = request.offset.unwrap_or(0).max(0);
+        let limit = request
+            .limit
+            .map(|value| value.0 .0)
+            .unwrap_or(100)
+            .clamp(1, 200);
+        let offset = request.offset.map(|value| value.0).unwrap_or(0);
         let entries = entries
             .into_iter()
             .skip(usize::try_from(offset).unwrap_or(usize::MAX))
@@ -172,13 +187,18 @@ impl HealthStore {
         let projection = projection_meta(&connection)?;
         Ok(HealthQueryResponse {
             entries,
-            count,
-            limit,
-            offset,
+            count: Uint64(count.try_into().unwrap_or_default()),
+            limit: Int64(limit).into(),
+            offset: Uint64(offset),
             as_of: rfc3339(now_ns)?,
             projection: HealthQueryResponseProjection {
-                last_stream_sequence: projection.last_stream_sequence,
-                revision: projection.revision,
+                last_stream_sequence: Uint64(
+                    projection
+                        .last_stream_sequence
+                        .try_into()
+                        .unwrap_or_default(),
+                ),
+                revision: Uint64(projection.revision.try_into().unwrap_or_default()),
                 gap_detected: projection.gap_detected,
                 retained_from: projection.retained_from,
                 complete_since: projection.complete_since,
@@ -199,11 +219,11 @@ impl HealthStore {
             .into_iter()
             .filter(|row| {
                 row.participant_kind == request.participant_kind.as_str()
-                    && row.contract_id == request.contract_id
+                    && row.contract_id == request.contract_id.as_ref()
                     && request
                         .instance_id
                         .as_ref()
-                        .is_none_or(|instance_id| row.instance_id == *instance_id)
+                        .is_none_or(|instance_id| row.instance_id == instance_id.as_ref())
             })
             .collect::<Vec<_>>();
         if rows.is_empty() {
@@ -246,7 +266,11 @@ impl HealthStore {
                 effective_status: wire(effective_status)?,
                 observed_at: rfc3339(row.observed_at_ns)?,
                 heartbeat_deadline: rfc3339(row.heartbeat_deadline_ns)?,
-                age_ms: now_ns.saturating_sub(row.observed_at_ns) / 1_000_000,
+                age_ms: Uint64(
+                    (now_ns.saturating_sub(row.observed_at_ns) / 1_000_000)
+                        .try_into()
+                        .unwrap_or_default(),
+                ),
                 started_at: row.started_at.clone(),
                 latest_sample,
             });
@@ -267,7 +291,11 @@ impl HealthStore {
             .map(parse_rfc3339_ns)
             .transpose()?
             .unwrap_or(i64::MIN);
-        let history_limit = request.history_limit.unwrap_or(100).clamp(1, 500);
+        let history_limit = request
+            .history_limit
+            .map(|value| value.0 .0)
+            .unwrap_or(100)
+            .clamp(1, 500);
         let mut statement = connection.prepare(
             "SELECT interval_id, instance_id, started_at_ns, ended_at_ns, reported_status,
                     effective_status, checks_json, reason
@@ -281,8 +309,8 @@ impl HealthStore {
             .query_map(
                 params![
                     request.participant_kind.as_str(),
-                    request.contract_id,
-                    request.instance_id,
+                    request.contract_id.as_ref(),
+                    request.instance_id.as_ref().map(AsRef::<str>::as_ref),
                     now_ns,
                     history_since_ns,
                     history_limit
@@ -299,7 +327,7 @@ impl HealthStore {
                                 )
                             })?;
                     Ok(HealthInspectResponseHistoryItem {
-                        interval_id: row.get(0)?,
+                        interval_id: wire_from_sql(row.get(0)?)?,
                         instance_id: row.get(1)?,
                         started_at: rfc3339(row.get(2)?).map_err(to_from_sql_error)?,
                         ended_at: row
@@ -313,7 +341,7 @@ impl HealthStore {
                             .into_iter()
                             .map(|check| {
                                 Ok(HealthInspectResponseHistoryItemChecksItem {
-                                    name: check.name,
+                                    name: check.name.to_string(),
                                     status: wire_from_sql(check.status.as_str().to_string())?,
                                 })
                             })
@@ -329,18 +357,23 @@ impl HealthStore {
         Ok(Some(HealthInspectResponse {
             participant: HealthInspectResponseParticipant {
                 participant_kind: wire(&request.participant_kind)?,
-                contract_id: request.contract_id.clone(),
+                contract_id: request.contract_id.to_string(),
                 participant_name,
                 effective_status: wire(effective_status)?,
-                online_instances,
-                offline_instances,
+                online_instances: Uint64(online_instances),
+                offline_instances: Uint64(offline_instances),
             },
             instances,
             history,
             as_of: rfc3339(now_ns)?,
             projection: HealthInspectResponseProjection {
-                last_stream_sequence: projection.last_stream_sequence,
-                revision: projection.revision,
+                last_stream_sequence: Uint64(
+                    projection
+                        .last_stream_sequence
+                        .try_into()
+                        .unwrap_or_default(),
+                ),
+                revision: Uint64(projection.revision.try_into().unwrap_or_default()),
                 gap_detected: projection.gap_detected,
                 retained_from: projection.retained_from,
                 complete_since: projection.complete_since,
@@ -357,6 +390,8 @@ impl HealthStore {
         let end_ns = parse_rfc3339_ns(&request.end)?;
         let step_ns = request
             .step_ms
+            .0
+             .0
             .checked_mul(1_000_000)
             .ok_or(HealthStoreError::TimestampRange)?;
         if start_ns >= end_ns || step_ns < 300_000_000_000 {
@@ -370,7 +405,7 @@ impl HealthStore {
             .into_iter()
             .filter(|row| {
                 row.participant_kind == request.participant_kind.as_str()
-                    && row.contract_id == request.contract_id
+                    && row.contract_id == request.contract_id.as_ref()
                     && matches_filter(request.instance_ids.as_ref(), &row.instance_id)
             })
             .map(|row| row.instance_id)
@@ -408,7 +443,7 @@ impl HealthStore {
                 .query_map(
                     params![
                         request.participant_kind.as_str(),
-                        request.contract_id,
+                        request.contract_id.as_ref(),
                         instance_id,
                         end_ns,
                         start_ns
@@ -445,7 +480,7 @@ impl HealthStore {
                 .query_map(
                     params![
                         request.participant_kind.as_str(),
-                        request.contract_id,
+                        request.contract_id.as_ref(),
                         instance_id,
                         metric_start,
                         end_ns
@@ -472,7 +507,7 @@ impl HealthStore {
                 .query_map(
                     params![
                         request.participant_kind.as_str(),
-                        request.contract_id,
+                        request.contract_id.as_ref(),
                         instance_id,
                         metric_start,
                         end_ns
@@ -514,27 +549,32 @@ impl HealthStore {
                     Ok(HealthMetricsResponseSeriesItemBucketsItem {
                         start: rfc3339(bucket.start_ns)?,
                         end: rfc3339(bucket.end_ns)?,
-                        observed_ms: bucket.observed_ms,
-                        sample_count: bucket.sample_count,
-                        healthy_ms: bucket.healthy_ms,
-                        degraded_ms: bucket.degraded_ms,
-                        unhealthy_ms: bucket.unhealthy_ms,
-                        offline_ms: bucket.offline_ms,
+                        observed_ms: Uint64(bucket.observed_ms.try_into().unwrap_or_default()),
+                        sample_count: Uint64(bucket.sample_count.try_into().unwrap_or_default()),
+                        healthy_ms: Uint64(bucket.healthy_ms.try_into().unwrap_or_default()),
+                        degraded_ms: Uint64(bucket.degraded_ms.try_into().unwrap_or_default()),
+                        unhealthy_ms: Uint64(bucket.unhealthy_ms.try_into().unwrap_or_default()),
+                        offline_ms: Uint64(bucket.offline_ms.try_into().unwrap_or_default()),
                         checks: bucket
                             .checks
                             .into_iter()
                             .map(|(name, check)| {
                                 HealthMetricsResponseSeriesItemBucketsItemChecksItem {
                                     name,
-                                    sample_count: check.sample_count,
-                                    ok_count: check.ok_count,
-                                    failed_count: check.failed_count,
+                                    sample_count: Uint64(
+                                        check.sample_count.try_into().unwrap_or_default(),
+                                    ),
+                                    ok_count: Uint64(check.ok_count.try_into().unwrap_or_default()),
+                                    failed_count: Uint64(
+                                        check.failed_count.try_into().unwrap_or_default(),
+                                    ),
                                     latency_average_ms: if check.sample_count == 0 {
-                                        0.0
+                                        Number(0.0).into()
                                     } else {
-                                        check.latency_sum_ms / check.sample_count as f64
+                                        Number(check.latency_sum_ms / check.sample_count as f64)
+                                            .into()
                                     },
-                                    latency_max_ms: check.latency_max_ms,
+                                    latency_max_ms: Number(check.latency_max_ms).into(),
                                 }
                             })
                             .collect(),
@@ -543,7 +583,7 @@ impl HealthStore {
                 .collect::<Result<Vec<_>, HealthStoreError>>()?;
             series.push(HealthMetricsResponseSeriesItem {
                 participant_kind: wire(&request.participant_kind)?,
-                contract_id: request.contract_id.clone(),
+                contract_id: request.contract_id.to_string(),
                 instance_id,
                 buckets: response_buckets,
             });
@@ -554,16 +594,21 @@ impl HealthStore {
             series,
             summary: HealthMetricsResponseSummary {
                 availability: (summary_observed_ms > 0)
-                    .then_some(summary_online_ms as f64 / summary_observed_ms as f64),
-                observed_ms: summary_observed_ms,
-                online_ms: summary_online_ms,
-                sample_count: summary_samples,
-                transitions: summary_transitions,
+                    .then(|| Number(summary_online_ms as f64 / summary_observed_ms as f64).into()),
+                observed_ms: Uint64(summary_observed_ms.try_into().unwrap_or_default()),
+                online_ms: Uint64(summary_online_ms.try_into().unwrap_or_default()),
+                sample_count: Uint64(summary_samples.try_into().unwrap_or_default()),
+                transitions: Uint64(summary_transitions.try_into().unwrap_or_default()),
             },
             as_of: rfc3339(now_ns)?,
             projection: HealthMetricsResponseProjection {
-                last_stream_sequence: projection.last_stream_sequence,
-                revision: projection.revision,
+                last_stream_sequence: Uint64(
+                    projection
+                        .last_stream_sequence
+                        .try_into()
+                        .unwrap_or_default(),
+                ),
+                revision: Uint64(projection.revision.try_into().unwrap_or_default()),
                 gap_detected: projection.gap_detected,
                 retained_from: projection.retained_from,
                 complete_since: projection.complete_since,

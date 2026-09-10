@@ -58,6 +58,7 @@ use super::ephemeral::{
     AuthEphemeralRepository, AuthOAuthKind, AuthOAuthState, AuthOAuthStatus,
     BrowserConsentProposal, BROWSER_FLOW_FORMAT,
 };
+use super::evidence::ParticipantRuntimeProjection;
 use super::{
     portal_policy_snapshot, resolve_portal_authority_selection, AccountFlowState,
     AccountRepository, AuthService, AuthorityEvidenceRepository, AuthorizationStateError,
@@ -554,12 +555,10 @@ fn getrandom_bytes() -> Result<[u8; 16], HttpError> {
 }
 
 fn project_service_resource_bindings(
-    participant_json: &str,
+    participant: &ParticipantRuntimeProjection,
     evidence: &[ResourceBindingEvidence],
     participant_id: &str,
 ) -> Result<ServiceResourceBindings, HttpError> {
-    let participant: Value = serde_json::from_str(participant_json)
-        .map_err(|_| HttpError::internal("participant_artifact_invalid"))?;
     let mut resources = ServiceResourceBindings::default();
     let mut job_queues = BTreeMap::new();
     let mut jobs_namespace = None;
@@ -568,26 +567,47 @@ fn project_service_resource_bindings(
     for binding in evidence {
         match &binding.provider_identity {
             ResourceProviderIdentity::Kv { bucket } => {
-                let config = participant_resource(&participant, "kv", &binding.local_name)?;
+                let config = participant
+                    .resources
+                    .get(&binding.local_name)
+                    .ok_or_else(|| HttpError::internal("resource_binding_invalid"))?;
                 resources.kv.insert(
                     binding.local_name.clone(),
                     KvResourceBinding {
                         bucket: bucket.clone(),
-                        history: config.get("history").and_then(Value::as_i64).unwrap_or(1),
-                        max_value_bytes: optional_i64(config, "maxValueBytes")?,
-                        ttl_ms: config.get("ttlMs").and_then(Value::as_i64).unwrap_or(0),
+                        history: i64::try_from(config.history.unwrap_or(1))
+                            .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
+                        max_value_bytes: config
+                            .desired_max_value
+                            .map(i64::try_from)
+                            .transpose()
+                            .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
+                        ttl_ms: i64::try_from(config.ttl_ms.unwrap_or_default())
+                            .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
                     },
                 );
             }
             ResourceProviderIdentity::Store { bucket } => {
-                let config = participant_resource(&participant, "store", &binding.local_name)?;
+                let config = participant
+                    .resources
+                    .get(&binding.local_name)
+                    .ok_or_else(|| HttpError::internal("resource_binding_invalid"))?;
                 resources.store.insert(
                     binding.local_name.clone(),
                     StoreResourceBinding {
                         name: bucket.clone(),
-                        max_object_bytes: optional_i64(config, "maxObjectBytes")?,
-                        max_total_bytes: optional_i64(config, "maxTotalBytes")?,
-                        ttl_ms: config.get("ttlMs").and_then(Value::as_i64).unwrap_or(0),
+                        max_object_bytes: config
+                            .desired_max_object
+                            .map(i64::try_from)
+                            .transpose()
+                            .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
+                        max_total_bytes: config
+                            .desired_max_total
+                            .map(i64::try_from)
+                            .transpose()
+                            .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
+                        ttl_ms: i64::try_from(config.ttl_ms.unwrap_or_default())
+                            .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
                     },
                 );
             }
@@ -601,9 +621,8 @@ fn project_service_resource_bindings(
                 consumer,
             } => {
                 let config = participant
-                    .get("jobQueues")
-                    .and_then(Value::as_object)
-                    .and_then(|queues| queues.get(&binding.local_name))
+                    .resources
+                    .get(&binding.local_name)
                     .ok_or_else(|| HttpError::internal("job_queue_binding_invalid"))?;
                 if jobs_namespace
                     .as_ref()
@@ -624,31 +643,39 @@ fn project_service_resource_bindings(
                         updates_prefix: updates_prefix.clone(),
                         work_subject: work_subject.clone(),
                         consumer_name: consumer.clone(),
-                        payload: required_schema_ref(config, "payload")?,
-                        update: optional_schema_ref(config, "update")?,
-                        result: optional_schema_ref(config, "result")?,
-                        max_deliver: config
-                            .get("maxDeliver")
-                            .and_then(Value::as_i64)
-                            .unwrap_or(5),
+                        payload: JobsSchemaRef {
+                            schema: config
+                                .payload_schema
+                                .clone()
+                                .ok_or_else(|| HttpError::internal("job_queue_binding_invalid"))?,
+                        },
+                        update: config
+                            .update_schema
+                            .clone()
+                            .map(|schema| JobsSchemaRef { schema }),
+                        result: config
+                            .result_schema
+                            .clone()
+                            .map(|schema| JobsSchemaRef { schema }),
+                        max_deliver: i64::from(config.retry_attempts.unwrap_or(5)),
                         backoff_ms: config
-                            .get("backoffMs")
-                            .map(|_| required_i64_array(config, "backoffMs"))
-                            .transpose()?
-                            .unwrap_or_else(|| vec![5_000, 30_000, 120_000, 600_000]),
-                        ack_wait_ms: config
-                            .get("ackWaitMs")
-                            .and_then(Value::as_i64)
-                            .unwrap_or(300_000),
-                        default_deadline_ms: optional_i64(config, "defaultDeadlineMs")?,
-                        progress: config
-                            .get("progress")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false),
-                        logs: config.get("logs").and_then(Value::as_bool).unwrap_or(false),
-                        dlq: config.get("dlq").and_then(Value::as_bool).unwrap_or(false),
-                        key_concurrency: optional_policy(config, "keyConcurrency")?,
-                        queue: optional_policy(config, "queue")?,
+                            .retry_backoff_ms
+                            .iter()
+                            .copied()
+                            .map(i64::try_from)
+                            .collect::<Result<_, _>>()
+                            .map_err(|_| HttpError::internal("job_queue_binding_invalid"))?,
+                        ack_wait_ms: 300_000,
+                        default_deadline_ms: config
+                            .deadline_ms
+                            .map(i64::try_from)
+                            .transpose()
+                            .map_err(|_| HttpError::internal("job_queue_binding_invalid"))?,
+                        progress: false,
+                        logs: false,
+                        dlq: false,
+                        key_concurrency: None,
+                        queue: None,
                     },
                 );
             }
@@ -658,52 +685,41 @@ fn project_service_resource_bindings(
                 filter_subjects,
             } => {
                 let config = participant
-                    .get("eventConsumers")
-                    .and_then(Value::as_object)
-                    .and_then(|consumers| consumers.get(&binding.local_name))
+                    .resources
+                    .get(&binding.local_name)
                     .ok_or_else(|| HttpError::internal("event_consumer_binding_invalid"))?;
-                let max_deliver = config
-                    .get("maxDeliver")
-                    .and_then(Value::as_i64)
-                    .unwrap_or(6);
-                let backoff_ms = config
-                    .get("backoffMs")
-                    .map(|_| required_i64_array(config, "backoffMs"))
-                    .transpose()?
-                    .unwrap_or_else(|| {
-                        [5_000, 30_000, 120_000, 600_000, 1_800_000]
-                            .into_iter()
-                            .take(max_deliver.saturating_sub(1) as usize)
-                            .collect()
-                    });
+                let max_deliver = i64::from(config.retry_attempts.unwrap_or(6));
+                let backoff_ms = if config.retry_backoff_ms.is_empty() {
+                    [5_000, 30_000, 120_000, 600_000, 1_800_000]
+                        .into_iter()
+                        .take(max_deliver.saturating_sub(1) as usize)
+                        .collect()
+                } else {
+                    config
+                        .retry_backoff_ms
+                        .iter()
+                        .copied()
+                        .map(i64::try_from)
+                        .collect::<Result<_, _>>()
+                        .map_err(|_| HttpError::internal("event_consumer_binding_invalid"))?
+                };
                 resources.event_consumers.insert(
                     binding.local_name.clone(),
                     EventConsumerResourceBinding {
                         stream: stream.clone(),
                         consumer_name: consumer.clone(),
                         filter_subjects: filter_subjects.clone(),
-                        replay: match config
-                            .get("replay")
-                            .and_then(Value::as_str)
-                            .unwrap_or("new")
-                        {
-                            "new" => EventConsumerReplay::New,
-                            "all" => EventConsumerReplay::All,
-                            _ => EventConsumerReplay::Unknown,
+                        replay: if config.consumer_replay_all {
+                            EventConsumerReplay::All
+                        } else {
+                            EventConsumerReplay::New
                         },
-                        ordering: match config
-                            .get("ordering")
-                            .and_then(Value::as_str)
-                            .unwrap_or("strict")
-                        {
-                            "strict" => EventConsumerOrdering::Strict,
-                            "parallel" => EventConsumerOrdering::Parallel,
-                            _ => EventConsumerOrdering::Unknown,
+                        ordering: if config.consumer_concurrency.unwrap_or(1) == 1 {
+                            EventConsumerOrdering::Strict
+                        } else {
+                            EventConsumerOrdering::Parallel
                         },
-                        ack_wait_ms: config
-                            .get("ackWaitMs")
-                            .and_then(Value::as_i64)
-                            .unwrap_or(300_000),
+                        ack_wait_ms: 300_000,
                         max_deliver,
                         backoff_ms,
                     },
@@ -721,20 +737,6 @@ fn project_service_resource_bindings(
         });
     }
     Ok(resources)
-}
-
-fn participant_resource<'a>(
-    participant: &'a Value,
-    family: &str,
-    local_name: &str,
-) -> Result<&'a Value, HttpError> {
-    participant
-        .get("resources")
-        .and_then(Value::as_object)
-        .and_then(|resources| resources.get(family))
-        .and_then(Value::as_object)
-        .and_then(|resources| resources.get(local_name))
-        .ok_or_else(|| HttpError::internal("resource_binding_invalid"))
 }
 
 fn optional_i64(value: &Value, field: &str) -> Result<Option<i64>, HttpError> {

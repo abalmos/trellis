@@ -1,635 +1,625 @@
 use crate::{
     ast::{
-        Api, ApiUse, Binding, Capability, Constraint, ConstraintValue, Docs, ErrorDecl, Field,
-        Participant, Project, Resource, SchemaDecl, Selection, Source, Spanned, State, Surface,
-        Transfer, Type,
+        Action, Alias, Api, ApiUse, Capability, Declaration, Enum, Field, Import, MemberValue,
+        Model, ParsedSource, Participant, Prelude, PreludeDependency, Resource, ResourceValue,
+        Selection, Spanned, TypeExpr,
     },
     lexer::{lex, Token, TokenKind},
+    semantic::SourceUnit,
 };
 use miette::{LabeledSpan, MietteDiagnostic, NamedSource, Report};
-use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet};
 
-pub(crate) fn parse(sources: Vec<Source>) -> miette::Result<Project> {
-    let mut project = Project {
-        sources,
-        apis: Vec::new(),
-        participants: Vec::new(),
-    };
-    for source_index in 0..project.sources.len() {
-        let source = &project.sources[source_index];
-        let tokens = lex(&source.text)
-            .map_err(|span| diagnostic(source, span, "unrecognized token in Trellis IDL"))?;
-        let mut parser = Parser {
-            source,
-            source_index,
-            tokens,
-            position: 0,
-        };
-        while !parser.done() {
-            if parser.at_word("api") {
-                project.apis.push(parser.api()?);
-            } else if parser.at_word("participant") {
-                project.participants.push(parser.participant()?);
-            } else {
-                return Err(parser.error_here("expected 'api' or 'participant'"));
-            }
-        }
-    }
-    Ok(project)
+pub(crate) fn parse(sources: &[SourceUnit]) -> miette::Result<Vec<ParsedSource>> {
+    sources
+        .iter()
+        .enumerate()
+        .map(|(index, source)| Parser::new(source, index)?.source())
+        .collect()
 }
 
 struct Parser<'a> {
-    source: &'a Source,
+    input: &'a SourceUnit,
     source_index: usize,
     tokens: Vec<Token>,
     position: usize,
 }
 
-impl Parser<'_> {
-    fn api(&mut self) -> miette::Result<Spanned<Api>> {
-        let start = self.word("api")?.start;
-        let id = self.string()?.value;
-        self.token(TokenKind::LBrace)?;
-        let mut api = Api {
-            id,
-            version: None,
-            display_name: None,
-            description: None,
-            docs: None,
-            schemas: BTreeMap::new(),
-            exports: Vec::new(),
-            capabilities: BTreeMap::new(),
-            errors: BTreeMap::new(),
-            rpcs: BTreeMap::new(),
-            operations: BTreeMap::new(),
-            events: BTreeMap::new(),
-            feeds: BTreeMap::new(),
-        };
-        while !self.at(TokenKind::RBrace) {
-            match self.word_text()?.as_str() {
-                "version" => api.version = Some(self.string_statement()?),
-                "display_name" => api.display_name = Some(self.string_statement()?),
-                "description" => api.description = Some(self.string_statement()?),
-                "docs" => api.docs = Some(self.docs()?),
-                "model" => {
-                    let (name, declaration) = self.model()?;
-                    insert(&mut api.schemas, name, declaration, self.source)?;
-                }
-                "type" => {
-                    let (name, declaration) = self.alias()?;
-                    insert(&mut api.schemas, name, declaration, self.source)?;
-                }
-                "enum" => {
-                    let (name, declaration) = self.enum_decl()?;
-                    insert(&mut api.schemas, name, declaration, self.source)?;
-                }
-                "export" => {
-                    api.exports.push(self.ident_statement()?);
-                }
-                "capability" => {
-                    let (name, capability) = self.capability()?;
-                    insert(&mut api.capabilities, name, capability, self.source)?;
-                }
-                "error" => {
-                    let name = self.ident()?;
-                    let start = name.span.start;
-                    let mut value = ErrorDecl::default();
-                    let end = if self.eat(TokenKind::Semi) {
-                        self.previous_span().end
-                    } else {
-                        self.token(TokenKind::LBrace)?;
-                        while !self.at(TokenKind::RBrace) {
-                            match self.word_text()?.as_str() {
-                                "code" => value.code = Some(self.string_statement()?),
-                                "schema" => value.schema = Some(self.ident_statement()?),
-                                other => {
-                                    return Err(self.error_previous(format!(
-                                        "unsupported error member '{other}'"
-                                    )))
-                                }
-                            }
-                        }
-                        self.token(TokenKind::RBrace)?.end
-                    };
-                    let declaration = self.spanned(value, start..end);
-                    insert(&mut api.errors, name, declaration, self.source)?;
-                }
-                "rpc" => {
-                    let (name, surface) = self.surface("rpc")?;
-                    insert(&mut api.rpcs, name, surface, self.source)?;
-                }
-                "operation" => {
-                    let (name, surface) = self.surface("operation")?;
-                    insert(&mut api.operations, name, surface, self.source)?;
-                }
-                "event" => {
-                    let (name, surface) = self.surface("event")?;
-                    insert(&mut api.events, name, surface, self.source)?;
-                }
-                "feed" => {
-                    let (name, surface) = self.surface("feed")?;
-                    insert(&mut api.feeds, name, surface, self.source)?;
-                }
-                other => {
-                    return Err(
-                        self.error_previous(format!("unsupported API declaration '{other}'"))
-                    )
-                }
-            }
-        }
-        let end = self.token(TokenKind::RBrace)?.end;
-        Ok(self.spanned(api, start..end))
+impl<'a> Parser<'a> {
+    fn new(input: &'a SourceUnit, source_index: usize) -> miette::Result<Self> {
+        let tokens = lex(&input.source)
+            .map_err(|span| diagnostic(input, span, "unrecognized token in Trellis IDL"))?;
+        Ok(Self {
+            input,
+            source_index,
+            tokens,
+            position: 0,
+        })
     }
 
-    fn capability(&mut self) -> miette::Result<(Spanned<String>, Spanned<Capability>)> {
-        let name = self.string()?;
-        let start = name.span.start;
-        if self.at(TokenKind::Semi) {
-            let end = self.token(TokenKind::Semi)?.end;
-            return Ok((name, self.spanned(Capability::default(), start..end)));
+    fn source(mut self) -> miette::Result<ParsedSource> {
+        let mut prelude = Prelude::default();
+        let mut imports = BTreeMap::new();
+        let mut declarations = Vec::new();
+        if self.at_word("package") {
+            self.word("package")?;
+            prelude.package = Some(self.string()?);
+            self.token(TokenKind::Semi)?;
         }
-        self.token(TokenKind::LBrace)?;
-        let mut capability = Capability::default();
-        while !self.at(TokenKind::RBrace) {
-            match self.word_text()?.as_str() {
-                "display_name" => capability.display_name = Some(self.string_statement()?),
-                "description" => capability.description = Some(self.string_statement()?),
-                "consequence" => capability.consequence = Some(self.string_statement()?),
-                other => {
-                    return Err(
-                        self.error_previous(format!("unsupported capability member '{other}'"))
+        while self.at_word("dependency") {
+            self.word("dependency")?;
+            let alias = self.ident()?;
+            let package = self.string()?;
+            self.word("version")?;
+            let version = self.string()?;
+            self.word("digest")?;
+            let digest = self.string()?;
+            self.token(TokenKind::Semi)?;
+            prelude.dependencies.push(PreludeDependency {
+                alias,
+                package,
+                version,
+                digest,
+            });
+        }
+        while self.at_word("import") {
+            self.word("import")?;
+            self.token(TokenKind::LBrace)?;
+            while !self.at(TokenKind::RBrace) {
+                let start = self.current_span().start;
+                let name = self.ident()?;
+                let local = if self.eat_word("as") {
+                    self.ident()?
+                } else {
+                    name.clone()
+                };
+                if imports
+                    .insert(
+                        local.clone(),
+                        Import {
+                            from: String::new(),
+                            name,
+                            span: start..self.previous_span().end,
+                        },
                     )
+                    .is_some()
+                {
+                    return Err(self.error_here(format!("duplicate import name '{local}'")));
+                }
+                if !self.eat(TokenKind::Comma) {
+                    break;
                 }
             }
+            self.token(TokenKind::RBrace)?;
+            self.word("from")?;
+            let from = self.ident()?;
+            self.token(TokenKind::Semi)?;
+            for import in imports.values_mut().filter(|import| import.from.is_empty()) {
+                import.from.clone_from(&from);
+            }
         }
-        let end = self.token(TokenKind::RBrace)?.end;
-        Ok((name, self.spanned(capability, start..end)))
-    }
-
-    fn model(&mut self) -> miette::Result<(Spanned<String>, Spanned<SchemaDecl>)> {
-        let name = self.ident()?;
-        let start = name.span.start;
-        self.token(TokenKind::LBrace)?;
-        let mut fields = Vec::new();
-        while !self.at(TokenKind::RBrace) {
-            let field = if self.at(TokenKind::String) {
-                self.string()?
-            } else {
-                self.ident()?
+        while !self.done() {
+            let start = self.current_span().start;
+            let declaration = match self.word_text()?.as_str() {
+                "model" => Declaration::Model(self.model()?),
+                "enum" => Declaration::Enum(self.enum_decl()?),
+                "type" => Declaration::Alias(self.alias()?),
+                "api" => Declaration::Api(self.api()?),
+                kind @ ("service" | "device" | "app" | "agent") => {
+                    Declaration::Participant(self.participant(kind.to_owned(), false)?)
+                }
+                other => {
+                    return Err(self.error_previous(format!("unsupported declaration '{other}'")))
+                }
             };
+            let end = self.previous_span().end;
+            declarations.push(Spanned {
+                value: declaration,
+                source: self.source_index,
+                span: start..end,
+            });
+        }
+        Ok(ParsedSource {
+            alias: self.input.alias.clone(),
+            path: self.input.path.clone(),
+            text: self.input.source.clone(),
+            imports,
+            declarations,
+            prelude,
+        })
+    }
+
+    fn model(&mut self) -> miette::Result<Model> {
+        let name = self.ident()?;
+        self.token(TokenKind::LBrace)?;
+        let mut fields = BTreeMap::new();
+        while !self.at(TokenKind::RBrace) {
+            let field = self.ident()?;
             let optional = self.eat(TokenKind::Question);
             self.token(TokenKind::Colon)?;
             let ty = self.ty()?;
             self.token(TokenKind::Semi)?;
-            fields.push(Field {
-                name: field.value,
-                optional,
-                ty,
-            });
+            if fields
+                .insert(field.clone(), Field { optional, ty })
+                .is_some()
+            {
+                return Err(self.error_previous(format!("duplicate field '{field}'")));
+            }
         }
-        let end = self.token(TokenKind::RBrace)?.end;
-        Ok((name, self.spanned(SchemaDecl::Model(fields), start..end)))
+        self.token(TokenKind::RBrace)?;
+        Ok(Model { name, fields })
     }
 
-    fn alias(&mut self) -> miette::Result<(Spanned<String>, Spanned<SchemaDecl>)> {
+    fn enum_decl(&mut self) -> miette::Result<Enum> {
         let name = self.ident()?;
-        let start = name.span.start;
+        self.token(TokenKind::LBrace)?;
+        let mut symbols = Vec::new();
+        while !self.at(TokenKind::RBrace) {
+            let symbol = self.ident()?;
+            if symbols.contains(&symbol) {
+                return Err(self.error_previous(format!("duplicate enum symbol '{symbol}'")));
+            }
+            symbols.push(symbol);
+            self.token(TokenKind::Semi)?;
+        }
+        self.token(TokenKind::RBrace)?;
+        Ok(Enum { name, symbols })
+    }
+
+    fn alias(&mut self) -> miette::Result<Alias> {
+        let name = self.ident()?;
         self.token(TokenKind::Eq)?;
         let ty = self.ty()?;
-        let end = self.token(TokenKind::Semi)?.end;
-        Ok((name, self.spanned(SchemaDecl::Alias(ty.value), start..end)))
+        self.token(TokenKind::Semi)?;
+        Ok(Alias { name, ty })
     }
 
-    fn enum_decl(&mut self) -> miette::Result<(Spanned<String>, Spanned<SchemaDecl>)> {
+    fn ty(&mut self) -> miette::Result<TypeExpr> {
+        let mut ty = self.type_member()?;
+        if self.eat(TokenKind::Pipe) {
+            self.word("null")?;
+            if self.eat(TokenKind::Pipe) {
+                return Err(self.error_previous("only 'T | null' unions are supported"));
+            }
+            ty = TypeExpr::Nullable(Box::new(ty));
+        }
+        Ok(ty)
+    }
+
+    fn type_member(&mut self) -> miette::Result<TypeExpr> {
         let name = self.ident()?;
-        let start = name.span.start;
-        self.token(TokenKind::LBrace)?;
-        let mut values = Vec::new();
-        while !self.at(TokenKind::RBrace) {
-            let value = if self.at(TokenKind::String) {
-                self.string()?.value
-            } else {
-                self.ident()?.value
-            };
-            self.token(TokenKind::Semi)?;
-            values.push(value);
-        }
-        let end = self.token(TokenKind::RBrace)?.end;
-        Ok((name, self.spanned(SchemaDecl::Enum(values), start..end)))
-    }
-
-    fn ty(&mut self) -> miette::Result<Spanned<Type>> {
-        let start = self.current_span().start;
-        let mut members = vec![self.type_member()?];
-        while self.eat(TokenKind::Pipe) {
-            members.push(self.type_member()?);
-        }
-        let end = members.last().expect("type has a member").span.end;
-        if members.len() == 1 {
-            Ok(members.pop().expect("type has a member"))
-        } else {
-            Ok(self.spanned(Type::Union(members), start..end))
-        }
-    }
-
-    fn type_member(&mut self) -> miette::Result<Spanned<Type>> {
-        if self.at(TokenKind::String) {
-            let value = self.string()?;
-            return Ok(self.spanned(Type::Literal(value.value), value.span));
-        }
-        let name = self.ident()?;
-        let start = name.span.start;
-        let ty = match name.value.as_str() {
-            "json" => Type::Json,
-            "string" => Type::String(self.constraints()?),
-            "bool" => Type::Bool,
-            "true" => Type::BoolLiteral(true),
-            "false" => Type::BoolLiteral(false),
-            "uint" => Type::Integer {
-                unsigned: true,
-                constraints: self.constraints()?,
-            },
-            "int" => Type::Integer {
-                unsigned: false,
-                constraints: self.constraints()?,
-            },
-            "number" => Type::Number(self.constraints()?),
-            "list" | "map" => {
+        match name.as_str() {
+            "list" | "map" | "CursorPage" => {
                 self.token(TokenKind::LAngle)?;
                 let member = self.ty()?;
                 self.token(TokenKind::RAngle)?;
                 let constraints = self.constraints()?;
-                let end = self.previous_span().end;
-                return Ok(self.spanned(
-                    if name.value == "list" {
-                        Type::List {
-                            member: Box::new(member),
-                            constraints,
-                        }
-                    } else {
-                        if !constraints.is_empty() {
-                            return Err(self.error_at(&name, "map constraints are not supported"));
-                        }
-                        Type::Map(Box::new(member))
-                    },
-                    start..end,
-                ));
+                match name.as_str() {
+                    "list" => Ok(TypeExpr::List(Box::new(member), constraints)),
+                    "map" if constraints.is_empty() => Ok(TypeExpr::Map(Box::new(member))),
+                    "CursorPage" if constraints.is_empty() => {
+                        Ok(TypeExpr::CursorPage(Box::new(member)))
+                    }
+                    _ => Err(self.error_previous(format!("{name} does not accept constraints"))),
+                }
             }
-            "null" => Type::Null,
-            _ => Type::Named(name.value),
-        };
-        let end = self.previous_span().end;
-        Ok(self.spanned(ty, start..end))
+            "string" | "bool" | "int32" | "uint32" | "int64" | "uint64" | "number" | "bytes"
+            | "timestamp" | "ulid" => Ok(TypeExpr::Primitive(name, self.constraints()?)),
+            "null" => Err(self.error_previous("'null' is only legal as 'T | null'")),
+            _ => {
+                if self.at(TokenKind::LParen) {
+                    return Err(self.error_here("constraints require a scalar or list alias"));
+                }
+                Ok(TypeExpr::Named(name))
+            }
+        }
     }
 
-    fn constraints(&mut self) -> miette::Result<Vec<Constraint>> {
+    fn constraints(&mut self) -> miette::Result<Vec<(String, String)>> {
         if !self.eat(TokenKind::LParen) {
             return Ok(Vec::new());
         }
-        let mut constraints = Vec::new();
+        let mut values = Vec::new();
         while !self.at(TokenKind::RParen) {
-            let name = self.ident()?.value;
+            let name = self.ident()?;
             self.token(TokenKind::Eq)?;
-            let value = if self.at(TokenKind::String) {
-                ConstraintValue::String(self.string()?.value)
-            } else {
-                let token = self.token(TokenKind::Number)?;
-                ConstraintValue::Number(serde_json::from_str(self.text(&token)).map_err(|_| {
-                    diagnostic(
-                        self.source,
-                        token.clone(),
-                        "expected a finite JSON numeric literal",
-                    )
-                })?)
-            };
-            constraints.push(Constraint { name, value });
+            let value = self.number_text()?;
+            if values.iter().any(|(existing, _)| existing == &name) {
+                return Err(self.error_previous(format!("duplicate constraint '{name}'")));
+            }
+            values.push((name, value));
             if !self.eat(TokenKind::Comma) {
                 break;
             }
         }
         self.token(TokenKind::RParen)?;
-        Ok(constraints)
+        Ok(values)
     }
 
-    fn surface(&mut self, kind: &str) -> miette::Result<(Spanned<String>, Spanned<Surface>)> {
-        let name = self.string()?;
-        let start = name.span.start;
+    fn api(&mut self) -> miette::Result<Api> {
+        let name = self.ident()?;
+        self.token(TokenKind::At)?;
+        let version_name = self.ident()?;
+        let major = version_name
+            .strip_prefix('v')
+            .and_then(|value| value.parse().ok())
+            .filter(|value| *value > 0)
+            .ok_or_else(|| self.error_previous("expected API transport major 'vN'"))?;
         self.token(TokenKind::LBrace)?;
-        let mut surface = Surface::default();
-        let mut seen = BTreeSet::new();
+        let mut api = Api {
+            name,
+            major,
+            title: String::new(),
+            description: String::new(),
+            version: None,
+            errors: BTreeMap::new(),
+            actions: Vec::new(),
+            capabilities: Vec::new(),
+            capabilities_present: false,
+        };
+        let mut members = BTreeSet::new();
         while !self.at(TokenKind::RBrace) {
             let member = self.word_text()?;
-            let allowed = matches!(member.as_str(), "version" | "docs" | "capabilities")
-                || match kind {
-                    "rpc" => matches!(member.as_str(), "input" | "output" | "errors" | "transfer"),
-                    "operation" => matches!(
-                        member.as_str(),
-                        "input" | "output" | "progress" | "errors" | "transfer" | "cancellable"
-                    ),
-                    "event" => matches!(member.as_str(), "payload" | "event" | "params" | "class"),
-                    "feed" => matches!(member.as_str(), "input" | "event" | "payload"),
-                    _ => unreachable!("known surface kind"),
-                };
-            if !allowed {
-                return Err(
-                    self.error_previous(format!("member '{member}' is not supported by {kind}"))
-                );
-            }
-            let canonical_member = if member == "payload" {
-                "event"
-            } else {
-                &member
-            };
-            if !seen.insert(canonical_member.to_owned()) {
-                return Err(self.error_previous(format!("duplicate member '{member}' in {kind}")));
-            }
             match member.as_str() {
-                "version" => surface.version = Some(self.string_statement()?),
-                "input" => surface.input = Some(self.ident_statement()?),
-                "output" => surface.output = Some(self.ident_statement()?),
-                "progress" => surface.progress = Some(self.ident_statement()?),
-                "payload" | "event" => surface.event = Some(self.ident_statement()?),
-                "params" => surface.params = self.string_list_statement()?,
-                "errors" => surface.errors = self.ident_list_statement()?,
-                "transfer" => {
-                    let direction = self.ident()?;
-                    surface.transfer = Some(match direction.value.as_str() {
-                        "send" => Transfer::Send,
-                        "receive" => Transfer::Receive,
-                        _ => return Err(self.error_at(&direction, "expected 'send' or 'receive'")),
-                    });
-                    self.token(TokenKind::Semi)?;
+                "title" | "description" | "version" | "capabilities"
+                    if !members.insert(member.clone()) =>
+                {
+                    return Err(self.error_previous(format!("duplicate API member '{member}'")));
                 }
-                "cancellable" => {
-                    surface.cancellable = true;
-                    self.token(TokenKind::Semi)?;
-                }
-                "capabilities" => surface.capabilities = self.capabilities()?,
-                "class" => surface.class = Some(self.ident_statement()?),
-                "docs" => surface.docs = Some(self.docs()?),
-                other => {
-                    return Err(self.error_previous(format!("unsupported surface member '{other}'")))
-                }
-            }
-        }
-        let end = self.token(TokenKind::RBrace)?.end;
-        Ok((name, self.spanned(surface, start..end)))
-    }
-
-    fn capabilities(&mut self) -> miette::Result<BTreeMap<String, Vec<String>>> {
-        self.token(TokenKind::LBrace)?;
-        let mut capabilities = BTreeMap::new();
-        while !self.at(TokenKind::RBrace) {
-            let action = self.ident()?.value;
-            let names = self.string_list_statement()?;
-            capabilities.insert(action, names);
-        }
-        self.token(TokenKind::RBrace)?;
-        Ok(capabilities)
-    }
-
-    fn docs(&mut self) -> miette::Result<Docs> {
-        self.token(TokenKind::LBrace)?;
-        let mut docs = Docs::default();
-        while !self.at(TokenKind::RBrace) {
-            match self.word_text()?.as_str() {
-                "summary" => docs.summary = Some(self.string_statement()?.value),
-                "markdown" => docs.markdown = Some(self.string_statement()?.value),
-                other => {
-                    return Err(self.error_previous(format!("unsupported docs member '{other}'")))
-                }
-            }
-        }
-        self.token(TokenKind::RBrace)?;
-        Ok(docs)
-    }
-
-    fn participant(&mut self) -> miette::Result<Spanned<Participant>> {
-        let start = self.word("participant")?.start;
-        let id = self.string()?.value;
-        let kind = self.ident()?.value;
-        self.token(TokenKind::LBrace)?;
-        let mut participant = Participant {
-            id,
-            kind,
-            implements: Vec::new(),
-            uses: BTreeMap::new(),
-            subscribed_events: Vec::new(),
-            schemas: BTreeMap::new(),
-            state: BTreeMap::new(),
-            stores: BTreeMap::new(),
-            kv: BTreeMap::new(),
-            jobs: BTreeMap::new(),
-            bindings: BTreeMap::new(),
-        };
-        while !self.at(TokenKind::RBrace) {
-            match self.word_text()?.as_str() {
-                "implements" => participant.implements.push(self.string_statement()?),
-                "use" => {
-                    let (alias, api_use) = self.api_use()?;
-                    insert(&mut participant.uses, alias, api_use, self.source)?;
-                }
-                "subscribe" => {
-                    self.word("event")?;
-                    participant.subscribed_events.push(self.string_statement()?);
-                }
-                "model" => {
-                    let (name, schema) = self.model()?;
-                    insert(&mut participant.schemas, name, schema, self.source)?;
-                }
-                "type" => {
-                    let (name, schema) = self.alias()?;
-                    insert(&mut participant.schemas, name, schema, self.source)?;
-                }
-                "enum" => {
-                    let (name, schema) = self.enum_decl()?;
-                    insert(&mut participant.schemas, name, schema, self.source)?;
-                }
-                "state" => {
+                "title" => api.title = self.string_statement()?,
+                "description" => api.description = self.string_statement()?,
+                "version" => api.version = Some(self.string_statement()?),
+                "error" => {
                     let name = self.ident()?;
-                    let kind = self.ident()?.value;
-                    let start = name.span.start;
+                    let payload = if self.eat(TokenKind::LParen) {
+                        let value = self.name()?;
+                        self.token(TokenKind::RParen)?;
+                        Some(value)
+                    } else {
+                        None
+                    };
+                    self.token(TokenKind::Semi)?;
+                    if api.errors.insert(name.clone(), payload).is_some() {
+                        return Err(self.error_previous(format!("duplicate error '{name}'")));
+                    }
+                }
+                kind @ ("rpc" | "operation" | "event" | "feed") => {
+                    api.actions.push(self.action(kind.to_owned())?)
+                }
+                "capabilities" => {
+                    api.capabilities = self.capabilities()?;
+                    api.capabilities_present = true;
+                }
+                other => {
+                    return Err(self.error_previous(format!("unsupported API member '{other}'")))
+                }
+            }
+        }
+        self.token(TokenKind::RBrace)?;
+        Ok(api)
+    }
+
+    fn action(&mut self, kind: String) -> miette::Result<Action> {
+        let start = self.previous_span().start;
+        let name = self.path()?;
+        self.token(TokenKind::LBrace)?;
+        let mut members = BTreeMap::new();
+        while !self.at(TokenKind::RBrace) {
+            let member = self.word_text()?;
+            let value = match member.as_str() {
+                "input" | "output" | "payload" | "event" | "progress" => {
+                    MemberValue::Name(self.name_statement()?)
+                }
+                "errors" => MemberValue::Names(self.name_list_statement()?),
+                "params" => MemberValue::Paths(self.path_list_statement()?),
+                "upload" | "download" => {
+                    self.token(TokenKind::Semi)?;
+                    MemberValue::Flag
+                }
+                "pagination" => {
+                    let value = self.ident()?;
+                    self.token(TokenKind::Semi)?;
+                    MemberValue::Name(value)
+                }
+                "signals" => {
                     self.token(TokenKind::LBrace)?;
-                    let mut schema = None;
-                    let mut state_version = None;
-                    let mut docs = None;
+                    let mut signals = BTreeMap::new();
                     while !self.at(TokenKind::RBrace) {
-                        match self.word_text()?.as_str() {
-                            "schema" => schema = Some(self.ident_statement()?),
-                            "state_version" => state_version = Some(self.string_statement()?.value),
-                            "docs" => docs = Some(self.docs()?),
-                            other => {
-                                return Err(self
-                                    .error_previous(format!("unsupported state member '{other}'")))
-                            }
+                        let signal = self.ident()?;
+                        let ty = self.name_statement()?;
+                        if signals.insert(signal.clone(), ty).is_some() {
+                            return Err(self.error_previous(format!("duplicate signal '{signal}'")));
                         }
                     }
-                    let end = self.token(TokenKind::RBrace)?.end;
-                    let schema =
-                        schema.ok_or_else(|| self.error_here("state requires 'schema'"))?;
-                    insert(
-                        &mut participant.state,
-                        name,
-                        self.spanned(
-                            State {
-                                kind,
-                                schema,
-                                state_version,
-                                docs,
-                            },
-                            start..end,
-                        ),
-                        self.source,
-                    )?;
-                }
-                "store" => {
-                    let (name, resource) = self.resource()?;
-                    insert(&mut participant.stores, name, resource, self.source)?;
-                }
-                "kv" => {
-                    let (name, resource) = self.resource()?;
-                    insert(&mut participant.kv, name, resource, self.source)?;
-                }
-                "job" => {
-                    let (name, resource) = self.resource()?;
-                    insert(&mut participant.jobs, name, resource, self.source)?;
-                }
-                "bind" => {
-                    self.word("operation")?;
-                    let name = self.string()?;
-                    let binding = self.binding()?;
-                    insert(&mut participant.bindings, name, binding, self.source)?;
+                    self.token(TokenKind::RBrace)?;
+                    MemberValue::Signals(signals)
                 }
                 other => {
-                    return Err(self
-                        .error_previous(format!("unsupported participant declaration '{other}'")))
+                    return Err(self.error_previous(format!("unsupported {kind} member '{other}'")))
                 }
-            }
-        }
-        let end = self.token(TokenKind::RBrace)?.end;
-        Ok(self.spanned(participant, start..end))
-    }
-
-    fn api_use(&mut self) -> miette::Result<(Spanned<String>, Spanned<ApiUse>)> {
-        let requirement = self.ident()?;
-        let required = match requirement.value.as_str() {
-            "required" => true,
-            "optional" => false,
-            _ => return Err(self.error_at(&requirement, "expected 'required' or 'optional'")),
-        };
-        let alias = self.ident()?;
-        let start = requirement.span.start;
-        let api = self.string()?;
-        self.token(TokenKind::LBrace)?;
-        let mut selections = Vec::new();
-        while !self.at(TokenKind::RBrace) {
-            let action = self.ident()?;
-            let surface = self.ident()?;
-            if !matches!(
-                (action.value.as_str(), surface.value.as_str()),
-                ("call", "rpc")
-                    | ("invoke" | "observe" | "cancel" | "control", "operation")
-                    | ("publish" | "subscribe", "event")
-                    | ("subscribe", "feed")
-                    | ("read" | "write", "state")
-            ) {
-                return Err(self.error_at(
-                    &action,
-                    format!(
-                        "unsupported participant use selection '{} {}'",
-                        action.value, surface.value
-                    ),
-                ));
-            }
-            let name = self.string()?;
-            let signal = if action.value == "control" {
-                self.word("signal")?;
-                Some(self.string()?.value)
-            } else {
-                None
             };
-            let end = self.token(TokenKind::Semi)?.end;
-            selections.push(self.spanned(
-                Selection {
-                    action: action.value,
-                    surface: surface.value,
-                    name: name.value,
-                    signal,
-                },
-                action.span.start..end,
-            ));
-        }
-        let end = self.token(TokenKind::RBrace)?.end;
-        Ok((
-            alias,
-            self.spanned(
-                ApiUse {
-                    required,
-                    api,
-                    selections,
-                },
-                start..end,
-            ),
-        ))
-    }
-
-    fn resource(&mut self) -> miette::Result<(Spanned<String>, Spanned<Resource>)> {
-        let name = self.ident()?;
-        let start = name.span.start;
-        self.token(TokenKind::LBrace)?;
-        let mut resource = Resource::default();
-        while !self.at(TokenKind::RBrace) {
-            match self.word_text()?.as_str() {
-                "purpose" => resource.purpose = Some(self.string_statement()?.value),
-                "schema" => resource.schema = Some(self.ident_statement()?),
-                "payload" => resource.payload = Some(self.ident_statement()?),
-                "result" => resource.result = Some(self.ident_statement()?),
-                "history" => resource.history = Some(self.number_statement()?),
-                "ttl_ms" => resource.ttl_ms = Some(self.number_statement()?),
-                "max_object_bytes" => resource.max_object_bytes = Some(self.number_statement()?),
-                "max_total_bytes" => resource.max_total_bytes = Some(self.number_statement()?),
-                "max_value_bytes" => resource.max_value_bytes = Some(self.number_statement()?),
-                "docs" => resource.docs = Some(self.docs()?),
-                other => {
-                    return Err(
-                        self.error_previous(format!("unsupported resource member '{other}'"))
-                    )
-                }
+            if members.insert(member.clone(), value).is_some() {
+                return Err(self.error_previous(format!("duplicate {kind} member '{member}'")));
             }
         }
-        let end = self.token(TokenKind::RBrace)?.end;
-        Ok((name, self.spanned(resource, start..end)))
+        self.token(TokenKind::RBrace)?;
+        let span = start..self.previous_span().end;
+        Ok(Action {
+            kind,
+            name,
+            members,
+            span,
+        })
     }
 
-    fn binding(&mut self) -> miette::Result<Spanned<Binding>> {
-        let start = self.token(TokenKind::LBrace)?.start;
-        self.word("transfer")?;
+    fn capabilities(&mut self) -> miette::Result<Vec<Capability>> {
         self.token(TokenKind::LBrace)?;
-        let mut binding = Binding::default();
+        let mut values = Vec::new();
         while !self.at(TokenKind::RBrace) {
-            match self.word_text()?.as_str() {
-                "store" => binding.store = Some(self.ident_statement()?),
-                "key" => binding.key = Some(self.string_statement()?.value),
-                "content_type" => binding.content_type = Some(self.string_statement()?.value),
-                "metadata" => binding.metadata = Some(self.string_statement()?.value),
-                "expires_in_ms" => binding.expires_in_ms = Some(self.number_statement()?),
+            let start = self.current_span().start;
+            let head = self.word_text()?;
+            let (public, name) = match head.as_str() {
+                "public" => (true, "public".to_owned()),
+                "capability" => (false, self.ident()?),
+                _ => return Err(self.error_previous("expected 'public' or 'capability'")),
+            };
+            self.token(TokenKind::LBrace)?;
+            let mut capability = Capability {
+                name,
+                public,
+                title: String::new(),
+                description: String::new(),
+                consequence: String::new(),
+                allows: Vec::new(),
+                span: start..start,
+            };
+            let mut members = BTreeSet::new();
+            while !self.at(TokenKind::RBrace) {
+                let member = self.word_text()?;
+                if !members.insert(member.clone()) {
+                    return Err(
+                        self.error_previous(format!("duplicate capability member '{member}'"))
+                    );
+                }
+                match member.as_str() {
+                    "title" => capability.title = self.string_statement()?,
+                    "description" => capability.description = self.string_statement()?,
+                    "consequence" => capability.consequence = self.string_statement()?,
+                    "allows" => capability.allows = self.selection_block(false)?,
+                    other => {
+                        return Err(
+                            self.error_previous(format!("unsupported capability member '{other}'"))
+                        )
+                    }
+                }
+            }
+            self.token(TokenKind::RBrace)?;
+            capability.span = start..self.previous_span().end;
+            values.push(capability);
+        }
+        self.token(TokenKind::RBrace)?;
+        Ok(values)
+    }
+
+    fn participant(&mut self, kind: String, optional: bool) -> miette::Result<Participant> {
+        let start = self.previous_span().start;
+        let name = self.ident()?;
+        self.token(TokenKind::LBrace)?;
+        let mut value = Participant {
+            kind: kind.clone(),
+            name,
+            implements: Vec::new(),
+            uses: Vec::new(),
+            resources: Vec::new(),
+            companion: None,
+            optional,
+            span: start..start,
+        };
+        while !self.at(TokenKind::RBrace) {
+            let member = self.word_text()?;
+            match member.as_str() {
+                "implements" => value.implements.push(self.name_statement()?),
+                "use" => {
+                    let api = self.name()?;
+                    let mut selections = Vec::new();
+                    let mut optional_capabilities = Vec::new();
+                    if self.eat(TokenKind::Semi) {
+                    } else {
+                        self.token(TokenKind::LBrace)?;
+                        while !self.at(TokenKind::RBrace) {
+                            if self.at_word("optional") {
+                                self.word("optional")?;
+                                self.word("capability")?;
+                                optional_capabilities.push(self.name_statement()?);
+                            } else {
+                                selections.push(self.selection()?);
+                            }
+                        }
+                        self.token(TokenKind::RBrace)?;
+                    }
+                    value.uses.push(ApiUse {
+                        api,
+                        selections,
+                        optional_capabilities,
+                    });
+                }
+                kind @ ("state" | "kv" | "store" | "job" | "consumer") => {
+                    let start = self.previous_span().start;
+                    let optional = self.eat_word("optional");
+                    let mut resource = self.resource(kind.to_owned(), optional)?;
+                    resource.span.start = start;
+                    value.resources.push(resource)
+                }
+                "app" | "agent" if kind == "device" => {
+                    let start = self.previous_span().start;
+                    if value.companion.is_some() {
+                        return Err(self.error_previous("a device may contain only one companion"));
+                    }
+                    let optional = self.eat_word("optional");
+                    let mut companion = self.participant(member, optional)?;
+                    companion.span.start = start;
+                    value.companion = Some(Box::new(companion));
+                }
+                "optional" => {
+                    return Err(self.error_previous(
+                        "resource optionality follows its kind, for example 'kv optional cache'",
+                    ))
+                }
                 other => {
                     return Err(
-                        self.error_previous(format!("unsupported transfer member '{other}'"))
+                        self.error_previous(format!("unsupported participant member '{other}'"))
                     )
                 }
             }
         }
         self.token(TokenKind::RBrace)?;
-        let end = self.token(TokenKind::RBrace)?.end;
-        Ok(self.spanned(binding, start..end))
+        value.span = start..self.previous_span().end;
+        Ok(value)
     }
 
-    fn ident_list_statement(&mut self) -> miette::Result<Vec<Spanned<String>>> {
+    fn resource(&mut self, kind: String, optional: bool) -> miette::Result<Resource> {
+        let start = self.previous_span().start;
+        let name = self.ident()?;
+        self.token(TokenKind::LBrace)?;
+        let mut members = BTreeMap::new();
+        while !self.at(TokenKind::RBrace) {
+            let member = self.word_text()?;
+            let value = match member.as_str() {
+                "title" | "description" => ResourceValue::Text(self.string_statement()?),
+                "schema" | "payload" | "result" | "update" => {
+                    ResourceValue::Name(self.name_statement()?)
+                }
+                "version" | "history" | "concurrency" => {
+                    ResourceValue::Integer(self.integer_statement()?)
+                }
+                "ttl" | "deadline" => {
+                    ResourceValue::Duration(self.duration_statement(member == "ttl")?)
+                }
+                "desired_max_value" | "desired_max_object" | "desired_max_total" => {
+                    ResourceValue::Capacity(self.capacity_statement()?)
+                }
+                "events" => ResourceValue::Names(self.name_list_statement()?),
+                "accepts" => ResourceValue::Accepts(self.accepts()?),
+                "retry" => self.retry()?,
+                "key_concurrency" => self.key_concurrency()?,
+                "replay" => ResourceValue::Name(self.name_statement()?),
+                other => {
+                    return Err(self
+                        .error_previous(format!("unsupported {kind} resource member '{other}'")))
+                }
+            };
+            if members.insert(member.clone(), value).is_some() {
+                return Err(self.error_previous(format!("duplicate resource member '{member}'")));
+            }
+        }
+        self.token(TokenKind::RBrace)?;
+        let span = start..self.previous_span().end;
+        Ok(Resource {
+            kind,
+            name,
+            optional,
+            members,
+            span,
+        })
+    }
+
+    fn accepts(&mut self) -> miette::Result<Vec<(u32, String)>> {
+        self.token(TokenKind::LBrace)?;
+        let mut values = Vec::new();
+        while !self.at(TokenKind::RBrace) {
+            let version = self.integer()?;
+            let version = u32::try_from(version)
+                .map_err(|_| self.error_previous("representation version exceeds u32"))?;
+            self.token(TokenKind::Colon)?;
+            let ty = self.name_statement()?;
+            values.push((version, ty));
+        }
+        self.token(TokenKind::RBrace)?;
+        Ok(values)
+    }
+
+    fn retry(&mut self) -> miette::Result<ResourceValue> {
+        self.token(TokenKind::LBrace)?;
+        self.word("attempts")?;
+        let attempts = u32::try_from(self.integer_statement()?)
+            .map_err(|_| self.error_previous("retry attempts exceeds u32"))?;
+        self.word("backoff")?;
+        self.token(TokenKind::LBracket)?;
+        let mut backoff_ms = Vec::new();
+        while !self.at(TokenKind::RBracket) {
+            backoff_ms.push(self.duration(false)?);
+            if !self.eat(TokenKind::Comma) {
+                break;
+            }
+        }
+        self.token(TokenKind::RBracket)?;
+        self.token(TokenKind::Semi)?;
+        self.token(TokenKind::RBrace)?;
+        Ok(ResourceValue::Retry {
+            attempts,
+            backoff_ms,
+        })
+    }
+
+    fn key_concurrency(&mut self) -> miette::Result<ResourceValue> {
+        self.token(TokenKind::LBrace)?;
+        self.word("path")?;
+        let path = self.path()?;
+        self.token(TokenKind::Semi)?;
+        self.word("policy")?;
+        let policy = self.name_statement()?;
+        self.token(TokenKind::RBrace)?;
+        Ok(ResourceValue::KeyConcurrency {
+            path: path.split('.').map(str::to_owned).collect(),
+            policy,
+        })
+    }
+
+    fn selection_block(&mut self, opened: bool) -> miette::Result<Vec<Selection>> {
+        if !opened {
+            self.token(TokenKind::LBrace)?;
+        }
+        let mut values = Vec::new();
+        while !self.at(TokenKind::RBrace) {
+            values.push(self.selection()?);
+        }
+        self.token(TokenKind::RBrace)?;
+        Ok(values)
+    }
+
+    fn selection(&mut self) -> miette::Result<Selection> {
+        let first = self.ident()?;
+        let (direction, kind) = match first.as_str() {
+            "rpc" => ("call".to_owned(), "rpc".to_owned()),
+            "operation" => ("invoke".to_owned(), "operation".to_owned()),
+            "feed" => ("subscribe".to_owned(), "feed".to_owned()),
+            "publish" | "subscribe" => {
+                let kind = self.ident()?;
+                if kind != "event" {
+                    return Err(self.error_previous("publish/subscribe requires 'event'"));
+                }
+                (first, kind)
+            }
+            _ => {
+                return Err(self.error_previous(
+                    "expected rpc, operation, feed, publish event, or subscribe event",
+                ))
+            }
+        };
+        let name = self.path()?;
+        self.token(TokenKind::Semi)?;
+        Ok(Selection {
+            direction,
+            kind,
+            name,
+        })
+    }
+
+    fn name_list_statement(&mut self) -> miette::Result<Vec<String>> {
         self.token(TokenKind::LBracket)?;
         let mut values = Vec::new();
         while !self.at(TokenKind::RBracket) {
-            values.push(self.ident()?);
+            values.push(self.name()?);
             if !self.eat(TokenKind::Comma) {
                 break;
             }
@@ -639,11 +629,11 @@ impl Parser<'_> {
         Ok(values)
     }
 
-    fn string_list_statement(&mut self) -> miette::Result<Vec<String>> {
+    fn path_list_statement(&mut self) -> miette::Result<Vec<Vec<String>>> {
         self.token(TokenKind::LBracket)?;
         let mut values = Vec::new();
         while !self.at(TokenKind::RBracket) {
-            values.push(self.string()?.value);
+            values.push(self.path()?.split('.').map(str::to_owned).collect());
             if !self.eat(TokenKind::Comma) {
                 break;
             }
@@ -653,60 +643,125 @@ impl Parser<'_> {
         Ok(values)
     }
 
-    fn string_statement(&mut self) -> miette::Result<Spanned<String>> {
+    fn name_statement(&mut self) -> miette::Result<String> {
+        let value = self.name()?;
+        self.token(TokenKind::Semi)?;
+        Ok(value)
+    }
+    fn string_statement(&mut self) -> miette::Result<String> {
         let value = self.string()?;
         self.token(TokenKind::Semi)?;
         Ok(value)
     }
-
-    fn ident_statement(&mut self) -> miette::Result<Spanned<String>> {
-        let value = self.ident()?;
+    fn integer_statement(&mut self) -> miette::Result<u64> {
+        let value = self.integer()?;
+        self.token(TokenKind::Semi)?;
+        Ok(value)
+    }
+    fn duration_statement(&mut self, zero_bare: bool) -> miette::Result<u64> {
+        let value = self.duration(zero_bare)?;
+        self.token(TokenKind::Semi)?;
+        Ok(value)
+    }
+    fn capacity_statement(&mut self) -> miette::Result<u64> {
+        let value = self.quantity(false)?;
         self.token(TokenKind::Semi)?;
         Ok(value)
     }
 
-    fn number_statement(&mut self) -> miette::Result<u64> {
-        let span = self.token(TokenKind::Number)?;
-        let value = self.text(&span).parse().map_err(|_| {
-            diagnostic(
-                self.source,
-                span.clone(),
-                "expected an unsigned integer within u64 range",
-            )
-        })?;
-        self.token(TokenKind::Semi)?;
-        Ok(value)
+    fn integer(&mut self) -> miette::Result<u64> {
+        let text = self.number_text()?;
+        text.parse()
+            .map_err(|_| self.error_previous("expected an unsigned integer"))
     }
 
-    fn string(&mut self) -> miette::Result<Spanned<String>> {
-        let span = self.token(TokenKind::String)?;
-        let value = serde_json::from_str(self.text(&span)).map_err(|error| {
-            diagnostic(
-                self.source,
-                span.clone(),
-                format!("invalid string: {error}"),
-            )
-        })?;
-        Ok(self.spanned(value, span))
-    }
-
-    fn ident(&mut self) -> miette::Result<Spanned<String>> {
-        let span = self.token(TokenKind::Ident)?;
-        Ok(self.spanned(self.text(&span).to_owned(), span))
-    }
-
-    fn word(&mut self, expected: &str) -> miette::Result<std::ops::Range<usize>> {
-        let value = self.ident()?;
-        if value.value != expected {
-            return Err(self.error_at(&value, format!("expected '{expected}'")));
+    fn duration(&mut self, zero_bare: bool) -> miette::Result<u64> {
+        let value = self.quantity(true)?;
+        if value == 0 && !zero_bare && self.previous_kind() == Some(TokenKind::Number) {
+            return Err(self.error_previous("duration requires ms, s, m, h, or d"));
         }
-        Ok(value.span)
+        Ok(value)
     }
 
+    fn quantity(&mut self, duration: bool) -> miette::Result<u64> {
+        let number = self.integer()?;
+        let unit = if self.at(TokenKind::Ident) {
+            Some(self.ident()?)
+        } else {
+            None
+        };
+        let multiplier = match (duration, unit.as_deref()) {
+            (true, Some("ms")) => 1,
+            (true, Some("s")) => 1_000,
+            (true, Some("m")) => 60_000,
+            (true, Some("h")) => 3_600_000,
+            (true, Some("d")) => 86_400_000,
+            (true, None) if number == 0 => 1,
+            (false, Some("B")) => 1,
+            (false, Some("KiB")) => 1 << 10,
+            (false, Some("MiB")) => 1 << 20,
+            (false, Some("GiB")) => 1 << 30,
+            _ => {
+                return Err(self.error_previous(if duration {
+                    "expected duration unit ms, s, m, h, or d"
+                } else {
+                    "expected capacity unit B, KiB, MiB, or GiB"
+                }))
+            }
+        };
+        number
+            .checked_mul(multiplier)
+            .ok_or_else(|| self.error_previous("quantity exceeds u64"))
+    }
+
+    fn name(&mut self) -> miette::Result<String> {
+        self.path()
+    }
+    fn path(&mut self) -> miette::Result<String> {
+        let mut value = self.ident()?;
+        while self.eat(TokenKind::Dot) {
+            value.push('.');
+            value.push_str(&self.ident()?);
+        }
+        Ok(value)
+    }
+
+    fn string(&mut self) -> miette::Result<String> {
+        let span = self.token(TokenKind::String)?;
+        serde_json::from_str(self.text(&span))
+            .map_err(|error| self.error_at(span, format!("invalid string: {error}")))
+    }
+    fn ident(&mut self) -> miette::Result<String> {
+        let span = self.token(TokenKind::Ident)?;
+        Ok(self.text(&span).to_owned())
+    }
+    fn number_text(&mut self) -> miette::Result<String> {
+        let span = self.token(TokenKind::Number)?;
+        Ok(self.text(&span).to_owned())
+    }
+    fn word(&mut self, expected: &str) -> miette::Result<()> {
+        let value = self.ident()?;
+        if value != expected {
+            return Err(self.error_previous(format!("expected '{expected}'")));
+        }
+        Ok(())
+    }
     fn word_text(&mut self) -> miette::Result<String> {
-        Ok(self.ident()?.value)
+        self.ident()
     }
-
+    fn eat_word(&mut self, word: &str) -> bool {
+        if self.at_word(word) {
+            self.position += 1;
+            true
+        } else {
+            false
+        }
+    }
+    fn at_word(&self, word: &str) -> bool {
+        self.tokens
+            .get(self.position)
+            .is_some_and(|token| token.kind == TokenKind::Ident && self.text(&token.span) == word)
+    }
     fn token(&mut self, expected: TokenKind) -> miette::Result<std::ops::Range<usize>> {
         let Some(token) = self.tokens.get(self.position) else {
             return Err(self.error_here(format!("expected {}", token_name(&expected))));
@@ -717,7 +772,6 @@ impl Parser<'_> {
         self.position += 1;
         Ok(token.span.clone())
     }
-
     fn eat(&mut self, kind: TokenKind) -> bool {
         if self.at(kind) {
             self.position += 1;
@@ -726,80 +780,47 @@ impl Parser<'_> {
             false
         }
     }
-
     fn at(&self, kind: TokenKind) -> bool {
         self.tokens
             .get(self.position)
             .is_some_and(|token| token.kind == kind)
     }
-
-    fn at_word(&self, word: &str) -> bool {
-        self.tokens
-            .get(self.position)
-            .is_some_and(|token| token.kind == TokenKind::Ident && self.text(&token.span) == word)
-    }
-
     fn done(&self) -> bool {
         self.position == self.tokens.len()
     }
-
     fn text(&self, span: &std::ops::Range<usize>) -> &str {
-        &self.source.text[span.clone()]
+        &self.input.source[span.clone()]
     }
-
     fn current_span(&self) -> std::ops::Range<usize> {
         self.tokens
             .get(self.position)
             .map(|token| token.span.clone())
-            .unwrap_or(self.source.text.len()..self.source.text.len())
+            .unwrap_or(self.input.source.len()..self.input.source.len())
     }
-
     fn previous_span(&self) -> std::ops::Range<usize> {
-        self.tokens[self.position - 1].span.clone()
+        self.tokens
+            .get(self.position.saturating_sub(1))
+            .map(|token| token.span.clone())
+            .unwrap_or(0..0)
     }
-
-    fn spanned<T>(&self, value: T, span: std::ops::Range<usize>) -> Spanned<T> {
-        Spanned {
-            value,
-            source: self.source_index,
-            span,
-        }
+    fn previous_kind(&self) -> Option<TokenKind> {
+        self.tokens
+            .get(self.position.saturating_sub(1))
+            .map(|token| token.kind.clone())
     }
-
     fn error_here(&self, message: impl Into<String>) -> Report {
-        diagnostic(self.source, self.current_span(), message)
+        diagnostic(self.input, self.current_span(), message)
     }
-
     fn error_previous(&self, message: impl Into<String>) -> Report {
-        diagnostic(self.source, self.previous_span(), message)
+        diagnostic(self.input, self.previous_span(), message)
     }
-
-    fn error_at<T>(&self, value: &Spanned<T>, message: impl Into<String>) -> Report {
-        diagnostic(self.source, value.span.clone(), message)
-    }
-}
-
-fn insert<T>(
-    map: &mut BTreeMap<String, Spanned<T>>,
-    name: Spanned<String>,
-    value: Spanned<T>,
-    source: &Source,
-) -> miette::Result<()> {
-    match map.entry(name.value.clone()) {
-        Entry::Vacant(entry) => {
-            entry.insert(value);
-            Ok(())
-        }
-        Entry::Occupied(_) => Err(diagnostic(
-            source,
-            name.span,
-            format!("duplicate declaration '{}'", name.value),
-        )),
+    fn error_at(&self, span: std::ops::Range<usize>, message: impl Into<String>) -> Report {
+        diagnostic(self.input, span, message)
     }
 }
 
 pub(crate) fn diagnostic(
-    source: &Source,
+    source: &SourceUnit,
     span: std::ops::Range<usize>,
     message: impl Into<String>,
 ) -> Report {
@@ -811,7 +832,7 @@ pub(crate) fn diagnostic(
     )
     .with_source_code(NamedSource::new(
         source.path.display().to_string(),
-        source.text.clone(),
+        source.source.clone(),
     ))
 }
 
@@ -834,5 +855,7 @@ fn token_name(kind: &TokenKind) -> &'static str {
         TokenKind::Comma => "','",
         TokenKind::Question => "'?'",
         TokenKind::Pipe => "'|'",
+        TokenKind::Dot => "'.'",
+        TokenKind::At => "'@'",
     }
 }

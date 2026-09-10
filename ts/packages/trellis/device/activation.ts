@@ -22,7 +22,7 @@ import { base64urlDecode, base64urlEncode } from "../auth/utils.ts";
 
 const PendingActivationStateSchema = Type.Object({
   status: Type.Literal("pending"),
-  participantDigest: Type.String({ minLength: 1 }),
+  participantId: Type.String({ minLength: 1 }),
   publicIdentityKey: Type.String({ minLength: 1 }),
   instanceId: Type.String({ minLength: 1 }),
   deploymentId: Type.String({ minLength: 1 }),
@@ -33,7 +33,7 @@ const PendingActivationStateSchema = Type.Object({
 
 const ActivatedActivationStateSchema = Type.Object({
   status: Type.Literal("activated"),
-  participantDigest: Type.String({ minLength: 1 }),
+  participantId: Type.String({ minLength: 1 }),
   publicIdentityKey: Type.String({ minLength: 1 }),
   instanceId: Type.String({ minLength: 1 }),
   deploymentId: Type.String({ minLength: 1 }),
@@ -59,7 +59,7 @@ type PersistedActivationState = StaticDecode<
 type DeviceActivationStateStoreOptions = {
   trellisUrl: string;
   rootSecret: Uint8Array | string;
-  participantDigest: string;
+  participantId: string;
   stateDir?: string;
   statePath?: string;
 };
@@ -243,11 +243,11 @@ function assertLocalStateMatchesIdentity(args: {
 
 function assertLocalStateMatchesContract(args: {
   state: TrellisDeviceLocalActivationState;
-  participantDigest: string;
+  participantId: string;
 }): void {
-  if (args.state.participantDigest !== args.participantDigest) {
+  if (args.state.participantId !== args.participantId) {
     throw new Error(
-      "Stored Trellis device activation state does not match the requested contract digest.",
+      "Stored Trellis device activation state belongs to another participant.",
     );
   }
 }
@@ -262,8 +262,9 @@ async function resolveDeviceActivationStatePath(
   const { publicIdentityKey } = await deriveStoreIdentity(args);
   const origin = new URL(args.trellisUrl).origin;
   const originHash = await hashOrigin(origin);
-  const fileName =
-    `activation-state-v1-${originHash}-${args.participantDigest}-${publicIdentityKey}.json`;
+  const fileName = `activation-state-v1-${originHash}-${
+    encodeURIComponent(args.participantId)
+  }-${publicIdentityKey}.json`;
 
   return join(args.stateDir ?? defaultActivationStateDir(), fileName);
 }
@@ -285,7 +286,7 @@ async function openDeviceActivationStateStore(
           assertLocalStateMatchesIdentity({ state, publicIdentityKey });
           assertLocalStateMatchesContract({
             state,
-            participantDigest: args.participantDigest,
+            participantId: args.participantId,
           });
           return state;
         } catch (error) {
@@ -307,7 +308,7 @@ async function openDeviceActivationStateStore(
       assertLocalStateMatchesIdentity({ state, publicIdentityKey });
       assertLocalStateMatchesContract({
         state,
-        participantDigest: args.participantDigest,
+        participantId: args.participantId,
       });
       await mkdir(dirname(statePath), { recursive: true });
       const nextText =
@@ -458,7 +459,7 @@ export async function checkDeviceActivation<
   const store = await openDeviceActivationStateStore({
     trellisUrl: args.trellisUrl,
     rootSecret: args.rootSecret,
-    participantDigest: args.participant.digest,
+    participantId: args.participant.identity,
     stateDir: args.stateDir,
     statePath: args.statePath,
   });

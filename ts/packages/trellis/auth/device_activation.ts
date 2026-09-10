@@ -1,29 +1,32 @@
+import type { BaseError } from "@qlever-llc/result";
+import type { AsyncResult } from "@qlever-llc/result";
 import type { StaticDecode } from "typebox";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import type { BaseError } from "@qlever-llc/result";
-import type { AsyncResult } from "@qlever-llc/result";
-import type { OperationRef } from "../operations.ts";
+import { ulid } from "ulid";
 
+import type {
+  API as AUTH_API,
+  DeviceUserAuthoritiesListInput,
+  DeviceUserAuthoritiesListOutput,
+  DeviceUserAuthoritiesResolveInput,
+  DeviceUserAuthoritiesResolveOutput,
+  DeviceUserAuthoritiesResolveProgress,
+  DeviceUserAuthoritiesRevokeInput,
+  DeviceUserAuthoritiesRevokeOutput,
+} from "../internal_sdk/generated/apis/auth/mod.js";
+import type { OperationRef } from "../operations.ts";
+import type { GeneratedParticipant } from "../participant_runtime/participant.ts";
 import { decodeTrellisHttpError } from "./http_error.ts";
 import {
   importEd25519PrivateKeyFromSeedBase64url,
   publicKeyBase64urlFromPrivateKey,
 } from "./keys.ts";
+import { createAuth } from "./session_auth.ts";
 import {
-  AuthDeviceUserAuthoritiesListRequestSchema
-    as AuthDeviceUserAuthoritiesListSchema,
-  AuthDeviceUserAuthoritiesListResponseSchema,
-  AuthDeviceUserAuthoritiesResolveProgressSchema
-    as AuthResolveDeviceUserAuthoritiesProgressSchema,
-  AuthDeviceUserAuthoritiesResolveRequestSchema
-    as AuthResolveDeviceUserAuthoritiesSchema,
-  AuthDeviceUserAuthoritiesResolveResponseSchema
-    as AuthResolveDeviceUserAuthoritiesResponseSchema,
-  AuthDeviceUserAuthoritiesRevokeRequestSchema
-    as AuthDeviceUserAuthoritiesRevokeSchema,
-  AuthDeviceUserAuthoritiesRevokeResponseSchema,
-} from "../internal_sdk/generated/auth/schemas.ts";
+  SESSION_PROOF_FORMAT_V1,
+  sessionProofRequestDigest,
+} from "./session_proof.ts";
 import {
   base64urlDecode,
   base64urlEncode,
@@ -31,12 +34,6 @@ import {
   toArrayBuffer,
   utf8,
 } from "./utils.ts";
-import { createAuth } from "./session_auth.ts";
-import {
-  SESSION_PROOF_FORMAT_V1,
-  sessionProofRequestDigest,
-} from "./session_proof.ts";
-import { ulid } from "ulid";
 
 const DEVICE_IDENTITY_HKDF_INFO = "trellis/device-identity/v1";
 const DEVICE_ACTIVATION_HKDF_INFO = "trellis/device-activate/v1";
@@ -55,27 +52,19 @@ export const DeviceActivationPayloadSchema = Type.Object({
 export type DeviceActivationPayload = StaticDecode<
   typeof DeviceActivationPayloadSchema
 >;
-export type AuthResolveDeviceUserAuthoritiesInput = StaticDecode<
-  typeof AuthResolveDeviceUserAuthoritiesSchema
->;
-export type AuthResolveDeviceUserAuthoritiesProgress = StaticDecode<
-  typeof AuthResolveDeviceUserAuthoritiesProgressSchema
->;
-export type AuthResolveDeviceUserAuthoritiesOutput = StaticDecode<
-  typeof AuthResolveDeviceUserAuthoritiesResponseSchema
->;
-export type AuthDeviceUserAuthoritiesListInput = StaticDecode<
-  typeof AuthDeviceUserAuthoritiesListSchema
->;
-export type AuthDeviceUserAuthoritiesListOutput = StaticDecode<
-  typeof AuthDeviceUserAuthoritiesListResponseSchema
->;
-export type AuthDeviceUserAuthoritiesRevokeInput = StaticDecode<
-  typeof AuthDeviceUserAuthoritiesRevokeSchema
->;
-export type AuthDeviceUserAuthoritiesRevokeResponse = StaticDecode<
-  typeof AuthDeviceUserAuthoritiesRevokeResponseSchema
->;
+export type AuthResolveDeviceUserAuthoritiesInput =
+  DeviceUserAuthoritiesResolveInput;
+export type AuthResolveDeviceUserAuthoritiesProgress =
+  DeviceUserAuthoritiesResolveProgress;
+export type AuthResolveDeviceUserAuthoritiesOutput =
+  DeviceUserAuthoritiesResolveOutput;
+export type AuthDeviceUserAuthoritiesListInput = DeviceUserAuthoritiesListInput;
+export type AuthDeviceUserAuthoritiesListOutput =
+  DeviceUserAuthoritiesListOutput;
+export type AuthDeviceUserAuthoritiesRevokeInput =
+  DeviceUserAuthoritiesRevokeInput;
+export type AuthDeviceUserAuthoritiesRevokeResponse =
+  DeviceUserAuthoritiesRevokeOutput;
 export type DeviceIdentity = {
   identitySeed: Uint8Array;
   identitySeedBase64url: string;
@@ -86,9 +75,14 @@ export type DeviceIdentity = {
 
 type AuthResolveDeviceUserAuthoritiesOperationShape = {
   subject: string;
-  input: typeof AuthResolveDeviceUserAuthoritiesSchema;
-  progress: typeof AuthResolveDeviceUserAuthoritiesProgressSchema;
-  output: typeof AuthResolveDeviceUserAuthoritiesResponseSchema;
+  input:
+    typeof AUTH_API.actions["operation:DeviceUserAuthorities.Resolve"]["input"];
+  progress: typeof AUTH_API.actions["operation:DeviceUserAuthorities.Resolve"][
+    "progress"
+  ];
+  output: typeof AUTH_API.actions["operation:DeviceUserAuthorities.Resolve"][
+    "output"
+  ];
 };
 
 export type AuthResolveDeviceUserAuthoritiesOperation = OperationRef<
@@ -339,6 +333,9 @@ export async function requestDeviceEnrollment(args: {
   sessionIdentity: Awaited<ReturnType<typeof createAuth>>;
   connectionId: string;
   participantId: string;
+  packageEvidence: GeneratedParticipant["packageEvidence"];
+  participantPath: string;
+  packageDigest: string;
   challengeDigest: string;
   confirmationCode: string;
   provisioningSecret?: string;
@@ -359,6 +356,9 @@ export async function requestDeviceEnrollment(args: {
     requestId: ulid(),
     iat: Date.now(),
     participantId: args.participantId,
+    packageEvidence: args.packageEvidence,
+    participantPath: args.participantPath,
+    packageDigest: args.packageDigest,
     challengeDigest: args.challengeDigest,
     confirmationCode: args.confirmationCode,
     ...(args.provisioningSecret === undefined ? {} : {
@@ -402,6 +402,9 @@ export async function waitForDeviceActivation(args: {
   identitySeed: Uint8Array | string;
   activationKey: Uint8Array | string;
   participantId: string;
+  packageEvidence: GeneratedParticipant["packageEvidence"];
+  participantPath: string;
+  packageDigest: string;
   provisioningSecret?: string;
   nonce?: string;
   signal?: AbortSignal;
@@ -469,6 +472,9 @@ export async function waitForDeviceActivation(args: {
         connectionId,
         requestId: ulid(),
         iat: Date.now(),
+        packageEvidence: args.packageEvidence,
+        participantPath: args.participantPath,
+        packageDigest: args.packageDigest,
       };
       const bootstrapResponse = await fetch(
         new URL("/bootstrap/device", args.trellisUrl),

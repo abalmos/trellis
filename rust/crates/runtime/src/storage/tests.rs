@@ -161,7 +161,7 @@ fn assert_migration_order(path: &Path, expected_versions: &[i32]) -> rusqlite::R
 }
 
 #[test]
-fn sqlite_platform_store_migrates_marker_schema() -> Result<(), Box<dyn std::error::Error>> {
+fn sqlite_platform_store_creates_complete_fresh_schema() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
     let path = temp_dir.path().join("platform.sqlite");
     let store = SqliteStore::new(SubsystemName::Platform, sqlite_config(path.clone()));
@@ -171,12 +171,6 @@ fn sqlite_platform_store_migrates_marker_schema() -> Result<(), Box<dyn std::err
     assert!(path.exists());
     assert_marker(&path, "trellis_platform_store_marker")?;
     assert_migration(&path, 1000, "platform_init")?;
-    assert_migration(&path, 1001, "authorization_state")?;
-    assert_migration(&path, 1002, "auth_service_cutover")?;
-    assert_migration(&path, 1003, "authorization_context_runtime")?;
-    assert_migration(&path, 1004, "auth_console_policy")?;
-    assert_migration(&path, 1005, "bootstrap_administrator")?;
-    assert_migration(&path, 1006, "auth_event_delivery")?;
     assert_table(&path, "auth_principals")?;
     assert_table(&path, "auth_sessions")?;
     assert_table(&path, "auth_grant_bindings")?;
@@ -184,6 +178,20 @@ fn sqlite_platform_store_migrates_marker_schema() -> Result<(), Box<dyn std::err
     assert_table(&path, "auth_authorization_issuers")?;
     assert_table(&path, "auth_authorization_contexts")?;
     assert_table(&path, "auth_bootstrap_administrator")?;
+    assert_table(&path, "auth_package_evidence")?;
+    let connection = Connection::open(&path)?;
+    let mut statement = connection.prepare("PRAGMA table_info(auth_installed_participants)")?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    assert_eq!(
+        columns
+            .iter()
+            .filter(|column| column.ends_with("_digest"))
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["participant_digest", "needs_digest", "package_digest"]
+    );
     for retired in [
         "auth_participant_bindings",
         "auth_identity_authorities",
@@ -239,13 +247,10 @@ fn sqlite_migration_check_does_not_modify_configured_database(
 }
 
 #[test]
-fn sqlite_platform_store_upgrades_current_marker_schema_and_reruns_safely(
+fn sqlite_platform_store_creates_fresh_schema_and_reruns_safely(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
-    let path = temp_dir.path().join("platform-upgrade.sqlite");
-    let connection = rusqlite::Connection::open(&path)?;
-    connection.execute_batch(include_str!("sqlite/platform/V1000__platform_init.sql"))?;
-    drop(connection);
+    let path = temp_dir.path().join("platform.sqlite");
 
     let store = SqliteStore::new(SubsystemName::Platform, sqlite_config(path.clone()));
     store.migrate()?;
@@ -328,7 +333,7 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert_marker(&jobs_path, "trellis_jobs_projection_store_marker")?;
     assert_marker(&health_path, "trellis_health_projection_store_marker")?;
     assert_marker(&eventlog_path, "trellis_eventlog_store_marker")?;
-    assert_migration_order(&platform_path, &[1000, 1001, 1002, 1003, 1004, 1005, 1006])?;
+    assert_migration_order(&platform_path, &[1000])?;
     assert_migration_order(&jobs_path, &[2000])?;
     assert_migration_order(&health_path, &[3000, 3001])?;
     assert_migration_order(&eventlog_path, &[4000])?;

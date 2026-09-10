@@ -46,37 +46,3 @@ pub(super) async fn dispatch(
         )))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-
-    use serde_json::Value;
-
-    const DISPATCH_SOURCE: &str = concat!(
-        include_str!("sessions.rs"),
-        include_str!("portals.rs"),
-        include_str!("users.rs"),
-        include_str!("deployments.rs"),
-        include_str!("devices.rs"),
-        include_str!("grants.rs"),
-    );
-
-    #[test]
-    fn every_native_auth_rpc_has_a_rust_dispatch_arm() {
-        let api: Value = serde_json::from_str(include_str!("../../../../../trellis.api.json"))
-            .expect("parse native Auth API");
-        let missing = api["rpc"]
-            .as_object()
-            .expect("Auth RPC map")
-            .keys()
-            .filter(|name| !name.starts_with("_removed."))
-            .map(|name| format!("rpc.v1.{name}"))
-            .filter(|subject| !DISPATCH_SOURCE.contains(&format!("\"{subject}\"")))
-            .collect::<BTreeSet<_>>();
-        assert!(
-            missing.is_empty(),
-            "Auth RPCs without Rust dispatch: {missing:?}"
-        );
-    }
-}

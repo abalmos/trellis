@@ -62,7 +62,7 @@ pub enum ParticipantsSubcommand {
 /// Compile and install one participant definition.
 pub struct ParticipantsInstallArgs {
     #[arg(long)]
-    /// Trellis project root containing contract.trellis and trellis.lock.
+    /// Trellis source-package root containing trellis.toml and trellis.lock.
     pub source: PathBuf,
     #[arg(long)]
     /// Participant ID when the project declares more than one candidate.
@@ -70,6 +70,9 @@ pub struct ParticipantsInstallArgs {
     #[arg(long)]
     /// Expected installed revision; omitted reads it once.
     pub expected_revision: Option<u64>,
+    #[arg(long)]
+    /// Mark this exact package digest as operator-trusted platform evidence.
+    pub platform_trust: bool,
 }
 
 #[derive(Debug, Args)]

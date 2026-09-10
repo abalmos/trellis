@@ -1,58 +1,47 @@
-use std::collections::BTreeMap;
+use trellis_rs::generated::ParticipantDescriptor;
 
-use serde_json::Value;
+use super::{AuthorizationStateError, ParticipantBindingRecord};
 
-use super::{AuthorizationStateError, ParticipantBindingRecord, ParticipantBindingState};
-
-pub(crate) const AUTH_RUNTIME_PARTICIPANT_ID: &str = "trellis.auth-runtime";
-pub(crate) const CLI_PARTICIPANT_ID: &str = "trellis-app.cli@v1";
-pub(crate) const CONSOLE_PARTICIPANT_ID: &str = "trellis-app.console@v1";
-pub(crate) const PORTAL_PARTICIPANT_ID: &str = "trellis-app.portal@v1";
+pub(crate) const AUTH_RUNTIME_PARTICIPANT_ID: &str =
+    trellis_runtime_apis::participants::trellis_platform::PARTICIPANT_ID;
+pub(crate) const CLI_PARTICIPANT_ID: &str =
+    trellis_runtime_apis::participants::trellis_cli::PARTICIPANT_ID;
+pub(crate) const CONSOLE_PARTICIPANT_ID: &str =
+    trellis_runtime_apis::participants::trellis_console::PARTICIPANT_ID;
+pub(crate) const PORTAL_PARTICIPANT_ID: &str =
+    trellis_runtime_apis::participants::trellis_portal::PARTICIPANT_ID;
 
 pub(crate) fn validate_binding_namespace(
     binding: &ParticipantBindingRecord,
+    platform_trusted: bool,
 ) -> Result<(), AuthorizationStateError> {
-    if binding.participant_id.starts_with("trellis.")
-        || binding.participant_id.starts_with("trellis-app.")
-    {
-        let canonical_digest = match binding.participant_id.as_str() {
-            CLI_PARTICIPANT_ID => return Ok(()),
-            AUTH_RUNTIME_PARTICIPANT_ID => {
-                auth_runtime_participant_binding(binding.resolved_at)?.artifact_digest
-            }
-            CONSOLE_PARTICIPANT_ID => {
-                console_participant_binding(binding.resolved_at)?.artifact_digest
-            }
-            PORTAL_PARTICIPANT_ID => {
-                portal_participant_binding(binding.resolved_at)?.artifact_digest
-            }
+    let trusted_package = platform_trusted || is_trusted_package_digest(&binding.package_digest);
+    if binding.participant_id.starts_with("trellis.") {
+        match binding.participant_id.as_str() {
+            AUTH_RUNTIME_PARTICIPANT_ID
+            | CLI_PARTICIPANT_ID
+            | CONSOLE_PARTICIPANT_ID
+            | PORTAL_PARTICIPANT_ID => {}
             _ => {
                 return Err(AuthorizationStateError::InvalidRecord(format!(
                     "participant id '{}' uses the reserved 'trellis.' namespace",
                     binding.participant_id
                 )))
             }
-        };
-        if binding.artifact_digest != canonical_digest {
+        }
+        if !trusted_package {
             return Err(AuthorizationStateError::InvalidRecord(format!(
-                "participant '{}' does not match its canonical Trellis artifact",
+                "participant '{}' does not match the trusted Trellis package",
                 binding.participant_id
             )));
         }
     }
 
-    let artifacts: BTreeMap<String, Value> = serde_json::from_str(&binding.api_artifacts_json)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    for (api_id, value) in artifacts {
-        if !api_id.starts_with("trellis.") && !api_id.starts_with("trellis-app.") {
-            continue;
-        }
-        let api = trellis_protocol::parse_api(&value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let digest = api
-            .digest()
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        if !is_platform_api(&api_id, &digest) {
+    for (api_id, api) in &binding.projection.referenced_apis {
+        if api_id.starts_with("trellis.")
+            && !trusted_package
+            && !is_platform_api(api_id, &api.digest)
+        {
             return Err(AuthorizationStateError::InvalidRecord(format!(
                 "API '{api_id}' uses the reserved 'trellis.' namespace"
             )));
@@ -62,79 +51,40 @@ pub(crate) fn validate_binding_namespace(
 }
 
 pub(crate) fn is_platform_api(api_id: &str, api_digest: &str) -> bool {
-    if [
+    [
         (
-            trellis_runtime_apis::auth::API_ID,
-            trellis_runtime_apis::auth::API_DIGEST,
+            trellis_runtime_apis::apis::trellis_auth_v1::API_ID,
+            trellis_runtime_apis::apis::trellis_auth_v1::API_DIGEST,
         ),
         (
-            trellis_runtime_apis::core::API_ID,
-            trellis_runtime_apis::core::API_DIGEST,
+            trellis_runtime_apis::apis::trellis_core_v1::API_ID,
+            trellis_runtime_apis::apis::trellis_core_v1::API_DIGEST,
         ),
         (
-            trellis_runtime_apis::eventlog::API_ID,
-            trellis_runtime_apis::eventlog::API_DIGEST,
+            trellis_runtime_apis::apis::trellis_events_v1::API_ID,
+            trellis_runtime_apis::apis::trellis_events_v1::API_DIGEST,
         ),
         (
-            trellis_runtime_apis::health::API_ID,
-            trellis_runtime_apis::health::API_DIGEST,
+            trellis_runtime_apis::apis::trellis_health_v1::API_ID,
+            trellis_runtime_apis::apis::trellis_health_v1::API_DIGEST,
         ),
         (
-            trellis_runtime_apis::jobs::API_ID,
-            trellis_runtime_apis::jobs::API_DIGEST,
+            trellis_runtime_apis::apis::trellis_jobs_v1::API_ID,
+            trellis_runtime_apis::apis::trellis_jobs_v1::API_DIGEST,
         ),
         (
-            trellis_runtime_apis::state::API_ID,
-            trellis_runtime_apis::state::API_DIGEST,
+            trellis_runtime_apis::apis::trellis_state_v1::API_ID,
+            trellis_runtime_apis::apis::trellis_state_v1::API_DIGEST,
         ),
     ]
     .contains(&(api_id, api_digest))
-    {
-        return true;
-    }
-    let json = match api_id {
-        CONSOLE_PARTICIPANT_ID => trellis_runtime_apis::CONSOLE_API_JSON,
-        PORTAL_PARTICIPANT_ID => trellis_runtime_apis::PORTAL_API_JSON,
-        _ => return false,
-    };
-    serde_json::from_str(json)
-        .ok()
-        .and_then(|value| trellis_protocol::parse_api(&value).ok())
-        .and_then(|api| api.digest().ok())
-        .is_some_and(|digest| digest == api_digest)
 }
 
 pub(crate) fn cli_participant_binding(
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    let mut participant_value: Value = serde_json::from_str(include_str!(
-        "../../../../trellis/artifacts/trellis.cli.participant.json"
-    ))
-    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let mut api_values = BTreeMap::new();
-    for (section, api_json) in [
-        ("required", trellis_runtime_apis::auth::API_JSON),
-        ("required", trellis_runtime_apis::jobs::API_JSON),
-        ("required", trellis_runtime_apis::state::API_JSON),
-        ("optional", trellis_runtime_apis::eventlog::API_JSON),
-        ("required", trellis_runtime_apis::health::API_JSON),
-    ] {
-        let api_value: Value = serde_json::from_str(api_json)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        trellis_protocol::lint_api_authoring(&api_value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let api = trellis_protocol::parse_api(&api_value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        participant_value["uses"][section][api.id()]["apiDigest"] = Value::String(
-            api.digest()
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-        );
-        api_values.insert(api.id().to_owned(), api_value);
-    }
-    builtin_participant_binding(
-        &serde_json::to_string(&participant_value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-        api_values,
+    builtin_participant_binding::<trellis_runtime_apis::participants::trellis_cli::Participant>(
+        trellis_runtime_apis::participants::trellis_cli::PARTICIPANT_DIGEST,
         resolved_at,
     )
 }
@@ -142,43 +92,8 @@ pub(crate) fn cli_participant_binding(
 pub(crate) fn auth_runtime_participant_binding(
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    let api_value: Value = serde_json::from_str(trellis_runtime_apis::auth::API_JSON)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    trellis_protocol::lint_api_authoring(&api_value)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let api = trellis_protocol::parse_api(&api_value)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let mut participant_value: Value =
-        serde_json::from_str(trellis_runtime_apis::AUTH_RUNTIME_PARTICIPANT_JSON)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    participant_value["implements"]["self"]["apiDigest"] = Value::String(
-        api.digest()
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-    );
-    let mut api_values = BTreeMap::from([(api.id().to_owned(), api_value)]);
-    for (alias, api_json) in [
-        ("core", trellis_runtime_apis::core::API_JSON),
-        ("eventlog", trellis_runtime_apis::eventlog::API_JSON),
-        ("health", trellis_runtime_apis::health::API_JSON),
-        ("jobs", trellis_runtime_apis::jobs::API_JSON),
-        ("state", trellis_runtime_apis::state::API_JSON),
-    ] {
-        let value: Value = serde_json::from_str(api_json)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        trellis_protocol::lint_api_authoring(&value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let parsed = trellis_protocol::parse_api(&value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        participant_value["implements"][alias] = serde_json::json!({
-            "api": parsed.id(),
-            "apiDigest": parsed.digest().map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-        });
-        api_values.insert(parsed.id().to_owned(), value);
-    }
-    builtin_participant_binding(
-        &serde_json::to_string(&participant_value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-        api_values,
+    builtin_participant_binding::<trellis_runtime_apis::participants::trellis_platform::Participant>(
+        trellis_runtime_apis::participants::trellis_platform::PARTICIPANT_DIGEST,
         resolved_at,
     )
 }
@@ -186,26 +101,8 @@ pub(crate) fn auth_runtime_participant_binding(
 pub(crate) fn console_participant_binding(
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    let api_values = [
-        trellis_runtime_apis::CONSOLE_API_JSON,
-        trellis_runtime_apis::auth::API_JSON,
-        trellis_runtime_apis::eventlog::API_JSON,
-        trellis_runtime_apis::health::API_JSON,
-        trellis_runtime_apis::jobs::API_JSON,
-        trellis_runtime_apis::state::API_JSON,
-    ]
-    .into_iter()
-    .map(|json| {
-        let value: Value = serde_json::from_str(json)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let api = trellis_protocol::parse_api(&value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        Ok((api.id().to_owned(), value))
-    })
-    .collect::<Result<BTreeMap<_, _>, AuthorizationStateError>>()?;
-    builtin_participant_binding(
-        trellis_runtime_apis::CONSOLE_PARTICIPANT_JSON,
-        api_values,
+    builtin_participant_binding::<trellis_runtime_apis::participants::trellis_console::Participant>(
+        trellis_runtime_apis::participants::trellis_console::PARTICIPANT_DIGEST,
         resolved_at,
     )
 }
@@ -213,106 +110,146 @@ pub(crate) fn console_participant_binding(
 pub(crate) fn portal_participant_binding(
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    let api_values = [
-        trellis_runtime_apis::PORTAL_API_JSON,
-        trellis_runtime_apis::auth::API_JSON,
-    ]
-    .into_iter()
-    .map(|json| {
-        let value: Value = serde_json::from_str(json)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let api = trellis_protocol::parse_api(&value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        Ok((api.id().to_owned(), value))
-    })
-    .collect::<Result<BTreeMap<_, _>, AuthorizationStateError>>()?;
-    builtin_participant_binding(
-        trellis_runtime_apis::PORTAL_PARTICIPANT_JSON,
-        api_values,
+    builtin_participant_binding::<trellis_runtime_apis::participants::trellis_portal::Participant>(
+        trellis_runtime_apis::participants::trellis_portal::PARTICIPANT_DIGEST,
         resolved_at,
     )
 }
 
-fn builtin_participant_binding(
-    participant_json: &str,
-    api_values: BTreeMap<String, Value>,
+pub(crate) fn trusted_package_evidence_json(
+    package_digest: &str,
+) -> Result<Option<String>, AuthorizationStateError> {
+    let generated = trellis_runtime_apis::participants::trellis_platform::PACKAGE_EVIDENCE;
+    if generated.root_digest() != package_digest {
+        return Ok(None);
+    }
+    let value = serde_json::to_value(generated)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    trellis_protocol::canonicalize_json(&value)
+        .map(Some)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
+}
+
+pub(crate) fn is_trusted_package_evidence(package_digest: &str, evidence_json: &str) -> bool {
+    trusted_package_evidence_json(package_digest)
+        .ok()
+        .flatten()
+        .is_some_and(|trusted| trusted == evidence_json)
+}
+
+fn is_trusted_package_digest(package_digest: &str) -> bool {
+    package_digest == super::builtin_semantics::PACKAGE_DIGEST
+}
+
+fn builtin_participant_binding<D: ParticipantDescriptor>(
+    expected_digest: &str,
     resolved_at: i64,
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
-    trellis_protocol::lint_participant_authoring(
-        &serde_json::from_str(participant_json)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-    )
-    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let participant_value: Value = serde_json::from_str(participant_json)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let participant = trellis_protocol::parse_participant(&participant_value)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let mut apis = BTreeMap::new();
-    for value in api_values.values() {
-        let api = trellis_protocol::parse_api(value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        apis.insert(api.id().to_owned(), api);
+    let native = super::builtin_semantics::participant(D::ID).ok_or_else(|| {
+        AuthorizationStateError::InvalidRecord(format!(
+            "generated participant '{}' has no native semantics",
+            D::ID
+        ))
+    })?;
+    let expected_kind = match D::KIND {
+        trellis_rs::generated::ParticipantKind::Service => {
+            trellis_protocol::ParticipantKind::Service
+        }
+        trellis_rs::generated::ParticipantKind::Device => trellis_protocol::ParticipantKind::Device,
+        trellis_rs::generated::ParticipantKind::App => trellis_protocol::ParticipantKind::App,
+        trellis_rs::generated::ParticipantKind::Agent => trellis_protocol::ParticipantKind::Agent,
+    };
+    if native.participant_digest != expected_digest
+        || native.projection.participant_id != D::ID
+        || native.projection.participant_kind != expected_kind
+    {
+        return Err(AuthorizationStateError::ParticipantDigestMismatch);
     }
-    let resolved = trellis_protocol::resolve_participant(&participant, &apis)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     Ok(ParticipantBindingRecord {
-        participant_id: resolved.participant_id().to_owned(),
-        participant_kind: resolved.participant_kind(),
-        artifact_digest: resolved.participant_digest().to_owned(),
-        needs_digest: resolved
-            .needs()
-            .digest()
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-        participant_json: participant
-            .canonical_json()
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-        api_artifacts_json: trellis_protocol::canonicalize_json(
-            &serde_json::to_value(api_values)
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-        )
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+        participant_id: D::ID.to_owned(),
+        participant_kind: native.projection.participant_kind,
+        participant_digest: native.participant_digest.to_owned(),
+        needs_digest: native.needs_digest.to_owned(),
+        package_digest: native.package_digest.to_owned(),
+        participant_path: D::PATH.to_owned(),
+        projection: native.projection,
         resolved_at,
-        state: ParticipantBindingState::Resolved,
+        state: super::ParticipantBindingState::Resolved,
         error: None,
     })
 }
 
 #[cfg(test)]
-mod state_api_digest_test {
-    #[test]
-    fn cli_binding_includes_state_admin_api() {
-        let binding = super::cli_participant_binding(0).expect("CLI binding");
-        assert!(binding.api_artifacts_json.contains("trellis.state@v1"));
+mod tests {
+    use trellis_rs::generated::ParticipantDescriptor;
+
+    fn assert_matches_source(
+        generated: trellis_rs::generated::PackageEvidence,
+        participant_id: &str,
+        native: super::ParticipantBindingRecord,
+    ) {
+        let evidence = super::super::evidence::PackageEvidenceInput::from_generated_descriptor(
+            generated,
+            D::PATH,
+        )
+        .expect("generated evidence");
+        let (source, _) = super::ParticipantBindingRecord::from_package_evidence(&evidence, 0)
+            .expect("source semantics");
+        assert_eq!(native.participant_digest, source.participant_digest);
+        assert_eq!(native.projection, source.projection);
     }
 
     #[test]
-    fn platform_api_identity_requires_the_canonical_digest() {
-        assert!(super::is_platform_api(
-            trellis_runtime_apis::jobs::API_ID,
-            trellis_runtime_apis::jobs::API_DIGEST,
-        ));
-        assert!(!super::is_platform_api(
-            trellis_runtime_apis::jobs::API_ID,
-            trellis_runtime_apis::auth::API_DIGEST,
-        ));
-        assert!(!super::is_platform_api(
-            "trellis.community-defined@v1",
-            trellis_runtime_apis::auth::API_DIGEST,
-        ));
-        assert!(!super::is_platform_api(
-            "example.jobs@v1",
-            trellis_runtime_apis::jobs::API_DIGEST,
-        ));
+    fn generated_builtins_use_exact_trusted_package_evidence() {
+        for binding in [
+            super::cli_participant_binding(0).expect("CLI binding"),
+            super::auth_runtime_participant_binding(0).expect("platform binding"),
+            super::console_participant_binding(0).expect("Console binding"),
+            super::portal_participant_binding(0).expect("Portal binding"),
+        ] {
+            super::validate_binding_namespace(&binding, true).expect("trusted binding");
+            assert!(
+                super::trusted_package_evidence_json(&binding.package_digest)
+                    .expect("trusted evidence")
+                    .is_some()
+            );
+        }
+
+        assert_matches_source(
+            trellis_runtime_apis::participants::trellis_cli::Participant::package_evidence(),
+            super::CLI_PARTICIPANT_ID,
+            super::cli_participant_binding(0).expect("CLI binding"),
+        );
+        assert_matches_source(
+            trellis_runtime_apis::participants::trellis_platform::Participant::package_evidence(),
+            super::AUTH_RUNTIME_PARTICIPANT_ID,
+            super::auth_runtime_participant_binding(0).expect("platform binding"),
+        );
+        assert_matches_source(
+            trellis_runtime_apis::participants::trellis_console::Participant::package_evidence(),
+            super::CONSOLE_PARTICIPANT_ID,
+            super::console_participant_binding(0).expect("Console binding"),
+        );
+        assert_matches_source(
+            trellis_runtime_apis::participants::trellis_portal::Participant::package_evidence(),
+            super::PORTAL_PARTICIPANT_ID,
+            super::portal_participant_binding(0).expect("Portal binding"),
+        );
     }
 
     #[test]
-    fn trellis_participant_namespace_is_platform_reserved() {
-        let mut ordinary_cli = super::cli_participant_binding(0).expect("CLI binding");
-        ordinary_cli.artifact_digest = "other-artifact".to_owned();
-        assert!(super::validate_binding_namespace(&ordinary_cli).is_ok());
+    fn reserved_namespace_rejects_tampered_participant_and_api_digests() {
+        let mut participant = super::auth_runtime_participant_binding(0).expect("binding");
+        participant.package_digest = "x".repeat(43);
+        assert!(super::validate_binding_namespace(&participant, false).is_err());
 
-        let mut forged = super::auth_runtime_participant_binding(0).expect("auth binding");
-        forged.artifact_digest = "forged".to_owned();
-        assert!(super::validate_binding_namespace(&forged).is_err());
+        let mut api = super::auth_runtime_participant_binding(0).expect("binding");
+        api.package_digest = "x".repeat(43);
+        api.projection
+            .referenced_apis
+            .get_mut(trellis_runtime_apis::apis::trellis_auth_v1::API_ID)
+            .expect("Auth API")
+            .digest = "x".repeat(43);
+        assert!(super::validate_binding_namespace(&api, false).is_err());
     }
 }

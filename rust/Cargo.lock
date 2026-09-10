@@ -4287,6 +4287,10 @@ name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+dependencies = [
+ "serde",
+ "serde_core",
+]
 
 [[package]]
 name = "seq-macro"
@@ -5300,6 +5304,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "tar",
  "tempfile",
  "time",
  "tokio",
@@ -5323,12 +5328,11 @@ name = "trellis-codegen-rust"
 version = "0.12.0"
 dependencies = [
  "prettyplease",
- "serde",
- "serde_json",
+ "semver",
  "syn",
+ "tempfile",
  "thiserror 2.0.18",
- "toml",
- "trellis-protocol",
+ "trellis-idl",
 ]
 
 [[package]]
@@ -5342,10 +5346,9 @@ dependencies = [
  "oxc_semantic",
  "oxc_span",
  "oxc_transformer",
- "serde",
  "serde_json",
  "thiserror 2.0.18",
- "trellis-protocol",
+ "trellis-idl",
 ]
 
 [[package]]
@@ -5355,12 +5358,14 @@ dependencies = [
  "async-nats",
  "futures-util",
  "rusqlite",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "time",
  "tokio",
  "tracing",
  "trellis-rs",
+ "trellis-runtime-apis",
 ]
 
 [[package]]
@@ -5373,6 +5378,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tempfile",
  "toml",
  "trellis-protocol",
@@ -5430,9 +5436,7 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
  "jsonptr",
- "jsonschema",
  "nkeys",
- "semver",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -5524,6 +5528,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trellis-eventlog-runtime",
+ "trellis-idl",
  "trellis-jobs-runtime",
  "trellis-local-nats",
  "trellis-protocol",
@@ -6403,10 +6408,13 @@ dependencies = [
  "clap",
  "miette",
  "serde_json",
+ "tempfile",
  "tokio",
  "trellis-cli",
  "trellis-codegen-rust",
  "trellis-codegen-ts",
+ "trellis-idl",
+ "trellis-protocol",
  "wasm-bindgen-cli-support",
 ]
 

@@ -2564,7 +2564,6 @@
           "npm:@nats-io/nats-core@^3.3.1",
           "npm:@nats-io/transport-node@^3.3.1",
           "npm:fflate@~0.8.2",
-          "npm:typebox@^1.1.33",
           "npm:ulid@^3.0.2"
         ]
       }

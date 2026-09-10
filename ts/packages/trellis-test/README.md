@@ -5,9 +5,10 @@ Use ordinary `deno test -A`; there is no runner, matrix, or case registration.
 
 ## Generated Participants
 
-Author a small service and caller in `contract.trellis`, run `trellis generate`,
-and import their generated participant exports. Never construct test contracts,
-subjects, or authorization evidence by hand.
+List the fixture source and dependencies in `trellis.toml`, author participants
+in `contract.trellis`, run `trellis install`, and import their generated
+participant exports. Never construct test contracts, subjects, or authorization
+evidence by hand.
 
 ```ts
 import { TrellisTestRuntime } from "@qlever-llc/trellis-test";

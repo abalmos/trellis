@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -6,10 +5,10 @@ use base64::Engine as _;
 use ed25519_dalek::SigningKey;
 use reqwest::Client as HttpClient;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use trellis_protocol::{
-    parse_api, parse_authorization_context, parse_participant, resolve_participant,
-    SessionProofInput, UserAuthBindSessionProofInput, UserAuthRequestSessionProofInput,
+    parse_authorization_context, SessionProofInput, UserAuthBindSessionProofInput,
+    UserAuthRequestSessionProofInput,
 };
 
 use super::client::connect_admin_client_async;
@@ -19,60 +18,11 @@ use super::models::{
 };
 use super::TrellisAuthError;
 use crate::client::{decode_trellis_http_error, SessionAuth};
-use crate::internal_sdk::auth::types::AuthUsersGetResponseUser;
-use crate::internal_sdk::auth::AuthClient;
 
 pub(crate) const DETACHED_LOGIN_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-struct CliParticipant {
-    id: String,
-    digest: String,
-    required_grants: trellis_protocol::GrantSet,
-}
-
-fn cli_participant() -> Result<CliParticipant, TrellisAuthError> {
-    let participant_value: Value =
-        serde_json::from_str(include_str!("../../artifacts/trellis.cli.participant.json"))?;
-    let participant = parse_participant(&participant_value)?;
-    let mut apis = BTreeMap::new();
-    for api_json in [
-        crate::internal_sdk::auth::api::API_JSON,
-        crate::internal_sdk::state::api::API_JSON,
-        crate::internal_sdk::jobs::api::API_JSON,
-        crate::internal_sdk::health::api::API_JSON,
-        crate::internal_sdk::eventlog::api::API_JSON,
-    ] {
-        let api_value: Value = serde_json::from_str(api_json)?;
-        let api = parse_api(&api_value)?;
-        apis.insert(api.id().to_owned(), api);
-    }
-    let resolved = resolve_participant(&participant, &apis)?;
-    Ok(CliParticipant {
-        id: participant.id().to_owned(),
-        digest: participant.digest()?,
-        required_grants: resolved.proposal().required().grant_set().clone(),
-    })
-}
-
-/// Return the exact built-in Trellis CLI participant artifact digest.
-pub fn cli_participant_digest() -> Result<String, TrellisAuthError> {
-    Ok(cli_participant()?.digest)
-}
-
-/// Return the exact required grants declared by the built-in Trellis CLI participant.
-pub fn cli_participant_grants() -> Result<trellis_protocol::GrantSet, TrellisAuthError> {
-    Ok(cli_participant()?.required_grants)
-}
-
 fn base64url_encode(bytes: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(bytes)
-}
-
-/// Compute the semantic digest for one native Trellis API artifact.
-#[doc = concat!("Trellis API operation `", stringify!(contract_digest), "`.")]
-pub fn contract_digest(api_source_json: &str) -> Result<String, TrellisAuthError> {
-    let value = serde_json::from_str(api_source_json)?;
-    Ok(trellis_protocol::parse_api(&value)?.digest()?)
 }
 
 /// Generate a new base64url-encoded Ed25519 session seed and public key.
@@ -92,17 +42,17 @@ pub fn detached_login_redirect_to() -> Result<String, TrellisAuthError> {
 async fn start_auth_request(
     trellis_url: &str,
     redirect_to: &str,
+    participant_id: &str,
     auth: &SessionAuth,
 ) -> Result<AuthStartResponse, TrellisAuthError> {
     let trellis_url = crate::client::canonical_trellis_origin(trellis_url)?;
-    let participant = cli_participant()?;
     let request_id = ulid::Ulid::new().to_string();
     let issued_at = now_ms()?;
     let unsigned_request = json!({
         "requestId": request_id,
         "issuedAt": issued_at,
         "sessionPublicKey": auth.session_key,
-        "participantId": participant.id,
+        "participantId": participant_id,
         "redirectTarget": redirect_to,
     });
     let input = SessionProofInput::user_auth_request(UserAuthRequestSessionProofInput {
@@ -218,6 +168,7 @@ pub async fn poll_agent_flow_until_ready(
 async fn bind_session(
     trellis_url: &str,
     flow_id: &str,
+    participant_id: &str,
     auth: &SessionAuth,
 ) -> Result<BoundSession, TrellisAuthError> {
     let trellis_url = crate::client::canonical_trellis_origin(trellis_url)?;
@@ -265,7 +216,7 @@ async fn bind_session(
             .is_some_and(|expiry| expiry <= server_now)
         || session.session_id.parse::<ulid::Ulid>().is_err()
         || session.session_key != auth.session_key
-        || session.participant_id != cli_participant()?.id
+        || session.participant_id != participant_id
     {
         return Err(TrellisAuthError::UnexpectedBindStatus(
             "login_binding_mismatch".to_owned(),
@@ -292,7 +243,7 @@ impl AgentLoginChallenge {
             flow_id,
             login_url: _,
             session_seed,
-            participant_digest: _,
+            participant_id,
             auth,
         } = self;
         let flow_id = poll_agent_flow_until_ready(
@@ -302,9 +253,10 @@ impl AgentLoginChallenge {
             Duration::from_secs(300),
         )
         .await?;
-        let bound = bind_session(trellis_url, &flow_id, auth).await?;
+        let bound = bind_session(trellis_url, &flow_id, participant_id, auth).await?;
         let expires_at = bound.expires_at;
         let state = AdminSessionState {
+            participant_id: participant_id.clone(),
             login_session_id: bound.login_session_id,
             trellis_url: trellis_url.to_string(),
             session_seed: session_seed.clone(),
@@ -313,26 +265,23 @@ impl AgentLoginChallenge {
 
         super::session_store::save_admin_session(&state)?;
         let client = connect_admin_client_async(&state).await?;
-        let auth_client = AuthClient::new(&client);
-        let response = auth_client
-            .rpc()
-            .auth()
-            .sessions_me()
+        let response = client
+            .request_value("rpc.v1.auth.Sessions.Me", json!({}))
             .await
             .map_err(|error| TrellisAuthError::OperationFailed(error.to_string()))?;
-        let user = response.user.ok_or_else(|| {
-            TrellisAuthError::NotUserSession(response.connection.principal_kind.to_string())
-        })?;
-        let user: AuthUsersGetResponseUser = serde_json::from_value(serde_json::to_value(user)?)?;
+        let response: SessionsMeResponse = serde_json::from_value(response)?;
+        let user = response
+            .user
+            .ok_or_else(|| TrellisAuthError::NotUserSession(response.connection.principal_kind))?;
         let user = super::AuthenticatedUser {
             user_id: user.user_id,
             principal_id: user.principal_id,
-            state: user.state.to_string(),
+            state: user.state,
             email: user.email,
             image: user.image,
             name: user.name,
         };
-        let context = client.authorization_context()?.ok_or_else(|| {
+        let context = client.inner().authorization_context()?.ok_or_else(|| {
             TrellisAuthError::OperationFailed(
                 "admin connection omitted authorization context".to_owned(),
             )
@@ -361,14 +310,14 @@ pub async fn start_agent_login(
         opts.trellis_url.trim_end_matches('/'),
         detached_login_redirect_to()?.trim_start_matches('/')
     );
-    let response = start_auth_request(opts.trellis_url, &redirect_to, &auth).await?;
-    let participant_digest = cli_participant()?.digest;
+    let response =
+        start_auth_request(opts.trellis_url, &redirect_to, opts.participant_id, &auth).await?;
 
     Ok(AgentLoginChallenge {
         flow_id: response.flow_id,
         login_url: response.login_url,
         session_seed,
-        participant_digest,
+        participant_id: opts.participant_id.to_owned(),
         auth,
     })
 }
@@ -384,14 +333,43 @@ pub async fn start_admin_reauth(
         state.trellis_url.trim_end_matches('/'),
         detached_login_redirect_to()?.trim_start_matches('/')
     );
-    let response = start_auth_request(&state.trellis_url, &redirect_to, &auth).await?;
+    let response = start_auth_request(
+        &state.trellis_url,
+        &redirect_to,
+        &state.participant_id,
+        &auth,
+    )
+    .await?;
     Ok(AdminReauthOutcome::Flow(Box::new(AgentLoginChallenge {
         flow_id: response.flow_id,
         login_url: response.login_url,
         session_seed: state.session_seed.clone(),
-        participant_digest: cli_participant()?.digest,
+        participant_id: state.participant_id.clone(),
         auth,
     })))
+}
+
+#[derive(Deserialize)]
+struct SessionsMeResponse {
+    connection: SessionsMeConnection,
+    user: Option<SessionsMeUser>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionsMeConnection {
+    principal_kind: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionsMeUser {
+    user_id: String,
+    principal_id: String,
+    state: String,
+    email: Option<String>,
+    image: Option<String>,
+    name: Option<String>,
 }
 
 fn now_ms() -> Result<i64, TrellisAuthError> {

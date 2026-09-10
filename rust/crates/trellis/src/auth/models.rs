@@ -7,6 +7,8 @@ use crate::client::SessionAuth;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[doc = concat!("Public Trellis data type `", stringify!(AdminSessionState), "`.")]
 pub struct AdminSessionState {
+    /// Generated participant identity used by this login.
+    pub participant_id: String,
     /// Durable user-only login identifier.
     pub login_session_id: String,
     /// Base URL for the Trellis deployment.
@@ -71,8 +73,7 @@ pub struct AgentLoginChallenge {
     pub login_url: String,
     #[doc = concat!("The `", stringify!(session_seed), "` value.")]
     pub session_seed: String,
-    #[doc = concat!("The `", stringify!(participant_digest), "` value.")]
-    pub participant_digest: String,
+    pub(crate) participant_id: String,
     #[doc = concat!("The `", stringify!(auth), "` value.")]
     pub auth: SessionAuth,
 }
@@ -82,6 +83,8 @@ pub struct StartAgentLoginOpts<'a> {
     /// Base URL for the Trellis deployment.
     #[doc = concat!("The `", stringify!(trellis_url), "` value.")]
     pub trellis_url: &'a str,
+    /// Generated participant identity requesting the user session.
+    pub participant_id: &'a str,
 }
 
 /// Successful agent-login result after the admin user has been verified.

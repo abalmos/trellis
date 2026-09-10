@@ -6,6 +6,7 @@ use clap::error::ErrorKind;
 use clap::{Parser, Subcommand};
 use miette::{IntoDiagnostic, Result, WrapErr};
 
+mod builtin_semantics;
 mod release;
 
 #[derive(Debug, Clone, Eq, PartialEq, Subcommand)]
@@ -101,9 +102,6 @@ where
 const TRELLIS_PROJECTS: &[&str] = &[
     // Trellis has a small fixed API DAG. Replace this list with dynamic graph
     // discovery only if maintaining it becomes a real problem.
-    "rust/crates/eventlog-runtime",
-    "rust/crates/jobs-runtime",
-    "rust/crates/runtime",
     "ts/packages/trellis-test",
     "web",
     "integration/fixtures/runtime",
@@ -117,136 +115,109 @@ const TRELLIS_PROJECTS: &[&str] = &[
 
 fn run_install() -> Result<()> {
     let root = repo_root()?;
+    generate_builtin_package(&root)?;
     let runtime = tokio::runtime::Runtime::new().into_diagnostic()?;
     for project in TRELLIS_PROJECTS {
         let project = root.join(project);
-        if project.join("trellis.lock").is_file() {
-            runtime.block_on(trellis_cli::package::install(
-                trellis_cli::cli::OutputFormat::Text,
-                &trellis_cli::cli::ProjectRootArgs { root: project },
-            ))?;
-        } else {
-            trellis_cli::generate::generate_project(&project)?;
-        }
-    }
-    let compiled = [
-        ("runtime", "rust/crates/runtime"),
-        ("jobs-runtime", "rust/crates/jobs-runtime"),
-        ("eventlog-runtime", "rust/crates/eventlog-runtime"),
-        ("web", "web"),
-    ]
-    .into_iter()
-    .map(|(name, path)| {
-        let project = root.join(path);
-        let manifest = trellis_cli::project::read_manifest(&project.join("trellis.toml"))?;
-        Ok((
-            name,
-            trellis_cli::package::compile_project(&project, &manifest)?,
-        ))
-    })
-    .collect::<Result<std::collections::BTreeMap<_, _>>>()?;
-    for (project, api_id, module) in [
-        ("runtime", "trellis.auth@v1", "auth"),
-        ("runtime", "trellis.core@v1", "core"),
-        ("eventlog-runtime", "trellis.eventlog@v1", "eventlog"),
-        ("runtime", "trellis.health@v1", "health"),
-        ("jobs-runtime", "trellis.jobs@v1", "jobs"),
-        ("runtime", "trellis.state@v1", "state"),
-    ] {
-        let target = root
-            .join("rust/crates/trellis/src/internal_sdk/generated")
-            .join(module);
-        if target.exists() {
-            std::fs::remove_dir_all(&target).into_diagnostic()?;
-        }
-        trellis_codegen_rust::generate_rust_api_module(&compiled[project].apis[api_id], &target)
-            .into_diagnostic()?;
-    }
-    for (project, api_id, module) in [
-        ("runtime", "trellis.auth@v1", "auth"),
-        ("eventlog-runtime", "trellis.eventlog@v1", "eventlog"),
-        ("runtime", "trellis.core@v1", "core"),
-        ("runtime", "trellis.health@v1", "health"),
-        ("jobs-runtime", "trellis.jobs@v1", "jobs"),
-        ("runtime", "trellis.state@v1", "state"),
-    ] {
-        let out_dir = root
-            .join("ts/packages/trellis/internal_sdk/generated")
-            .join(module);
-        if out_dir.exists() {
-            std::fs::remove_dir_all(&out_dir).into_diagnostic()?;
-        }
-        let mut sources =
-            trellis_codegen_ts::collect_ts_sdk_sources(&compiled[project].apis[api_id])
-                .into_diagnostic()?;
-        for source in &mut sources {
-            source.contents = source.contents.replace(
-                "\"@qlever-llc/trellis/generated\"",
-                "\"../../../generated.ts\"",
-            );
-        }
-        trellis_codegen_ts::write_ts_sdk_sources(&out_dir, &sources)
-            .map_err(|error| miette::miette!(error.to_string()))?;
-        let status = Command::new("deno")
-            .current_dir(&root)
-            .args(["fmt", "-c", "ts/deno.json"])
-            .arg(&out_dir)
-            .status()
-            .into_diagnostic()
-            .wrap_err("failed to format generated internal TypeScript SDK")?;
-        if !status.success() {
-            return Err(miette::miette!(
-                "failed to format generated internal TypeScript SDK {}",
-                out_dir.display()
-            ));
-        }
+        runtime.block_on(trellis_cli::package::install(
+            trellis_cli::cli::OutputFormat::Text,
+            &trellis_cli::cli::ProjectRootArgs { root: project },
+        ))?;
     }
     std::fs::copy(
         root.join("rust/crates/local-nats/nats-binaries.json"),
         root.join("ts/packages/trellis-test/src/nats-binaries.json"),
     )
     .into_diagnostic()?;
-    let runtime = &compiled["runtime"];
-    let participant = runtime
-        .participants
-        .iter()
-        .find(|participant| participant.id() == "trellis.auth-runtime")
-        .expect("runtime participant");
-    std::fs::write(
-        root.join("rust/crates/runtime-apis/src/trellis.auth-runtime.json"),
-        format!("{}\n", participant.canonical_json().into_diagnostic()?),
-    )
-    .into_diagnostic()?;
-    std::fs::write(
-        root.join("rust/crates/runtime-apis/src/trellis.state@v1.json"),
-        format!(
-            "{}\n",
-            runtime.apis["trellis.state@v1"]
-                .canonical_json()
-                .into_diagnostic()?
-        ),
-    )
-    .into_diagnostic()?;
-    let web = &compiled["web"];
-    for id in ["trellis-app.console@v1", "trellis-app.portal@v1"] {
-        std::fs::write(
-            root.join(format!("rust/crates/runtime-apis/src/{id}.api.json")),
-            format!("{}\n", web.apis[id].canonical_json().into_diagnostic()?),
-        )
-        .into_diagnostic()?;
-        let participant = web
-            .participants
-            .iter()
-            .find(|participant| participant.id() == id)
-            .expect("built-in web participant");
-        std::fs::write(
-            root.join(format!(
-                "rust/crates/runtime-apis/src/{id}.participant.json"
-            )),
-            format!("{}\n", participant.canonical_json().into_diagnostic()?),
-        )
-        .into_diagnostic()?;
+    Ok(())
+}
+
+fn generate_builtin_package(root: &Path) -> Result<()> {
+    let project = root.join("rust/crates/runtime");
+    let manifest = trellis_idl::project::read_manifest(&project.join("trellis.toml"))?;
+    let sources = trellis_idl::project::load_sources(&project, &manifest)?;
+    let graph = trellis_idl::compile_project(&manifest, sources, Default::default())?;
+    let builtin_semantics = builtin_semantics::render(&graph)?;
+    let target = root.join("rust/crates/runtime-apis");
+    let staging = root.join("rust/crates/.runtime-apis-generated");
+    let backup = root.join("rust/crates/.runtime-apis-backup");
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).into_diagnostic()?;
     }
+    miette::ensure!(
+        !backup.exists(),
+        "refusing to overwrite retained builtin generation backup {}",
+        backup.display()
+    );
+    trellis_codegen_rust::generate_rust_package(&graph, &staging, "trellis-runtime-apis")
+        .into_diagnostic()?;
+    rustfmt_generated(&staging)?;
+    if target.exists() {
+        std::fs::rename(&target, &backup).into_diagnostic()?;
+    }
+    if let Err(error) = std::fs::rename(&staging, &target) {
+        if backup.exists() {
+            std::fs::rename(&backup, &target).into_diagnostic()?;
+        }
+        return Err(error).into_diagnostic();
+    }
+    if backup.exists() {
+        std::fs::remove_dir_all(backup).into_diagnostic()?;
+    }
+    let target = root.join("ts/packages/trellis/internal_sdk/generated");
+    let staging = root.join("ts/packages/trellis/internal_sdk/.generated-staging");
+    let backup = root.join("ts/packages/trellis/internal_sdk/.generated-backup");
+    if staging.exists() {
+        std::fs::remove_dir_all(&staging).into_diagnostic()?;
+    }
+    miette::ensure!(
+        !backup.exists(),
+        "refusing to overwrite retained builtin TypeScript generation backup {}",
+        backup.display()
+    );
+    trellis_codegen_ts::generate_ts_package(&graph, &staging, "@qlever-llc/trellis-internal-sdk")
+        .into_diagnostic()?;
+    if target.exists() {
+        std::fs::rename(&target, &backup).into_diagnostic()?;
+    }
+    if let Err(error) = std::fs::rename(&staging, &target) {
+        if backup.exists() {
+            std::fs::rename(&backup, &target).into_diagnostic()?;
+        }
+        return Err(error).into_diagnostic();
+    }
+    if backup.exists() {
+        std::fs::remove_dir_all(backup).into_diagnostic()?;
+    }
+    let builtin_semantics_path =
+        root.join("rust/crates/runtime/src/platform/auth/builtin_semantics.rs");
+    std::fs::write(&builtin_semantics_path, builtin_semantics).into_diagnostic()?;
+    rustfmt_generated(&builtin_semantics_path)?;
+    Ok(())
+}
+
+fn rustfmt_generated(path: &Path) -> Result<()> {
+    let mut pending = vec![path.to_path_buf()];
+    let mut files = Vec::new();
+    while let Some(path) = pending.pop() {
+        if path.is_dir() {
+            pending.extend(
+                std::fs::read_dir(path)
+                    .into_diagnostic()?
+                    .map(|entry| entry.map(|entry| entry.path()))
+                    .collect::<std::io::Result<Vec<_>>>()
+                    .into_diagnostic()?,
+            );
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
+    let status = Command::new("rustfmt")
+        .args(["--edition", "2021"])
+        .args(files)
+        .status()
+        .into_diagnostic()?;
+    miette::ensure!(status.success(), "rustfmt failed for generated Rust");
     Ok(())
 }
 

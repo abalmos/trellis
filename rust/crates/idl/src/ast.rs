@@ -1,188 +1,167 @@
 use std::{collections::BTreeMap, ops::Range, path::PathBuf};
 
 #[derive(Clone, Debug)]
-pub(crate) struct Source {
-    pub path: PathBuf,
-    pub text: String,
-}
-
-#[derive(Clone, Debug)]
 pub(crate) struct Spanned<T> {
     pub value: T,
     pub source: usize,
     pub span: Range<usize>,
 }
 
-#[derive(Debug)]
-pub(crate) struct Project {
-    pub sources: Vec<Source>,
-    pub apis: Vec<Spanned<Api>>,
-    pub participants: Vec<Spanned<Participant>>,
-}
-
-#[derive(Debug)]
-pub(crate) struct Api {
-    pub id: String,
-    pub version: Option<Spanned<String>>,
-    pub display_name: Option<Spanned<String>>,
-    pub description: Option<Spanned<String>>,
-    pub docs: Option<Docs>,
-    pub schemas: BTreeMap<String, Spanned<SchemaDecl>>,
-    pub exports: Vec<Spanned<String>>,
-    pub capabilities: BTreeMap<String, Spanned<Capability>>,
-    pub errors: BTreeMap<String, Spanned<ErrorDecl>>,
-    pub rpcs: BTreeMap<String, Spanned<Surface>>,
-    pub operations: BTreeMap<String, Spanned<Surface>>,
-    pub events: BTreeMap<String, Spanned<Surface>>,
-    pub feeds: BTreeMap<String, Spanned<Surface>>,
+#[derive(Clone, Debug)]
+pub(crate) struct ParsedSource {
+    pub alias: String,
+    pub path: PathBuf,
+    pub text: String,
+    pub imports: BTreeMap<String, Import>,
+    pub declarations: Vec<Spanned<Declaration>>,
+    pub prelude: Prelude,
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Docs {
-    pub summary: Option<String>,
-    pub markdown: Option<String>,
+pub(crate) struct Prelude {
+    pub package: Option<String>,
+    pub dependencies: Vec<PreludeDependency>,
 }
 
-#[derive(Debug)]
-pub(crate) enum SchemaDecl {
-    Model(Vec<Field>),
-    Alias(Type),
-    Enum(Vec<String>),
+#[derive(Clone, Debug)]
+pub(crate) struct PreludeDependency {
+    pub alias: String,
+    pub package: String,
+    pub version: String,
+    pub digest: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
+pub(crate) struct Import {
+    pub from: String,
+    pub name: String,
+    pub span: std::ops::Range<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum Declaration {
+    Model(Model),
+    Enum(Enum),
+    Alias(Alias),
+    Api(Api),
+    Participant(Participant),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Model {
+    pub name: String,
+    pub fields: BTreeMap<String, Field>,
+}
+#[derive(Clone, Debug)]
 pub(crate) struct Field {
+    pub optional: bool,
+    pub ty: TypeExpr,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct Enum {
+    pub name: String,
+    pub symbols: Vec<String>,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct Alias {
+    pub name: String,
+    pub ty: TypeExpr,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum TypeExpr {
+    Named(String),
+    Primitive(String, Vec<(String, String)>),
+    List(Box<TypeExpr>, Vec<(String, String)>),
+    Map(Box<TypeExpr>),
+    Nullable(Box<TypeExpr>),
+    CursorPage(Box<TypeExpr>),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Api {
+    pub name: String,
+    pub major: u32,
+    pub title: String,
+    pub description: String,
+    pub version: Option<String>,
+    pub errors: BTreeMap<String, Option<String>>,
+    pub actions: Vec<Action>,
+    pub capabilities: Vec<Capability>,
+    pub capabilities_present: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Action {
+    pub kind: String,
+    pub name: String,
+    pub members: BTreeMap<String, MemberValue>,
+    pub span: Range<usize>,
+}
+#[derive(Clone, Debug)]
+pub(crate) enum MemberValue {
+    Name(String),
+    Names(Vec<String>),
+    Flag,
+    Paths(Vec<Vec<String>>),
+    Signals(BTreeMap<String, String>),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Capability {
+    pub name: String,
+    pub public: bool,
+    pub title: String,
+    pub description: String,
+    pub consequence: String,
+    pub allows: Vec<Selection>,
+    pub span: Range<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Selection {
+    pub direction: String,
+    pub kind: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Participant {
+    pub kind: String,
+    pub name: String,
+    pub implements: Vec<String>,
+    pub uses: Vec<ApiUse>,
+    pub resources: Vec<Resource>,
+    pub companion: Option<Box<Participant>>,
+    pub optional: bool,
+    pub span: Range<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ApiUse {
+    pub api: String,
+    pub selections: Vec<Selection>,
+    pub optional_capabilities: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Resource {
+    pub kind: String,
     pub name: String,
     pub optional: bool,
-    pub ty: Spanned<Type>,
+    pub members: BTreeMap<String, ResourceValue>,
+    pub span: Range<usize>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum Type {
-    Json,
-    Named(String),
-    String(Vec<Constraint>),
-    Bool,
-    BoolLiteral(bool),
-    Integer {
-        unsigned: bool,
-        constraints: Vec<Constraint>,
-    },
-    Number(Vec<Constraint>),
-    List {
-        member: Box<Spanned<Type>>,
-        constraints: Vec<Constraint>,
-    },
-    Map(Box<Spanned<Type>>),
-    Literal(String),
-    Null,
-    Union(Vec<Spanned<Type>>),
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct Capability {
-    pub display_name: Option<Spanned<String>>,
-    pub description: Option<Spanned<String>>,
-    pub consequence: Option<Spanned<String>>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct ErrorDecl {
-    pub code: Option<Spanned<String>>,
-    pub schema: Option<Spanned<String>>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct Constraint {
-    pub name: String,
-    pub value: ConstraintValue,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) enum ConstraintValue {
-    Number(serde_json::Number),
-    String(String),
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct Surface {
-    pub version: Option<Spanned<String>>,
-    pub input: Option<Spanned<String>>,
-    pub output: Option<Spanned<String>>,
-    pub progress: Option<Spanned<String>>,
-    pub event: Option<Spanned<String>>,
-    pub params: Vec<String>,
-    pub errors: Vec<Spanned<String>>,
-    pub transfer: Option<Transfer>,
-    pub cancellable: bool,
-    pub capabilities: BTreeMap<String, Vec<String>>,
-    pub class: Option<Spanned<String>>,
-    pub docs: Option<Docs>,
-}
-
-#[derive(Debug)]
-pub(crate) enum Transfer {
-    Receive,
-    Send,
-}
-
-#[derive(Debug)]
-pub(crate) struct Participant {
-    pub id: String,
-    pub kind: String,
-    pub implements: Vec<Spanned<String>>,
-    pub uses: BTreeMap<String, Spanned<ApiUse>>,
-    pub subscribed_events: Vec<Spanned<String>>,
-    pub schemas: BTreeMap<String, Spanned<SchemaDecl>>,
-    pub state: BTreeMap<String, Spanned<State>>,
-    pub stores: BTreeMap<String, Spanned<Resource>>,
-    pub kv: BTreeMap<String, Spanned<Resource>>,
-    pub jobs: BTreeMap<String, Spanned<Resource>>,
-    pub bindings: BTreeMap<String, Spanned<Binding>>,
-}
-
-#[derive(Debug)]
-pub(crate) struct State {
-    pub kind: String,
-    pub schema: Spanned<String>,
-    pub state_version: Option<String>,
-    pub docs: Option<Docs>,
-}
-
-#[derive(Debug)]
-pub(crate) struct ApiUse {
-    pub required: bool,
-    pub api: Spanned<String>,
-    pub selections: Vec<Spanned<Selection>>,
-}
-
-#[derive(Debug)]
-pub(crate) struct Selection {
-    pub action: String,
-    pub surface: String,
-    pub name: String,
-    pub signal: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct Resource {
-    pub purpose: Option<String>,
-    pub schema: Option<Spanned<String>>,
-    pub payload: Option<Spanned<String>>,
-    pub result: Option<Spanned<String>>,
-    pub history: Option<u64>,
-    pub ttl_ms: Option<u64>,
-    pub max_object_bytes: Option<u64>,
-    pub max_total_bytes: Option<u64>,
-    pub max_value_bytes: Option<u64>,
-    pub docs: Option<Docs>,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct Binding {
-    pub store: Option<Spanned<String>>,
-    pub key: Option<String>,
-    pub content_type: Option<String>,
-    pub metadata: Option<String>,
-    pub expires_in_ms: Option<u64>,
+pub(crate) enum ResourceValue {
+    Text(String),
+    Name(String),
+    Integer(u64),
+    Duration(u64),
+    Capacity(u64),
+    Names(Vec<String>),
+    Accepts(Vec<(u32, String)>),
+    Retry { attempts: u32, backoff_ms: Vec<u64> },
+    KeyConcurrency { path: Vec<String>, policy: String },
 }

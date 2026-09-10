@@ -1,150 +1,196 @@
-//! Parser and compiler for declarative Trellis IDL projects.
+//! Native parser, resolver, canonicalizer, and projector for Trellis source packages.
 
 mod ast;
+mod canonical;
+mod compatibility;
 mod compile;
 mod lexer;
 mod parser;
 pub mod project;
+mod projection;
+mod semantic;
 
-use ast::{Project, Source};
-use miette::{IntoDiagnostic, WrapErr};
-use std::{collections::BTreeMap, path::Path};
-use trellis_protocol::{ApiArtifact, ParticipantArtifact};
+pub use canonical::{
+    api_digest, canonical_package, capability_consent_digest, package_digest, participant_digest,
+    selected_surface_digest, CanonicalMode,
+};
+pub use compatibility::{
+    compare_implementation, compare_resource, compare_resource_evolution, compare_selected,
+    CompatibilityIssue, CompatibilityReport, ResourceCompatibilityReport, RetainedResourceActual,
+    SelectedCompatibilityCache,
+};
+#[doc(hidden)]
+pub use compile::selected_permission_atoms;
+pub use compile::SuppliedDependencies;
+pub use projection::json_schema;
+pub use semantic::*;
 
-/// A parsed Trellis IDL project whose source model remains private.
-#[derive(Debug)]
-pub struct ParsedProject(Project);
+use project::{Dependency, GenerateConfig, PackageManifest, PackageMetadata};
+use semver::Version;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+};
 
-/// Canonical artifacts compiled from one Trellis project and its direct API dependencies.
-#[derive(Debug)]
-pub struct CompiledProject {
-    /// APIs authored by the root project.
-    pub apis: BTreeMap<String, ApiArtifact>,
-    /// Participants authored by the root project.
-    pub participants: Vec<ParticipantArtifact>,
-    /// Exact APIs supplied by dependency orchestration.
-    pub referenced_apis: BTreeMap<String, ApiArtifact>,
-}
-
-/// Compile one Trellis project against validated dependency API objects.
-/// Dependency acquisition and manifest/lock policy belong to the caller.
+/// Compile a source package and supplied exact dependency graphs without I/O.
 ///
 /// # Errors
 ///
-/// Returns an error for invalid source, duplicate or mismatched API identities,
-/// protocol artifacts, or participant selections.
+/// Returns source-aware syntax or semantic diagnostics. No partial graph is returned.
 pub fn compile_project(
-    root: &Path,
-    referenced_apis: BTreeMap<String, ApiArtifact>,
-) -> miette::Result<CompiledProject> {
-    let project = parse_project(root)?;
-    let apis = compile_apis(&project)?;
-    for (id, api) in &referenced_apis {
-        if id != api.id() {
-            return Err(miette::miette!(
-                "dependency API key '{id}' does not match '{}'",
-                api.id()
-            ));
-        }
-        if apis.contains_key(id) {
-            return Err(miette::miette!(
-                "API '{id}' is both authored by this project and declared as a dependency"
-            ));
-        }
+    manifest: &PackageManifest,
+    sources: Vec<SourceUnit>,
+    dependencies: SuppliedDependencies,
+) -> miette::Result<PackageGraph> {
+    compile::compile(manifest, sources, dependencies)
+}
+
+/// One immutable canonical source package in a bootstrap evidence closure.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PackageSourceEvidence {
+    /// Logical package identity.
+    pub name: String,
+    /// Exact package version.
+    pub version: Version,
+    /// Semantic package digest.
+    pub digest: String,
+    /// Presentation-preserving canonical IDL.
+    pub source: String,
+}
+
+/// Complete exact source-package closure embedded by generated code.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PackageEvidence {
+    /// Root package identity.
+    pub root_package: String,
+    /// Root semantic package digest.
+    pub root_digest: String,
+    /// Complete closure sorted by package identity.
+    pub packages: Vec<PackageSourceEvidence>,
+}
+
+/// Recompile and verify generated package evidence without filesystem or network access.
+///
+/// # Errors
+///
+/// Returns an error when the closure is incomplete, cyclic, malformed, or digest-invalid.
+pub fn compile_evidence(evidence: PackageEvidence) -> miette::Result<PackageGraph> {
+    if !evidence
+        .packages
+        .windows(2)
+        .all(|pair| pair[0].name < pair[1].name)
+    {
+        return Err(miette::miette!(
+            "evidence packages must be uniquely sorted by identity"
+        ));
     }
-    let available = apis
+    let entries = evidence
+        .packages
         .iter()
-        .chain(&referenced_apis)
-        .map(|(id, api)| (id.clone(), api.clone()))
-        .collect();
-    let participants = compile_participants(&project, &available)?;
-    Ok(CompiledProject {
-        apis,
-        participants,
-        referenced_apis,
-    })
+        .map(|entry| (entry.name.as_str(), entry))
+        .collect::<BTreeMap<_, _>>();
+    let mut compiled = BTreeMap::new();
+    let mut visiting = BTreeSet::new();
+    compile_evidence_package(
+        &evidence.root_package,
+        &entries,
+        &mut compiled,
+        &mut visiting,
+    )?;
+    if compiled.len() != entries.len() {
+        return Err(miette::miette!(
+            "evidence contains packages outside the root closure"
+        ));
+    }
+    let graph = compiled
+        .remove(&evidence.root_package)
+        .ok_or_else(|| miette::miette!("evidence root package is absent"))?;
+    if graph.root_digest() != evidence.root_digest {
+        return Err(miette::miette!(
+            "evidence root digest does not match recompiled semantics"
+        ));
+    }
+    Ok(graph)
 }
 
-/// Discover and parse the IDL source in a Trellis project root.
-///
-/// # Errors
-///
-/// Returns an error when neither supported source layout exists, both layouts
-/// exist, source I/O fails, or the first source syntax error is encountered.
-pub fn parse_project(root: &Path) -> miette::Result<ParsedProject> {
-    let single = root.join("contract.trellis");
-    let directory = root.join("contracts");
-    let single_exists = single.is_file();
-    let mut paths = if directory.is_dir() {
-        let entries = std::fs::read_dir(&directory)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("failed to read {}", directory.display()))?
-            .collect::<Result<Vec<_>, _>>()
-            .into_diagnostic()
-            .wrap_err_with(|| format!("failed to read {}", directory.display()))?;
-        entries
-            .into_iter()
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.is_file() && path.extension().is_some_and(|value| value == "trellis")
-            })
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
+fn compile_evidence_package(
+    name: &str,
+    entries: &BTreeMap<&str, &PackageSourceEvidence>,
+    compiled: &mut BTreeMap<String, PackageGraph>,
+    visiting: &mut BTreeSet<String>,
+) -> miette::Result<PackageGraph> {
+    if let Some(graph) = compiled.get(name) {
+        return Ok(graph.clone());
+    }
+    if !visiting.insert(name.to_owned()) {
+        return Err(miette::miette!("evidence package cycle through '{name}'"));
+    }
+    let entry = entries
+        .get(name)
+        .ok_or_else(|| miette::miette!("evidence package '{name}' is missing"))?;
+    let source = SourceUnit {
+        alias: "canonical".into(),
+        path: PathBuf::from("canonical.trellis"),
+        source: entry.source.clone(),
     };
-    if single_exists && !paths.is_empty() {
+    let parsed = parser::parse(std::slice::from_ref(&source))?;
+    let prelude = &parsed[0].prelude;
+    if prelude.package.as_deref() != Some(name) {
         return Err(miette::miette!(
-            "project {} contains both contract.trellis and contracts/*.trellis",
-            root.display()
+            "evidence source package prelude does not match '{name}'"
         ));
     }
-    if single_exists {
-        paths.push(single);
+    let mut dependencies = BTreeMap::new();
+    let mut supplied = BTreeMap::new();
+    for dependency in &prelude.dependencies {
+        let graph = compile_evidence_package(&dependency.package, entries, compiled, visiting)?;
+        if graph.root_package().version().to_string() != dependency.version
+            || graph.root_digest() != dependency.digest
+        {
+            return Err(miette::miette!(
+                "evidence dependency '{}' does not match its canonical prelude",
+                dependency.package
+            ));
+        }
+        dependencies.insert(
+            dependency.alias.clone(),
+            Dependency {
+                package: dependency.package.clone(),
+                version: None,
+                path: Some(dependency.package.clone()),
+                registry: None,
+            },
+        );
+        supplied.insert(dependency.alias.clone(), graph);
     }
-    if paths.is_empty() {
+    let manifest = PackageManifest {
+        package: PackageMetadata {
+            name: name.to_owned(),
+            version: entry.version.clone(),
+        },
+        sources: BTreeMap::from([("canonical".into(), "canonical.trellis".into())]),
+        dependencies,
+        generate: GenerateConfig::default(),
+        default_registry: None,
+        registries: BTreeMap::new(),
+    };
+    let graph = compile_project(&manifest, vec![source], supplied)?;
+    if graph.root_digest() != entry.digest {
         return Err(miette::miette!(
-            "project {} contains neither contract.trellis nor contracts/*.trellis",
-            root.display()
+            "evidence digest for '{name}' does not match recompiled semantics"
         ));
     }
-    paths.sort();
-    let sources = paths
-        .into_iter()
-        .map(|path| {
-            let text = std::fs::read_to_string(&path)
-                .into_diagnostic()
-                .wrap_err_with(|| format!("failed to read {}", path.display()))?;
-            Ok(Source { path, text })
-        })
-        .collect::<miette::Result<Vec<_>>>()?;
-    parser::parse(sources).map(ParsedProject)
-}
-
-/// Compile and validate every API declared by a parsed project.
-///
-/// # Errors
-///
-/// Returns the first source-aware semantic or protocol validation error.
-pub fn compile_apis(project: &ParsedProject) -> miette::Result<BTreeMap<String, ApiArtifact>> {
-    compile::apis(&project.0)
-}
-
-/// Compile and resolve every participant against the supplied API artifacts.
-///
-/// # Errors
-///
-/// Returns the first source-aware semantic, protocol validation, or participant
-/// resolution error.
-pub fn compile_participants(
-    project: &ParsedProject,
-    apis: &BTreeMap<String, ApiArtifact>,
-) -> miette::Result<Vec<ParticipantArtifact>> {
-    compile::participants(&project.0, apis)
-}
-
-impl ParsedProject {
-    /// Return the deterministically ordered IDL source paths.
-    pub fn source_paths(&self) -> impl Iterator<Item = &Path> {
-        self.0.sources.iter().map(|source| source.path.as_path())
+    let canonical = canonical_package(&graph, graph.root(), CanonicalMode::Presentation)?;
+    if canonical != entry.source {
+        return Err(miette::miette!(
+            "package '{}' evidence source is not presentation-canonical",
+            entry.name
+        ));
     }
+    visiting.remove(name);
+    compiled.insert(name.to_owned(), graph.clone());
+    Ok(graph)
 }

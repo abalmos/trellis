@@ -1,6 +1,0 @@
-format = 1
-name = "trellis-eventlog-generated"
-default-registry = "trellis"
-
-[registries.trellis]
-prefix = "ghcr.io/qlever-llc/trellis-apis"

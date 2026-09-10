@@ -1,24 +1,25 @@
 //! `EventLog.Watch` feed implementation.
 
 use futures_util::{stream, Stream, StreamExt};
-use serde_json::{json, Value};
+use serde_json::json;
 use trellis_rs::service::{Router, ServerError};
+use trellis_runtime_apis::apis::trellis_events_v1::{feeds, feeds::Watch};
 
 use crate::projector::{EventLogRuntime, EventMessageStream};
 use crate::storage::now_timestamp_string;
-use crate::wire::EventLogWatchFeed;
+use crate::wire::generated_output;
 
 /// Register the `EventLog.Watch` feed on a built-in Event Log router.
 pub fn register_eventlog_watch_feed(router: &mut Router, eventlog_runtime: EventLogRuntime) {
-    router.register_feed::<EventLogWatchFeed, _, _>(move |_ctx, input| {
+    router.register_feed::<Watch, _, _>(move |_ctx, input| {
         watch_events(input, eventlog_runtime.clone())
     });
 }
 
 fn watch_events(
-    _input: Value,
+    _input: feeds::WatchInput,
     eventlog_runtime: EventLogRuntime,
-) -> impl Stream<Item = Result<Value, ServerError>> + Send + 'static {
+) -> impl Stream<Item = Result<feeds::WatchEvent, ServerError>> + Send + 'static {
     stream::unfold(WatchState::Init(eventlog_runtime), next_watch_frame)
 }
 
@@ -28,7 +29,9 @@ enum WatchState {
     Done,
 }
 
-async fn next_watch_frame(state: WatchState) -> Option<(Result<Value, ServerError>, WatchState)> {
+async fn next_watch_frame(
+    state: WatchState,
+) -> Option<(Result<feeds::WatchEvent, ServerError>, WatchState)> {
     match state {
         WatchState::Init(eventlog_runtime) => {
             let messages = match eventlog_runtime.live_events().await {
@@ -43,11 +46,14 @@ async fn next_watch_frame(state: WatchState) -> Option<(Result<Value, ServerErro
                 }
             };
             Some((
-                Ok(json!({
-                    "kind": "ready",
-                    "cursor": "now",
-                    "serverTime": now_timestamp_string(),
-                })),
+                generated_output(
+                    json!({
+                        "kind": "ready",
+                        "cursor": "now",
+                        "serverTime": now_timestamp_string(),
+                    }),
+                    &[],
+                ),
                 WatchState::Open(messages),
             ))
         }
@@ -55,11 +61,14 @@ async fn next_watch_frame(state: WatchState) -> Option<(Result<Value, ServerErro
             Some(Ok(message)) => {
                 let _ = message.ack().await;
                 Some((
-                    Ok(json!({
-                        "kind": "eventQueryInvalidated",
-                        "reason": "new-event",
-                        "serverTime": now_timestamp_string(),
-                    })),
+                    generated_output(
+                        json!({
+                            "kind": "eventQueryInvalidated",
+                            "reason": "new-event",
+                            "serverTime": now_timestamp_string(),
+                        }),
+                        &[],
+                    ),
                     WatchState::Open(messages),
                 ))
             }

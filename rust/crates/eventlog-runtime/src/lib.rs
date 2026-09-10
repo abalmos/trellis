@@ -1,6 +1,6 @@
 //! Internal built-in Event Log runtime for Trellis.
 //!
-//! This crate hosts the read-only `trellis.eventlog@v1` API and maintains the
+//! This crate hosts the read-only `trellis.events@v1` API and maintains the
 //! SQLite projection used by the Trellis runtime.
 
 mod consumers;

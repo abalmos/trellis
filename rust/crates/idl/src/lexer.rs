@@ -40,6 +40,10 @@ pub(crate) enum TokenKind {
     Question,
     #[token("|")]
     Pipe,
+    #[token(".")]
+    Dot,
+    #[token("@")]
+    At,
 }
 
 #[derive(Clone, Debug)]

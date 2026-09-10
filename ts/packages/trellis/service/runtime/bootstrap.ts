@@ -16,6 +16,7 @@ import { AuthorizationContextRefreshResponseSchema } from "../../auth/authorizat
 import { decodeTrellisHttpError } from "../../auth/http_error.ts";
 import { ContractResourceBindingsSchema } from "../../participant.ts";
 import type { RuntimeApi } from "../../participant_runtime/api.ts";
+import { participantEvidence } from "../../participant_runtime/participant.ts";
 import { TransportError } from "../../errors/index.ts";
 import type { LoggerLike } from "../../globals.ts";
 import { loadDefaultRuntimeTransport } from "../../runtime_transport.ts";
@@ -51,6 +52,7 @@ export type ServiceBootstrapResponse = {
     contractId: string;
     digest: string;
     resources: ResourceBindings;
+    apiBindings: Readonly<Record<string, unknown>>;
   };
 };
 
@@ -114,7 +116,7 @@ const ServiceBootstrapReadySchema = Type.Object({
   ...AuthorizationContextRefreshResponseSchema.properties,
   authorization: Type.Object({
     participantId: Type.String({ minLength: 1 }),
-    participantArtifactDigest: Type.String({ minLength: 1 }),
+    participantDigest: Type.String({ minLength: 1 }),
     resourceRuntime: ContractResourceBindingsSchema,
   }),
 });
@@ -146,6 +148,7 @@ async function fetchServiceBootstrapInfoOnce(args: {
     connectionId: args.connectionId,
     requestId,
     iat: issuedAt,
+    ...participantEvidence(args.contract),
     ...(args.name === undefined ? {} : { name: args.name }),
   };
   const body = JSON.stringify({
@@ -271,7 +274,7 @@ export async function fetchServiceBootstrapInfo(args: {
       connectInfo: {
         connectionId: response.runtime.connectionId,
         participantId: response.runtime.participantId,
-        participantDigest: response.authorization.participantArtifactDigest,
+        participantDigest: response.authorization.participantDigest,
         contractId: args.contractId,
         contractDigest: args.contractDigest,
         transports: { native: { natsServers: native.natsServers } },
@@ -281,7 +284,8 @@ export async function fetchServiceBootstrapInfo(args: {
       },
       binding: {
         contractId: args.contractId,
-        digest: response.authorization.participantArtifactDigest,
+        digest: response.authorization.participantDigest,
+        apiBindings: response.apiBindings,
         resources: {
           kv: response.authorization.resourceRuntime.kv ?? {},
           store: response.authorization.resourceRuntime.store ?? {},

@@ -48,7 +48,7 @@ pub(crate) enum AuthBrowserFlowState {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct BrowserConsentProposal {
     pub participant_id: String,
-    pub participant_artifact_digest: String,
+    pub participant_digest: String,
     pub participant_needs_digest: String,
     pub consent_view: Value,
     pub consent_view_digest: String,
@@ -62,10 +62,7 @@ pub(crate) struct BrowserConsentProposal {
 impl BrowserConsentProposal {
     pub(crate) fn validate(&self) -> Result<(), AuthorizationStateError> {
         require_nonempty("consent participantId", &self.participant_id)?;
-        require_digest(
-            "consent participantArtifactDigest",
-            &self.participant_artifact_digest,
-        )?;
+        require_digest("consent participantDigest", &self.participant_digest)?;
         require_digest(
             "consent participantNeedsDigest",
             &self.participant_needs_digest,
@@ -89,7 +86,7 @@ impl BrowserConsentProposal {
         }
         let machine_value = serde_json::json!({
             "participantId": self.participant_id,
-            "participantArtifactDigest": self.participant_artifact_digest,
+            "participantDigest": self.participant_digest,
             "participantNeedsDigest": self.participant_needs_digest,
             "requiredGrantSet": self.required_grant_set,
             "optionalGrantBundles": self.optional_grant_bundles,

@@ -44,11 +44,13 @@ pub enum TopLevelCommand {
     Add(AddArgs),
     /// Remove one API dependency and reconcile installed outputs.
     Rm(RmArgs),
-    /// Resolve local API dependencies into a fresh lock and install.
-    Update(ProjectRootArgs),
-    /// Recreate local generated artifacts from the exact lock.
+    /// Parse, resolve, and validate the local source package.
+    Check(ProjectRootArgs),
+    /// Refresh local package dependencies, lock them, and install.
+    Update(UpdateArgs),
+    /// Recreate the local generated package from the exact lock.
     Install(ProjectRootArgs),
-    /// Generate project artifacts from Trellis IDL.
+    /// Generate the project package from Trellis IDL.
     Generate(GenerateArgs),
     /// Publish every project-owned canonical API to OCI.
     Publish(PublishArgs),
@@ -94,7 +96,16 @@ pub struct ProjectRootArgs {
 }
 
 #[derive(Debug, clap::Args)]
-/// Generate project artifacts once or whenever IDL sources change.
+/// Select dependencies to refresh in a local Trellis project.
+pub struct UpdateArgs {
+    /// Dependency alias to refresh; omit to refresh every dependency.
+    pub dependency_alias: Option<String>,
+    #[command(flatten)]
+    pub project: ProjectRootArgs,
+}
+
+#[derive(Debug, clap::Args)]
+/// Generate the project package once or whenever IDL sources change.
 pub struct GenerateArgs {
     #[arg(short = 'w', long)]
     /// Watch the project and direct local dependencies for source changes.

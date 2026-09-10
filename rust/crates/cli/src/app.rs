@@ -10,11 +10,12 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 use ed25519_dalek::SigningKey;
 use miette::IntoDiagnostic;
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use tracing_subscriber::EnvFilter;
 use trellis_rs::auth as authlib;
-use trellis_rs::client::AuthErrorPayload;
-use trellis_rs::generated::{Caller, TrellisClientError};
+use trellis_rs::client::TrellisClientError;
+use trellis_rs::generated::Client;
 
 mod auth;
 mod bootstrap;
@@ -37,6 +38,7 @@ pub async fn run() -> miette::Result<()> {
     match cli.command {
         TopLevelCommand::Add(args) => package::add(format, &args).await?,
         TopLevelCommand::Rm(args) => package::remove(format, &args).await?,
+        TopLevelCommand::Check(args) => package::check(format, &args).await?,
         TopLevelCommand::Update(args) => package::update(format, &args).await?,
         TopLevelCommand::Install(args) => package::install(format, &args).await?,
         TopLevelCommand::Generate(args) => crate::generate::run(&args)?,
@@ -91,7 +93,7 @@ pub(crate) fn base64url_encode(bytes: &[u8]) -> String {
 }
 
 pub(crate) async fn connect_authenticated_cli_client(
-) -> miette::Result<(authlib::AdminSessionState, Caller)> {
+) -> miette::Result<(authlib::AdminSessionState, Client)> {
     let state = authlib::load_admin_session().into_diagnostic()?;
 
     let connected = match authlib::connect_admin_client_async(&state).await {
@@ -150,9 +152,9 @@ fn admin_session_error_code(error: &authlib::TrellisAuthError) -> Option<String>
             ..
         }) => Some(code.clone()),
         authlib::TrellisAuthError::TrellisClient(TrellisClientError::RpcError(payload)) => {
-            serde_json::from_slice::<AuthErrorPayload>(payload.raw().as_bytes())
+            serde_json::from_str::<Value>(payload.raw())
                 .ok()
-                .map(|payload| payload.reason)
+                .and_then(|payload| payload.get("code")?.as_str().map(str::to_owned))
         }
         _ => None,
     }
@@ -186,6 +188,14 @@ pub(crate) fn json_value_label(value: &Value) -> String {
         .as_str()
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| value.to_string())
+}
+
+pub(crate) fn wire<T: DeserializeOwned>(value: impl Serialize) -> miette::Result<T> {
+    serde_json::from_value(serde_json::to_value(value).into_diagnostic()?).into_diagnostic()
+}
+
+pub(crate) fn wire_u64(value: impl Serialize) -> miette::Result<u64> {
+    wire::<String>(value)?.parse().into_diagnostic()
 }
 
 pub(crate) fn release_channel(prerelease: bool) -> ReleaseChannel {

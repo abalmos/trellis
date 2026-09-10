@@ -3,8 +3,8 @@
 //! The runtime verifier checks v1 request and event proofs entirely against
 //! in-process state: the shared [`AuthorizationProviderCache`] (verified contexts,
 //! online issuer keys, and full revocation timestamps) plus a precompiled
-//! route/permission index built once at startup from the source-owned API
-//! artifacts. Cache-hit verification performs no SQLite, HTTP, Auth RPC, or
+//! route/permission index built once at startup from generated API descriptors.
+//! Cache-hit verification performs no SQLite, HTTP, Auth RPC, or
 //! NATS registry I/O; unknown context digests are resolved from the registry
 //! through coalesced registry reads and expiry-bounded revocation watches.
 

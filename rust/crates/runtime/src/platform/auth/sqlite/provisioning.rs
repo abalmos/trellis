@@ -999,22 +999,32 @@ pub(in crate::platform::auth) fn insert_sql_provisioned_identity(
     connection: &Connection,
     identity: &ProvisionedIdentityRecord,
 ) -> Result<(), AuthorizationStateError> {
-    connection
-    .execute(
-        "INSERT INTO auth_provisioned_identities (identity_key_id, identity_public_key, principal_id, deployment_id, instance_id, kind, state, created_at, revoked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![
-            identity.identity_key_id,
-            identity.identity_public_key,
-            identity.principal_id,
-            identity.deployment_id,
-            identity.instance_id,
-            encode_enum(identity.kind)?,
-            encode_enum(identity.state)?,
-            identity.created_at,
-            identity.revoked_at
-        ],
-    )
-    .map_err(map_write_error)?;
+    let changed = connection
+        .execute(
+            "INSERT INTO auth_provisioned_identities
+             (identity_key_id, identity_public_key, principal_id, deployment_id, instance_id,
+              participant_id, kind, state, created_at, revoked_at)
+             SELECT ?1, ?2, ?3, ?4, ?5, deployment.participant_id, ?6, ?7, ?8, ?9
+             FROM auth_deployments AS deployment
+             WHERE deployment.deployment_id = ?4",
+            params![
+                identity.identity_key_id,
+                identity.identity_public_key,
+                identity.principal_id,
+                identity.deployment_id,
+                identity.instance_id,
+                encode_enum(identity.kind)?,
+                encode_enum(identity.state)?,
+                identity.created_at,
+                identity.revoked_at
+            ],
+        )
+        .map_err(map_write_error)?;
+    if changed != 1 {
+        return Err(AuthorizationStateError::InvalidRecord(
+            "provisioned identity requires an assigned deployment participant".to_owned(),
+        ));
+    }
     Ok(())
 }
 

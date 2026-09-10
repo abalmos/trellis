@@ -14,6 +14,7 @@ fn new_top_level_help_is_available() {
         &["login", "--help"][..],
         &["add", "--help"],
         &["rm", "--help"],
+        &["check", "--help"],
         &["update", "--help"],
         &["install", "--help"],
         &["logout", "--help"],

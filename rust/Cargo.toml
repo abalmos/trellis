@@ -58,6 +58,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_json_canonicalizer = "0.3.2"
 semver = "1.0.27"
+tar = "0.4.46"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 ryu-js = "1.0.3"
 rustls = { version = "0.23.40", default-features = false, features = ["ring", "std"] }

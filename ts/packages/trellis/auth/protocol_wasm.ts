@@ -90,19 +90,6 @@ export type GrantSet = {
   permissions: PermissionAtom[];
 };
 
-/** Native participant resolution returned by the Rust protocol boundary. */
-export type ResolvedParticipant = {
-  apiArtifacts: Record<string, JsonObject>;
-  apiDigests: Record<string, string>;
-  participant: JsonObject;
-  participantDigest: string;
-  participantNeeds: JsonObject;
-  participantNeedsDigest: string;
-  requiredGrants: GrantSet;
-  optionalGrants: GrantSet;
-  authorityProposal: JsonObject;
-};
-
 /** Verified request caller projection. */
 export type VerifiedAuthorizationRequestProjection = { contextDigest: string };
 
@@ -286,20 +273,6 @@ export function initializeProtocolWasmSync(): void {
   }
   initSync({ module: bytes as SyncInitInput });
   initializedSync = true;
-}
-
-/** Resolve a native participant through the authoritative Rust protocol resolver. */
-export function resolveParticipantV1WasmSync(args: {
-  participant: unknown;
-  apis: Record<string, unknown>;
-}): ResolvedParticipant {
-  initializeProtocolWasmSync();
-  return JSON.parse(
-    protocolWasm.resolve_participant(
-      JSON.stringify(args.participant),
-      JSON.stringify(args.apis),
-    ),
-  ) as ResolvedParticipant;
 }
 
 /** Verify a complete signed authorization context through Rust/WASM. */

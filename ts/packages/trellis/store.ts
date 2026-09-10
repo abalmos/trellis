@@ -11,7 +11,7 @@ import {
   type Result as ResultType,
 } from "@qlever-llc/result";
 import { StoreError } from "./errors/index.ts";
-import type { PageResponse } from "./models/trellis/Page.ts";
+import type { PageResponse } from "./participant.ts";
 import { TypedStoreEntry } from "./store_entry.ts";
 export { TypedStoreEntry } from "./store_entry.ts";
 

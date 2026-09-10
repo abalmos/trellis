@@ -5,6 +5,10 @@ import {
   type Subscription,
 } from "@nats-io/nats-core";
 import type { StoreError } from "../../errors/index.ts";
+import {
+  installConnectionAvailability,
+  type TrellisAvailability,
+} from "../../connection.ts";
 import { TypedKV } from "../../kv.ts";
 import {
   type StoreWaitOptions,
@@ -32,7 +36,6 @@ import type {
   PermissionAtom,
   RuntimeApi,
 } from "../../participant_runtime/api.ts";
-import type { GeneratedParticipantEvidence } from "../../participant_runtime/artifacts.ts";
 import type {
   ParticipantJobsMetadata,
   ParticipantKvMetadata,
@@ -41,17 +44,13 @@ import type { ContractEventConsumers } from "../../participant_runtime/schemas.t
 import {
   type GeneratedParticipant,
   getParticipantRuntime,
+  participantAvailability,
+  participantEvidence,
 } from "../../participant_runtime/participant.ts";
-import type { ActionDescriptor } from "../../participant_runtime/descriptors.ts";
 import {
   type ConnectedActionName,
   lowerCamelSurfaceName,
 } from "../../participant_runtime/surface_names.ts";
-import {
-  PARTICIPANT_EVENT_CONSUMERS_METADATA,
-  PARTICIPANT_JOBS_METADATA,
-  PARTICIPANT_KV_METADATA,
-} from "../../participant_runtime/metadata.ts";
 import {
   AsyncResult,
   type BaseError,
@@ -531,17 +530,14 @@ export type GeneratedServiceParticipant<
   TTrellisApi extends RuntimeApi | undefined,
   TJobs extends ParticipantJobsMetadata = {},
   TKv extends ParticipantKvMetadata = ParticipantKvMetadata,
-> =
-  & GeneratedParticipant<
-    ActionDescriptor,
-    TOwnedApi
-  >
-  & GeneratedParticipantEvidence
-  & {
-    readonly [PARTICIPANT_JOBS_METADATA]?: TJobs;
-    readonly [PARTICIPANT_KV_METADATA]?: TKv;
-    readonly [PARTICIPANT_EVENT_CONSUMERS_METADATA]?: ContractEventConsumers;
+> = GeneratedParticipant & {
+  readonly __runtimeTypes?: {
+    ownedApi: TOwnedApi;
+    api: TTrellisApi;
+    jobs: TJobs;
+    kv: TKv;
   };
+};
 
 type ParticipantOwnedApi<
   TContract extends GeneratedServiceParticipant<
@@ -549,12 +545,9 @@ type ParticipantOwnedApi<
     RuntimeApi | undefined,
     ParticipantJobsMetadata
   >,
-> = TContract extends GeneratedParticipant<
-  ActionDescriptor,
-  infer TOwnedApi,
-  infer _TUsedApi,
-  infer _TApi
-> ? Extract<TOwnedApi, RuntimeApi>
+> = TContract extends {
+  readonly __runtimeTypes?: { ownedApi: infer TOwnedApi };
+} ? Extract<TOwnedApi, RuntimeApi>
   : RuntimeApi;
 
 type ParticipantTrellisApi<
@@ -563,12 +556,9 @@ type ParticipantTrellisApi<
     RuntimeApi | undefined,
     ParticipantJobsMetadata
   >,
-> = TContract extends GeneratedParticipant<
-  ActionDescriptor,
-  infer _TOwnedApi,
-  infer _TUsedApi,
-  infer TApi
-> ? Extract<TApi, RuntimeApi>
+> = TContract extends {
+  readonly __runtimeTypes?: { api: infer TApi };
+} ? Extract<TApi, RuntimeApi>
   : ParticipantOwnedApi<TContract>;
 
 type ParticipantJobsOf<
@@ -578,7 +568,9 @@ type ParticipantJobsOf<
     ParticipantJobsMetadata,
     ParticipantKvMetadata
   >,
-> = NonNullable<TContract[typeof PARTICIPANT_JOBS_METADATA]>;
+> = TContract extends { readonly __runtimeTypes?: { jobs: infer TJobs } }
+  ? Extract<TJobs, ParticipantJobsMetadata>
+  : {};
 
 type ParticipantKvOf<
   TContract extends GeneratedServiceParticipant<
@@ -587,7 +579,9 @@ type ParticipantKvOf<
     ParticipantJobsMetadata,
     ParticipantKvMetadata
   >,
-> = NonNullable<TContract[typeof PARTICIPANT_KV_METADATA]>;
+> = TContract extends { readonly __runtimeTypes?: { kv: infer TKv } }
+  ? Extract<TKv, ParticipantKvMetadata>
+  : {};
 
 type ServiceHandlerClient<
   TContract extends GeneratedServiceParticipant<
@@ -1241,6 +1235,7 @@ export async function createConnectedService<
   contractEventConsumers?: ContractEventConsumers;
   runtime: TrellisServiceRuntimeCreateOpts<TOwnedApi, TTrellisApi>;
   bindings: ResourceBindings;
+  availability: TrellisAvailability;
   healthIdentity?: {
     instanceId: string;
     deploymentId: string;
@@ -1254,6 +1249,7 @@ export async function createConnectedService<
   const connection = observeNatsTrellisConnection({
     kind: "service",
     nc: args.nc,
+    availability: args.availability,
     log: false,
     lifecycleLog: {
       log: resolvedLog,
@@ -2674,7 +2670,7 @@ export function connectTrellisServiceWithRuntimeDeps<
         ...(await loadDefaultServiceRuntimeDeps()),
         ...deps,
       } satisfies TrellisServiceRuntimeDeps;
-      const serviceName = args.name ?? args.participant.id;
+      const serviceName = args.name ?? args.participant.identity;
       if (args.telemetry !== false && args.telemetry?.enabled !== false) {
         runtimeDeps.initTelemetry?.(serviceName);
       }
@@ -2692,8 +2688,8 @@ export function connectTrellisServiceWithRuntimeDeps<
         trellisUrl: args.trellisUrl,
         serviceName,
         name: args.name,
-        contractId: args.participant.id,
-        contractDigest: args.participant.digest,
+        contractId: args.participant.identity,
+        contractDigest: participantEvidence(args.participant).packageDigest,
         contract: args.participant,
         identityAuth,
         sessionAuth,
@@ -2722,7 +2718,7 @@ export function connectTrellisServiceWithRuntimeDeps<
         },
       );
       const verifiedContext = authorizationContexts.current();
-      if (verifiedContext.context.participantId !== args.participant.id) {
+      if (verifiedContext.context.participantId !== args.participant.identity) {
         throw new Error(
           "service authorization context belongs to another participant",
         );
@@ -2796,8 +2792,8 @@ export function connectTrellisServiceWithRuntimeDeps<
           cause,
           context: {
             trellisUrl: args.trellisUrl,
-            contractId: args.participant.id,
-            contractDigest: args.participant.digest,
+            contractId: args.participant.identity,
+            contractDigest: bootstrap.connectInfo.participantDigest,
           },
         });
       }
@@ -2831,21 +2827,23 @@ export function connectTrellisServiceWithRuntimeDeps<
           nc,
           inboxPrefix,
           contextDigest: () => authorizationContexts.current().contextDigest,
-          contractId: args.participant.id,
-          contractDigest: args.participant.digest,
+          contractId: args.participant.identity,
+          contractDigest: bootstrap.connectInfo.participantDigest,
           participantDigest: bootstrap.connectInfo.participantDigest,
-          contractJobs: (args.participant[PARTICIPANT_JOBS_METADATA] ??
-            {}) as ParticipantJobsOf<
-              TContract
-            >,
-          contractKv: (args.participant[PARTICIPANT_KV_METADATA] ??
-            {}) as ParticipantKvOf<
-              TContract
-            >,
-          contractEventConsumers:
-            args.participant[PARTICIPANT_EVENT_CONSUMERS_METADATA] ?? {},
+          contractJobs: contractRuntime.jobs as ParticipantJobsOf<
+            TContract
+          >,
+          contractKv: contractRuntime.kv as ParticipantKvOf<
+            TContract
+          >,
+          contractEventConsumers: contractRuntime.eventConsumers,
           runtime,
           bindings: bootstrap.binding.resources,
+          availability: participantAvailability(
+            args.participant,
+            bootstrap.binding.apiBindings,
+            bootstrap.binding.resources,
+          ),
           healthIdentity: {
             instanceId: verifiedContext.context.instanceId,
             deploymentId: verifiedContext.context.deploymentId,
@@ -2865,8 +2863,8 @@ export function connectTrellisServiceWithRuntimeDeps<
                 trellisUrl: args.trellisUrl,
                 serviceName,
                 name: args.name,
-                contractId: args.participant.id,
-                contractDigest: args.participant.digest,
+                contractId: args.participant.identity,
+                contractDigest: bootstrap.connectInfo.participantDigest,
                 contract: args.participant,
                 identityAuth,
                 sessionAuth,
@@ -2876,7 +2874,7 @@ export function connectTrellisServiceWithRuntimeDeps<
               authorizationContexts.setServerClockOffsetMs(
                 next.serverClockOffsetMs,
               );
-              return await authorizationContexts.install(
+              const context = await authorizationContexts.install(
                 next.connectInfo.authorizationContext,
                 {
                   bootstrapJwt: next.connectInfo.jwt,
@@ -2885,6 +2883,15 @@ export function connectTrellisServiceWithRuntimeDeps<
                 undefined,
                 shouldInstall,
               );
+              installConnectionAvailability(
+                service.connection,
+                participantAvailability(
+                  args.participant,
+                  next.binding.apiBindings,
+                  next.binding.resources,
+                ),
+              );
+              return context;
             } catch (error) {
               if (error instanceof TrellisHttpError) {
                 throw new AuthorizationContextRefreshError(

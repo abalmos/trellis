@@ -58,12 +58,12 @@ fn consent_with_view(view: serde_json::Value) -> BrowserConsentProposal {
     let optional_capability_definitions = BTreeMap::new();
     BrowserConsentProposal {
         participant_id: "app-1".to_owned(),
-        participant_artifact_digest: DIGEST.to_owned(),
+        participant_digest: DIGEST.to_owned(),
         participant_needs_digest: DIGEST.to_owned(),
         consent_view_digest: trellis_protocol::digest_json(&view).unwrap(),
         proposal_digest: trellis_protocol::digest_json(&serde_json::json!({
             "participantId": "app-1",
-            "participantArtifactDigest": DIGEST,
+            "participantDigest": DIGEST,
             "participantNeedsDigest": DIGEST,
             "requiredGrantSet": required_grant_set,
             "optionalGrantBundles": optional_grant_bundles,

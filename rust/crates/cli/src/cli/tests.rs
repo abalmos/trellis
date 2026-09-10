@@ -2,8 +2,27 @@ use super::*;
 use clap::Parser;
 
 #[test]
-fn rejects_server_check_command() {
-    assert!(Cli::try_parse_from(["trellis", "check"]).is_err());
+fn parses_check_and_dependency_specific_update_commands() {
+    let cli = Cli::parse_from(["trellis", "check", "--root", "project"]);
+    match cli.command {
+        TopLevelCommand::Check(args) => assert_eq!(args.root, PathBuf::from("project")),
+        other => panic!("unexpected top-level command: {other:?}"),
+    }
+
+    let cli = Cli::parse_from(["trellis", "update", "common", "--root", "project"]);
+    match cli.command {
+        TopLevelCommand::Update(args) => {
+            assert_eq!(args.dependency_alias.as_deref(), Some("common"));
+            assert_eq!(args.project.root, PathBuf::from("project"));
+        }
+        other => panic!("unexpected top-level command: {other:?}"),
+    }
+
+    let cli = Cli::parse_from(["trellis", "update"]);
+    match cli.command {
+        TopLevelCommand::Update(args) => assert!(args.dependency_alias.is_none()),
+        other => panic!("unexpected top-level command: {other:?}"),
+    }
 }
 
 #[test]
@@ -88,6 +107,7 @@ fn parses_participant_install_and_issuer_revoke() {
         "acme.app@v1",
         "--expected-revision",
         "2",
+        "--platform-trust",
     ]);
     match cli.command {
         TopLevelCommand::Participants(command) => match command.command {
@@ -95,7 +115,16 @@ fn parses_participant_install_and_issuer_revoke() {
                 assert_eq!(args.source, PathBuf::from("."));
                 assert_eq!(args.participant.as_deref(), Some("acme.app@v1"));
                 assert_eq!(args.expected_revision, Some(2));
+                assert!(args.platform_trust);
             }
+        },
+        other => panic!("unexpected top-level command: {other:?}"),
+    }
+
+    let cli = Cli::parse_from(["trellis", "participants", "install", "--source", "."]);
+    match cli.command {
+        TopLevelCommand::Participants(command) => match command.command {
+            ParticipantsSubcommand::Install(args) => assert!(!args.platform_trust),
         },
         other => panic!("unexpected top-level command: {other:?}"),
     }
@@ -290,16 +319,6 @@ fn parses_target_first_service_and_device_resource_tokens() {
         other => panic!("unexpected top-level command: {other:?}"),
     }
 
-    assert!(Cli::try_parse_from([
-        "trellis",
-        "svc",
-        "api",
-        "apply",
-        "--manifest",
-        "./trellis.participant.json",
-    ])
-    .is_err());
-
     let cli = Cli::parse_from([
         "trellis",
         "dev",
@@ -339,6 +358,7 @@ fn rejects_resource_local_grant_commands() {
 }
 
 #[test]
+#[cfg(feature = "runtime")]
 fn parses_init_config_infra_init_keys_upgrade_version_and_completion() {
     let cli = Cli::parse_from([
         "trellis",

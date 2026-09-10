@@ -10,7 +10,10 @@
 
 import type { JsonValue } from "../../participant.ts";
 import { ulid } from "ulid";
-import type { HealthHeartbeatSample } from "../../internal_sdk/generated/health/mod.ts";
+import {
+  type HealthHeartbeatSample,
+  HealthHeartbeatSampleCodec,
+} from "../../internal_sdk/generated/types/_internal/p0.js";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -162,7 +165,7 @@ export function createHealthHeartbeatSample(args: {
   const runtime = detectRuntime();
   const summary = summarizeHealthChecks(args.checks);
 
-  return {
+  return HealthHeartbeatSampleCodec.decode({
     sample: {
       id: ulid(),
       time: new Date().toISOString(),
@@ -174,7 +177,7 @@ export function createHealthHeartbeatSample(args: {
       contractId: args.contractId,
       contractDigest: args.contractDigest,
       startedAt: args.startedAt,
-      publishIntervalMs: args.publishIntervalMs,
+      publishIntervalMs: String(args.publishIntervalMs),
       runtime: runtime.runtime,
       ...(runtime.runtimeVersion
         ? { runtimeVersion: runtime.runtimeVersion }
@@ -185,7 +188,7 @@ export function createHealthHeartbeatSample(args: {
     reportedStatus: summarizeHealthStatus(args.checks),
     ...(summary ? { summary } : {}),
     checks: args.checks,
-  };
+  });
 }
 
 /** Public health enrichment surface exposed by connected participants. */

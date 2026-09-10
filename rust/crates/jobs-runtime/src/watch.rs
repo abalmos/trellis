@@ -4,9 +4,10 @@ use futures_util::{stream, Stream, StreamExt};
 use trellis_rs::jobs::types::{JobEvent, JobState, JobTriggerKind};
 use trellis_rs::jobs::{JobsRuntime, JobsRuntimeMessageStream};
 use trellis_rs::service::{Router, ServerError};
-use trellis_runtime_apis::jobs::feeds::JobsWatchFeedDescriptor;
-use trellis_runtime_apis::jobs::types::{
-    JobsWatchEvent, JobsWatchEventQueryInvalidatedReason, JobsWatchInput, JobsWatchInputQuery,
+use trellis_runtime_apis::apis::trellis_jobs_v1::feeds::Watch;
+use trellis_runtime_apis::types::{
+    Bytes, JobsWatchFrame as JobsWatchEvent, JobsWatchRequest as JobsWatchInput,
+    JobsWatchRequestquery as JobsWatchInputQuery,
 };
 
 const JOBS_EVENTS_SUBJECT_WILDCARD: &str = "trellis.jobs.>";
@@ -17,7 +18,7 @@ pub fn register_jobs_watch_feed(
     jobs_runtime: JobsRuntime,
     jobs_stream: String,
 ) {
-    router.register_feed::<JobsWatchFeedDescriptor, _, _>(move |_ctx, input| {
+    router.register_feed::<Watch, _, _>(move |_ctx, input| {
         watch_jobs(input, jobs_runtime.clone(), jobs_stream.clone())
     });
 }
@@ -29,8 +30,8 @@ fn watch_jobs(
 ) -> impl Stream<Item = Result<JobsWatchEvent, ServerError>> + Send + 'static {
     let filter_subject = input
         .job_id
-        .as_deref()
-        .map(|job_id| format!("trellis.jobs.*.*.{job_id}.>"))
+        .as_ref()
+        .map(|job_id| format!("trellis.jobs.*.*.{}.>", job_id.0))
         .unwrap_or_else(|| JOBS_EVENTS_SUBJECT_WILDCARD.to_string());
     stream::unfold(
         WatchState::Init {
@@ -114,30 +115,36 @@ async fn next_watch_frame(
 }
 
 fn ready_frame(timestamp: String) -> JobsWatchEvent {
-    JobsWatchEvent::Ready { timestamp }
+    watch_frame(serde_json::json!({ "kind": "ready", "timestamp": timestamp }))
 }
 
 fn watch_frame_for_event(input: &JobsWatchInput, event: &JobEvent) -> Option<JobsWatchEvent> {
-    if input.job_id.as_deref() == Some(event.job_id.as_str()) {
-        return Some(JobsWatchEvent::JobInspectChanged {
-            id: event.job_id.clone(),
-            timestamp: event.timestamp.clone(),
-        });
+    if input.job_id.as_ref().map(|id| id.0.as_str()) == Some(event.job_id.as_str()) {
+        return Some(watch_frame(serde_json::json!({
+            "kind": "jobInspectChanged",
+            "id": event.job_id,
+            "timestamp": event.timestamp,
+        })));
     }
 
     input.query.as_ref().and_then(|query| {
         match query_invalidation_reason(query, event) {
             QueryInvalidation::No => None,
-            QueryInvalidation::Matched => {
-                Some(JobsWatchEventQueryInvalidatedReason::MatchedJobChanged)
-            }
-            QueryInvalidation::Unknown => Some(JobsWatchEventQueryInvalidatedReason::UnknownMatch),
+            QueryInvalidation::Matched => Some("matchedJobChanged"),
+            QueryInvalidation::Unknown => Some("unknownMatch"),
         }
-        .map(|reason| JobsWatchEvent::QueryInvalidated {
-            reason,
-            timestamp: event.timestamp.clone(),
+        .map(|reason| {
+            watch_frame(serde_json::json!({
+                "kind": "queryInvalidated",
+                "reason": reason,
+                "timestamp": event.timestamp,
+            }))
         })
     })
+}
+
+fn watch_frame(value: serde_json::Value) -> JobsWatchEvent {
+    JobsWatchEvent(Bytes(value.to_string().into_bytes()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,15 +158,15 @@ fn query_invalidation_reason(query: &JobsWatchInputQuery, event: &JobEvent) -> Q
     if query
         .service
         .as_ref()
-        .is_some_and(|service| service != &event.service)
+        .is_some_and(|service| service.0 != event.service)
         || query
             .r#type
             .as_ref()
-            .is_some_and(|job_type| job_type != &event.job_type)
+            .is_some_and(|job_type| job_type.0 != event.job_type)
         || query.state.as_ref().is_some_and(|states| {
             !states
                 .iter()
-                .any(|state| state.as_str() == job_state_token(event.state))
+                .any(|state| wire_token(state) == job_state_token(event.state))
         })
         || query.trigger.as_ref().is_some_and(|trigger| {
             event.trigger.as_ref().is_some_and(|event_trigger| {
@@ -228,9 +235,17 @@ fn trigger_kind_token(kind: JobTriggerKind) -> &'static str {
     }
 }
 
+fn wire_token(value: &impl serde::Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use trellis_rs::generated::Codec as _;
     use trellis_rs::jobs::events::{created, EventMeta};
     use trellis_rs::jobs::types::{JobContext, JobState};
 
@@ -249,20 +264,13 @@ mod tests {
     #[test]
     fn query_invalidation_matches_scalar_filters() {
         let event = created(meta(&context()), json!({ "documentId": "doc-1" }), 3, None);
-        let query = JobsWatchInputQuery {
-            group_by: None,
-            limit: 50,
-            offset: None,
-            queue_key: None,
-            runtime_band: None,
-            search: None,
-            service: Some("documents".to_string()),
-            sort: None,
-            state: Some(vec![serde_json::from_value(json!("pending")).unwrap()]),
-            trigger: None,
-            r#type: Some("document-process".to_string()),
-            window: None,
-        };
+        let query = JobsWatchInputQuery::decode(json!({
+            "limit": "50",
+            "service": "documents",
+            "state": ["pending"],
+            "type": "document-process"
+        }))
+        .unwrap();
 
         assert_eq!(
             query_invalidation_reason(&query, &event),
@@ -274,20 +282,12 @@ mod tests {
     fn query_invalidation_rejects_scalar_mismatches() {
         let mut event = created(meta(&context()), json!({ "documentId": "doc-1" }), 3, None);
         event.state = JobState::Failed;
-        let query = JobsWatchInputQuery {
-            group_by: None,
-            limit: 50,
-            offset: None,
-            queue_key: None,
-            runtime_band: None,
-            search: None,
-            service: Some("documents".to_string()),
-            sort: None,
-            state: Some(vec![serde_json::from_value(json!("pending")).unwrap()]),
-            trigger: None,
-            r#type: None,
-            window: None,
-        };
+        let query = JobsWatchInputQuery::decode(json!({
+            "limit": "50",
+            "service": "documents",
+            "state": ["pending"]
+        }))
+        .unwrap();
 
         assert_eq!(
             query_invalidation_reason(&query, &event),
@@ -298,20 +298,12 @@ mod tests {
     #[test]
     fn query_invalidation_is_unknown_for_text_search() {
         let event = created(meta(&context()), json!({ "documentId": "doc-1" }), 3, None);
-        let query = JobsWatchInputQuery {
-            group_by: None,
-            limit: 50,
-            offset: None,
-            queue_key: None,
-            runtime_band: None,
-            search: Some("doc-1".to_string()),
-            service: Some("documents".to_string()),
-            sort: None,
-            state: None,
-            trigger: None,
-            r#type: None,
-            window: None,
-        };
+        let query = JobsWatchInputQuery::decode(json!({
+            "limit": "50",
+            "search": "doc-1",
+            "service": "documents"
+        }))
+        .unwrap();
 
         assert_eq!(
             query_invalidation_reason(&query, &event),
@@ -322,20 +314,12 @@ mod tests {
     #[test]
     fn query_invalidation_is_unknown_for_missing_trigger_data() {
         let event = created(meta(&context()), json!({ "documentId": "doc-1" }), 3, None);
-        let query = JobsWatchInputQuery {
-            group_by: None,
-            limit: 50,
-            offset: None,
-            queue_key: None,
-            runtime_band: None,
-            search: None,
-            service: Some("documents".to_string()),
-            sort: None,
-            state: None,
-            trigger: Some("schedule".to_string()),
-            r#type: None,
-            window: None,
-        };
+        let query = JobsWatchInputQuery::decode(json!({
+            "limit": "50",
+            "service": "documents",
+            "trigger": "schedule"
+        }))
+        .unwrap();
 
         assert_eq!(
             query_invalidation_reason(&query, &event),

@@ -121,6 +121,12 @@ export const AuthorizationContextRefreshResponseSchema = Type.Object({
     participantId: Type.String({ minLength: 1 }),
     inboxPrefix: Type.String({ minLength: 1 }),
   }),
+  apiBindings: Type.Record(
+    Type.String({ minLength: 1 }),
+    Type.Object({
+      providerDeploymentId: Type.String({ minLength: 1 }),
+    }),
+  ),
   transports: Type.Object({
     native: Type.Optional(Type.Object({
       natsServers: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
@@ -131,7 +137,7 @@ export const AuthorizationContextRefreshResponseSchema = Type.Object({
   }),
   authorization: Type.Object({
     participantId: Type.String({ minLength: 1 }),
-    participantArtifactDigest: Type.String({ minLength: 1 }),
+    participantDigest: Type.String({ minLength: 1 }),
     resourceRuntime: ContractResourceBindingsSchema,
   }),
 });

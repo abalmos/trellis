@@ -396,6 +396,13 @@ where
     ) -> Result<OperationRef<'a, T, D>, TrellisClientError> {
         let body = serde_json::to_value(input)?;
         validate_operation_schema(D::INPUT_SCHEMA_JSON, &body, "operation input")?;
+        self.start_encoded(body).await
+    }
+
+    pub(crate) async fn start_encoded(
+        &self,
+        body: Value,
+    ) -> Result<OperationRef<'a, T, D>, TrellisClientError> {
         let response = self
             .transport
             .request_json_value(self.transport.descriptor_subject(D::SUBJECT), body)
@@ -675,6 +682,29 @@ where
         if let Some(input) = input {
             body["input"] = input;
         }
+        self.send_signal(body).await
+    }
+
+    pub(crate) async fn signal_encoded(
+        &self,
+        signal: String,
+        input: Option<Value>,
+    ) -> Result<OperationSignalAccepted<D::Progress, D::Output>, TrellisClientError> {
+        let mut body = json!({
+            "action": "signal",
+            "operationId": self.id(),
+            "signal": signal,
+        });
+        if let Some(input) = input {
+            body["input"] = input;
+        }
+        self.send_signal(body).await
+    }
+
+    async fn send_signal(
+        &self,
+        body: Value,
+    ) -> Result<OperationSignalAccepted<D::Progress, D::Output>, TrellisClientError> {
         let response = self
             .transport
             .request_json_value(

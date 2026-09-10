@@ -577,12 +577,9 @@ mod tests {
             1
         );
 
-        let mut participant_value: Value = serde_json::from_str(&participant_v1.participant_json)?;
-        participant_value["displayName"] = json!("Trellis Console R2");
-        let participant = trellis_protocol::parse_participant(&participant_value)?;
         let mut participant_v2 = participant_v1;
-        participant_v2.artifact_digest = participant.digest()?;
-        participant_v2.participant_json = participant.canonical_json()?;
+        participant_v2.projection.display_name = "Trellis Console R2".to_owned();
+        participant_v2.needs_digest = trellis_protocol::digest_json(&participant_v2.projection)?;
         participant_v2.resolved_at = now + 1;
         assert_eq!(store.put_participant_binding(participant_v2).await?, 2);
 

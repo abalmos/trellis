@@ -376,7 +376,7 @@ mod tests {
             },
         )?;
         let target = FirstAdminAuthorityTarget {
-            participant_id: "trellis-app.cli@v1".to_owned(),
+            participant_id: super::super::builtins::CLI_PARTICIPANT_ID.to_owned(),
             installed_revision: 1,
         };
 

@@ -21,17 +21,8 @@ import type {
   PermissionAtom as DescriptorPermissionAtom,
   RuntimeApi,
 } from "./participant_runtime/api.ts";
-import {
-  PARTICIPANT_RUNTIME,
-  type ParticipantRuntime,
-} from "./participant_runtime/participant.ts";
-import {
-  PARTICIPANT_JOBS_METADATA,
-  PARTICIPANT_KV_METADATA,
-  PARTICIPANT_STATE_METADATA,
-  type ParticipantJobsMetadata,
-  type ParticipantKvMetadata,
-} from "./participant_runtime/metadata.ts";
+import type { Codec } from "./generated.ts";
+import type { ParticipantKvMetadata } from "./participant_runtime/metadata.ts";
 import type { EventConsumerResourceBinding } from "./participant_runtime/schemas.ts";
 import type { StaticDecode } from "typebox";
 import { buildEventProofInput } from "./auth/proof.ts";
@@ -96,7 +87,7 @@ import {
 import { RemoteError } from "./errors/RemoteError.ts";
 import { logger, type LoggerLike } from "./globals.ts";
 import { TypedKV } from "./kv.ts";
-import { TrellisErrorDataSchema } from "./models/trellis/TrellisError.ts";
+import { TrellisErrorDataSchema } from "./errors/RemoteError.ts";
 import type {
   ActiveJob,
   JobRef,
@@ -111,26 +102,13 @@ import {
   type OperationTransport,
 } from "./operations.ts";
 import type { Span } from "./telemetry/mod.ts";
-import type { StateDeleteResponse } from "./models/trellis/rpc/StateDelete.ts";
 import {
-  StateDeleteResponseSchema,
-  StateDeleteSchema,
-} from "./models/trellis/rpc/StateDelete.ts";
-import type { StateGetResponse } from "./models/trellis/rpc/StateGet.ts";
-import {
-  StateGetResponseSchema,
-  StateGetSchema,
-} from "./models/trellis/rpc/StateGet.ts";
-import type { StateListResponse } from "./models/trellis/rpc/StateList.ts";
-import {
-  StateListResponseSchema,
-  StateListSchema,
-} from "./models/trellis/rpc/StateList.ts";
-import type { StatePutResponse } from "./models/trellis/rpc/StatePut.ts";
-import {
-  StatePutResponseSchema,
-  StatePutSchema,
-} from "./models/trellis/rpc/StatePut.ts";
+  API as STATE_API,
+  type DeleteOutput as StateDeleteResponse,
+  type GetOutput as StateGetResponse,
+  type ListOutput as StateListResponse,
+  type PutOutput as StatePutResponse,
+} from "./internal_sdk/generated/apis/state/mod.js";
 import {
   createTransferHandle,
   type FileInfo,
@@ -482,10 +460,40 @@ function classifyRequestTransportFailure(args: {
   });
 }
 
+/** Creates the existing typed transport error for an unavailable optional action. */
+export function createActionUnavailableError(
+  action: string,
+  capabilities: readonly string[],
+): TransportError {
+  return requestFailedTransportError({
+    code: "trellis.request.unavailable",
+    message: "Trellis could not reach the requested capability.",
+    hint:
+      "Wait for the optional capability to become available, then try again.",
+    subject: action,
+    context: { action, capabilities },
+  });
+}
+
 function encodeRuntimeSchema(
   schema: unknown,
   data: unknown,
 ): Result<string, SchemaValidationError | ValidationError | UnexpectedError> {
+  if (
+    schema && typeof schema === "object" &&
+    typeof Reflect.get(schema, "encode") === "function"
+  ) {
+    try {
+      const encoded = (schema as Codec<unknown>).encode(data);
+      const json = JSON.stringify(encoded);
+      if (json === undefined) {
+        throw new TypeError("Codec encoded no JSON value");
+      }
+      return ok(json);
+    } catch (cause) {
+      return err(new UnexpectedError({ cause }));
+    }
+  }
   return encodeSchema(schema as never, data);
 }
 
@@ -493,6 +501,16 @@ function parseRuntimeSchema(
   schema: unknown,
   data: JsonValue,
 ): Result<unknown, SchemaValidationError | ValidationError | UnexpectedError> {
+  if (
+    schema && typeof schema === "object" &&
+    typeof Reflect.get(schema, "decode") === "function"
+  ) {
+    try {
+      return ok((schema as Codec<unknown>).decode(data));
+    } catch (cause) {
+      return err(new UnexpectedError({ cause }));
+    }
+  }
   return parseUnknownSchema(
     schema as Parameters<typeof parseUnknownSchema>[0],
     data,
@@ -593,25 +611,43 @@ export type TrellisAuth = {
 
 export type TrellisMode = "client" | "service";
 type Simplify<T> = { [K in keyof T]: T[K] } & {};
-type OwnedApiFor<TContract> = TContract extends {
-  readonly [PARTICIPANT_RUNTIME]: ParticipantRuntime<
-    never,
-    infer TOwnedApi,
-    RuntimeApi,
-    RuntimeApi
-  >;
-} ? TOwnedApi extends RuntimeApi ? TOwnedApi
-  : never
+type OwnedApiFor<TContract> = TContract extends
+  { implements: readonly unknown[] } ? RuntimeApi
   : never;
 type ContractKvFor<TContract> = TContract extends {
-  readonly [PARTICIPANT_KV_METADATA]?: infer TKv;
-} ? NonNullable<TKv> extends ParticipantKvMetadata ? NonNullable<TKv>
-  : {}
+  resources: infer TResources extends Readonly<Record<string, unknown>>;
+} ? {
+    [
+      K in keyof TResources as TResources[K] extends { kind: "kv" } ? K
+        : never
+    ]: TResources[K] extends {
+      codec: infer TCodec;
+      availability: infer TAvailability;
+    } ? {
+        value: TCodec extends Codec<infer TValue> ? TValue : unknown;
+        schema: TCodec;
+        required: TAvailability extends "required" ? true : false;
+      }
+      : never;
+  }
   : {};
 type ContractJobsFor<TContract> = TContract extends {
-  readonly [PARTICIPANT_JOBS_METADATA]?: infer TJobs;
-} ? NonNullable<TJobs> extends ParticipantJobsMetadata ? NonNullable<TJobs>
-  : {}
+  resources: infer TResources extends Readonly<Record<string, unknown>>;
+} ? {
+    [
+      K in keyof TResources as TResources[K] extends { kind: "job" } ? K
+        : never
+    ]: TResources[K] extends {
+      payload: infer TPayload;
+      result: infer TResult;
+      update: infer TUpdate;
+    } ? {
+        payload: TPayload extends Codec<infer TValue> ? TValue : unknown;
+        result: TResult extends Codec<infer TValue> ? TValue : void;
+        update: TUpdate extends Codec<infer TValue> ? TValue : never;
+      }
+      : never;
+  }
   : {};
 export type RuntimeStateStoreShape = {
   kind: "value" | "map";
@@ -622,20 +658,20 @@ export type RuntimeStateStoreShape = {
 };
 export type RuntimeStateStores = Record<string, RuntimeStateStoreShape>;
 export type RuntimeStateStoresForContract<TContract> = TContract extends {
-  readonly [PARTICIPANT_STATE_METADATA]?: infer TState;
-} ? NonNullable<TState> extends RuntimeStateStores ? NonNullable<TState>
-  : {}
+  resources: infer TResources extends Readonly<Record<string, unknown>>;
+} ? {
+    [
+      K in keyof TResources as TResources[K] extends { kind: "state" } ? K
+        : never
+    ]: TResources[K] extends { codec: infer TCodec } ? {
+        kind: "value";
+        value: TCodec extends Codec<infer TValue> ? TValue : unknown;
+        schema: TCodec;
+      }
+      : never;
+  }
   : {};
-type TrellisApiFor<TContract> = TContract extends {
-  readonly [PARTICIPANT_RUNTIME]: ParticipantRuntime<
-    never,
-    RuntimeApi,
-    RuntimeApi,
-    infer TTrellisApi
-  >;
-} ? TTrellisApi extends RuntimeApi ? TTrellisApi
-  : never
-  : OwnedApiFor<TContract>;
+type TrellisApiFor<TContract> = OwnedApiFor<TContract>;
 type RpcMethodsOf<TA extends RuntimeApi> = TA["rpc"];
 export type MethodsOf<TA extends RuntimeApi> =
   & keyof RpcMethodsOf<TA>
@@ -1907,12 +1943,18 @@ export type HandlerFn<
 >;
 
 const DEFAULT_STATE_LIST_LIMIT = 100;
+const STATE_TEXT_ENCODER = new TextEncoder();
+const STATE_TEXT_DECODER = new TextDecoder();
+
+function decodeStateJson(value: Uint8Array): JsonValue {
+  return JSON.parse(STATE_TEXT_DECODER.decode(value)) as JsonValue;
+}
 
 const STATE_RUNTIME_RPC = {
   get: {
-    subject: "rpc.v1.State.Get",
-    input: StateGetSchema,
-    output: StateGetResponseSchema,
+    subject: "rpc.v1.state.Get",
+    input: STATE_API.actions["rpc:Get"].input,
+    output: STATE_API.actions["rpc:Get"].output,
     callerCapabilities: [],
     errors: ["AuthError", "ValidationError", "UnexpectedError"] as const,
     declaredErrorTypes: [
@@ -1922,9 +1964,9 @@ const STATE_RUNTIME_RPC = {
     ] as const,
   },
   put: {
-    subject: "rpc.v1.State.Put",
-    input: StatePutSchema,
-    output: StatePutResponseSchema,
+    subject: "rpc.v1.state.Put",
+    input: STATE_API.actions["rpc:Put"].input,
+    output: STATE_API.actions["rpc:Put"].output,
     callerCapabilities: [],
     errors: ["AuthError", "ValidationError", "UnexpectedError"] as const,
     declaredErrorTypes: [
@@ -1934,9 +1976,9 @@ const STATE_RUNTIME_RPC = {
     ] as const,
   },
   delete: {
-    subject: "rpc.v1.State.Delete",
-    input: StateDeleteSchema,
-    output: StateDeleteResponseSchema,
+    subject: "rpc.v1.state.Delete",
+    input: STATE_API.actions["rpc:Delete"].input,
+    output: STATE_API.actions["rpc:Delete"].output,
     callerCapabilities: [],
     errors: ["AuthError", "ValidationError", "UnexpectedError"] as const,
     declaredErrorTypes: [
@@ -1946,9 +1988,9 @@ const STATE_RUNTIME_RPC = {
     ] as const,
   },
   list: {
-    subject: "rpc.v1.State.List",
-    input: StateListSchema,
-    output: StateListResponseSchema,
+    subject: "rpc.v1.state.List",
+    input: STATE_API.actions["rpc:List"].input,
+    output: STATE_API.actions["rpc:List"].output,
     callerCapabilities: [],
     errors: ["AuthError", "ValidationError", "UnexpectedError"] as const,
     declaredErrorTypes: [
@@ -2449,7 +2491,7 @@ export class Trellis<
             get: () =>
               AsyncResult.from((async () => {
                 const result = await this.#requestBuiltRpc<
-                  StateGetResult<{ kind: "value"; value: unknown }>
+                  StateGetResponse
                 >(
                   "State.Get",
                   { store },
@@ -2458,9 +2500,9 @@ export class Trellis<
                 if (result.isErr()) return result;
                 return validateStateGetResult(
                   descriptor,
-                  result.unwrapOrElse(() => {
+                  decodeStateJson(result.unwrapOrElse(() => {
                     throw new Error("state get unexpectedly failed");
-                  }),
+                  })) as StateGetResult<{ kind: "value"; value: unknown }>,
                 );
               })()),
             put: (value, opts) =>
@@ -2471,18 +2513,25 @@ export class Trellis<
                   return Result.err(encoded.error);
                 }
                 const result = await this.#requestBuiltRpc<
-                  StatePutResult<{ kind: "value"; value: unknown }>
+                  StatePutResponse
                 >(
                   "State.Put",
-                  { store, value, ...opts },
+                  {
+                    store,
+                    value: STATE_TEXT_ENCODER.encode(encoded),
+                    ...opts,
+                    ...(opts?.ttlMs === undefined
+                      ? {}
+                      : { ttlMs: BigInt(opts.ttlMs) }),
+                  },
                   STATE_RUNTIME_RPC.put,
                 );
                 if (result.isErr()) return result;
                 return validateStatePutResult(
                   descriptor,
-                  result.unwrapOrElse(() => {
+                  decodeStateJson(result.unwrapOrElse(() => {
                     throw new Error("state put unexpectedly failed");
-                  }),
+                  })) as StatePutResult<{ kind: "value"; value: unknown }>,
                 );
               })()),
             delete: (opts) =>
@@ -2499,7 +2548,7 @@ export class Trellis<
           get: (key) =>
             AsyncResult.from((async () => {
               const result = await this.#requestBuiltRpc<
-                StateGetResult<{ kind: "map"; value: unknown }>
+                StateGetResponse
               >(
                 "State.Get",
                 { store, key: joinStatePath(prefix, key) },
@@ -2508,9 +2557,9 @@ export class Trellis<
               if (result.isErr()) return result;
               return validateStateGetResult(
                 descriptor,
-                result.unwrapOrElse(() => {
+                decodeStateJson(result.unwrapOrElse(() => {
                   throw new Error("state get unexpectedly failed");
-                }),
+                })) as StateGetResult<{ kind: "map"; value: unknown }>,
               );
             })()),
           put: (key, value, opts) =>
@@ -2521,18 +2570,26 @@ export class Trellis<
                 return Result.err(encoded.error);
               }
               const result = await this.#requestBuiltRpc<
-                StatePutResult<{ kind: "map"; value: unknown }>
+                StatePutResponse
               >(
                 "State.Put",
-                { store, key: joinStatePath(prefix, key), value, ...opts },
+                {
+                  store,
+                  key: joinStatePath(prefix, key),
+                  value: STATE_TEXT_ENCODER.encode(encoded),
+                  ...opts,
+                  ...(opts?.ttlMs === undefined
+                    ? {}
+                    : { ttlMs: BigInt(opts.ttlMs) }),
+                },
                 STATE_RUNTIME_RPC.put,
               );
               if (result.isErr()) return result;
               return validateStatePutResult(
                 descriptor,
-                result.unwrapOrElse(() => {
+                decodeStateJson(result.unwrapOrElse(() => {
                   throw new Error("state put unexpectedly failed");
-                }),
+                })) as StatePutResult<{ kind: "map"; value: unknown }>,
               );
             })()),
           delete: (key, opts) =>
@@ -2543,31 +2600,37 @@ export class Trellis<
             ),
           list: (opts) =>
             AsyncResult.from((async () => {
-              const result = await this.#requestBuiltRpc<{
-                entries: Array<
-                  | MapStateEntry<unknown>
-                  | StateMigrationRequiredEntry<MapStateEntry<unknown>>
-                >;
-                count: number;
-                offset: number;
-                limit: number;
-                nextOffset?: number;
-              }>(
+              const result = await this.#requestBuiltRpc<StateListResponse>(
                 "State.List",
                 {
                   store,
                   ...(prefix ? { prefix } : {}),
-                  offset: opts?.offset ?? 0,
-                  limit: opts?.limit ?? DEFAULT_STATE_LIST_LIMIT,
+                  offset: BigInt(opts?.offset ?? 0),
+                  limit: BigInt(opts?.limit ?? DEFAULT_STATE_LIST_LIMIT),
                 },
                 STATE_RUNTIME_RPC.list,
               );
               if (result.isErr()) return result;
               return validateStateListResult(
                 descriptor,
-                result.unwrapOrElse(() => {
-                  throw new Error("state list unexpectedly failed");
-                }),
+                (() => {
+                  const value = result.unwrapOrElse(() => {
+                    throw new Error("state list unexpectedly failed");
+                  });
+                  return {
+                    entries: value.entries.map((entry) =>
+                      decodeStateJson(entry) as
+                        | MapStateEntry<unknown>
+                        | StateMigrationRequiredEntry<MapStateEntry<unknown>>
+                    ),
+                    count: Number(value.count),
+                    offset: Number(value.offset),
+                    limit: Number(value.limit),
+                    ...(value.nextOffset === undefined
+                      ? {}
+                      : { nextOffset: Number(value.nextOffset) }),
+                  };
+                })(),
               );
             })()),
           prefix: (path) => mapClient(joinStatePath(prefix, path)),
@@ -3587,6 +3650,7 @@ export class Trellis<
 
   operationHandle<O extends OperationsOf<TA>>(
     operation: O,
+    unavailable?: () => TransportError | undefined,
   ): OperationSurface<TA, TMode, O> {
     const descriptor = this.api["operations"]?.[operation];
     if (!descriptor) {
@@ -3594,9 +3658,18 @@ export class Trellis<
     }
 
     const transport: OperationTransport = {
-      requestJson: (subject, body) =>
-        this.#requestJson(subject, body as JsonValue),
-      watchJson: (subject, body) => this.#watchJson(subject, body as JsonValue),
+      requestJson: (subject, body) => {
+        const error = unavailable?.();
+        return error
+          ? AsyncResult.from(Promise.resolve(err(error)))
+          : this.#requestJson(subject, body as JsonValue);
+      },
+      watchJson: (subject, body) => {
+        const error = unavailable?.();
+        return error
+          ? AsyncResult.from(Promise.resolve(err(error)))
+          : this.#watchJson(subject, body as JsonValue);
+      },
       putTransfer: (
         grant: SendTransferGrant,
         body: TransferBody,

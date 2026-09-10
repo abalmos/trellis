@@ -2,9 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::Duration;
 
 use async_nats::jetstream::{self, consumer, kv, object_store};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
-use trellis_protocol::{parse_api, parse_participant};
+use trellis_protocol::ParticipantResourceKind;
 
 use super::{
     AuthorizationStateError, ParticipantBindingRecord, ResourceBindingEvidence,
@@ -17,20 +16,13 @@ pub(crate) async fn provision_deployment_resources(
     deployment_id: &str,
     now: i64,
 ) -> Result<Vec<ResourceBindingEvidence>, AuthorizationStateError> {
-    let participant: Value = serde_json::from_str(&binding.participant_json)
-        .map_err(|error| invalid(error.to_string()))?;
-    parse_participant(&participant).map_err(|error| invalid(error.to_string()))?;
-    let apis: BTreeMap<String, Value> = serde_json::from_str(&binding.api_artifacts_json)
-        .map_err(|error| invalid(error.to_string()))?;
+    let participant = binding.resolve()?;
     let jetstream = jetstream::new(client.clone());
     let mut evidence = Vec::new();
 
-    for name in participant
-        .get("state")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|state| state.keys())
-    {
+    for name in participant.resources.iter().filter_map(|(name, resource)| {
+        (resource.kind == ParticipantResourceKind::State).then_some(name)
+    }) {
         evidence.push(resource(
             binding,
             deployment_id,
@@ -42,68 +34,65 @@ pub(crate) async fn provision_deployment_resources(
             now,
         ));
     }
-    for (kind, resources) in participant
-        .get("resources")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|resources| resources.iter())
-    {
-        for (name, config) in resources.as_object().into_iter().flatten() {
-            let token = token(deployment_id, kind, name);
-            let provider = match kind.as_str() {
-                "kv" => {
-                    let bucket = format!("tr_kv_{token}");
-                    if jetstream.get_key_value(&bucket).await.is_err() {
-                        jetstream
-                            .create_key_value(kv::Config {
-                                bucket: bucket.clone(),
-                                history: config.get("history").and_then(Value::as_u64).unwrap_or(1)
-                                    as i64,
-                                max_age: duration(config, "ttlMs"),
-                                max_value_size: config
-                                    .get("maxValueBytes")
-                                    .and_then(Value::as_i64)
-                                    .unwrap_or(-1)
-                                    as i32,
-                                ..Default::default()
-                            })
-                            .await
-                            .map_err(|error| storage(error.to_string()))?;
-                    }
-                    ResourceProviderIdentity::Kv { bucket }
+    for (name, config) in &participant.resources {
+        let kind = match config.kind {
+            ParticipantResourceKind::Kv => "kv",
+            ParticipantResourceKind::Store => "store",
+            _ => continue,
+        };
+        let token = token(deployment_id, kind, name);
+        let provider = match kind {
+            "kv" => {
+                let bucket = format!("tr_kv_{token}");
+                if jetstream.get_key_value(&bucket).await.is_err() {
+                    jetstream
+                        .create_key_value(kv::Config {
+                            bucket: bucket.clone(),
+                            history: i64::try_from(config.history.unwrap_or(1))
+                                .map_err(|error| invalid(error.to_string()))?,
+                            max_age: Duration::from_millis(config.ttl_ms.unwrap_or_default()),
+                            max_value_size: config
+                                .desired_max_value
+                                .and_then(|value| i32::try_from(value).ok())
+                                .unwrap_or(-1),
+                            ..Default::default()
+                        })
+                        .await
+                        .map_err(|error| storage(error.to_string()))?;
                 }
-                "store" => {
-                    let bucket = format!("tr_obj_{token}");
-                    if jetstream.get_object_store(&bucket).await.is_err() {
-                        jetstream
-                            .create_object_store(object_store::Config {
-                                bucket: bucket.clone(),
-                                max_age: duration(config, "ttlMs"),
-                                max_bytes: config
-                                    .get("maxTotalBytes")
-                                    .and_then(Value::as_i64)
-                                    .unwrap_or(-1),
-                                ..Default::default()
-                            })
-                            .await
-                            .map_err(|error| storage(error.to_string()))?;
-                    }
-                    ResourceProviderIdentity::Store { bucket }
+                ResourceProviderIdentity::Kv { bucket }
+            }
+            "store" => {
+                let bucket = format!("tr_obj_{token}");
+                if jetstream.get_object_store(&bucket).await.is_err() {
+                    jetstream
+                        .create_object_store(object_store::Config {
+                            bucket: bucket.clone(),
+                            max_age: Duration::from_millis(config.ttl_ms.unwrap_or_default()),
+                            max_bytes: config
+                                .desired_max_total
+                                .and_then(|value| i64::try_from(value).ok())
+                                .unwrap_or(-1),
+                            ..Default::default()
+                        })
+                        .await
+                        .map_err(|error| storage(error.to_string()))?;
                 }
-                "state" => ResourceProviderIdentity::State {
-                    bucket: "trellis_state".to_owned(),
-                },
-                _ => continue,
-            };
-            evidence.push(resource(binding, deployment_id, kind, name, provider, now));
-        }
+                ResourceProviderIdentity::Store { bucket }
+            }
+            "state" => ResourceProviderIdentity::State {
+                bucket: "trellis_state".to_owned(),
+            },
+            _ => continue,
+        };
+        evidence.push(resource(binding, deployment_id, kind, name, provider, now));
     }
 
     let namespace = format!("tr_jobs_{}", token(deployment_id, "jobs", "namespace"));
     if participant
-        .get("jobQueues")
-        .and_then(Value::as_object)
-        .is_some_and(|queues| !queues.is_empty())
+        .resources
+        .values()
+        .any(|resource| resource.kind == ParticipantResourceKind::JobQueue)
     {
         let bucket = format!("JOBS_KEYS_{namespace}");
         if jetstream.get_key_value(&bucket).await.is_err() {
@@ -118,19 +107,27 @@ pub(crate) async fn provision_deployment_resources(
         }
     }
     for (name, config) in participant
-        .get("jobQueues")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|queues| queues.iter())
+        .resources
+        .iter()
+        .filter(|(_, resource)| resource.kind == ParticipantResourceKind::JobQueue)
     {
         let item = token(deployment_id, "jobQueue", name);
         let work_subject = format!("trellis.work.{namespace}.{item}");
         let consumer_name = format!("{namespace}_{item}");
-        let max_deliver = config
-            .get("maxDeliver")
-            .and_then(Value::as_i64)
-            .unwrap_or(5);
-        let mut backoff = backoff(config, &[5_000, 30_000, 120_000, 600_000]);
+        let max_deliver = i64::from(config.retry_attempts.unwrap_or(5));
+        let mut backoff = if config.retry_backoff_ms.is_empty() {
+            [5_000, 30_000, 120_000, 600_000]
+                .into_iter()
+                .map(Duration::from_millis)
+                .collect()
+        } else {
+            config
+                .retry_backoff_ms
+                .iter()
+                .copied()
+                .map(Duration::from_millis)
+                .collect()
+        };
         backoff.truncate(max_deliver.saturating_sub(1) as usize);
         jetstream
             .get_stream("JOBS_WORK")
@@ -145,7 +142,7 @@ pub(crate) async fn provision_deployment_resources(
                     ack_wait: backoff
                         .first()
                         .copied()
-                        .unwrap_or_else(|| duration_default(config, "ackWaitMs", 300_000)),
+                        .unwrap_or(Duration::from_millis(300_000)),
                     max_deliver,
                     backoff,
                     ..Default::default()
@@ -163,8 +160,8 @@ pub(crate) async fn provision_deployment_resources(
                 work_stream: "JOBS_WORK".to_owned(),
                 publish_prefix: format!("trellis.jobs.{namespace}.{item}"),
                 updates_prefix: config
-                    .get("update")
-                    .filter(|value| !value.is_null())
+                    .update_schema
+                    .as_ref()
                     .map(|_| format!("trellis.job_updates.{namespace}.{item}")),
                 work_subject,
                 consumer: consumer_name,
@@ -173,52 +170,45 @@ pub(crate) async fn provision_deployment_resources(
         ));
     }
 
-    let aliases = aliases(&participant)?;
     for (name, config) in participant
-        .get("eventConsumers")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|values| values.iter())
+        .resources
+        .iter()
+        .filter(|(_, resource)| resource.kind == ParticipantResourceKind::EventConsumer)
     {
         let mut filters = BTreeSet::new();
-        for (alias, names) in config
-            .get("events")
-            .and_then(Value::as_object)
-            .into_iter()
-            .flat_map(|values| values.iter())
-        {
-            let api_id = aliases.get(alias).ok_or_else(|| {
-                invalid(format!(
-                    "event consumer references unknown API alias {alias}"
-                ))
-            })?;
-            let subjects =
-                parse_api(apis.get(api_id).ok_or_else(|| {
-                    invalid(format!("event consumer API {api_id} is unavailable"))
-                })?)
-                .map_err(|error| invalid(error.to_string()))?
-                .derived_subjects()
-                .map_err(|error| invalid(error.to_string()))?;
-            for event in names.as_array().into_iter().flatten() {
-                let event = event
-                    .as_str()
-                    .ok_or_else(|| invalid("event consumer name must be text"))?;
-                filters.insert(
-                    subjects
-                        .events
-                        .get(event)
-                        .ok_or_else(|| invalid(format!("event {event} is unavailable")))?
-                        .wildcard
-                        .clone(),
-                );
+        for (api_id, names) in &config.consumer_events {
+            let api = participant
+                .referenced_apis
+                .get(api_id)
+                .ok_or_else(|| invalid(format!("event consumer API {api_id} is unavailable")))?;
+            for event in names {
+                let action = api
+                    .actions
+                    .get(&format!("event:{event}"))
+                    .ok_or_else(|| invalid(format!("event {event} is unavailable")))?;
+                filters.insert(format!(
+                    "events.v{}.{}{}",
+                    api.major,
+                    event,
+                    ".*".repeat(action.event_parameter_count)
+                ));
             }
         }
         let filters = filters.into_iter().collect::<Vec<_>>();
-        let max_deliver = config
-            .get("maxDeliver")
-            .and_then(Value::as_i64)
-            .unwrap_or(6);
-        let mut backoff = backoff(config, &[5_000, 30_000, 120_000, 600_000, 1_800_000]);
+        let max_deliver = i64::from(config.retry_attempts.unwrap_or(6));
+        let mut backoff = if config.retry_backoff_ms.is_empty() {
+            [5_000, 30_000, 120_000, 600_000, 1_800_000]
+                .into_iter()
+                .map(Duration::from_millis)
+                .collect()
+        } else {
+            config
+                .retry_backoff_ms
+                .iter()
+                .copied()
+                .map(Duration::from_millis)
+                .collect()
+        };
         backoff.truncate(max_deliver.saturating_sub(1) as usize);
         let consumer_name = format!("tr_cons_{}", token(deployment_id, "eventConsumer", name));
         jetstream
@@ -230,7 +220,7 @@ pub(crate) async fn provision_deployment_resources(
                 consumer::pull::Config {
                     durable_name: Some(consumer_name.clone()),
                     filter_subjects: filters.clone(),
-                    deliver_policy: if config.get("replay").and_then(Value::as_str) == Some("all") {
+                    deliver_policy: if config.consumer_replay_all {
                         consumer::DeliverPolicy::All
                     } else {
                         consumer::DeliverPolicy::New
@@ -239,13 +229,8 @@ pub(crate) async fn provision_deployment_resources(
                     ack_wait: duration_default(config, "ackWaitMs", 300_000),
                     max_deliver,
                     backoff,
-                    max_ack_pending: if config.get("ordering").and_then(Value::as_str)
-                        == Some("strict")
-                    {
-                        1
-                    } else {
-                        1_000
-                    },
+                    max_ack_pending: i64::from(config.consumer_concurrency.unwrap_or(1).max(1_000))
+                        as i32,
                     metadata: HashMap::from([
                         ("trellis.managed_by".to_owned(), "trellis".to_owned()),
                         ("trellis.group".to_owned(), name.clone()),
@@ -277,14 +262,13 @@ pub(crate) fn identity_resources(
     principal_id: &str,
     now: i64,
 ) -> Result<Vec<ResourceBindingEvidence>, AuthorizationStateError> {
-    let participant: Value = serde_json::from_str(&binding.participant_json)
-        .map_err(|error| invalid(error.to_string()))?;
-    parse_participant(&participant).map_err(|error| invalid(error.to_string()))?;
-    Ok(participant
-        .get("state")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|state| state.keys())
+    Ok(binding
+        .resolve()?
+        .resources
+        .iter()
+        .filter_map(|(name, resource)| {
+            (resource.kind == ParticipantResourceKind::State).then_some(name)
+        })
         .map(|name| {
             resource(
                 binding,
@@ -298,32 +282,6 @@ pub(crate) fn identity_resources(
             )
         })
         .collect())
-}
-
-fn aliases(participant: &Value) -> Result<BTreeMap<String, String>, AuthorizationStateError> {
-    let mut aliases = BTreeMap::new();
-    for section in ["implements", "required", "optional"] {
-        let values = if section == "implements" {
-            participant.get(section)
-        } else {
-            participant.get("uses").and_then(|uses| uses.get(section))
-        };
-        for (alias, value) in values
-            .and_then(Value::as_object)
-            .into_iter()
-            .flat_map(|values| values.iter())
-        {
-            aliases.insert(
-                alias.clone(),
-                value
-                    .get("api")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| invalid(format!("participant API alias {alias} is invalid")))?
-                    .to_owned(),
-            );
-        }
-    }
-    Ok(aliases)
 }
 
 fn resource(
@@ -351,25 +309,6 @@ fn token(owner: &str, kind: &str, name: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
-}
-fn duration(value: &Value, field: &str) -> Duration {
-    Duration::from_millis(value.get(field).and_then(Value::as_u64).unwrap_or_default())
-}
-fn duration_default(value: &Value, field: &str, default: u64) -> Duration {
-    Duration::from_millis(value.get(field).and_then(Value::as_u64).unwrap_or(default))
-}
-fn backoff(value: &Value, default: &[u64]) -> Vec<Duration> {
-    value
-        .get("backoffMs")
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_u64)
-                .map(Duration::from_millis)
-                .collect()
-        })
-        .unwrap_or_else(|| default.iter().copied().map(Duration::from_millis).collect())
 }
 fn invalid(message: impl Into<String>) -> AuthorizationStateError {
     AuthorizationStateError::InvalidRecord(message.into())

@@ -1,14 +1,13 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use serde_json::Value;
 use trellis_protocol::{
-    parse_api, parse_participant, resolve_participant, ApiArtifact, ApiSurfaceKind,
-    AuthorizationPrincipalKind, ParticipantResourceKind, PermissionAction,
+    ApiSurfaceKind, AuthorizationPrincipalKind, ParticipantResourceKind, PermissionAction,
     UnsignedAuthorizationContext,
 };
 
+use super::evidence::{ApiRuntimeProjection, RuntimeActionKind};
 use super::{
     AuthorizationRegistryBinding, AuthorizationStateError, ParticipantBindingRecord,
     ResourceBindingEvidence, ResourceProviderIdentity,
@@ -29,31 +28,7 @@ pub(crate) fn compile_transport_permissions(
     if binding.participant_id != context.participant_id {
         return invalid("issuable state does not match participant binding");
     }
-    let participant_value: Value = serde_json::from_str(&binding.participant_json)
-        .map_err(|error| invalid_error(format!("participant JSON is invalid: {error}")))?;
-    let participant =
-        parse_participant(&participant_value).map_err(|error| invalid_error(error.to_string()))?;
-    let api_values: BTreeMap<String, Value> = serde_json::from_str(&binding.api_artifacts_json)
-        .map_err(|error| invalid_error(format!("API artifact map is invalid: {error}")))?;
-    let mut apis = BTreeMap::new();
-    for (api_id, value) in api_values {
-        let api = parse_api(&value).map_err(|error| invalid_error(error.to_string()))?;
-        if api.id() != api_id {
-            return invalid("API artifact map key does not match artifact ID");
-        }
-        apis.insert(api_id, api);
-    }
-    let resolved = resolve_participant(&participant, &apis)
-        .map_err(|error| invalid_error(error.to_string()))?;
-    if resolved.participant_digest() != binding.artifact_digest
-        || resolved
-            .needs()
-            .digest()
-            .map_err(|error| invalid_error(error.to_string()))?
-            != binding.needs_digest
-    {
-        return invalid("resolved participant identity does not match issuable state");
-    }
+    let resolved = binding.resolve()?;
 
     let mut publish = BTreeSet::new();
     let mut subscribe = BTreeSet::new();
@@ -95,43 +70,44 @@ pub(crate) fn compile_transport_permissions(
         publish.insert(format!(
             "health.v1.heartbeat.{kind}.{}.{}.{}.{}.{}",
             URL_SAFE_NO_PAD.encode(context.participant_id.as_bytes()),
-            URL_SAFE_NO_PAD.encode(binding.artifact_digest.as_bytes()),
+            URL_SAFE_NO_PAD.encode(binding.participant_digest.as_bytes()),
             URL_SAFE_NO_PAD.encode(deployment_id.as_bytes()),
             URL_SAFE_NO_PAD.encode(instance_id.as_bytes()),
             context.session_key,
         ));
     }
 
-    for implementation in resolved.implemented_apis() {
-        let provided = implementation.provided();
-        let api = apis
-            .get(provided.api())
-            .ok_or_else(|| invalid_error("implemented API artifact is missing".to_owned()))?;
-        let api_value = api
-            .normalized_value()
-            .map_err(|error| invalid_error(error.to_string()))?;
+    for api in resolved.implemented_apis.values() {
         let session_prefix = &context.session_key[..16.min(context.session_key.len())];
-        subscribe.extend(provided.rpc().values().cloned());
-        for name in provided.rpc().keys() {
-            if api_value["rpc"][name]["transfer"]["direction"].as_str() == Some("receive") {
-                subscribe.insert(format!("transfer.v1.download.{session_prefix}.*"));
+        for (key, action) in &api.actions {
+            let name = key.split_once(':').map_or(key.as_str(), |(_, name)| name);
+            match action.kind {
+                RuntimeActionKind::Rpc => {
+                    subscribe.insert(format!("rpc.v{}.{name}", api.major));
+                    if action.download {
+                        subscribe.insert(format!("transfer.v1.download.{session_prefix}.*"));
+                    }
+                }
+                RuntimeActionKind::Operation => {
+                    let subject = format!("operations.v{}.{name}", api.major);
+                    subscribe.insert(subject.clone());
+                    subscribe.insert(format!("{subject}.control"));
+                    if action.upload {
+                        subscribe.insert(format!("transfer.v1.upload.{session_prefix}.*"));
+                    }
+                }
+                RuntimeActionKind::Feed => {
+                    subscribe.insert(format!("feed.v{}.{name}", api.major));
+                }
+                RuntimeActionKind::Event => {}
             }
         }
-        for operation in provided.operations().values() {
-            subscribe.insert(operation.subject().to_owned());
-            subscribe.insert(format!("{}.control", operation.subject()));
-        }
-        for name in provided.operations().keys() {
-            if api_value["operations"][name]["transfer"]["direction"].as_str() == Some("send") {
-                subscribe.insert(format!("transfer.v1.upload.{session_prefix}.*"));
-            }
-        }
-        subscribe.extend(provided.feeds().values().cloned());
     }
 
     for atom in context.grants.permissions() {
         if let Some((api_id, surface, name)) = atom.target().as_api_surface() {
-            let api = apis
+            let api = resolved
+                .referenced_apis
                 .get(api_id)
                 .ok_or_else(|| invalid_error(format!("grant references unknown API {api_id}")))?;
             compile_api_surface(
@@ -143,7 +119,11 @@ pub(crate) fn compile_transport_permissions(
                 &mut subscribe,
             )?;
         } else if let Some((api_id, operation, _signal)) = atom.target().as_operation_signal() {
-            let subject = api_subject(apis.get(api_id), ApiSurfaceKind::Operation, operation)?;
+            let subject = api_subject(
+                resolved.referenced_apis.get(api_id),
+                ApiSurfaceKind::Operation,
+                operation,
+            )?;
             if atom.action() != PermissionAction::Control {
                 return invalid("operation signal grant must use control action");
             }
@@ -185,64 +165,56 @@ fn compile_authorization_registry_transport(
 }
 
 fn compile_api_surface(
-    api: &ApiArtifact,
+    api: &ApiRuntimeProjection,
     surface: ApiSurfaceKind,
     name: &str,
     action: PermissionAction,
     publish: &mut BTreeSet<String>,
     subscribe: &mut BTreeSet<String>,
 ) -> Result<(), AuthorizationStateError> {
-    let subjects = api
-        .derived_subjects()
-        .map_err(|error| invalid_error(error.to_string()))?;
-    let api_value = api
-        .normalized_value()
-        .map_err(|error| invalid_error(error.to_string()))?;
+    let projected = api
+        .actions
+        .get(&format!("{}:{name}", surface_name(surface)))
+        .ok_or_else(|| invalid_error(format!("unknown {surface:?} {name}")))?;
     match (surface, action) {
         (ApiSurfaceKind::Rpc, PermissionAction::Call) => {
-            publish.insert(required_subject(subjects.rpc.get(name), "RPC", name)?);
-            if api_value["rpc"][name]["transfer"]["direction"].as_str() == Some("receive") {
+            publish.insert(format!("rpc.v{}.{name}", api.major));
+            if projected.download {
                 publish.insert("transfer.v1.download.*.*".to_owned());
             }
         }
         (ApiSurfaceKind::Operation, PermissionAction::Invoke) => {
-            let subject = required_subject(subjects.operations.get(name), "operation", name)?;
+            let subject = format!("operations.v{}.{name}", api.major);
             publish.insert(subject.clone());
             publish.insert(format!("{subject}.control"));
-            if api_value["operations"][name]["transfer"]["direction"].as_str() == Some("send") {
+            if projected.upload {
                 publish.insert("transfer.v1.upload.*.*".to_owned());
             }
         }
         (ApiSurfaceKind::Operation, PermissionAction::Observe) => {
-            let subject = required_subject(subjects.operations.get(name), "operation", name)?;
+            let subject = format!("operations.v{}.{name}", api.major);
             publish.insert(format!("{subject}.control"));
         }
         (ApiSurfaceKind::Operation, PermissionAction::Cancel | PermissionAction::Control) => {
-            let subject = required_subject(subjects.operations.get(name), "operation", name)?;
+            let subject = format!("operations.v{}.{name}", api.major);
             publish.insert(format!("{subject}.control"));
         }
         (ApiSurfaceKind::Event, PermissionAction::Publish) => {
-            publish.insert(
-                subjects
-                    .events
-                    .get(name)
-                    .ok_or_else(|| invalid_error(format!("unknown event {name}")))?
-                    .wildcard
-                    .clone(),
-            );
+            publish.insert(format!(
+                "events.v{}.{name}{}",
+                api.major,
+                ".*".repeat(projected.event_parameter_count)
+            ));
         }
         (ApiSurfaceKind::Event, PermissionAction::Subscribe) => {
-            subscribe.insert(
-                subjects
-                    .events
-                    .get(name)
-                    .ok_or_else(|| invalid_error(format!("unknown event {name}")))?
-                    .wildcard
-                    .clone(),
-            );
+            subscribe.insert(format!(
+                "events.v{}.{name}{}",
+                api.major,
+                ".*".repeat(projected.event_parameter_count)
+            ));
         }
         (ApiSurfaceKind::Feed, PermissionAction::Subscribe) => {
-            publish.insert(required_subject(subjects.feeds.get(name), "feed", name)?);
+            publish.insert(format!("feed.v{}.{name}", api.major));
         }
         (ApiSurfaceKind::State, PermissionAction::Read) => {
             publish.insert("rpc.v1.State.Get".to_owned());
@@ -260,30 +232,27 @@ fn compile_api_surface(
 }
 
 fn api_subject(
-    api: Option<&ApiArtifact>,
+    api: Option<&ApiRuntimeProjection>,
     surface: ApiSurfaceKind,
     name: &str,
 ) -> Result<String, AuthorizationStateError> {
     let api = api.ok_or_else(|| invalid_error("grant references unknown API"))?;
-    let subjects = api
-        .derived_subjects()
-        .map_err(|error| invalid_error(error.to_string()))?;
     match surface {
-        ApiSurfaceKind::Operation => {
-            required_subject(subjects.operations.get(name), "operation", name)
+        ApiSurfaceKind::Operation if api.actions.contains_key(&format!("operation:{name}")) => {
+            Ok(format!("operations.v{}.{name}", api.major))
         }
         _ => invalid("unsupported subject lookup"),
     }
 }
 
-fn required_subject(
-    subject: Option<&String>,
-    kind: &str,
-    name: &str,
-) -> Result<String, AuthorizationStateError> {
-    subject
-        .cloned()
-        .ok_or_else(|| invalid_error(format!("unknown {kind} {name}")))
+fn surface_name(surface: ApiSurfaceKind) -> &'static str {
+    match surface {
+        ApiSurfaceKind::Rpc => "rpc",
+        ApiSurfaceKind::Operation => "operation",
+        ApiSurfaceKind::Event => "event",
+        ApiSurfaceKind::Feed => "feed",
+        ApiSurfaceKind::State => "state",
+    }
 }
 
 fn resource_binding<'a>(

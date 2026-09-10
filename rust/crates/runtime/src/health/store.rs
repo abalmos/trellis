@@ -5,9 +5,10 @@ use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
-use trellis_runtime_apis::health::types::{
-    HealthHeartbeatSample, HealthStatusChangedEvent, HealthStatusChangedEventHeader,
-    HealthStatusChangedEventParticipant,
+use trellis_runtime_apis::__types::trellis::HealthHeartbeatSample;
+use trellis_runtime_apis::types::{
+    HealthStatusChangedEvent, HealthStatusChangedEventheader as HealthStatusChangedEventHeader,
+    HealthStatusChangedEventparticipant as HealthStatusChangedEventParticipant,
 };
 use ulid::Ulid;
 
@@ -140,6 +141,8 @@ impl HealthStore {
         let interval_ns = sample
             .participant
             .publish_interval_ms
+            .0
+             .0
             .checked_mul(2)
             .and_then(|value| value.checked_mul(1_000_000))
             .ok_or(HealthStoreError::DeadlineOverflow)?;
@@ -211,7 +214,7 @@ impl HealthStore {
                         reason: "heartbeat-resumed",
                         changed_at_ns: observed_at_ns,
                         last_seen_at_ns: observed_at_ns,
-                        summary: sample.summary.as_deref(),
+                        summary: sample.summary.as_ref().map(AsRef::<str>::as_ref),
                     },
                 )?;
             } else if current.effective_status == "offline" {
@@ -238,7 +241,7 @@ impl HealthStore {
                         reason: "heartbeat-resumed",
                         changed_at_ns: observed_at_ns,
                         last_seen_at_ns: observed_at_ns,
-                        summary: sample.summary.as_deref(),
+                        summary: sample.summary.as_ref().map(AsRef::<str>::as_ref),
                     },
                 )?;
             } else if current.effective_status != sample.reported_status.as_str()
@@ -268,7 +271,7 @@ impl HealthStore {
                             reason: "heartbeat-change",
                             changed_at_ns: observed_at_ns,
                             last_seen_at_ns: observed_at_ns,
-                            summary: sample.summary.as_deref(),
+                            summary: sample.summary.as_ref().map(AsRef::<str>::as_ref),
                         },
                     )?;
                 }
@@ -319,17 +322,25 @@ impl HealthStore {
                 identity.instance_id,
                 identity.deployment_id,
                 identity.session_key,
-                sample.participant.name,
+                sample.participant.name.as_ref(),
                 identity.contract_digest,
                 sample.reported_status.as_str(),
                 observed_at_ns,
                 projected_at_ns,
                 deadline_ns,
-                sample.participant.started_at,
-                sample.participant.publish_interval_ms,
+                sample.participant.started_at.as_str(),
+                sample.participant.publish_interval_ms.0 .0,
                 sample.participant.runtime.as_str(),
-                sample.participant.runtime_version,
-                sample.participant.version,
+                sample
+                    .participant
+                    .runtime_version
+                    .as_ref()
+                    .map(AsRef::<str>::as_ref),
+                sample
+                    .participant
+                    .version
+                    .as_ref()
+                    .map(AsRef::<str>::as_ref),
                 sample_json,
                 stream_sequence,
             ],
@@ -728,7 +739,7 @@ fn insert_transition(
     let changed_at = rfc3339(row.changed_at_ns)?;
     let event = HealthStatusChangedEvent {
         header: HealthStatusChangedEventHeader {
-            id: event_id.clone(),
+            id: event_id.clone().into(),
             time: changed_at.clone(),
         },
         participant: HealthStatusChangedEventParticipant {
@@ -744,7 +755,7 @@ fn insert_transition(
         reason: wire(row.reason)?,
         changed_at,
         last_seen_at: rfc3339(row.last_seen_at_ns)?,
-        summary: row.summary.map(ToString::to_string),
+        summary: row.summary.map(|value| value.to_string().into()),
     };
     transaction.execute(
         "INSERT INTO health_transition_outbox
@@ -816,10 +827,10 @@ fn update_metric_buckets(
                 identity.contract_id,
                 identity.instance_id,
                 bucket_start_ns,
-                check.name,
-                i64::from(check.status == "ok"),
-                i64::from(check.status == "failed"),
-                check.latency_ms,
+                check.name.as_ref(),
+                i64::from(check.status.as_str() == "ok"),
+                i64::from(check.status.as_str() == "failed"),
+                check.latency_ms.0 .0,
             ],
         )?;
     }
@@ -857,7 +868,7 @@ pub(super) fn rfc3339(timestamp_ns: i64) -> Result<String, HealthStoreError> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use trellis_runtime_apis::health::types::{
+    use trellis_runtime_apis::types::{
         HealthHeartbeatSampleChecksItem, HealthHeartbeatSampleParticipant,
         HealthHeartbeatSampleSample, HealthInspectRequest, HealthMetricsRequest,
         HealthQueryRequest,

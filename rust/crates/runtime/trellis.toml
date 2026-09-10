@@ -1,6 +1,18 @@
-format = 1
-name = "trellis-runtime-generated"
 default-registry = "trellis"
+
+[package]
+name = "trellis"
+version = "0.12.0"
+
+[sources]
+types = "contracts/types.trellis"
+auth = "contracts/auth.trellis"
+core = "contracts/core.trellis"
+state = "contracts/state.trellis"
+health = "contracts/health.trellis"
+jobs = "contracts/jobs.trellis"
+events = "contracts/events.trellis"
+participants = "contracts/participants.trellis"
 
 [registries.trellis]
 prefix = "ghcr.io/qlever-llc/trellis-apis"

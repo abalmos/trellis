@@ -1,11 +1,10 @@
 //! Router construction for the Jobs admin service.
 
 use trellis_rs::service::{DeclaredRpcError, Router, ServerError};
-use trellis_runtime_apis::jobs::rpc::{
-    JobsCancelRpc, JobsDismissDLQRpc, JobsGetKeyRpc, JobsInspectRpc, JobsListDLQRpc,
-    JobsListServicesRpc, JobsMetricsRpc, JobsQueryRpc, JobsReplayDLQRpc, JobsRetryRpc,
+use trellis_runtime_apis::apis::trellis_jobs_v1::rpc::{
+    Cancel, DismissDLQ, GetKey, Inspect, ListDLQ, ListServices, Metrics, Query, ReplayDLQ, Retry,
 };
-use trellis_runtime_apis::jobs::types::{
+use trellis_runtime_apis::types::{
     JobsCancelRequest, JobsDismissDLQRequest, JobsGetKeyRequest, JobsInspectRequest,
     JobsListDLQRequest, JobsListServicesRequest, JobsMetricsRequest, JobsQueryRequest,
     JobsReplayDLQRequest, JobsRetryRequest,
@@ -16,70 +15,70 @@ use crate::query::{JobsQuery, JobsQueryError};
 /// Build the Jobs admin RPC router backed by a SQL projection query adapter.
 pub fn build_router_with_query(query: JobsQuery) -> Router {
     let mut router = Router::new();
-    router.register_rpc::<JobsListServicesRpc, _, _>({
+    router.register_rpc::<ListServices, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsListServicesRequest| {
             let query = query.clone();
             async move { query.list_services(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsQueryRpc, _, _>({
+    router.register_rpc::<Query, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsQueryRequest| {
             let query = query.clone();
             async move { query.query_jobs(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsMetricsRpc, _, _>({
+    router.register_rpc::<Metrics, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsMetricsRequest| {
             let query = query.clone();
             async move { query.metrics(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsInspectRpc, _, _>({
+    router.register_rpc::<Inspect, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsInspectRequest| {
             let query = query.clone();
             async move { query.inspect(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsGetKeyRpc, _, _>({
+    router.register_rpc::<GetKey, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsGetKeyRequest| {
             let query = query.clone();
             async move { query.get_key(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsCancelRpc, _, _>({
+    router.register_rpc::<Cancel, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsCancelRequest| {
             let query = query.clone();
             async move { query.cancel_job(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsRetryRpc, _, _>({
+    router.register_rpc::<Retry, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsRetryRequest| {
             let query = query.clone();
             async move { query.retry_job(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsListDLQRpc, _, _>({
+    router.register_rpc::<ListDLQ, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsListDLQRequest| {
             let query = query.clone();
             async move { query.list_dlq(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsReplayDLQRpc, _, _>({
+    router.register_rpc::<ReplayDLQ, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsReplayDLQRequest| {
             let query = query.clone();
             async move { query.replay_dlq(&input).await.map_err(map_query_error) }
         }
     });
-    router.register_rpc::<JobsDismissDLQRpc, _, _>({
+    router.register_rpc::<DismissDLQ, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsDismissDLQRequest| {
             let query = query.clone();

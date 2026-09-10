@@ -159,7 +159,7 @@ fn unmatched_consumer_row(info: async_nats::jetstream::consumer::Info) -> Value 
         attributed_consumer_row(info, None, "platform")
     } else if is_eventlog_projector_consumer(&info.name) {
         let mut row = consumer_row(info, None, "platform");
-        row["contractId"] = json!("trellis.eventlog@v1");
+        row["contractId"] = json!("trellis.events@v1");
         row["group"] = json!("projector");
         row
     } else {

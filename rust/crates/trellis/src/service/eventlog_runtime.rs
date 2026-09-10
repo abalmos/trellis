@@ -163,7 +163,7 @@ fn platform_consumer_metadata(group: &str) -> HashMap<String, String> {
         ("trellis.managed_by".to_string(), "platform".to_string()),
         (
             "trellis.contract_id".to_string(),
-            "trellis.eventlog@v1".to_string(),
+            "trellis.events@v1".to_string(),
         ),
         ("trellis.group".to_string(), group.to_string()),
     ])

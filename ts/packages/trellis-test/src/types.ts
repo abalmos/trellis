@@ -11,8 +11,12 @@ import type {
   TrellisControlPlaneWebSource,
 } from "./control_plane_config.ts";
 
-/** Native contract artifacts accepted by Trellis test admin automation. */
-export type TrellisTestParticipantLike = CallerParticipant;
+/** Generated participant descriptor accepted by Trellis test admin automation. */
+export type TrellisTestParticipantLike = Readonly<{
+  identity: string;
+  path: string;
+  packageEvidence: unknown;
+}>;
 
 /** Polling options for `waitFor` and runtime readiness helpers. */
 export type WaitForOptions = {
@@ -84,7 +88,7 @@ export type TrellisTestClientAuth = {
 /** Result returned when a participant is installed for a test deployment. */
 export type TrellisTestParticipantApproval = {
   participantId: string;
-  installedRevision: number;
+  installedRevision: bigint;
   deploymentId?: string;
   binding?: Record<string, unknown> | null;
 };
@@ -96,4 +100,5 @@ export type TrellisTestParticipant = TrellisTestParticipantLike;
 export type TrellisTestClientParticipant = CallerParticipant;
 
 /** Connected app/client type returned by `TrellisTestRuntime.connectClient`. */
-export type TrellisTestConnectedClient<TContract> = CallerRuntime<TContract>;
+export type TrellisTestConnectedClient<TContract extends CallerParticipant> =
+  CallerRuntime<TContract>;

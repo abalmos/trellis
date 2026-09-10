@@ -3,7 +3,6 @@ import {
   type ClientAuthRequiredContext,
   TrellisClient,
 } from "@qlever-llc/trellis";
-import Value from "typebox/value";
 
 import {
   adminAccountTokenFromUrl,
@@ -14,7 +13,6 @@ import {
 } from "./admin/auth_flow.ts";
 import * as adminDeployment from "./admin/deployment.ts";
 import {
-  ADMIN_PARTICIPANT,
   ADMIN_USERNAME,
   type AdminClient,
   adminMethods,
@@ -60,7 +58,6 @@ export class TrellisTestAdminAutomation {
       deploymentBindingRevisions: new Map(),
       deploymentIds: new Map(),
       installedParticipants: new Map(),
-      protocolApis: new Map(),
       rpc: <M extends TrellisTestAdminRpcMethod>(
         method: M,
         input: AdminRpc[M]["input"],
@@ -145,26 +142,7 @@ export class TrellisTestAdminAutomation {
     }
     const rpcMethod = method as TrellisTestAdminRpcMethod;
     const descriptor = adminMethods[rpcMethod];
-    let decodedInput: unknown;
-    try {
-      decodedInput = Value.Decode(descriptor.input, input);
-    } catch (error) {
-      throw new Error(
-        `${method} input decode failed for ${JSON.stringify(input)}: ${
-          String(error)
-        }`,
-      );
-    }
-    const output = await descriptor.call(await this.#client(), decodedInput);
-    try {
-      return Value.Decode(descriptor.output, output);
-    } catch (error) {
-      throw new Error(
-        `${method} output decode failed for ${JSON.stringify(output)}: ${
-          String(error)
-        }`,
-      );
-    }
+    return await descriptor.call(await this.#client(), input);
   }
 
   async #rpc<M extends TrellisTestAdminRpcMethod>(
@@ -184,33 +162,36 @@ export class TrellisTestAdminAutomation {
   }
 
   async provisionDevice(
-    input: import("../trellis/index.js").apis.auth.AuthDevicesProvisionInput,
+    input: import("../trellis/index.js").apis.auth.DevicesProvisionInput,
   ): Promise<
-    import("../trellis/index.js").apis.auth.AuthDevicesProvisionOutput
+    import("../trellis/index.js").apis.auth.DevicesProvisionOutput
   > {
-    return await this.#rpc("authDevicesProvision", {
-      ...input,
-      deploymentId: this.#deployment.deploymentIds.get(input.deploymentId) ??
-        input.deploymentId,
-    });
+    return await this.#rpc(
+      "authDevicesProvision",
+      {
+        ...input,
+        deploymentId: this.#deployment.deploymentIds.get(input.deploymentId) ??
+          input.deploymentId,
+      },
+    );
   }
 
   async stateAdminGet(
-    input: import("../trellis/index.js").apis.state.StateAdminGetInput,
-  ): Promise<import("../trellis/index.js").apis.state.StateAdminGetOutput> {
+    input: import("../trellis/index.js").apis.state.AdminGetInput,
+  ): Promise<import("../trellis/index.js").apis.state.AdminGetOutput> {
     return await this.#rpc("stateAdminGet", input);
   }
 
   async stateAdminList(
-    input: import("../trellis/index.js").apis.state.StateAdminListInput,
-  ): Promise<import("../trellis/index.js").apis.state.StateAdminListOutput> {
+    input: import("../trellis/index.js").apis.state.AdminListInput,
+  ): Promise<import("../trellis/index.js").apis.state.AdminListOutput> {
     return await this.#rpc("stateAdminList", input);
   }
 
   async stateAdminDelete(
-    input: import("../trellis/index.js").apis.state.StateAdminDeleteInput,
+    input: import("../trellis/index.js").apis.state.AdminDeleteInput,
   ): Promise<
-    import("../trellis/index.js").apis.state.StateAdminDeleteOutput
+    import("../trellis/index.js").apis.state.AdminDeleteOutput
   > {
     return await this.#rpc("stateAdminDelete", input);
   }

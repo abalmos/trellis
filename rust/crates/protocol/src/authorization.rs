@@ -593,7 +593,7 @@ pub struct UnsignedAuthorizationContext {
     pub principal_id: String,
     /// Kind of the authenticated principal.
     pub principal_kind: AuthorizationPrincipalKind,
-    /// Installed participant assignment, not a client artifact digest.
+    /// Installed participant assignment, not a client-supplied digest.
     pub participant_id: String,
     /// Owner of the current grant binding.
     pub owner_kind: GrantOwnerKind,
@@ -1995,7 +1995,7 @@ mod tests {
             encode_base64url(SigningKey::from_bytes(&[9; 32]).verifying_key().as_bytes());
         assert!(wrong_key.verifying_key().is_err());
         let mut unknown = value;
-        unknown["participantArtifactDigest"] = json!("not-an-identity-credential");
+        unknown["unknownField"] = json!("not-an-identity-credential");
         assert!(parse_authorization_context(&unknown).is_err());
     }
 }

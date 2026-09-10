@@ -1,13 +1,15 @@
-//! OCI distribution, Docker credentials, and the content-addressed API cache.
+//! OCI distribution, Docker credentials, and the content-addressed source-package cache.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
     fs,
-    path::PathBuf,
+    io::{Cursor, Read},
+    path::{Component, Path, PathBuf},
     str::FromStr,
 };
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use docker_credential::{CredentialRetrievalError, DockerCredential};
 use miette::{miette, IntoDiagnostic, Result, WrapErr};
 use oci_client::{
@@ -17,45 +19,141 @@ use oci_client::{
     secrets::RegistryAuth,
     Reference,
 };
+use semver::Version;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::project::RegistryConfig;
+use crate::project::{LockedDependency, LockedPackage, LockedSource, ProjectLock, RegistryConfig};
 
-pub const API_MEDIA_TYPE: &str = "application/vnd.trellis.api.v1+json";
-const EMPTY_CONFIG_MEDIA_TYPE: &str = "application/vnd.oci.empty.v1+json";
-const EMPTY_CONFIG_DIGEST: &str =
-    "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+pub(crate) const SOURCE_MEDIA_TYPE: &str = "application/vnd.trellis.package.source.v1+tar";
+const CONFIG_MEDIA_TYPE: &str = "application/vnd.trellis.package.source.v1+json";
+const RESOLUTION_PATH: &str = "trellis.resolution.json";
+const MAX_FILES: usize = 1_024;
+const MAX_PATH_BYTES: usize = 255;
+const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_PACKAGE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_ARCHIVE_BYTES: u64 = MAX_PACKAGE_BYTES + MAX_FILES as u64 * 4 * 512 + 1_024;
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Exact validated bytes and distribution identity for one OCI API release.
-#[derive(Debug)]
-pub struct PulledApi {
-    /// Parsed canonical API.
-    pub api: trellis_protocol::ApiArtifact,
-    /// Exact canonical API layer bytes.
-    pub bytes: Vec<u8>,
-    /// Exact raw OCI manifest bytes.
-    pub manifest_bytes: Vec<u8>,
-    /// Exact OCI manifest digest.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PackageConfig {
+    format: String,
+    name: String,
+    version: String,
+    package_digest: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FrozenResolution {
+    format: String,
+    dependencies: Vec<LockedDependency>,
+    packages: Vec<LockedPackage>,
+}
+
+/// Validated source files and immutable distribution identity for one package release.
+#[derive(Clone, Debug)]
+pub(crate) struct SourcePackage {
+    /// Stable package name and OCI repository suffix.
+    pub name: String,
+    /// Immutable package release version.
+    pub version: Version,
+    /// Base64url SHA-256 digest of the compiled package semantics.
+    pub package_digest: String,
+    /// SHA-256 digest of the exact normalized tar layer.
+    pub distribution_digest: String,
+    /// Explicit manifest and IDL source files.
+    pub files: BTreeMap<PathBuf, Vec<u8>>,
+    /// Exact OCI image manifest digest, empty before publication.
     pub manifest_digest: String,
 }
 
-/// Derive the one OCI repository owned by a stable API ID.
-pub fn repository(config: &RegistryConfig, api_id: &str) -> Result<String> {
-    let (name, major) = api_id
-        .rsplit_once("@v")
-        .ok_or_else(|| miette!("invalid API id '{api_id}'"))?;
-    // API IDs map directly until a real registry requires overrides.
-    let repository = format!("{}/{name}-v{major}", config.prefix.trim_end_matches('/'));
-    Reference::from_str(&format!("{repository}:probe"))
-        .map_err(|error| miette!("invalid OCI repository for '{api_id}': {error}"))?;
+/// Build a normalized source package from its explicit manifest and IDL sources.
+pub(crate) fn source_package(
+    name: &str,
+    version: &Version,
+    package_digest: &str,
+    mut files: BTreeMap<PathBuf, Vec<u8>>,
+    dependencies: Vec<LockedDependency>,
+    packages: Vec<LockedPackage>,
+) -> Result<SourcePackage> {
+    miette::ensure!(
+        !files.contains_key(Path::new(RESOLUTION_PATH)),
+        "package source path '{RESOLUTION_PATH}' is reserved"
+    );
+    files.insert(
+        RESOLUTION_PATH.into(),
+        canonical_json(&FrozenResolution {
+            format: "trellis.package.resolution.v1".into(),
+            dependencies,
+            packages,
+        })?,
+    );
+    validate_files(&files)?;
+    let manifest = package_manifest(&files)?;
+    miette::ensure!(
+        manifest.package.name == name && manifest.package.version == *version,
+        "source package identity differs from trellis.toml"
+    );
+    let bytes = archive(&files)?;
+    validate_package_digest(package_digest)?;
+    Ok(SourcePackage {
+        name: name.to_owned(),
+        version: version.clone(),
+        package_digest: package_digest.to_owned(),
+        distribution_digest: sha256(&bytes),
+        files,
+        manifest_digest: String::new(),
+    })
+}
+
+impl SourcePackage {
+    pub(crate) fn lock(&self, source: LockedSource) -> Result<ProjectLock> {
+        let resolution = frozen_resolution(&self.files)?;
+        miette::ensure!(
+            resolution
+                .packages
+                .iter()
+                .all(|package| matches!(&package.source, LockedSource::Registry { .. })),
+            "published frozen resolution contains a path dependency"
+        );
+        let mut packages = resolution.packages;
+        miette::ensure!(
+            packages.iter().all(|package| package.name != self.name),
+            "frozen resolution repeats its root package"
+        );
+        packages.push(LockedPackage {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            digest: self.package_digest.clone(),
+            distribution_digest: self.distribution_digest.clone(),
+            dependencies: resolution.dependencies,
+            source,
+        });
+        packages.sort_by(|left, right| left.name.cmp(&right.name));
+        let lock = ProjectLock {
+            format: 2,
+            root: self.name.clone(),
+            packages,
+        };
+        lock.validate()?;
+        Ok(lock)
+    }
+}
+
+/// Derive the one OCI repository owned by a package name.
+pub(crate) fn repository(config: &RegistryConfig, name: &str) -> Result<String> {
+    let repository = format!("{}/{name}", config.prefix.trim_end_matches('/'));
+    Reference::from_str(&repository)
+        .map_err(|error| miette!("invalid OCI repository for package '{name}': {error}"))?;
     Ok(repository)
 }
 
-/// List every valid SemVer release tag in one API repository.
-pub async fn versions(config: &RegistryConfig, api_id: &str) -> Result<Vec<semver::Version>> {
-    let reference = Reference::from_str(&format!("{}:probe", repository(config, api_id)?))
+/// List every valid SemVer release tag in one package repository.
+pub(crate) async fn versions(config: &RegistryConfig, name: &str) -> Result<Vec<Version>> {
+    let reference = Reference::from_str(&repository(config, name)?)
         .map_err(|error| miette!(error.to_string()))?;
     let auth = registry_auth(reference.resolve_registry())?;
     let client = client(reference.resolve_registry())?;
@@ -69,14 +167,14 @@ pub async fn versions(config: &RegistryConfig, api_id: &str) -> Result<Vec<semve
         {
             Ok(response) => response,
             Err(error) if tags.is_empty() && missing_repository(&error) => return Ok(Vec::new()),
-            Err(error) => return Err(miette!("failed to list releases for '{api_id}': {error}")),
+            Err(error) => return Err(miette!("failed to list releases for '{name}': {error}")),
         };
         let Some(next) = response.tags.last().cloned() else {
             break;
         };
         if !cursors.insert(next.clone()) {
             return Err(miette!(
-                "registry returned a non-advancing tag page for '{api_id}'"
+                "registry returned a non-advancing tag page for '{name}'"
             ));
         }
         tags.extend(response.tags);
@@ -84,207 +182,412 @@ pub async fn versions(config: &RegistryConfig, api_id: &str) -> Result<Vec<semve
     }
     let mut versions = tags
         .into_iter()
-        .filter_map(|tag| semver::Version::parse(&tag).ok())
+        .filter_map(|tag| Version::parse(&tag).ok())
         .collect::<Vec<_>>();
     versions.sort();
     versions.dedup();
     Ok(versions)
 }
 
-/// Pull and validate a tagged API release.
-pub async fn pull_tag(
+/// Pull and validate a tagged source-package release.
+pub(crate) async fn pull_tag(
     config: &RegistryConfig,
-    api_id: &str,
-    version: &semver::Version,
-) -> Result<PulledApi> {
-    let reference = Reference::from_str(&format!("{}:{version}", repository(config, api_id)?))
+    name: &str,
+    version: &Version,
+) -> Result<SourcePackage> {
+    let reference = Reference::from_str(&format!("{}:{version}", repository(config, name)?))
         .map_err(|error| miette!(error.to_string()))?;
     let pulled = pull_reference(&reference).await?;
-    validate_api(&pulled, api_id, &version.to_string(), None)?;
+    validate_package(&pulled, name, &version.to_string(), None)?;
     write_cache(&pulled)?;
     Ok(pulled)
 }
 
-/// Read a locked API from cache or pull its exact manifest digest.
-pub async fn pull_locked(
+/// Read a locked package from cache or pull its exact OCI manifest digest.
+pub(crate) async fn pull_locked(
     config: &RegistryConfig,
-    api_id: &str,
+    name: &str,
     version: &str,
-    api_digest: &str,
+    package_digest: &str,
+    distribution_digest: &str,
     manifest_digest: &str,
-) -> Result<PulledApi> {
-    if let Ok(pulled) = read_locked(api_id, version, api_digest, manifest_digest) {
+) -> Result<SourcePackage> {
+    if let Ok(pulled) = read_locked(
+        name,
+        version,
+        package_digest,
+        distribution_digest,
+        manifest_digest,
+    ) {
         return Ok(pulled);
     }
     let _ = fs::remove_dir_all(cache_entry(manifest_digest)?);
-    let reference = Reference::from_str(&format!(
-        "{}@{manifest_digest}",
-        repository(config, api_id)?
-    ))
-    .map_err(|error| miette!(error.to_string()))?;
+    let reference =
+        Reference::from_str(&format!("{}@{manifest_digest}", repository(config, name)?))
+            .map_err(|error| miette!(error.to_string()))?;
     let pulled = pull_reference(&reference)
         .await
-        .wrap_err_with(|| format!("locked OCI artifact {manifest_digest} is unavailable"))?;
-    if pulled.manifest_digest != manifest_digest {
-        return Err(miette!("OCI manifest digest differs from lock"));
-    }
-    validate_api(&pulled, api_id, version, Some(api_digest))?;
+        .wrap_err_with(|| format!("locked source package {manifest_digest} is unavailable"))?;
+    miette::ensure!(
+        pulled.manifest_digest == manifest_digest,
+        "OCI manifest digest differs from lock"
+    );
+    validate_package(&pulled, name, version, Some(package_digest))?;
+    miette::ensure!(
+        pulled.distribution_digest == distribution_digest,
+        "Trellis package distribution digest differs from lock"
+    );
     write_cache(&pulled)?;
     Ok(pulled)
 }
 
-/// Read and verify an exact locked release without credentials or network access.
-pub fn read_locked(
-    api_id: &str,
+/// Read and verify an exact locked package without credentials or network access.
+pub(crate) fn read_locked(
+    name: &str,
     version: &str,
-    api_digest: &str,
+    package_digest: &str,
+    distribution_digest: &str,
     manifest_digest: &str,
-) -> Result<PulledApi> {
+) -> Result<SourcePackage> {
     let pulled = read_cache(manifest_digest)?;
-    validate_api(&pulled, api_id, version, Some(api_digest))?;
+    validate_package(&pulled, name, version, Some(package_digest))?;
+    miette::ensure!(
+        pulled.distribution_digest == distribution_digest,
+        "Trellis package distribution digest differs from lock"
+    );
     Ok(pulled)
 }
 
-/// Build and publish one deterministic canonical API artifact.
-pub async fn publish(
-    config: &RegistryConfig,
-    api: &trellis_protocol::ApiArtifact,
-) -> Result<String> {
-    let version = semver::Version::parse(api.version())
-        .map_err(|error| miette!("invalid API release version: {error}"))?;
-    let reference = Reference::from_str(&format!("{}:{version}", repository(config, api.id())?))
-        .map_err(|error| miette!(error.to_string()))?;
+/// Publish one deterministic source package.
+pub(crate) async fn publish(config: &RegistryConfig, package: &SourcePackage) -> Result<String> {
+    let reference = Reference::from_str(&format!(
+        "{}:{}",
+        repository(config, &package.name)?,
+        package.version
+    ))
+    .map_err(|error| miette!(error.to_string()))?;
     let auth = registry_auth(reference.resolve_registry())?;
-    let (layer, config_blob, manifest, expected_digest) = artifact(api)?;
+    let (layer, config_blob, manifest, expected_digest) = image(package)?;
     client(reference.resolve_registry())?
         .push(&reference, &[layer], config_blob, &auth, Some(manifest))
         .await
-        .map_err(|error| miette!("failed to publish {}: {error}", api.id()))?;
+        .map_err(|error| miette!("failed to publish {}: {error}", package.name))?;
     let pulled = pull_reference(&reference).await?;
-    if pulled.manifest_digest != expected_digest {
-        return Err(miette!("registry stored a different OCI manifest digest"));
-    }
-    validate_api(
+    miette::ensure!(
+        pulled.manifest_digest == expected_digest,
+        "registry stored a different OCI manifest digest"
+    );
+    validate_package(
         &pulled,
-        api.id(),
-        api.version(),
-        Some(&api.digest().map_err(|e| miette!(e.to_string()))?),
+        &package.name,
+        &package.version.to_string(),
+        Some(&package.package_digest),
     )?;
+    write_cache(&pulled)?;
     Ok(pulled.manifest_digest)
 }
 
-/// Compute the deterministic OCI manifest digest without contacting a registry.
-pub fn artifact_digest(api: &trellis_protocol::ApiArtifact) -> Result<String> {
-    Ok(artifact(api)?.3)
-}
-
-fn artifact(
-    api: &trellis_protocol::ApiArtifact,
-) -> Result<(ImageLayer, Config, OciImageManifest, String)> {
-    let bytes = api
-        .canonical_json()
-        .map_err(|error| miette!(error.to_string()))?
-        .into_bytes();
-    let layer = ImageLayer::new(bytes, API_MEDIA_TYPE.to_owned(), None);
-    let config = Config::new(b"{}".as_slice(), EMPTY_CONFIG_MEDIA_TYPE.to_owned(), None);
-    let mut annotations = BTreeMap::new();
-    annotations.insert("dev.trellis.api.id".to_owned(), api.id().to_owned());
-    annotations.insert(
-        "dev.trellis.api.version".to_owned(),
-        api.version().to_owned(),
+fn image(package: &SourcePackage) -> Result<(ImageLayer, Config, OciImageManifest, String)> {
+    let bytes = archive(&package.files)?;
+    miette::ensure!(
+        sha256(&bytes) == package.distribution_digest,
+        "source package distribution digest does not match its files"
     );
-    annotations.insert(
-        "dev.trellis.api.digest".to_owned(),
-        api.digest().map_err(|error| miette!(error.to_string()))?,
-    );
-    let mut manifest =
-        OciImageManifest::build(std::slice::from_ref(&layer), &config, Some(annotations));
+    let config_bytes = config_bytes(package)?;
+    let layer = ImageLayer::new(bytes, SOURCE_MEDIA_TYPE.to_owned(), None);
+    let config = Config::new(config_bytes, CONFIG_MEDIA_TYPE.to_owned(), None);
+    let mut manifest = OciImageManifest::build(std::slice::from_ref(&layer), &config, None);
     manifest.media_type = Some(OCI_IMAGE_MEDIA_TYPE.to_owned());
-    manifest.artifact_type = Some(API_MEDIA_TYPE.to_owned());
-    let bytes =
-        trellis_protocol::canonicalize_json(&serde_json::to_value(&manifest).into_diagnostic()?)
-            .map_err(|error| miette!(error.to_string()))?;
-    let digest = sha256(bytes.as_bytes());
-    Ok((layer, config, manifest, digest))
+    manifest.artifact_type = Some(SOURCE_MEDIA_TYPE.to_owned());
+    let bytes = canonical_json(&manifest)?;
+    Ok((layer, config, manifest, sha256(&bytes)))
 }
 
-async fn pull_reference(reference: &Reference) -> Result<PulledApi> {
+async fn pull_reference(reference: &Reference) -> Result<SourcePackage> {
     let client = client(reference.resolve_registry())?;
     let auth = registry_auth(reference.resolve_registry())?;
     let (manifest_bytes, manifest_digest) = client
         .pull_manifest_raw(reference, &auth, &[OCI_IMAGE_MEDIA_TYPE])
         .await
         .map_err(|error| miette!("failed to pull {reference}: {error}"))?;
-    if sha256(&manifest_bytes) != manifest_digest {
-        return Err(miette!(
-            "registry returned a manifest with the wrong digest"
-        ));
-    }
+    miette::ensure!(
+        manifest_bytes.len() <= 64 * 1024,
+        "Trellis package manifest is too large"
+    );
+    miette::ensure!(
+        sha256(&manifest_bytes) == manifest_digest,
+        "registry returned a manifest with the wrong digest"
+    );
     let manifest: OciImageManifest = serde_json::from_slice(&manifest_bytes)
         .into_diagnostic()
         .wrap_err("invalid OCI image manifest")?;
     validate_manifest(&manifest)?;
+    let mut config_bytes = Vec::new();
+    client
+        .pull_blob(reference, &manifest.config, &mut config_bytes)
+        .await
+        .map_err(|error| miette!("failed to pull Trellis package config: {error}"))?;
+    miette::ensure!(
+        i64::try_from(config_bytes.len()).ok() == Some(manifest.config.size),
+        "Trellis package config size mismatch"
+    );
+    miette::ensure!(
+        sha256(&config_bytes) == manifest.config.digest,
+        "Trellis package config digest mismatch"
+    );
+    let config: PackageConfig = serde_json::from_slice(&config_bytes)
+        .into_diagnostic()
+        .wrap_err("invalid Trellis package config")?;
+    miette::ensure!(
+        config.format == "trellis.package.source.v1",
+        "unsupported Trellis package config format"
+    );
+    miette::ensure!(
+        config_bytes == canonical_json(&config)?,
+        "Trellis package config is not canonical JSON"
+    );
     let mut bytes = Vec::new();
     client
         .pull_blob(reference, &manifest.layers[0], &mut bytes)
         .await
-        .map_err(|error| miette!("failed to pull Trellis API layer: {error}"))?;
-    if sha256(&bytes) != manifest.layers[0].digest {
-        return Err(miette!("Trellis API layer digest mismatch"));
-    }
-    let value = serde_json::from_slice(&bytes).into_diagnostic()?;
-    let api = trellis_protocol::parse_api(&value).map_err(|error| miette!(error.to_string()))?;
-    Ok(PulledApi {
-        api,
-        bytes,
-        manifest_bytes: manifest_bytes.to_vec(),
+        .map_err(|error| miette!("failed to pull Trellis source package: {error}"))?;
+    miette::ensure!(
+        i64::try_from(bytes.len()).ok() == Some(manifest.layers[0].size),
+        "Trellis source-package layer size mismatch"
+    );
+    miette::ensure!(
+        sha256(&bytes) == manifest.layers[0].digest,
+        "Trellis source-package layer digest mismatch"
+    );
+    let files = extract_archive(&bytes)?;
+    Ok(SourcePackage {
+        name: config.name,
+        version: Version::parse(&config.version).into_diagnostic()?,
+        package_digest: config.package_digest,
+        distribution_digest: sha256(&bytes),
+        files,
         manifest_digest,
     })
 }
 
 fn validate_manifest(manifest: &OciImageManifest) -> Result<()> {
-    if manifest.schema_version != 2
-        || manifest.media_type.as_deref() != Some(OCI_IMAGE_MEDIA_TYPE)
-        || manifest.artifact_type.as_deref() != Some(API_MEDIA_TYPE)
-        || manifest.config.media_type != EMPTY_CONFIG_MEDIA_TYPE
-        || manifest.config.digest != EMPTY_CONFIG_DIGEST
-        || manifest.config.size != 2
-        || manifest.layers.len() != 1
-        || manifest.layers[0].media_type != API_MEDIA_TYPE
-    {
-        return Err(miette!(
-            "OCI artifact is not a Trellis API v1 image manifest"
-        ));
-    }
+    miette::ensure!(
+        manifest.schema_version == 2
+            && manifest.media_type.as_deref() == Some(OCI_IMAGE_MEDIA_TYPE)
+            && manifest.artifact_type.as_deref() == Some(SOURCE_MEDIA_TYPE)
+            && manifest.config.media_type == CONFIG_MEDIA_TYPE
+            && manifest.config.size >= 0
+            && manifest.config.size <= 4 * 1024
+            && manifest.layers.len() == 1
+            && manifest.layers[0].media_type == SOURCE_MEDIA_TYPE
+            && manifest.layers[0].size >= 0
+            && manifest.layers[0].size
+                <= i64::try_from(MAX_ARCHIVE_BYTES)
+                    .expect("package bounds fit OCI descriptor size"),
+        "OCI image is not a Trellis source package v1 manifest"
+    );
     Ok(())
 }
 
-fn validate_api(pulled: &PulledApi, id: &str, version: &str, digest: Option<&str>) -> Result<()> {
-    if pulled.bytes
-        != pulled
-            .api
-            .canonical_json()
+fn validate_package(
+    package: &SourcePackage,
+    name: &str,
+    version: &str,
+    digest: Option<&str>,
+) -> Result<()> {
+    miette::ensure!(
+        package.name == name,
+        "remote package name differs from request"
+    );
+    miette::ensure!(
+        package.version.to_string() == version,
+        "remote package version differs from request"
+    );
+    validate_files(&package.files)?;
+    let manifest = package_manifest(&package.files)?;
+    miette::ensure!(
+        manifest.package.name == package.name && manifest.package.version == package.version,
+        "source package identity differs from trellis.toml"
+    );
+    validate_package_digest(&package.package_digest)?;
+    let actual = sha256(&archive(&package.files)?);
+    miette::ensure!(
+        actual == package.distribution_digest,
+        "Trellis source package distribution digest mismatch"
+    );
+    miette::ensure!(
+        digest.is_none_or(|expected| expected == package.package_digest),
+        "Trellis source package digest differs from lock"
+    );
+    Ok(())
+}
+
+fn config_bytes(package: &SourcePackage) -> Result<Vec<u8>> {
+    canonical_json(&PackageConfig {
+        format: "trellis.package.source.v1".to_owned(),
+        name: package.name.clone(),
+        version: package.version.to_string(),
+        package_digest: package.package_digest.clone(),
+    })
+}
+
+fn canonical_json(value: &impl Serialize) -> Result<Vec<u8>> {
+    Ok(
+        trellis_protocol::canonicalize_json(&serde_json::to_value(value).into_diagnostic()?)
             .map_err(|error| miette!(error.to_string()))?
-            .as_bytes()
+            .into_bytes(),
+    )
+}
+
+fn archive(files: &BTreeMap<PathBuf, Vec<u8>>) -> Result<Vec<u8>> {
+    validate_files(files)?;
+    let mut bytes = Vec::new();
     {
-        return Err(miette!("remote API layer is not canonical Trellis JSON"));
+        let mut builder = tar::Builder::new(&mut bytes);
+        builder.mode(tar::HeaderMode::Deterministic);
+        for (path, contents) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(contents.len() as u64);
+            header.set_mode(0o644);
+            header.set_uid(0);
+            header.set_gid(0);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, path, contents.as_slice())
+                .into_diagnostic()?;
+        }
+        builder.finish().into_diagnostic()?;
     }
-    if pulled.api.id() != id {
-        return Err(miette!("remote '{id}' contains API '{}'", pulled.api.id()));
+    Ok(bytes)
+}
+
+fn extract_archive(bytes: &[u8]) -> Result<BTreeMap<PathBuf, Vec<u8>>> {
+    miette::ensure!(
+        bytes.len() as u64 <= MAX_ARCHIVE_BYTES,
+        "source package archive is too large"
+    );
+    let mut tar = tar::Archive::new(Cursor::new(bytes));
+    let mut files = BTreeMap::new();
+    let mut total = 0_u64;
+    for entry in tar.entries().into_diagnostic()? {
+        let mut entry = entry.into_diagnostic()?;
+        miette::ensure!(
+            entry.header().entry_type().is_file(),
+            "source package contains a non-file entry"
+        );
+        let path = entry.path().into_diagnostic()?.into_owned();
+        validate_path(&path)?;
+        let size = entry.size();
+        total = total
+            .checked_add(size)
+            .ok_or_else(|| miette!("source package size overflow"))?;
+        miette::ensure!(
+            size <= MAX_FILE_BYTES && total <= MAX_PACKAGE_BYTES,
+            "source package contents exceed size limits"
+        );
+        let mut contents = Vec::with_capacity(size as usize);
+        entry.read_to_end(&mut contents).into_diagnostic()?;
+        miette::ensure!(
+            files.insert(path.clone(), contents).is_none(),
+            "source package contains duplicate path {}",
+            path.display()
+        );
+        miette::ensure!(
+            files.len() <= MAX_FILES,
+            "source package contains too many files"
+        );
     }
-    if pulled.api.version() != version {
-        return Err(miette!(
-            "remote {id}:{version} contains API version {}",
-            pulled.api.version()
-        ));
+    validate_files(&files)?;
+    miette::ensure!(
+        archive(&files)? == bytes,
+        "source package tar is not normalized"
+    );
+    Ok(files)
+}
+
+fn validate_files(files: &BTreeMap<PathBuf, Vec<u8>>) -> Result<()> {
+    miette::ensure!(
+        files.contains_key(Path::new("trellis.toml")),
+        "source package is missing trellis.toml"
+    );
+    let manifest = package_manifest(files)?;
+    let expected = std::iter::once(PathBuf::from("trellis.toml"))
+        .chain(std::iter::once(PathBuf::from(RESOLUTION_PATH)))
+        .chain(manifest.sources.values().map(PathBuf::from))
+        .collect::<BTreeSet<_>>();
+    miette::ensure!(
+        files.keys().cloned().collect::<BTreeSet<_>>() == expected,
+        "source package content does not exactly match its manifest sources"
+    );
+    let mut total = 0_u64;
+    for (path, contents) in files {
+        validate_path(path)?;
+        total = total
+            .checked_add(contents.len() as u64)
+            .ok_or_else(|| miette!("source package size overflow"))?;
+        miette::ensure!(
+            contents.len() as u64 <= MAX_FILE_BYTES && total <= MAX_PACKAGE_BYTES,
+            "source package contents exceed size limits"
+        );
     }
-    let actual = pulled
-        .api
-        .digest()
-        .map_err(|error| miette!(error.to_string()))?;
-    if digest.is_some_and(|expected| expected != actual) {
-        return Err(miette!("Trellis API semantic digest differs from lock"));
-    }
+    miette::ensure!(
+        files.len() <= MAX_FILES,
+        "source package contains too many files"
+    );
+    frozen_resolution(files)?;
+    Ok(())
+}
+
+fn frozen_resolution(files: &BTreeMap<PathBuf, Vec<u8>>) -> Result<FrozenResolution> {
+    let bytes = files
+        .get(Path::new(RESOLUTION_PATH))
+        .ok_or_else(|| miette!("source package is missing frozen resolution metadata"))?;
+    let resolution: FrozenResolution = serde_json::from_slice(bytes).into_diagnostic()?;
+    miette::ensure!(
+        resolution.format == "trellis.package.resolution.v1",
+        "unsupported frozen resolution format"
+    );
+    miette::ensure!(
+        bytes == &canonical_json(&resolution)?,
+        "frozen resolution is not canonical JSON"
+    );
+    miette::ensure!(
+        resolution
+            .dependencies
+            .windows(2)
+            .all(|pair| pair[0].name < pair[1].name)
+            && resolution
+                .packages
+                .windows(2)
+                .all(|pair| pair[0].name < pair[1].name),
+        "frozen resolution entries must be uniquely sorted"
+    );
+    Ok(resolution)
+}
+
+fn package_manifest(
+    files: &BTreeMap<PathBuf, Vec<u8>>,
+) -> Result<trellis_idl::project::PackageManifest> {
+    let manifest: trellis_idl::project::PackageManifest =
+        toml::from_slice(&files[Path::new("trellis.toml")]).into_diagnostic()?;
+    manifest.validate()?;
+    Ok(manifest)
+}
+
+fn validate_path(path: &Path) -> Result<()> {
+    miette::ensure!(
+        !path.as_os_str().is_empty()
+            && !path.is_absolute()
+            && path
+                .to_str()
+                .is_some_and(|path| path.len() <= MAX_PATH_BYTES)
+            && path
+                .components()
+                .all(|component| matches!(component, Component::Normal(_))),
+        "invalid source package path {}",
+        path.display()
+    );
     Ok(())
 }
 
@@ -356,7 +659,7 @@ fn cache_root() -> PathBuf {
         })
         .or_else(|| std::env::var_os("HOME").map(|path| PathBuf::from(path).join(".cache/trellis")))
         .unwrap_or_else(|| std::env::temp_dir().join(format!("trellis-{}", std::process::id())))
-        .join("oci")
+        .join("oci/source-v1")
 }
 
 fn cache_entry(digest: &str) -> Result<PathBuf> {
@@ -367,36 +670,68 @@ fn cache_entry(digest: &str) -> Result<PathBuf> {
     Ok(cache_root().join("sha256").join(hex))
 }
 
-fn read_cache(digest: &str) -> Result<PulledApi> {
+fn read_cache(digest: &str) -> Result<SourcePackage> {
     let entry = cache_entry(digest)?;
     let manifest_bytes = fs::read(entry.join("manifest.json")).into_diagnostic()?;
-    if sha256(&manifest_bytes) != digest {
-        return Err(miette!("cached OCI manifest digest mismatch"));
-    }
+    miette::ensure!(
+        sha256(&manifest_bytes) == digest,
+        "cached OCI manifest digest mismatch"
+    );
     let manifest: OciImageManifest = serde_json::from_slice(&manifest_bytes).into_diagnostic()?;
     validate_manifest(&manifest)?;
-    let bytes = fs::read(entry.join("api.json")).into_diagnostic()?;
-    if sha256(&bytes) != manifest.layers[0].digest {
-        return Err(miette!("cached OCI layer digest mismatch"));
-    }
-    let value = serde_json::from_slice(&bytes).into_diagnostic()?;
-    let api = trellis_protocol::parse_api(&value).map_err(|error| miette!(error.to_string()))?;
-    Ok(PulledApi {
-        api,
-        bytes,
-        manifest_bytes,
+    let config_bytes = fs::read(entry.join("config.json")).into_diagnostic()?;
+    miette::ensure!(
+        i64::try_from(config_bytes.len()).ok() == Some(manifest.config.size),
+        "cached package config size mismatch"
+    );
+    miette::ensure!(
+        sha256(&config_bytes) == manifest.config.digest,
+        "cached package config digest mismatch"
+    );
+    let config: PackageConfig = serde_json::from_slice(&config_bytes).into_diagnostic()?;
+    miette::ensure!(
+        config.format == "trellis.package.source.v1",
+        "unsupported cached Trellis package config format"
+    );
+    miette::ensure!(
+        config_bytes == canonical_json(&config)?,
+        "cached package config is not canonical JSON"
+    );
+    let bytes = fs::read(entry.join("source.tar")).into_diagnostic()?;
+    miette::ensure!(
+        i64::try_from(bytes.len()).ok() == Some(manifest.layers[0].size),
+        "cached source-package layer size mismatch"
+    );
+    miette::ensure!(
+        sha256(&bytes) == manifest.layers[0].digest,
+        "cached source-package layer digest mismatch"
+    );
+    Ok(SourcePackage {
+        name: config.name,
+        version: Version::parse(&config.version).into_diagnostic()?,
+        package_digest: config.package_digest,
+        distribution_digest: sha256(&bytes),
+        files: extract_archive(&bytes)?,
         manifest_digest: digest.to_owned(),
     })
 }
 
-fn write_cache(pulled: &PulledApi) -> Result<()> {
-    let destination = cache_entry(&pulled.manifest_digest)?;
+fn write_cache(package: &SourcePackage) -> Result<()> {
+    let destination = cache_entry(&package.manifest_digest)?;
     if destination.is_dir() {
-        if read_cache(&pulled.manifest_digest).is_ok() {
+        if read_cache(&package.manifest_digest).is_ok() {
             return Ok(());
         }
         fs::remove_dir_all(&destination).into_diagnostic()?;
     }
+    let bytes = archive(&package.files)?;
+    let config_bytes = config_bytes(package)?;
+    let (_, _, manifest, digest) = image(package)?;
+    miette::ensure!(
+        digest == package.manifest_digest,
+        "package manifest digest mismatch"
+    );
+    let manifest_bytes = canonical_json(&manifest)?;
     let parent = destination
         .parent()
         .ok_or_else(|| miette!("invalid cache path"))?;
@@ -405,22 +740,24 @@ fn write_cache(pulled: &PulledApi) -> Result<()> {
         .prefix(".pull-")
         .tempdir_in(parent)
         .into_diagnostic()?;
-    fs::write(staging.path().join("api.json"), &pulled.bytes).into_diagnostic()?;
-    fs::write(staging.path().join("manifest.json"), &pulled.manifest_bytes).into_diagnostic()?;
-    fs::File::open(staging.path().join("api.json"))
-        .into_diagnostic()?
-        .sync_all()
-        .into_diagnostic()?;
-    fs::File::open(staging.path().join("manifest.json"))
-        .into_diagnostic()?
-        .sync_all()
-        .into_diagnostic()?;
-    // Identical digest writers race benignly; the first complete rename wins.
+    for (name, contents) in [
+        ("source.tar", bytes.as_slice()),
+        ("config.json", config_bytes.as_slice()),
+        ("manifest.json", manifest_bytes.as_slice()),
+    ] {
+        let path = staging.path().join(name);
+        fs::write(&path, contents).into_diagnostic()?;
+        fs::File::open(path)
+            .into_diagnostic()?
+            .sync_all()
+            .into_diagnostic()?;
+    }
     if let Err(error) = fs::rename(staging.path(), &destination) {
         if !destination.is_dir() {
             return Err(error).into_diagnostic();
         }
     }
+    read_cache(&package.manifest_digest)?;
     Ok(())
 }
 
@@ -433,75 +770,158 @@ fn sha256(bytes: &[u8]) -> String {
         })
 }
 
+fn validate_package_digest(value: &str) -> Result<()> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| miette!("package digest must be a base64url SHA-256 digest"))?;
+    miette::ensure!(
+        bytes.len() == 32,
+        "package digest must be a base64url SHA-256 digest"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use registry_testkit::{RegistryConfig as TestRegistryConfig, RegistryServer};
-
     use super::*;
 
-    #[test]
-    fn rejects_noncanonical_api_layer_bytes() {
-        let value = serde_json::json!({
-            "format": "trellis.api.v1",
-            "id": "acme.orders@v1",
-            "version": "1.4.2",
-            "displayName": "Orders",
-            "description": "Orders API"
-        });
-        let api = trellis_protocol::parse_api(&value).unwrap();
-        let pulled = PulledApi {
-            api,
-            bytes: serde_json::to_vec_pretty(&value).unwrap(),
-            manifest_bytes: Vec::new(),
-            manifest_digest: "sha256:test".into(),
-        };
+    fn files() -> BTreeMap<PathBuf, Vec<u8>> {
+        BTreeMap::from([
+            (PathBuf::from("main.trellis"), b"api test@v1 {}\n".to_vec()),
+            (
+                PathBuf::from("trellis.toml"),
+                b"[package]\nname='acme-orders'\nversion='1.2.3'\n[sources]\nmain='main.trellis'\n"
+                    .to_vec(),
+            ),
+        ])
+    }
 
-        assert!(validate_api(&pulled, "acme.orders@v1", "1.4.2", None)
+    fn archived_files() -> BTreeMap<PathBuf, Vec<u8>> {
+        let mut files = files();
+        files.insert(
+            RESOLUTION_PATH.into(),
+            canonical_json(&FrozenResolution {
+                format: "trellis.package.resolution.v1".into(),
+                dependencies: Vec::new(),
+                packages: Vec::new(),
+            })
+            .unwrap(),
+        );
+        files
+    }
+
+    #[test]
+    fn source_archive_is_normalized_and_rejects_unsafe_content() {
+        let bytes = archive(&archived_files()).unwrap();
+        assert_eq!(archive(&archived_files()).unwrap(), bytes);
+        assert_eq!(extract_archive(&bytes).unwrap(), archived_files());
+        let mut unexpected = archived_files();
+        unexpected.insert(PathBuf::from("README.md"), Vec::new());
+        assert!(archive(&unexpected)
             .unwrap_err()
             .to_string()
-            .contains("not canonical"));
+            .contains("exactly match"));
+
+        let mut bytes = Vec::new();
+        let mut builder = tar::Builder::new(&mut bytes);
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_size(0);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "contract.trellis", &[][..])
+            .unwrap();
+        builder.finish().unwrap();
+        drop(builder);
+        assert!(extract_archive(&bytes)
+            .unwrap_err()
+            .to_string()
+            .contains("non-file"));
+    }
+
+    #[test]
+    fn package_config_has_required_v1_identity() {
+        let package = source_package(
+            "acme-orders",
+            &Version::parse("1.2.3").unwrap(),
+            &URL_SAFE_NO_PAD.encode([0_u8; 32]),
+            files(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&config_bytes(&package).unwrap()).unwrap();
+        assert_eq!(value["format"], "trellis.package.source.v1");
+        assert_eq!(value["name"], "acme-orders");
+        assert_eq!(value["version"], "1.2.3");
+        assert_eq!(value["packageDigest"], package.package_digest);
+        let (_, _, manifest, manifest_digest) = image(&package).unwrap();
+        assert_eq!(manifest.layers[0].digest, package.distribution_digest);
+        assert_ne!(package.package_digest, package.distribution_digest);
+        assert_ne!(manifest_digest, package.distribution_digest);
+        let mut invalid_manifest = manifest;
+        invalid_manifest.layers[0].size = -1;
+        assert!(validate_manifest(&invalid_manifest).is_err());
+        let lock = package
+            .lock(LockedSource::Path { path: ".".into() })
+            .unwrap();
+        assert_eq!(lock.format, 2);
+        assert_eq!(lock.root, "acme-orders");
+        assert_eq!(lock.packages.len(), 1);
     }
 
     #[tokio::test]
-    async fn publishes_pulls_and_repairs_exact_cached_api_artifacts() {
+    async fn exact_cache_revalidates_all_content() {
         let _guard = TEST_ENV_LOCK.lock().await;
         let cache = tempfile::tempdir().unwrap();
-        std::env::set_var("TRELLIS_CACHE", cache.path());
-        let server = RegistryServer::new(TestRegistryConfig::memory())
-            .await
-            .unwrap();
-        let config = RegistryConfig {
-            prefix: format!("127.0.0.1:{}", server.port()),
-        };
-        let value = serde_json::json!({
-            "format": "trellis.api.v1",
-            "id": "acme.orders@v1",
-            "version": "1.4.2",
-            "displayName": "Orders",
-            "description": "Orders API"
-        });
-        let api = trellis_protocol::parse_api(&value).unwrap();
-        let api_digest = api.digest().unwrap();
-        assert!(versions(&config, api.id()).await.unwrap().is_empty());
-        let first = publish(&config, &api).await.unwrap();
-        assert_eq!(publish(&config, &api).await.unwrap(), first);
-        let pulled = pull_locked(&config, api.id(), api.version(), &api_digest, &first)
-            .await
-            .unwrap();
-        assert_eq!(pulled.api.digest().unwrap(), api_digest);
-        fs::write(cache_entry(&first).unwrap().join("api.json"), b"corrupt").unwrap();
-        let repaired = pull_locked(&config, api.id(), api.version(), &api_digest, &first)
-            .await
-            .unwrap();
-        assert_eq!(repaired.bytes, api.canonical_json().unwrap().as_bytes());
-        assert_eq!(read_cache(&first).unwrap().bytes, repaired.bytes);
-
-        let mut next = value;
-        next["version"] = serde_json::json!("1.4.3");
-        let next = trellis_protocol::parse_api(&next).unwrap();
-        assert_eq!(next.digest().unwrap(), api_digest);
-        assert_ne!(publish(&config, &next).await.unwrap(), first);
-        std::env::remove_var("TRELLIS_CACHE");
+        unsafe { std::env::set_var("TRELLIS_CACHE", cache.path()) };
+        let mut package = source_package(
+            "acme-orders",
+            &Version::parse("1.2.3").unwrap(),
+            &URL_SAFE_NO_PAD.encode([0_u8; 32]),
+            files(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        package.manifest_digest = image(&package).unwrap().3;
+        write_cache(&package).unwrap();
+        assert_eq!(
+            cache_entry(&package.manifest_digest).unwrap(),
+            cache
+                .path()
+                .join("oci/source-v1/sha256")
+                .join(package.manifest_digest.strip_prefix("sha256:").unwrap())
+        );
+        assert_eq!(
+            read_locked(
+                &package.name,
+                &package.version.to_string(),
+                &package.package_digest,
+                &package.distribution_digest,
+                &package.manifest_digest,
+            )
+            .unwrap()
+            .files,
+            package.files
+        );
+        fs::write(
+            cache_entry(&package.manifest_digest)
+                .unwrap()
+                .join("source.tar"),
+            b"corrupt",
+        )
+        .unwrap();
+        assert!(read_locked(
+            &package.name,
+            &package.version.to_string(),
+            &package.package_digest,
+            &package.distribution_digest,
+            &package.manifest_digest,
+        )
+        .is_err());
+        unsafe { std::env::remove_var("TRELLIS_CACHE") };
     }
 
     #[test]
@@ -525,20 +945,7 @@ mod tests {
             .unwrap(),
             RegistryAuth::Bearer("token".into())
         );
-        assert_eq!(
-            credential_auth(
-                Err(CredentialRetrievalError::ConfigNotFound),
-                "registry.example"
-            )
-            .unwrap(),
-            RegistryAuth::Anonymous
-        );
-        assert!(credential_auth(
-            Err(CredentialRetrievalError::ConfigReadError),
-            "registry.example"
-        )
-        .is_err());
-        let helper_error = credential_auth(
+        let error = credential_auth(
             Err(CredentialRetrievalError::HelperFailure {
                 helper: "test".into(),
                 stdout: "secret-token".into(),
@@ -548,6 +955,6 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(!helper_error.contains("secret"));
+        assert!(!error.contains("secret"));
     }
 }

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::super::{AuthorizationContextBundle, AuthorizationContextIssueRequest};
 use super::*;
 use crate::platform::auth::{
@@ -10,6 +12,9 @@ pub(super) use enroll::device_enroll;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NativeBootstrapRequest {
+    package_evidence: trellis_runtime_apis::types::AuthPackageEvidence,
+    participant_path: String,
+    package_digest: String,
     identity_key_id: String,
     session_key: String,
     connection_id: String,
@@ -27,6 +32,7 @@ pub(super) struct BootstrapResponse {
     authorization_context: AuthorizationContextBundle,
     routing: BootstrapRouting,
     runtime: BootstrapRuntime,
+    api_bindings: BTreeMap<String, trellis_rs::client::AuthorizationApiBinding>,
     transports: BootstrapTransports,
     authorization: BootstrapAuthorization,
 }
@@ -65,7 +71,7 @@ struct BootstrapTransport {
 #[serde(rename_all = "camelCase")]
 struct BootstrapAuthorization {
     participant_id: String,
-    participant_artifact_digest: String,
+    participant_digest: String,
     resource_runtime: ServiceResourceBindings,
 }
 
@@ -74,7 +80,7 @@ pub(super) async fn service_bootstrap<R, E>(
     Json(raw): Json<Value>,
 ) -> Result<Json<BootstrapResponse>, HttpError>
 where
-    R: ContextRepository + ProvisioningRepository + Clone + Send + Sync + 'static,
+    R: ContextRepository + GrantRepository + ProvisioningRepository + Clone + Send + Sync + 'static,
     E: AuthEphemeralRepository + Clone,
 {
     bootstrap(&state, raw, ProvisionedIdentityKind::Service)
@@ -87,7 +93,7 @@ pub(super) async fn device_bootstrap<R, E>(
     Json(raw): Json<Value>,
 ) -> Result<Json<BootstrapResponse>, HttpError>
 where
-    R: ContextRepository + ProvisioningRepository + Clone + Send + Sync + 'static,
+    R: ContextRepository + GrantRepository + ProvisioningRepository + Clone + Send + Sync + 'static,
     E: AuthEphemeralRepository + Clone,
 {
     bootstrap(&state, raw, ProvisionedIdentityKind::Device)
@@ -101,7 +107,7 @@ async fn bootstrap<R, E>(
     expected_kind: ProvisionedIdentityKind,
 ) -> Result<BootstrapResponse, HttpError>
 where
-    R: ContextRepository + ProvisioningRepository + Clone + Send + Sync + 'static,
+    R: ContextRepository + GrantRepository + ProvisioningRepository + Clone + Send + Sync + 'static,
     E: AuthEphemeralRepository + Clone,
 {
     let request: NativeBootstrapRequest = serde_json::from_value(raw.clone())
@@ -142,6 +148,15 @@ where
     if identity.kind != expected_kind || identity.state != ProvisionedIdentityState::Active {
         return Err(HttpError::unauthorized("identity_inactive"));
     }
+    let assigned_participant = state
+        .service
+        .repository()
+        .get_credential_participant_assignment(request.identity_key_id.clone())
+        .await?
+        .ok_or_else(|| HttpError::unauthorized("participant_assignment_missing"))?;
+    if assigned_participant != request.participant_path {
+        return Err(HttpError::unauthorized("participant_assignment_mismatch"));
+    }
     let proof = parse_session_proof(&request.proof)
         .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
     verify_session_proof(
@@ -153,7 +168,29 @@ where
     )
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
 
+    let evidence = crate::platform::auth::evidence::PackageEvidenceInput::from_generated_wire(
+        request.package_evidence,
+        request.participant_path,
+        request.package_digest,
+    )?;
     let now = now_ms()?;
+    let presented = state
+        .service
+        .repository()
+        .accept_presented_package(evidence, now)
+        .await?;
+    let (_, installed) = state
+        .service
+        .repository()
+        .get_installed_participant_record(presented.participant_id.clone(), None)
+        .await?
+        .ok_or(AuthorizationStateError::ParticipantMissing)?;
+    if presented.package_digest != installed.package_digest
+        || presented.participant_path != installed.participant_path
+        || presented.participant_digest != installed.participant_digest
+    {
+        return Err(HttpError::conflict("participant_evidence_mismatch"));
+    }
     let connection = IssuanceConnection {
         credential: IssuanceCredential::Native(request.identity_key_id),
         connection_id: request.connection_id,
@@ -228,12 +265,13 @@ where
             participant_id: issuance.participant.participant_id.clone(),
             inbox_prefix: issuance.inbox_prefix,
         },
+        api_bindings: BTreeMap::new(),
         transports,
         authorization: BootstrapAuthorization {
             participant_id: issuance.participant.participant_id.clone(),
-            participant_artifact_digest: issuance.participant.artifact_digest.clone(),
+            participant_digest: issuance.participant.participant_digest.clone(),
             resource_runtime: project_service_resource_bindings(
-                &issuance.participant.participant_json,
+                &issuance.participant.projection,
                 &issuance.resource_bindings,
                 &issuance.participant.participant_id,
             )?,

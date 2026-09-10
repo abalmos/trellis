@@ -1,7 +1,10 @@
 import { jetstream } from "@nats-io/jetstream";
 import type { NatsConnection } from "@nats-io/nats-core";
 import { base64urlEncode } from "./auth/utils.ts";
-import type { HealthHeartbeatSample } from "./internal_sdk/generated/health/types.ts";
+import {
+  type HealthHeartbeatSample,
+  HealthHeartbeatSampleCodec,
+} from "./internal_sdk/generated/types/_internal/p0.js";
 
 const HEALTH_HEARTBEAT_SUBJECT_PREFIX = "health.v1.heartbeat";
 
@@ -43,7 +46,9 @@ export async function publishHealthHeartbeatSample(args: {
   identity: HealthHeartbeatSubjectIdentity;
   sample: HealthHeartbeatSample;
 }): Promise<void> {
-  const payload = new TextEncoder().encode(JSON.stringify(args.sample));
+  const payload = new TextEncoder().encode(
+    JSON.stringify(HealthHeartbeatSampleCodec.encode(args.sample)),
+  );
   if (payload.byteLength > 65_536) {
     throw new Error("health heartbeat sample exceeds 64 KiB");
   }

@@ -40,6 +40,8 @@ pub(crate) enum AuthorizationCredential {
     Native {
         kind: trellis_protocol::AuthorizationPrincipalKind,
         identity: std::sync::Arc<super::super::SessionAuth>,
+        package_evidence: crate::generated::PackageEvidence,
+        participant_path: &'static str,
     },
     User {
         login_session_id: String,
@@ -143,6 +145,14 @@ pub struct AuthorizationRuntimeBinding {
     pub transports: AuthorizationRuntimeTransports,
 }
 
+/// Reserved provider deployment selection for one API.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AuthorizationApiBinding {
+    /// Deployment selected to provide the API.
+    pub provider_deployment_id: String,
+}
+
 /// One complete authorization/runtime installation committed atomically.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -153,6 +163,8 @@ pub struct AuthorizationInstallation {
     pub routing: AuthorizationRoutingMaterial,
     /// Proof-bound session and runtime connection metadata.
     pub runtime: AuthorizationRuntimeBinding,
+    /// API provider selections reserved for deployment routing.
+    pub api_bindings: std::collections::BTreeMap<String, AuthorizationApiBinding>,
     /// Server-clock correction in milliseconds.
     pub server_clock_offset_ms: i64,
     /// Server-owned native resource evidence, absent for user connections.

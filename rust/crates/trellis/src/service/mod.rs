@@ -16,8 +16,6 @@ mod bindings;
 mod bootstrap_ports;
 #[doc(hidden)]
 mod core_bootstrap;
-#[doc(hidden)]
-mod descriptor;
 mod error;
 mod eventlog_runtime;
 mod local_validator;
@@ -37,6 +35,8 @@ mod service_host;
 mod transfer;
 pub(crate) use transfer::transfer_frame_proof_payload;
 
+#[doc(hidden)]
+pub use crate::generated::{EventDescriptor, FeedDescriptor, RpcDescriptor};
 pub use crate::jobs::{ActiveJob, JobDescriptor, JobRef, JobUpdateDescriptor, JobsError};
 #[doc(hidden)]
 pub use authenticated_router::{AuthenticatedRouter, RequestValidation, RequestValidator};
@@ -47,8 +47,6 @@ pub use bindings::{
 };
 #[doc(hidden)]
 pub use bootstrap_ports::BootstrapBindingInfo;
-#[doc(hidden)]
-pub use descriptor::{EventDescriptor, FeedDescriptor, RpcDescriptor};
 pub use error::{
     DeclaredRpcError, HandlerResult, SchemaValidationIssue, ServerError, ValidationIssue,
 };
@@ -73,9 +71,7 @@ pub use resources::{
 #[doc(hidden)]
 pub use router::{RequestContext, RoutePermission, Router};
 #[doc(hidden)]
-pub use runtime_facade::{
-    ConnectedServiceRuntime, CoreBootstrapBinding, GeneratedServiceParticipant, ServiceHandle,
-};
+pub use runtime_facade::{ConnectedServiceRuntime, CoreBootstrapBinding, ServiceHandle};
 pub use runtime_facade::{
     ServiceConnectOptions, ServiceEventListenOptions, ServiceEventListenerContext,
     ServiceEventListenerHandle, ServiceEventListenerMode, ServiceEventPublisherContext,

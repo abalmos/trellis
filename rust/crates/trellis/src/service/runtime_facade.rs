@@ -107,32 +107,6 @@ impl Drop for ServiceEventListenerRegistryCleanup {
 /// Default request/connect timeout for service bootstrap and NATS RPC calls.
 pub const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 
-/// Native participant and API evidence emitted by generated Rust participant facades.
-///
-/// Service and device facades use this as their sole source of exact contract evidence.
-pub trait GeneratedServiceParticipant {
-    /// Trellis participant id, for example `example.service@v1`.
-    const PARTICIPANT_ID: &'static str;
-
-    /// Content digest for the generated participant artifact.
-    const PARTICIPANT_DIGEST: &'static str;
-
-    /// Digest of the participant needs resolution.
-    const PARTICIPANT_NEEDS_DIGEST: &'static str;
-
-    /// Canonical participant artifact JSON presented during service bootstrap.
-    const PARTICIPANT_JSON: &'static str;
-
-    /// Canonical owned API artifact JSON presented during service bootstrap.
-    const API_JSON: &'static str;
-
-    /// Digest of the owned API artifact.
-    const API_DIGEST: &'static str;
-
-    /// Exact referenced API JSON and digest evidence.
-    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)];
-}
-
 /// High-level options for connecting a generated Rust service runtime.
 #[derive(Clone)]
 pub struct ServiceConnectOptions<'a> {
@@ -434,9 +408,9 @@ impl std::fmt::Debug for ServiceHandle {
 }
 
 impl ServiceHandle {
-    /// Return the opaque caller used for generated outbound calls.
-    pub fn caller(&self) -> crate::generated::Caller {
-        crate::generated::Caller::from_client(Arc::clone(&self.client))
+    /// Return the authenticated transport used by generated clients.
+    pub fn generated_client(&self) -> crate::generated::Client {
+        crate::generated::Client::from_client(Arc::clone(&self.client))
     }
 
     /// Return the authenticated service session's public key.
@@ -731,9 +705,10 @@ impl ServiceHandlerContext {
 /// Connected high-level service runtime for one generated service contract.
 pub struct ConnectedServiceRuntime<C> {
     client: Arc<TrellisClient>,
-    caller: crate::generated::Caller,
     binding: CoreBootstrapBinding,
     resources: ServiceResourceBindings,
+    kv_handles: BTreeMap<String, KvHandle>,
+    store_handles: BTreeMap<String, StoreHandle>,
     event_listeners: SharedDurableEventListeners,
     event_failures: mpsc::UnboundedSender<ServiceRuntimeError>,
     event_failure_receiver: mpsc::UnboundedReceiver<ServiceRuntimeError>,
@@ -770,14 +745,14 @@ impl<C> ConnectedServiceRuntime<C> {
         let api_id = api_id.into();
         let auth =
             LocalAuthVerifier::new(client.authorization_context_cache().ok(), api_id.clone());
-        let caller = crate::generated::Caller::new(Arc::clone(&client));
         let mut router = Router::new();
         router.set_api_id(api_id);
         Self {
             client,
-            caller,
             binding,
             resources,
+            kv_handles: BTreeMap::new(),
+            store_handles: BTreeMap::new(),
             event_listeners: Arc::clone(&event_listeners),
             event_failures,
             event_failure_receiver,
@@ -797,13 +772,13 @@ impl<C> ConnectedServiceRuntime<C> {
     }
 
     fn descriptor_subject(&self, subject: &str) -> String {
-        crate::client::OperationTransport::descriptor_subject(&self.caller, subject)
+        subject.to_owned()
     }
 
-    /// Return the opaque caller handle consumed by generated facades.
+    /// Return the authenticated transport consumed by generated facades.
     #[doc(hidden)]
-    pub fn caller(&self) -> &crate::generated::Caller {
-        &self.caller
+    pub fn generated_client(&self) -> crate::generated::Client {
+        crate::generated::Client::from_client(Arc::clone(&self.client))
     }
 
     /// Return the parsed core bootstrap binding supplied by service bootstrap.
@@ -814,6 +789,18 @@ impl<C> ConnectedServiceRuntime<C> {
     /// Return all typed resource bindings resolved during service bootstrap.
     pub fn resources(&self) -> &ServiceResourceBindings {
         &self.resources
+    }
+
+    /// Return an opened generic KV handle when bootstrap installed the resource.
+    #[doc(hidden)]
+    pub fn generated_kv_handle(&self, name: &str) -> Option<&KvHandle> {
+        self.kv_handles.get(name)
+    }
+
+    /// Return an opened generic object-store handle when bootstrap installed the resource.
+    #[doc(hidden)]
+    pub fn generated_store_handle(&self, name: &str) -> Option<&StoreHandle> {
+        self.store_handles.get(name)
     }
 
     /// Return one KV/state resource binding by contract-local resource name.
@@ -1099,28 +1086,42 @@ impl<C> ConnectedServiceRuntime<C> {
     }
 }
 
-impl<C: GeneratedServiceParticipant> ConnectedServiceRuntime<C> {
-    /// Connect with generated contract constants and parse the returned bootstrap binding.
+impl<C: crate::generated::ParticipantDescriptor> ConnectedServiceRuntime<C> {
+    /// Connect with generated participant evidence and parse the returned bootstrap binding.
     pub async fn connect(options: ServiceConnectOptions<'_>) -> Result<Self, ServiceRuntimeError> {
         let client =
             TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
                 trellis_url: options.trellis_url,
-                participant_id: C::PARTICIPANT_ID,
+                participant_id: C::ID,
+                participant_path: C::PATH,
+                package_evidence: C::package_evidence(),
                 name: options.name,
                 provisioned_identity_seed_base64url: options.provisioned_identity_seed_base64url,
                 timeout_ms: options.timeout_ms,
             })
             .await?;
         let binding = parse_bootstrap_binding(&client)?;
-        let api_value = serde_json::from_str(C::API_JSON).map_err(TrellisClientError::from)?;
-        let api = trellis_protocol::parse_api(&api_value)
-            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
-        Ok(Self::from_parts(
-            options.name.unwrap_or(C::PARTICIPANT_ID),
+        let api_id = C::IMPLEMENTED_API_IDS.first().copied().ok_or_else(|| {
+            TrellisClientError::Bootstrap(format!(
+                "generated service participant `{}` implements no API",
+                C::ID
+            ))
+        })?;
+        let mut runtime = Self::from_parts(
+            options.name.unwrap_or(C::ID),
             Arc::new(client),
             binding,
-            api.id(),
-        ))
+            api_id,
+        );
+        for name in runtime.resources.kv.keys().cloned().collect::<Vec<_>>() {
+            let handle = runtime.kv_client(&name).await?;
+            runtime.kv_handles.insert(name, handle);
+        }
+        for name in runtime.resources.store.keys().cloned().collect::<Vec<_>>() {
+            let handle = runtime.store_client(&name).await?;
+            runtime.store_handles.insert(name, handle);
+        }
+        Ok(runtime)
     }
 }
 

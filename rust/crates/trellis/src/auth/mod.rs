@@ -10,10 +10,7 @@ mod protocol;
 mod session_store;
 
 pub use crate::service::payload_hash_base64url;
-pub use browser_login::{
-    cli_participant_digest, cli_participant_grants, contract_digest, generate_session_keypair,
-    start_admin_reauth, start_agent_login,
-};
+pub use browser_login::{generate_session_keypair, start_admin_reauth, start_agent_login};
 pub use client::{connect_admin_client_async, session_public_key};
 pub use device_activation::{
     check_device_activation, derive_device_confirmation_code, wait_for_device_activation,

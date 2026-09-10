@@ -4,9 +4,9 @@ use std::io;
 #[derive(Debug, thiserror::Error)]
 #[doc = concat!("Public Trellis value set `", stringify!(TrellisAuthError), "`.")]
 pub enum TrellisAuthError {
-    /// The supplied contract JSON could not be parsed.
-    #[error("invalid contract json: {0}")]
-    ContractJson(#[from] serde_json::Error),
+    /// A JSON request or response could not be encoded or decoded.
+    #[error("invalid json: {0}")]
+    Json(#[from] serde_json::Error),
 
     /// A protocol-owned participant or proof value was invalid.
     #[error("auth protocol error: {0}")]

@@ -3,34 +3,39 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use serde_json::json;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_rs::jobs::events::{cancelled_by_admin, dismissed, retried_by_admin, EventMeta};
 use trellis_rs::jobs::types::{
     Job, JobAdminAction, JobErrorDetail, JobEvent, JobState, JobTrigger, JobTriggerKind,
-    JobWaitEdge,
 };
 use trellis_rs::jobs::JobsRuntime;
 use trellis_rs::jobs::{is_terminal, job_event_subject, reduce_job_event};
 
-use trellis_runtime_apis::jobs::types::{
+use trellis_runtime_apis::types::{
     JobsCancelRequest, JobsCancelResponse, JobsDismissDLQRequest, JobsDismissDLQResponse,
-    JobsGetKeyRequest, JobsGetKeyResponse, JobsGetKeyResponseActiveItem,
-    JobsGetKeyResponseQueuedItem, JobsInspectRequest, JobsInspectResponse,
-    JobsInspectResponseErrorsItem, JobsInspectResponseRelatedItem,
-    JobsInspectResponseRelatedItemContext, JobsInspectResponseRelatedItemProgress,
-    JobsInspectResponseTimelineItem, JobsInspectResponseTimelineItemErrorDetail,
-    JobsInspectResponseTimelineItemWaitEdge, JobsListDLQRequest, JobsListDLQResponse,
-    JobsListServicesRequest, JobsListServicesResponse, JobsListServicesResponseEntriesItem,
-    JobsListServicesResponseEntriesItemWorkersItem, JobsMetricsRequest, JobsMetricsResponse,
-    JobsMetricsResponseBucketsItem, JobsMetricsResponseBucketsItemGroupsItem,
-    JobsMetricsResponseBucketsItemGroupsItemQueueWait,
-    JobsMetricsResponseBucketsItemGroupsItemRuntime, JobsMetricsResponseSummaryItem,
-    JobsMetricsResponseSummaryItemQueueWait, JobsMetricsResponseSummaryItemRuntime,
-    JobsQueryRequest, JobsQueryResponse, JobsQueryResponseEntriesItem,
-    JobsQueryResponseEntriesItemContext, JobsQueryResponseEntriesItemProgress,
-    JobsQueryResponseGroupsItem, JobsQueryResponseStats, JobsReplayDLQRequest,
-    JobsReplayDLQResponse, JobsRetryRequest, JobsRetryResponse,
+    JobsGetKeyRequest, JobsGetKeyResponse, JobsInspectRequest, JobsInspectResponse,
+    JobsInspectResponseerrorsItem as JobsInspectResponseErrorsItem,
+    JobsInspectResponserelatedItem as JobsInspectResponseRelatedItem,
+    JobsInspectResponsetimelineItem as JobsInspectResponseTimelineItem,
+    JobsInspectResponsetimelineItemerrorDetail as JobsInspectResponseTimelineItemErrorDetail,
+    JobsListDLQRequest, JobsListDLQResponse, JobsListServicesRequest, JobsListServicesResponse,
+    JobsListServicesResponseentriesItem as JobsListServicesResponseEntriesItem,
+    JobsListServicesResponseentriesItemworkersItem as JobsListServicesResponseEntriesItemWorkersItem,
+    JobsMetricsRequest, JobsMetricsResponse,
+    JobsMetricsResponsebucketsItem as JobsMetricsResponseBucketsItem,
+    JobsMetricsResponsebucketsItemgroupsItem as JobsMetricsResponseBucketsItemGroupsItem,
+    JobsMetricsResponsebucketsItemgroupsItemqueueWait as JobsMetricsResponseBucketsItemGroupsItemQueueWait,
+    JobsMetricsResponsebucketsItemgroupsItemruntime as JobsMetricsResponseBucketsItemGroupsItemRuntime,
+    JobsMetricsResponsesummaryItem as JobsMetricsResponseSummaryItem,
+    JobsMetricsResponsesummaryItemqueueWait as JobsMetricsResponseSummaryItemQueueWait,
+    JobsMetricsResponsesummaryItemruntime as JobsMetricsResponseSummaryItemRuntime,
+    JobsQueryRequest, JobsQueryResponse,
+    JobsQueryResponseentriesItem as JobsQueryResponseEntriesItem,
+    JobsQueryResponsegroupsItem as JobsQueryResponseGroupsItem,
+    JobsQueryResponsestats as JobsQueryResponseStats, JobsReplayDLQRequest, JobsReplayDLQResponse,
+    JobsRetryRequest, JobsRetryResponse,
 };
 
 mod resources;
@@ -116,7 +121,8 @@ impl JobsQuery {
         request: &JobsListServicesRequest,
     ) -> Result<JobsListServicesResponse, JobsQueryError> {
         let started = Instant::now();
-        let (offset, limit) = parse_page_request(request.offset, request.limit)?;
+        let (offset, limit) =
+            parse_page_request(request.offset.map(|value| value.0), request.limit.0 .0)?;
         tracing::debug!(offset, limit, "jobs rpc list_services started");
         let now = OffsetDateTime::now_utc();
         let workers = self
@@ -135,21 +141,21 @@ impl JobsQuery {
                 .push(wire::worker_presence_to_wire(&worker));
         }
 
-        let mut services = Vec::new();
+        let mut services = Vec::<JobsListServicesResponseEntriesItem>::new();
         for (name, mut workers) in grouped {
             workers.sort_by(|left, right| {
                 left.job_type
-                    .cmp(&right.job_type)
-                    .then_with(|| left.instance_id.cmp(&right.instance_id))
+                    .0
+                    .cmp(&right.job_type.0)
+                    .then_with(|| left.instance_id.0.cmp(&right.instance_id.0))
             });
-            services.push(JobsListServicesResponseEntriesItem {
-                healthy: !workers.is_empty(),
-                name,
-                workers,
-            });
+            services.push(wire::decode_wire(
+                json!({ "healthy": !workers.is_empty(), "name": name, "workers": workers }),
+                "jobs list services entry",
+            )?);
         }
         let count = u64::try_from(services.len()).unwrap_or(u64::MAX);
-        let services = services
+        let services: Vec<_> = services
             .into_iter()
             .skip(usize::try_from(offset).unwrap_or(usize::MAX))
             .take(usize::try_from(limit).unwrap_or(usize::MAX))
@@ -163,13 +169,16 @@ impl JobsQuery {
             "jobs rpc list_services completed"
         );
 
-        Ok(JobsListServicesResponse {
-            count: to_wire_integer(count),
-            entries: services,
-            limit: to_wire_integer(limit),
-            next_offset: next_offset.map(to_wire_integer),
-            offset: to_wire_integer(offset),
-        })
+        wire::decode_wire(
+            json!({
+                "count": count,
+                "entries": services,
+                "limit": limit,
+                "nextOffset": next_offset,
+                "offset": offset,
+            }),
+            "jobs list services response",
+        )
     }
 
     /// Query projected jobs using the generated `Jobs.Query` workbench wire shape.
@@ -178,7 +187,8 @@ impl JobsQuery {
         request: &JobsQueryRequest,
     ) -> Result<JobsQueryResponse, JobsQueryError> {
         let started = Instant::now();
-        let (offset, limit) = parse_page_request(request.offset, request.limit)?;
+        let (offset, limit) =
+            parse_page_request(request.offset.map(|value| value.0), request.limit.0 .0)?;
         let since = parse_window_filter(request.window.as_ref().map(AsRef::as_ref))?;
         tracing::debug!(
             service = ?request.service,
@@ -192,19 +202,16 @@ impl JobsQuery {
             "jobs rpc query started"
         );
         let filter = JobsWorkbenchFilter {
-            service: request.service.clone(),
-            job_type: request.r#type.clone(),
+            service: request.service.as_ref().map(|value| value.0.clone()),
+            job_type: request.r#type.as_ref().map(|value| value.0.clone()),
             states: parse_state_filter(request.state.as_ref())?,
             since,
             search: request.search.clone(),
             queue_key: request.queue_key.clone(),
-            runtime_band: request
-                .runtime_band
-                .as_ref()
-                .map(|value| value.as_str().to_string()),
+            runtime_band: request.runtime_band.as_ref().map(wire_token),
             trigger: request.trigger.clone(),
             sort: parse_workbench_sort(request.sort.as_ref())?,
-            group_by: parse_group_by(request.group_by.as_ref().map(AsRef::as_ref))?,
+            group_by: parse_group_by(request.group_by.as_ref().map(wire_token).as_deref())?,
             offset,
             limit,
         };
@@ -221,22 +228,27 @@ impl JobsQuery {
             "jobs rpc query completed"
         );
 
-        Ok(JobsQueryResponse {
-            count: to_wire_integer(page.count),
-            entries: page
-                .entries
-                .iter()
-                .map(workbench_entry_to_wire)
-                .collect::<Result<Vec<_>, _>>()?,
-            groups: groups
-                .iter()
-                .map(workbench_group_to_wire)
-                .collect::<Result<Vec<_>, _>>()?,
-            limit: to_wire_integer(page.limit),
-            next_offset: page.next_offset.map(to_wire_integer),
-            offset: to_wire_integer(page.offset),
-            stats: workbench_stats_to_wire(&page.stats)?,
-        })
+        let entries = page
+            .entries
+            .iter()
+            .map(workbench_entry_to_wire)
+            .collect::<Result<Vec<_>, _>>()?;
+        let groups = groups
+            .iter()
+            .map(workbench_group_to_wire)
+            .collect::<Result<Vec<_>, _>>()?;
+        wire::decode_wire(
+            json!({
+                "count": page.count,
+                "entries": entries,
+                "groups": groups,
+                "limit": page.limit,
+                "nextOffset": page.next_offset,
+                "offset": page.offset,
+                "stats": workbench_stats_to_wire(&page.stats)?,
+            }),
+            "jobs query response",
+        )
     }
 
     /// Query grouped operational metrics for Jobs dashboards.
@@ -253,12 +265,12 @@ impl JobsQuery {
             state = ?request.state,
             window = %request.window,
             step = %request.step,
-            group_by = %request.group_by,
+            group_by = %wire_token(&request.group_by),
             "jobs rpc metrics started"
         );
         let filter = JobsMetricsFilter {
-            service: request.service.clone(),
-            job_type: request.r#type.clone(),
+            service: request.service.as_ref().map(|value| value.0.clone()),
+            job_type: request.r#type.as_ref().map(|value| value.0.clone()),
             states: parse_state_filter(request.state.as_ref())?,
             since: until - window,
             until,
@@ -273,7 +285,7 @@ impl JobsQuery {
                 )?,
             queue_key: request.queue_key.clone(),
             trigger: request.trigger.clone(),
-            group_by: parse_metrics_group_by(request.group_by.as_str())?,
+            group_by: parse_metrics_group_by(&wire_token(&request.group_by))?,
         };
         let page = self
             .with_projection(move |store| Ok(store.query_metrics(&filter)?))
@@ -284,27 +296,33 @@ impl JobsQuery {
             elapsed_ms = started.elapsed().as_millis(),
             "jobs rpc metrics completed"
         );
-        Ok(JobsMetricsResponse {
-            buckets: page
-                .buckets
-                .iter()
-                .map(metrics_bucket_to_wire)
-                .collect::<Result<Vec<_>, _>>()?,
-            generated_at: until
-                .format(&Rfc3339)
-                .map_err(|error| JobsQueryError::Validation {
-                    field: "generatedAt",
-                    details: error.to_string(),
-                })?,
-            group_by: request.group_by.as_str().to_string(),
-            step: request.step.as_str().to_string(),
-            summary: page
-                .summary
-                .iter()
-                .map(metrics_summary_group_to_wire)
-                .collect::<Result<Vec<_>, _>>()?,
-            window: request.window.as_str().to_string(),
-        })
+        let buckets = page
+            .buckets
+            .iter()
+            .map(metrics_bucket_to_wire)
+            .collect::<Result<Vec<_>, _>>()?;
+        let generated_at = until
+            .format(&Rfc3339)
+            .map_err(|error| JobsQueryError::Validation {
+                field: "generatedAt",
+                details: error.to_string(),
+            })?;
+        let summary = page
+            .summary
+            .iter()
+            .map(metrics_summary_group_to_wire)
+            .collect::<Result<Vec<_>, _>>()?;
+        wire::decode_wire(
+            json!({
+                "buckets": buckets,
+                "generatedAt": generated_at,
+                "groupBy": wire_token(&request.group_by),
+                "step": request.step,
+                "summary": summary,
+                "window": request.window,
+            }),
+            "jobs metrics response",
+        )
     }
 
     /// Fetch one projected job and its timeline by globally addressable admin job id.
@@ -313,8 +331,8 @@ impl JobsQuery {
         request: &JobsInspectRequest,
     ) -> Result<JobsInspectResponse, JobsQueryError> {
         let started = Instant::now();
-        tracing::debug!(job_id = %request.id, "jobs rpc inspect started");
-        let request_id = request.id.clone();
+        tracing::debug!(job_id = %request.id.0, "jobs rpc inspect started");
+        let request_id = request.id.0.clone();
         let job = self
             .with_projection(move |store| {
                 store
@@ -353,21 +371,26 @@ impl JobsQuery {
             elapsed_ms = started.elapsed().as_millis(),
             "jobs rpc inspect completed"
         );
-        Ok(JobsInspectResponse {
-            attempts: Vec::new(),
-            errors,
-            job: job_to_inspect_item(&response_job, &metadata)?,
-            lineage: map_optional_wire(&lineage.lineage, "job inspect lineage")?,
-            related: related
-                .iter()
-                .map(related_entry_to_wire)
-                .collect::<Result<Vec<_>, _>>()?,
-            timeline: timeline
-                .iter()
-                .map(timeline_event_to_wire)
-                .collect::<Result<Vec<_>, _>>()?,
-            trigger: map_optional_wire(&lineage.trigger, "job inspect trigger")?,
-        })
+        let related = related
+            .iter()
+            .map(related_entry_to_wire)
+            .collect::<Result<Vec<_>, _>>()?;
+        let timeline = timeline
+            .iter()
+            .map(timeline_event_to_wire)
+            .collect::<Result<Vec<_>, _>>()?;
+        wire::decode_wire(
+            json!({
+                "attempts": [],
+                "errors": errors,
+                "job": job_to_inspect_item(&response_job, &metadata)?,
+                "lineage": lineage.lineage,
+                "related": related,
+                "timeline": timeline,
+                "trigger": lineage.trigger,
+            }),
+            "jobs inspect response",
+        )
     }
 
     /// Fetch projection-backed keyed-concurrency state by service, job type, and display key.
@@ -381,14 +404,14 @@ impl JobsQuery {
     ) -> Result<JobsGetKeyResponse, JobsQueryError> {
         let started = Instant::now();
         tracing::debug!(
-            service = ?request.service,
-            job_type = ?request.r#type,
-            key = %request.key,
+            service = %request.service.0,
+            job_type = %request.r#type.0,
+            key = %request.key.0,
             "jobs rpc get_key started"
         );
-        let service = request.service.clone();
-        let job_type = request.r#type.clone();
-        let request_key = request.key.clone();
+        let service = request.service.0.clone();
+        let job_type = request.r#type.0.clone();
+        let request_key = request.key.0.clone();
         let key = self
             .with_projection(move |store| {
                 store
@@ -409,40 +432,42 @@ impl JobsQuery {
             "jobs rpc get_key completed"
         );
 
-        Ok(JobsGetKeyResponse {
-            active: key
-                .active
-                .iter()
-                .filter_map(|active| {
-                    let started_at = active.started_at.clone()?;
-                    let heartbeat_at = active.heartbeat_at.clone()?;
-                    let lease_expires_at = active.lease_expires_at.clone()?;
-                    Some(JobsGetKeyResponseActiveItem {
-                        heartbeat_age_ms: heartbeat_age_ms(&heartbeat_at, now),
-                        heartbeat_at,
-                        instance_id: active.instance_id.clone().unwrap_or_default(),
-                        job_id: active.job_id.clone(),
-                        lease_expires_at,
-                        started_at,
-                    })
-                })
-                .collect(),
-            key: key.key,
-            key_hash: key.key_hash,
-            latest_policy_reason: key.latest_policy_reason,
-            queued_depth: to_wire_integer(u64::try_from(key.queued.len()).unwrap_or(u64::MAX)),
-            queued: key
-                .queued
-                .iter()
-                .map(|queued| JobsGetKeyResponseQueuedItem {
-                    created_at: queued.created_at.clone(),
-                    job_id: queued.job_id.clone(),
-                })
-                .collect(),
-            service: key.service,
-            stale_takeover_count: to_wire_integer(key.stale_takeover_count),
-            r#type: key.job_type,
-        })
+        let active = key
+            .active
+            .iter()
+            .filter_map(|active| {
+                let started_at = active.started_at.clone()?;
+                let heartbeat_at = active.heartbeat_at.clone()?;
+                let lease_expires_at = active.lease_expires_at.clone()?;
+                Some(json!({
+                    "heartbeatAgeMs": heartbeat_age_ms(&heartbeat_at, now),
+                    "heartbeatAt": heartbeat_at,
+                    "instanceId": active.instance_id.clone().unwrap_or_default(),
+                    "jobId": active.job_id,
+                    "leaseExpiresAt": lease_expires_at,
+                    "startedAt": started_at,
+                }))
+            })
+            .collect::<Vec<_>>();
+        let queued = key
+            .queued
+            .iter()
+            .map(|queued| json!({ "createdAt": queued.created_at, "jobId": queued.job_id }))
+            .collect::<Vec<_>>();
+        wire::decode_wire(
+            json!({
+                "active": active,
+                "key": key.key,
+                "keyHash": key.key_hash,
+                "latestPolicyReason": key.latest_policy_reason,
+                "queuedDepth": key.queued.len(),
+                "queued": queued,
+                "service": key.service,
+                "staleTakeoverCount": key.stale_takeover_count,
+                "type": key.job_type,
+            }),
+            "jobs get key response",
+        )
     }
 
     /// Cancel a projected job by publishing a `cancelled` event.
@@ -451,8 +476,8 @@ impl JobsQuery {
         request: &JobsCancelRequest,
     ) -> Result<JobsCancelResponse, JobsQueryError> {
         let started = Instant::now();
-        tracing::debug!(job_id = %request.id, "jobs rpc cancel started");
-        let request_id = request.id.clone();
+        tracing::debug!(job_id = %request.id.0, "jobs rpc cancel started");
+        let request_id = request.id.0.clone();
         let existing = self
             .with_projection(move |store| {
                 store
@@ -463,7 +488,7 @@ impl JobsQuery {
         let job = if is_terminal(existing.state) {
             existing
         } else {
-            self.transition_job(&request.id, "pending|retry|active", |job, now| {
+            self.transition_job(&request.id.0, "pending|retry|active", |job, now| {
                 if matches!(
                     job.state,
                     JobState::Pending | JobState::Retry | JobState::Active
@@ -478,7 +503,7 @@ impl JobsQuery {
                         },
                         job.tries,
                         job.state,
-                        request.reason.as_deref(),
+                        request.reason.as_ref().map(|value| value.0.as_str()),
                     ))
                 } else {
                     None
@@ -506,9 +531,9 @@ impl JobsQuery {
         request: &JobsRetryRequest,
     ) -> Result<JobsRetryResponse, JobsQueryError> {
         let started = Instant::now();
-        tracing::debug!(job_id = %request.id, "jobs rpc retry started");
+        tracing::debug!(job_id = %request.id.0, "jobs rpc retry started");
         let job = self
-            .transition_job(&request.id, "failed", |job, now| match job.state {
+            .transition_job(&request.id.0, "failed", |job, now| match job.state {
                 JobState::Failed => Some(retried_by_admin(
                     EventMeta {
                         service: &job.service,
@@ -521,7 +546,7 @@ impl JobsQuery {
                     Some(job.payload.clone()),
                     Some(job.max_tries),
                     job.deadline.as_deref(),
-                    request.reason.as_deref(),
+                    request.reason.as_ref().map(|value| value.0.as_str()),
                 )),
                 _ => None,
             })
@@ -546,7 +571,8 @@ impl JobsQuery {
         request: &JobsListDLQRequest,
     ) -> Result<JobsListDLQResponse, JobsQueryError> {
         let started = Instant::now();
-        let (offset, limit) = parse_page_request(request.offset, request.limit)?;
+        let (offset, limit) =
+            parse_page_request(request.offset.map(|value| value.0), request.limit.0 .0)?;
         let since = parse_since_filter(request.since.as_deref())?;
         tracing::debug!(
             service = ?request.service,
@@ -556,8 +582,8 @@ impl JobsQuery {
             limit,
             "jobs rpc list_dlq started"
         );
-        let service = request.service.clone();
-        let job_type = request.r#type.clone();
+        let service = request.service.as_ref().map(|value| value.0.clone());
+        let job_type = request.r#type.as_ref().map(|value| value.0.clone());
         let page = self
             .with_projection(move |store| {
                 Ok(store.list_jobs(&ListJobsFilter {
@@ -583,13 +609,16 @@ impl JobsQuery {
             elapsed_ms = started.elapsed().as_millis(),
             "jobs rpc list_dlq completed"
         );
-        Ok(JobsListDLQResponse {
-            count: to_wire_integer(page.count),
-            entries,
-            limit: to_wire_integer(page.limit),
-            next_offset: page.next_offset.map(to_wire_integer),
-            offset: to_wire_integer(page.offset),
-        })
+        wire::decode_wire(
+            json!({
+                "count": page.count,
+                "entries": entries,
+                "limit": page.limit,
+                "nextOffset": page.next_offset,
+                "offset": page.offset,
+            }),
+            "jobs list DLQ response",
+        )
     }
 
     /// Replay a dead-lettered job by publishing a `retried` event.
@@ -598,9 +627,9 @@ impl JobsQuery {
         request: &JobsReplayDLQRequest,
     ) -> Result<JobsReplayDLQResponse, JobsQueryError> {
         let started = Instant::now();
-        tracing::debug!(job_id = %request.id, "jobs rpc replay_dlq started");
+        tracing::debug!(job_id = %request.id.0, "jobs rpc replay_dlq started");
         let job = self
-            .transition_job(&request.id, "dead", |job, now| match job.state {
+            .transition_job(&request.id.0, "dead", |job, now| match job.state {
                 JobState::Dead => {
                     let mut event = retried_by_admin(
                         EventMeta {
@@ -614,7 +643,7 @@ impl JobsQuery {
                         Some(job.payload.clone()),
                         Some(job.max_tries),
                         job.deadline.as_deref(),
-                        request.reason.as_deref(),
+                        request.reason.as_ref().map(|value| value.0.as_str()),
                     );
                     event.trigger = Some(JobTrigger {
                         kind: JobTriggerKind::ManualReplay,
@@ -657,9 +686,9 @@ impl JobsQuery {
         request: &JobsDismissDLQRequest,
     ) -> Result<JobsDismissDLQResponse, JobsQueryError> {
         let started = Instant::now();
-        tracing::debug!(job_id = %request.id, "jobs rpc dismiss_dlq started");
+        tracing::debug!(job_id = %request.id.0, "jobs rpc dismiss_dlq started");
         let job = self
-            .transition_job(&request.id, "dead", |job, now| match job.state {
+            .transition_job(&request.id.0, "dead", |job, now| match job.state {
                 JobState::Dead => {
                     let mut event = dismissed(
                         EventMeta {
@@ -671,10 +700,14 @@ impl JobsQuery {
                         },
                         job.tries,
                         JobState::Dead,
-                        request.reason.as_deref().or(job.last_error.as_deref()),
+                        request
+                            .reason
+                            .as_ref()
+                            .map(|value| value.0.as_str())
+                            .or(job.last_error.as_deref()),
                     );
                     event.admin_action = request.reason.as_ref().map(|reason| JobAdminAction {
-                        reason: Some(reason.clone()),
+                        reason: Some(reason.0.clone()),
                     });
                     Some(event)
                 }
@@ -727,16 +760,13 @@ impl JobsQuery {
             detail.first_seen = Some(projection.first_seen);
             detail.occurrence_count = Some(projection.occurrence_count);
         }
-        Ok(vec![serde_json::from_value(
+        Ok(vec![wire::decode_wire(
             serde_json::to_value(detail).map_err(|error| JobsQueryError::ConvertWireModel {
                 model: "job error detail",
                 details: error.to_string(),
             })?,
-        )
-        .map_err(|error| JobsQueryError::ConvertWireModel {
-            model: "job error detail",
-            details: error.to_string(),
-        })?])
+            "job error detail",
+        )?])
     }
 
     async fn transition_job<F>(
@@ -921,11 +951,8 @@ impl From<SqliteJobsStoreError> for JobsQueryError {
     }
 }
 
-fn parse_page_request(offset: Option<i64>, limit: i64) -> Result<(u64, u64), JobsQueryError> {
-    let offset = match offset {
-        Some(offset) => parse_non_negative_integer("offset", offset)?,
-        None => 0,
-    };
+fn parse_page_request(offset: Option<u64>, limit: i64) -> Result<(u64, u64), JobsQueryError> {
+    let offset = offset.unwrap_or_default();
     let limit = parse_positive_integer("limit", limit)?;
     Ok((offset, limit))
 }
@@ -1003,12 +1030,12 @@ fn parse_metrics_group_by(value: &str) -> Result<JobsWorkbenchGroupBy, JobsQuery
 }
 
 fn parse_workbench_sort(
-    sort: Option<&trellis_runtime_apis::jobs::types::JobsQueryRequestSort>,
+    sort: Option<&trellis_runtime_apis::types::JobsQueryRequestsort>,
 ) -> Result<JobsWorkbenchSort, JobsQueryError> {
     let Some(sort) = sort else {
         return Ok(JobsWorkbenchSort::default());
     };
-    let field = match sort.field.as_str() {
+    let field = match wire_token(&sort.field).as_str() {
         "updatedAt" => JobsWorkbenchSortField::UpdatedAt,
         "queueAge" => JobsWorkbenchSortField::QueueAge,
         "runtime" => JobsWorkbenchSortField::Runtime,
@@ -1025,8 +1052,9 @@ fn parse_workbench_sort(
     let descending = match sort
         .direction
         .as_ref()
-        .map(|value| value.as_str())
-        .unwrap_or("desc")
+        .map(wire_token)
+        .unwrap_or_else(|| "desc".to_string())
+        .as_str()
     {
         "asc" => false,
         "desc" => true,
@@ -1057,117 +1085,88 @@ fn parse_group_by(value: Option<&str>) -> Result<Option<JobsWorkbenchGroupBy>, J
         .transpose()
 }
 
+fn wire_token(value: &impl serde::Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+        .unwrap_or_default()
+}
+
 fn workbench_entry_to_wire(
     entry: &JobsWorkbenchEntry,
 ) -> Result<JobsQueryResponseEntriesItem, JobsQueryError> {
     let job = &entry.job;
-    Ok(JobsQueryResponseEntriesItem {
-        completed_at: job.completed_at.clone(),
-        context: Some(JobsQueryResponseEntriesItemContext {
-            request_id: job.context.request_id.clone(),
-            trace_id: job.context.trace_id.clone(),
-            traceparent: job.context.traceparent.clone(),
-            tracestate: job.context.tracestate.clone(),
+    let queue_age_ms = entry
+        .queue_age_anchor_nanos
+        .map(|anchor| {
+            (OffsetDateTime::now_utc().unix_timestamp_nanos() - i128::from(anchor)) / 1_000_000
+        })
+        .and_then(|millis| u64::try_from(millis.max(0)).ok());
+    wire::decode_wire(
+        json!({
+            "completedAt": job.completed_at,
+            "context": job.context,
+            "createdAt": job.created_at,
+            "errorFingerprint": entry.last_error_fingerprint,
+            "id": job.id,
+            "lastError": job.last_error,
+            "lineage": job.lineage,
+            "maxTries": job.max_tries,
+            "progress": job.progress,
+            "queueAgeMs": queue_age_ms,
+            "queueKey": entry.queue_key,
+            "runtimeBand": entry.runtime_band,
+            "runtimeMs": entry.runtime_ms,
+            "service": job.service,
+            "startedAt": job.started_at,
+            "state": job.state,
+            "tries": job.tries,
+            "trigger": job.trigger,
+            "type": job.job_type,
+            "updatedAt": job.updated_at,
+            "waitingOn": (!entry.waiting_on.is_empty()).then_some(&entry.waiting_on),
         }),
-        created_at: job.created_at.clone(),
-        error_fingerprint: entry.last_error_fingerprint.clone(),
-        id: job.id.clone(),
-        last_error: job.last_error.clone(),
-        lineage: map_optional_wire(&job.lineage, "job query lineage")?,
-        max_tries: to_wire_integer(job.max_tries),
-        progress: job
-            .progress
-            .as_ref()
-            .map(|progress| JobsQueryResponseEntriesItemProgress {
-                current: progress.current.map(to_wire_integer),
-                message: progress.message.clone(),
-                step: progress.step.clone(),
-                total: progress.total.map(to_wire_integer),
-            }),
-        queue_age_ms: entry
-            .queue_age_anchor_nanos
-            .map(|anchor| {
-                (OffsetDateTime::now_utc().unix_timestamp_nanos() - i128::from(anchor)) / 1_000_000
-            })
-            .and_then(|millis| i64::try_from(millis.max(0)).ok()),
-        queue_key: entry.queue_key.clone(),
-        runtime_band: entry.runtime_band.clone(),
-        runtime_ms: entry.runtime_ms,
-        service: job.service.clone(),
-        started_at: job.started_at.clone(),
-        state: serde_json::from_value(serde_json::to_value(job.state).map_err(|error| {
-            JobsQueryError::ConvertWireModel {
-                model: "job query state",
-                details: error.to_string(),
-            }
-        })?)
-        .map_err(|error| JobsQueryError::ConvertWireModel {
-            model: "job query state",
-            details: error.to_string(),
-        })?,
-        tries: to_wire_integer(job.tries),
-        trigger: map_optional_wire(&job.trigger, "job query trigger")?,
-        r#type: job.job_type.clone(),
-        updated_at: job.updated_at.clone(),
-        waiting_on: map_wait_edges(&entry.waiting_on, "job query waitingOn")?,
-    })
+        "job query entry",
+    )
 }
 
 fn related_entry_to_wire(
     entry: &JobsWorkbenchEntry,
 ) -> Result<JobsInspectResponseRelatedItem, JobsQueryError> {
     let job = &entry.job;
-    Ok(JobsInspectResponseRelatedItem {
-        completed_at: job.completed_at.clone(),
-        context: Some(JobsInspectResponseRelatedItemContext {
-            request_id: job.context.request_id.clone(),
-            trace_id: job.context.trace_id.clone(),
-            traceparent: job.context.traceparent.clone(),
-            tracestate: job.context.tracestate.clone(),
+    let queue_age_ms = entry
+        .queue_age_anchor_nanos
+        .map(|anchor| {
+            (OffsetDateTime::now_utc().unix_timestamp_nanos() - i128::from(anchor)) / 1_000_000
+        })
+        .and_then(|millis| u64::try_from(millis.max(0)).ok());
+    wire::decode_wire(
+        json!({
+            "completedAt": job.completed_at,
+            "context": job.context,
+            "createdAt": job.created_at,
+            "errorFingerprint": entry.last_error_fingerprint,
+            "id": job.id,
+            "lastError": job.last_error,
+            "lineage": job.lineage,
+            "matchedBy": entry.matched_by,
+            "maxTries": job.max_tries,
+            "progress": job.progress,
+            "queueAgeMs": queue_age_ms,
+            "queueKey": entry.queue_key,
+            "runtimeBand": entry.runtime_band,
+            "runtimeMs": entry.runtime_ms,
+            "service": job.service,
+            "startedAt": job.started_at,
+            "state": job.state,
+            "tries": job.tries,
+            "trigger": job.trigger,
+            "type": job.job_type,
+            "updatedAt": job.updated_at,
+            "waitingOn": (!entry.waiting_on.is_empty()).then_some(&entry.waiting_on),
         }),
-        created_at: job.created_at.clone(),
-        error_fingerprint: entry.last_error_fingerprint.clone(),
-        id: job.id.clone(),
-        last_error: job.last_error.clone(),
-        lineage: map_optional_wire(&job.lineage, "job inspect related lineage")?,
-        matched_by: map_optional_wire(&entry.matched_by, "job inspect related matchedBy")?,
-        max_tries: to_wire_integer(job.max_tries),
-        progress: job
-            .progress
-            .as_ref()
-            .map(|progress| JobsInspectResponseRelatedItemProgress {
-                current: progress.current.map(to_wire_integer),
-                message: progress.message.clone(),
-                step: progress.step.clone(),
-                total: progress.total.map(to_wire_integer),
-            }),
-        queue_age_ms: entry
-            .queue_age_anchor_nanos
-            .map(|anchor| {
-                (OffsetDateTime::now_utc().unix_timestamp_nanos() - i128::from(anchor)) / 1_000_000
-            })
-            .and_then(|millis| i64::try_from(millis.max(0)).ok()),
-        queue_key: entry.queue_key.clone(),
-        runtime_band: entry.runtime_band.clone(),
-        runtime_ms: entry.runtime_ms,
-        service: job.service.clone(),
-        started_at: job.started_at.clone(),
-        state: serde_json::from_value(serde_json::to_value(job.state).map_err(|error| {
-            JobsQueryError::ConvertWireModel {
-                model: "job inspect related state",
-                details: error.to_string(),
-            }
-        })?)
-        .map_err(|error| JobsQueryError::ConvertWireModel {
-            model: "job inspect related state",
-            details: error.to_string(),
-        })?,
-        tries: to_wire_integer(job.tries),
-        trigger: map_optional_wire(&job.trigger, "job inspect related trigger")?,
-        r#type: job.job_type.clone(),
-        updated_at: job.updated_at.clone(),
-        waiting_on: map_wait_edges(&entry.waiting_on, "job inspect related waitingOn")?,
-    })
+        "job inspect related entry",
+    )
 }
 
 fn timeline_event_to_wire(
@@ -1180,55 +1179,28 @@ fn timeline_event_to_wire(
                 details: error.to_string(),
             }
         })?;
-    Ok(JobsInspectResponseTimelineItem {
-        error: event.error_message.clone(),
-        error_detail: timeline_error_detail(event)?,
-        logs: decode_optional_json(&event.logs_json, "job timeline logs")?,
-        message: event.message.clone(),
-        previous_state: map_optional_wire(&event.previous_state, "job timeline previousState")?,
-        progress: decode_optional_json(&event.progress_json, "job timeline progress")?,
-        projected: event.projected,
-        raw_event: Some(raw_event.clone()),
-        reason: event.reason.clone(),
-        sequence: to_wire_integer(event.sequence),
-        state: map_wire(&event.state, "job timeline state")?,
-        timestamp: event.timestamp.clone(),
-        tries: Some(to_wire_integer(event.tries)),
-        r#type: event.event_type.clone(),
-        wait_edge: raw_event
-            .get("waitEdge")
-            .cloned()
-            .map(serde_json::from_value::<JobsInspectResponseTimelineItemWaitEdge>)
-            .transpose()
-            .map_err(|error| JobsQueryError::ConvertWireModel {
-                model: "job timeline waitEdge",
-                details: error.to_string(),
-            })?,
-        worker_instance_id: event.worker_instance_id.clone(),
-    })
-}
-
-fn map_wait_edges<T>(
-    value: &[JobWaitEdge],
-    model: &'static str,
-) -> Result<Option<Vec<T>>, JobsQueryError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    if value.is_empty() {
-        return Ok(None);
-    }
-    serde_json::from_value(serde_json::to_value(value).map_err(|error| {
-        JobsQueryError::ConvertWireModel {
-            model,
-            details: error.to_string(),
-        }
-    })?)
-    .map(Some)
-    .map_err(|error| JobsQueryError::ConvertWireModel {
-        model,
-        details: error.to_string(),
-    })
+    let raw_event_bytes = wire::encode_document(&raw_event)?;
+    wire::decode_wire(
+        json!({
+            "error": event.error_message,
+            "errorDetail": timeline_error_detail(event)?,
+            "logs": decode_optional_json::<serde_json::Value>(&event.logs_json, "job timeline logs")?,
+            "message": event.message,
+            "previousState": event.previous_state,
+            "progress": decode_optional_json::<serde_json::Value>(&event.progress_json, "job timeline progress")?,
+            "projected": event.projected,
+            "rawEvent": raw_event_bytes,
+            "reason": event.reason,
+            "sequence": event.sequence,
+            "state": event.state,
+            "timestamp": event.timestamp,
+            "tries": event.tries,
+            "type": event.event_type,
+            "waitEdge": raw_event.get("waitEdge"),
+            "workerInstanceId": event.worker_instance_id,
+        }),
+        "job timeline event",
+    )
 }
 
 fn timeline_error_detail(
@@ -1242,12 +1214,7 @@ fn timeline_error_detail(
             }
         })?;
     if let Some(detail) = raw_event.get("errorDetail") {
-        return serde_json::from_value(detail.clone())
-            .map(Some)
-            .map_err(|error| JobsQueryError::ConvertWireModel {
-                model: "job timeline error detail",
-                details: error.to_string(),
-            });
+        return wire::decode_wire(detail.clone(), "job timeline error detail").map(Some);
     }
     let Some(message) = event.error_message.as_deref() else {
         return Ok(None);
@@ -1260,19 +1227,16 @@ fn timeline_error_detail(
         .get("jobType")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    serde_json::from_value(
+    wire::decode_wire(
         serde_json::to_value(JobErrorDetail::from_message(service, job_type, message)).map_err(
             |error| JobsQueryError::ConvertWireModel {
                 model: "job timeline error detail",
                 details: error.to_string(),
             },
         )?,
+        "job timeline error detail",
     )
     .map(Some)
-    .map_err(|error| JobsQueryError::ConvertWireModel {
-        model: "job timeline error detail",
-        details: error.to_string(),
-    })
 }
 
 fn decode_optional_json<T>(
@@ -1292,180 +1256,138 @@ where
         .transpose()
 }
 
-fn map_optional_wire<T, U>(
-    value: &Option<T>,
-    model: &'static str,
-) -> Result<Option<U>, JobsQueryError>
-where
-    T: serde::Serialize,
-    U: serde::de::DeserializeOwned,
-{
-    value
-        .as_ref()
-        .map(|value| {
-            serde_json::from_value(serde_json::to_value(value).map_err(|error| {
-                JobsQueryError::ConvertWireModel {
-                    model,
-                    details: error.to_string(),
-                }
-            })?)
-            .map_err(|error| JobsQueryError::ConvertWireModel {
-                model,
-                details: error.to_string(),
-            })
-        })
-        .transpose()
-}
-
-fn map_wire<T: serde::Serialize, U: serde::de::DeserializeOwned>(
-    value: &T,
-    model: &'static str,
-) -> Result<U, JobsQueryError> {
-    serde_json::from_value(serde_json::to_value(value).map_err(|error| {
-        JobsQueryError::ConvertWireModel {
-            model,
-            details: error.to_string(),
-        }
-    })?)
-    .map_err(|error| JobsQueryError::ConvertWireModel {
-        model,
-        details: error.to_string(),
-    })
-}
-
 fn workbench_group_to_wire(
     group: &JobsWorkbenchGroup,
 ) -> Result<JobsQueryResponseGroupsItem, JobsQueryError> {
-    Ok(JobsQueryResponseGroupsItem {
-        count: to_wire_integer(group.count),
-        depth: group.depth.map(to_wire_integer),
-        failure_rate: group.failure_rate,
-        key: group.key.clone(),
-        label: group.label.clone(),
-        latest_updated_at: group.latest_updated_at.clone(),
-        oldest_created_at: group.oldest_created_at.clone(),
-        state: map_optional_wire(&group.state, "job query group state")?,
-    })
+    wire::decode_wire(
+        json!({
+            "count": group.count,
+            "depth": group.depth,
+            "failureRate": group.failure_rate,
+            "key": group.key,
+            "label": group.label,
+            "latestUpdatedAt": group.latest_updated_at,
+            "oldestCreatedAt": group.oldest_created_at,
+            "state": group.state,
+        }),
+        "job query group",
+    )
 }
 
 fn workbench_stats_to_wire(
     stats: &JobsWorkbenchStats,
 ) -> Result<JobsQueryResponseStats, JobsQueryError> {
-    Ok(JobsQueryResponseStats {
-        by_state: stats
-            .by_state
-            .iter()
-            .map(|(key, value)| (key.clone(), to_wire_integer(*value)))
-            .collect(),
-        dead: stats.dead.map(to_wire_integer),
-        failed: stats.failed.map(to_wire_integer),
-        queued: stats.queued.map(to_wire_integer),
-        running: stats.running.map(to_wire_integer),
-        slow: stats.slow.map(to_wire_integer),
-        total: to_wire_integer(stats.total),
-    })
+    wire::decode_wire(
+        json!({
+            "byState": stats.by_state,
+            "dead": stats.dead,
+            "failed": stats.failed,
+            "queued": stats.queued,
+            "running": stats.running,
+            "slow": stats.slow,
+            "total": stats.total,
+        }),
+        "job query stats",
+    )
 }
 
 fn metrics_latency_to_summary_wire(
     latency: &JobsMetricsLatency,
-) -> JobsMetricsResponseSummaryItemRuntime {
-    JobsMetricsResponseSummaryItemRuntime {
-        count: to_wire_integer(latency.count),
-        max_ms: latency.max_ms.map(to_wire_integer),
-        p50_ms: latency.p50_ms.map(to_wire_integer),
-        p95_ms: latency.p95_ms.map(to_wire_integer),
-    }
+) -> Result<JobsMetricsResponseSummaryItemRuntime, JobsQueryError> {
+    wire::decode_wire(metrics_latency_value(latency), "jobs metrics runtime")
 }
 
 fn metrics_latency_to_summary_queue_wire(
     latency: &JobsMetricsLatency,
-) -> JobsMetricsResponseSummaryItemQueueWait {
-    JobsMetricsResponseSummaryItemQueueWait {
-        count: to_wire_integer(latency.count),
-        max_ms: latency.max_ms.map(to_wire_integer),
-        p50_ms: latency.p50_ms.map(to_wire_integer),
-        p95_ms: latency.p95_ms.map(to_wire_integer),
-    }
+) -> Result<JobsMetricsResponseSummaryItemQueueWait, JobsQueryError> {
+    wire::decode_wire(metrics_latency_value(latency), "jobs metrics queue wait")
 }
 
 fn metrics_latency_to_bucket_wire(
     latency: &JobsMetricsLatency,
-) -> JobsMetricsResponseBucketsItemGroupsItemRuntime {
-    JobsMetricsResponseBucketsItemGroupsItemRuntime {
-        count: to_wire_integer(latency.count),
-        max_ms: latency.max_ms.map(to_wire_integer),
-        p50_ms: latency.p50_ms.map(to_wire_integer),
-        p95_ms: latency.p95_ms.map(to_wire_integer),
-    }
+) -> Result<JobsMetricsResponseBucketsItemGroupsItemRuntime, JobsQueryError> {
+    wire::decode_wire(
+        metrics_latency_value(latency),
+        "jobs metrics bucket runtime",
+    )
 }
 
 fn metrics_latency_to_bucket_queue_wire(
     latency: &JobsMetricsLatency,
-) -> JobsMetricsResponseBucketsItemGroupsItemQueueWait {
-    JobsMetricsResponseBucketsItemGroupsItemQueueWait {
-        count: to_wire_integer(latency.count),
-        max_ms: latency.max_ms.map(to_wire_integer),
-        p50_ms: latency.p50_ms.map(to_wire_integer),
-        p95_ms: latency.p95_ms.map(to_wire_integer),
-    }
+) -> Result<JobsMetricsResponseBucketsItemGroupsItemQueueWait, JobsQueryError> {
+    wire::decode_wire(
+        metrics_latency_value(latency),
+        "jobs metrics bucket queue wait",
+    )
+}
+
+fn metrics_latency_value(latency: &JobsMetricsLatency) -> serde_json::Value {
+    json!({
+        "count": latency.count,
+        "maxMs": latency.max_ms,
+        "p50Ms": latency.p50_ms,
+        "p95Ms": latency.p95_ms,
+    })
 }
 
 fn metrics_summary_group_to_wire(
     group: &JobsMetricsSummaryGroup,
 ) -> Result<JobsMetricsResponseSummaryItem, JobsQueryError> {
-    Ok(JobsMetricsResponseSummaryItem {
-        by_state: group
-            .by_state
-            .iter()
-            .map(|(key, value)| (key.clone(), to_wire_integer(*value)))
-            .collect(),
-        dead: group.dead.map(to_wire_integer),
-        failed: group.failed.map(to_wire_integer),
-        failure_rate: group.failure_rate,
-        key: group.key.clone(),
-        label: group.label.clone(),
-        latest_updated_at: group.latest_updated_at.clone(),
-        oldest_created_at: group.oldest_created_at.clone(),
-        queue_wait: metrics_latency_to_summary_queue_wire(&group.queue_wait),
-        queued: group.queued.map(to_wire_integer),
-        running: group.running.map(to_wire_integer),
-        runtime: metrics_latency_to_summary_wire(&group.runtime),
-        slow: group.slow.map(to_wire_integer),
-        total: to_wire_integer(group.total),
-    })
+    wire::decode_wire(
+        json!({
+            "byState": group.by_state,
+            "dead": group.dead,
+            "failed": group.failed,
+            "failureRate": group.failure_rate,
+            "key": group.key,
+            "label": group.label,
+            "latestUpdatedAt": group.latest_updated_at,
+            "oldestCreatedAt": group.oldest_created_at,
+            "queueWait": metrics_latency_to_summary_queue_wire(&group.queue_wait)?,
+            "queued": group.queued,
+            "running": group.running,
+            "runtime": metrics_latency_to_summary_wire(&group.runtime)?,
+            "slow": group.slow,
+            "total": group.total,
+        }),
+        "jobs metrics summary",
+    )
 }
 
 fn metrics_bucket_to_wire(
     bucket: &JobsMetricsBucket,
 ) -> Result<JobsMetricsResponseBucketsItem, JobsQueryError> {
-    Ok(JobsMetricsResponseBucketsItem {
-        end: bucket.end.clone(),
-        groups: bucket
-            .groups
-            .iter()
-            .map(metrics_bucket_group_to_wire)
-            .collect::<Result<Vec<_>, _>>()?,
-        start: bucket.start.clone(),
-    })
+    let groups = bucket
+        .groups
+        .iter()
+        .map(metrics_bucket_group_to_wire)
+        .collect::<Result<Vec<_>, _>>()?;
+    wire::decode_wire(
+        json!({ "end": bucket.end, "groups": groups, "start": bucket.start }),
+        "jobs metrics bucket",
+    )
 }
 
 fn metrics_bucket_group_to_wire(
     group: &JobsMetricsBucketGroup,
 ) -> Result<JobsMetricsResponseBucketsItemGroupsItem, JobsQueryError> {
-    Ok(JobsMetricsResponseBucketsItemGroupsItem {
-        cancelled: to_wire_integer(group.cancelled),
-        completed: to_wire_integer(group.completed),
-        dead: to_wire_integer(group.dead),
-        dismissed: to_wire_integer(group.dismissed),
-        failed: to_wire_integer(group.failed),
-        key: group.key.clone(),
-        label: group.label.clone(),
-        queue_wait: metrics_latency_to_bucket_queue_wire(&group.queue_wait),
-        retried: to_wire_integer(group.retried),
-        runtime: metrics_latency_to_bucket_wire(&group.runtime),
-        started: to_wire_integer(group.started),
-        submitted: to_wire_integer(group.submitted),
-    })
+    wire::decode_wire(
+        json!({
+            "cancelled": group.cancelled,
+            "completed": group.completed,
+            "dead": group.dead,
+            "dismissed": group.dismissed,
+            "failed": group.failed,
+            "key": group.key,
+            "label": group.label,
+            "queueWait": metrics_latency_to_bucket_queue_wire(&group.queue_wait)?,
+            "retried": group.retried,
+            "runtime": metrics_latency_to_bucket_wire(&group.runtime)?,
+            "started": group.started,
+            "submitted": group.submitted,
+        }),
+        "jobs metrics bucket group",
+    )
 }
 
 fn heartbeat_age_ms(heartbeat_at: &str, now: OffsetDateTime) -> i64 {
@@ -1491,23 +1413,6 @@ fn parse_positive_integer(field: &'static str, value: i64) -> Result<u64, JobsQu
         model: field,
         details: error.to_string(),
     })
-}
-
-fn parse_non_negative_integer(field: &'static str, value: i64) -> Result<u64, JobsQueryError> {
-    if value < 0 {
-        return Err(JobsQueryError::ConvertWireModel {
-            model: field,
-            details: "must be non-negative".to_string(),
-        });
-    }
-    u64::try_from(value).map_err(|error| JobsQueryError::ConvertWireModel {
-        model: field,
-        details: error.to_string(),
-    })
-}
-
-fn to_wire_integer(value: u64) -> i64 {
-    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 fn projection_key(job: &Job) -> String {
@@ -1746,7 +1651,7 @@ mod tests {
             row.waiting_on
                 .as_ref()
                 .and_then(|waits| waits.first())
-                .map(|wait| wait.id.as_str()),
+                .map(|wait| wait.id.0.as_str()),
             Some("wait-1")
         );
 
@@ -1769,7 +1674,7 @@ mod tests {
 
         let timeline_row = timeline_event_to_wire(&timeline).expect("timeline row should map");
         assert_eq!(
-            timeline_row.wait_edge.map(|wait| wait.id),
+            timeline_row.wait_edge.map(|wait| wait.id.0),
             Some("wait-1".to_string())
         );
     }

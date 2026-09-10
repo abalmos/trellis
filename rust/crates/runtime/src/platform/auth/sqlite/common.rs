@@ -30,7 +30,7 @@ impl SqliteAuthorizationStore {
         Ok(Self::from_connections(connections))
     }
 
-    /// Create an isolated migrated in-memory store.
+    /// Create an isolated in-memory store with the current platform schema.
     ///
     /// # Errors
     ///
@@ -41,7 +41,11 @@ impl SqliteAuthorizationStore {
         connection
             .pragma_update(None, "foreign_keys", true)
             .map_err(sql_error)?;
-        migrate_test_schema(&connection)?;
+        connection
+            .execute_batch(include_str!(
+                "../../../storage/sqlite/platform/V1000__platform_init.sql"
+            ))
+            .map_err(sql_error)?;
         Ok(Self::from_connections(vec![connection]))
     }
 
@@ -168,64 +172,6 @@ where
     })
     .await
     .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?
-}
-
-fn migrate_test_schema(connection: &Connection) -> Result<(), AuthorizationStateError> {
-    for (table, migration) in [
-        (
-            "auth_principals",
-            include_str!("../../../storage/sqlite/platform/V1001__authorization_state.sql"),
-        ),
-        (
-            "auth_user_profiles",
-            include_str!("../../../storage/sqlite/platform/V1002__auth_service_cutover.sql"),
-        ),
-        (
-            "auth_authorization_contexts",
-            include_str!(
-                "../../../storage/sqlite/platform/V1003__authorization_context_runtime.sql"
-            ),
-        ),
-        (
-            "auth_capability_groups",
-            include_str!("../../../storage/sqlite/platform/V1004__auth_console_policy.sql"),
-        ),
-        (
-            "auth_bootstrap_administrator",
-            include_str!("../../../storage/sqlite/platform/V1005__bootstrap_administrator.sql"),
-        ),
-    ] {
-        let migrated = connection
-            .query_row(
-                "SELECT EXISTS(
-                    SELECT 1 FROM sqlite_master
-                    WHERE type = 'table' AND name = ?1
-                 )",
-                [table],
-                |row| row.get::<_, bool>(0),
-            )
-            .map_err(sql_error)?;
-        if !migrated {
-            connection.execute_batch(migration).map_err(sql_error)?;
-        }
-    }
-    let has_event_delivery = connection
-        .prepare("PRAGMA table_info(auth_post_commit_actions)")
-        .map_err(sql_error)?
-        .query_map([], |row| row.get::<_, String>(1))
-        .map_err(sql_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(sql_error)?
-        .into_iter()
-        .any(|column| column == "event_delivery_json");
-    if !has_event_delivery {
-        connection
-            .execute_batch(include_str!(
-                "../../../storage/sqlite/platform/V1006__auth_event_delivery.sql"
-            ))
-            .map_err(sql_error)?;
-    }
-    Ok(())
 }
 
 pub(in crate::platform::auth) fn encode_enum<T: Serialize>(

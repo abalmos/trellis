@@ -7,7 +7,7 @@ import {
   type StoreStatus,
   type StoreWaitOptions,
 } from "./store.ts";
-import type { PageResponse } from "./models/trellis/Page.ts";
+import type { PageResponse } from "./participant.ts";
 
 Deno.test("Store public types compile", () => {
   const _putOptions: StorePutOptions = {

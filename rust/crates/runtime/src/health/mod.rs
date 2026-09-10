@@ -14,17 +14,21 @@ use base64::Engine;
 use bytes::Bytes;
 use futures_util::{stream as futures_stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
 use trellis_rs::client::SessionAuth;
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, DeclaredRpcError, Router, ServerError,
 };
-use trellis_runtime_apis::health::feeds::HealthWatchFeedDescriptor;
-use trellis_runtime_apis::health::rpc::{HealthInspectRpc, HealthMetricsRpc, HealthQueryRpc};
-use trellis_runtime_apis::health::types::{
-    HealthHeartbeatSample, HealthWatchEvent, HealthWatchInput,
+use trellis_runtime_apis::__types::trellis::HealthHeartbeatSample;
+use trellis_runtime_apis::apis::trellis_health_v1::feeds::Watch as HealthWatchFeedDescriptor;
+use trellis_runtime_apis::apis::trellis_health_v1::rpc::{
+    Inspect as HealthInspectRpc, Metrics as HealthMetricsRpc, Query as HealthQueryRpc,
+};
+use trellis_runtime_apis::types::{
+    Bytes as WireBytes, HealthQueryRequestLimit, HealthWatchFrame,
+    HealthWatchRequest as HealthWatchInput, Int64, Uint64,
 };
 use ulid::Ulid;
 
@@ -223,10 +227,11 @@ fn build_router(store: HealthStore, invalidations: broadcast::Sender<Invalidatio
     router.register_feed::<HealthWatchFeedDescriptor, _, _>(move |_context, input| {
         let store = feed_store.clone();
         let receiver = invalidations.subscribe();
-        let ready = HealthWatchEvent::Ready {
-            projection_revision: current_revision(&store).unwrap_or_default(),
-        };
-        futures_stream::once(async move { Ok(ready) }).chain(futures_stream::unfold(
+        let ready = health_watch_frame(json!({
+            "type": "ready",
+            "projectionRevision": current_revision(&store).unwrap_or_default(),
+        }));
+        futures_stream::once(async move { ready }).chain(futures_stream::unfold(
             (receiver, input, store),
             |(mut receiver, input, store)| async move {
                 loop {
@@ -449,16 +454,16 @@ fn validate_sample(
     sample: &HealthHeartbeatSample,
 ) -> Result<(), String> {
     if sample.participant.kind.as_str() != identity.participant_kind
-        || sample.participant.contract_id != identity.contract_id
-        || sample.participant.contract_digest != identity.contract_digest
-        || sample.participant.instance_id != identity.instance_id
+        || sample.participant.contract_id.as_ref() != identity.contract_id
+        || sample.participant.contract_digest.as_ref() != identity.contract_digest
+        || sample.participant.instance_id.as_ref() != identity.instance_id
     {
         return Err("sample identity does not match authorized subject".to_string());
     }
     if !matches!(
         sample.reported_status.as_str(),
         "healthy" | "degraded" | "unhealthy"
-    ) || !(1_000..=600_000).contains(&sample.participant.publish_interval_ms)
+    ) || !(1_000..=600_000).contains(&sample.participant.publish_interval_ms.0 .0)
         || sample.checks.len() > 64
         || Ulid::from_string(&sample.sample.id).is_err()
         || time::OffsetDateTime::parse(
@@ -480,8 +485,8 @@ fn validate_sample(
             || check.name.len() > 128
             || !names.insert(&check.name)
             || !matches!(check.status.as_str(), "ok" | "failed")
-            || !check.latency_ms.is_finite()
-            || !(0.0..=3_600_000.0).contains(&check.latency_ms)
+            || !check.latency_ms.0 .0.is_finite()
+            || !(0.0..=3_600_000.0).contains(&check.latency_ms.0 .0)
         {
             return Err("sample check is invalid".to_string());
         }
@@ -604,12 +609,16 @@ fn matches_filter<T: AsRef<str>>(filter: Option<&Vec<T>>, value: &str) -> bool {
 fn health_invalidated_event(
     projection_revision: i64,
     changes: Option<Vec<InvalidationChange>>,
-) -> Result<HealthWatchEvent, ServerError> {
-    Ok(serde_json::from_value(json!({
+) -> Result<HealthWatchFrame, ServerError> {
+    health_watch_frame(json!({
         "type": "healthInvalidated",
         "projectionRevision": projection_revision,
         "changes": changes,
-    }))?)
+    }))
+}
+
+fn health_watch_frame(value: Value) -> Result<HealthWatchFrame, ServerError> {
+    Ok(HealthWatchFrame(WireBytes(serde_json::to_vec(&value)?)))
 }
 
 fn decode_token(token: &str) -> Result<String, String> {
@@ -622,11 +631,11 @@ fn decode_token(token: &str) -> Result<String, String> {
 fn current_revision(store: &HealthStore) -> Result<i64, RuntimeError> {
     let response = store
         .query(
-            &trellis_runtime_apis::health::types::HealthQueryRequest {
+            &trellis_runtime_apis::types::HealthQueryRequest {
                 contract_ids: None,
                 deployment_ids: None,
-                limit: Some(1),
-                offset: Some(0),
+                limit: Some(HealthQueryRequestLimit(Int64(1))),
+                offset: Some(Uint64(0)),
                 participant_kinds: None,
                 search: None,
                 statuses: None,
@@ -634,7 +643,7 @@ fn current_revision(store: &HealthStore) -> Result<i64, RuntimeError> {
             now_ns(),
         )
         .map_err(map_runtime_store_error)?;
-    Ok(response.projection.revision)
+    Ok(response.projection.revision.0 as i64)
 }
 
 fn map_store_error(error: store::HealthStoreError) -> ServerError {

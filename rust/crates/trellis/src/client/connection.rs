@@ -26,10 +26,10 @@ use crate::client::transfer::{get_download_grant, DownloadTransferGrant};
 use crate::client::transfer::{put_upload_grant, FileInfo, UploadTransferGrant};
 use crate::client::{
     prepare_event, AuthorizationContextBundle, AuthorizationContextCache,
-    AuthorizationProviderCache, AuthorizationRuntimeBinding, CallError, EventDescriptor,
-    FeedDescriptor, PreparedTrellisEvent, RpcDescriptor, RpcErrorPayload, SessionAuth,
-    TrellisClientError,
+    AuthorizationProviderCache, AuthorizationRuntimeBinding, EventDescriptor, FeedDescriptor,
+    PreparedTrellisEvent, RpcErrorPayload, SessionAuth, TrellisClientError,
 };
+use crate::generated::Codec as _;
 use crate::service::{BootstrapBinding, CoreBootstrapBinding, ServiceResourceBindings};
 
 const HEALTH_HEARTBEAT_SUBJECT_PREFIX: &str = "health.v1.heartbeat";
@@ -94,6 +94,8 @@ pub(crate) fn signed_headers(
 pub struct ServiceConnectWithContractOptions<'a> {
     pub trellis_url: &'a str,
     pub participant_id: &'a str,
+    pub participant_path: &'static str,
+    pub package_evidence: crate::generated::PackageEvidence,
     pub provisioned_identity_seed_base64url: &'a str,
     pub name: Option<&'a str>,
     pub timeout_ms: u64,
@@ -101,9 +103,7 @@ pub struct ServiceConnectWithContractOptions<'a> {
 
 /// Runtime and device-identity options for an activated device principal.
 ///
-/// The type parameter `C` supplies the exact generated participant and API evidence through
-/// [`crate::service::GeneratedServiceParticipant`]; callers do not provide or duplicate that
-/// evidence.
+/// The type parameter `C` supplies the generated participant identity.
 pub struct DeviceConnectOptions<'a, C> {
     trellis_url: &'a str,
     participant_id: &'a str,
@@ -113,7 +113,7 @@ pub struct DeviceConnectOptions<'a, C> {
     contract_type: std::marker::PhantomData<C>,
 }
 
-impl<'a, C: crate::service::GeneratedServiceParticipant> DeviceConnectOptions<'a, C> {
+impl<'a, C: crate::generated::ParticipantDescriptor> DeviceConnectOptions<'a, C> {
     /// Create device connection options using the participant identity from `C`.
     ///
     /// Runtime bootstrap generates fresh session keys internally; this constructor accepts only
@@ -121,7 +121,7 @@ impl<'a, C: crate::service::GeneratedServiceParticipant> DeviceConnectOptions<'a
     pub fn new(trellis_url: &'a str, identity_seed_base64url: &'a str) -> Self {
         Self {
             trellis_url,
-            participant_id: C::PARTICIPANT_ID,
+            participant_id: C::ID,
             identity_seed_base64url,
             timeout_ms: crate::service::DEFAULT_TIMEOUT_MS,
             name: None,
@@ -302,7 +302,7 @@ pub(crate) struct DeviceBootstrapActivation {
 #[serde(rename_all = "camelCase")]
 struct ServiceBootstrapAuthorization {
     participant_id: String,
-    participant_artifact_digest: String,
+    participant_digest: String,
     resource_runtime: ServiceResourceBindings,
 }
 
@@ -801,6 +801,8 @@ impl TrellisClient {
         Self::connect_native(
             opts.trellis_url,
             opts.participant_id,
+            opts.participant_path,
+            opts.package_evidence,
             opts.provisioned_identity_seed_base64url,
             opts.name,
             opts.timeout_ms,
@@ -812,6 +814,8 @@ impl TrellisClient {
     async fn connect_native(
         trellis_url: &str,
         participant_id: &str,
+        participant_path: &'static str,
+        package_evidence: crate::generated::PackageEvidence,
         identity_seed: &str,
         name: Option<&str>,
         timeout_ms: u64,
@@ -825,7 +829,12 @@ impl TrellisClient {
             participant_id.to_owned(),
             ulid::Ulid::new().to_string(),
             auth.session_key.clone(),
-            super::authorization::AuthorizationCredential::Native { kind, identity },
+            super::authorization::AuthorizationCredential::Native {
+                kind,
+                identity,
+                package_evidence,
+                participant_path,
+            },
             name.map(str::to_owned),
         )?);
         contexts.refresh(&auth).await?;
@@ -865,7 +874,7 @@ impl TrellisClient {
                 TrellisClientError::Bootstrap("native bootstrap omitted instance assignment".into())
             })?,
             contract_id: participant_id.to_owned(),
-            contract_digest: authorization.participant_artifact_digest.clone(),
+            contract_digest: authorization.participant_digest.clone(),
             started_at: now_rfc3339(),
             publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
         };
@@ -873,7 +882,7 @@ impl TrellisClient {
         connected.service_bootstrap_binding = Some(CoreBootstrapBinding::new(
             BootstrapBinding {
                 contract_id: authorization.participant_id,
-                digest: authorization.participant_artifact_digest,
+                digest: authorization.participant_digest,
             },
             authorization.resource_runtime,
         ));
@@ -890,12 +899,14 @@ impl TrellisClient {
     }
 
     /// Connect an activated device using refreshed auth-owned connect info.
-    pub async fn connect_device<C>(
+    pub async fn connect_device<C: crate::generated::ParticipantDescriptor>(
         opts: DeviceConnectOptions<'_, C>,
     ) -> Result<Self, TrellisClientError> {
         Self::connect_native(
             opts.trellis_url,
             opts.participant_id,
+            C::PATH,
+            C::package_evidence(),
             opts.identity_seed_base64url,
             opts.name,
             opts.timeout_ms,
@@ -1000,6 +1011,21 @@ impl TrellisClient {
         contexts.bundle()
     }
 
+    pub(crate) fn availability(&self) -> crate::generated::AvailabilitySnapshot {
+        self.authorization_contexts
+            .as_ref()
+            .map_or_else(Default::default, |contexts| contexts.availability())
+    }
+
+    pub(crate) fn watch_availability(
+        &self,
+    ) -> tokio::sync::watch::Receiver<crate::generated::AvailabilitySnapshot> {
+        self.authorization_contexts
+            .as_ref()
+            .expect("connected clients always retain authorization context state")
+            .watch_availability()
+    }
+
     async fn request(
         &self,
         subject: &str,
@@ -1056,45 +1082,6 @@ impl TrellisClient {
         self.request_json(subject, body.clone()).await
     }
 
-    /// Call one descriptor-backed RPC.
-    pub async fn call<D>(&self, input: &D::Input) -> Result<D::Output, TrellisClientError>
-    where
-        D: RpcDescriptor,
-    {
-        let value = serde_json::to_value(input)?;
-        let response = self
-            .request_json(&self.descriptor_subject(D::SUBJECT), value)
-            .await?;
-        Ok(serde_json::from_value(response)?)
-    }
-
-    /// Call one descriptor-backed RPC and decode contract-declared errors.
-    pub async fn call_typed<D, E>(&self, input: &D::Input) -> Result<D::Output, CallError<E>>
-    where
-        D: RpcDescriptor,
-        E: crate::client::DeclaredError,
-    {
-        let input = serde_json::to_value(input).map_err(|error| {
-            CallError::Protocol(crate::client::ProtocolError::new(error.to_string()))
-        })?;
-        validate_caller_input::<E>(D::INPUT_SCHEMA_JSON, &input)?;
-        let output = self
-            .request_json(&self.descriptor_subject(D::SUBJECT), input)
-            .await
-            .map_err(CallError::from_client)?;
-        crate::service::validate_input_schema(D::OUTPUT_SCHEMA_JSON, &output).map_err(|error| {
-            CallError::Protocol(crate::client::ProtocolError::new(format!(
-                "remote response violated `{}` output schema: {error}",
-                D::KEY
-            )))
-        })?;
-        serde_json::from_value(output.clone()).map_err(|error| {
-            CallError::Protocol(crate::client::ProtocolError::new(format!(
-                "{error}; output={output}"
-            )))
-        })
-    }
-
     /// Publish one descriptor-backed event.
     pub async fn publish<D>(&self, event: &D::Event) -> Result<(), TrellisClientError>
     where
@@ -1121,18 +1108,6 @@ impl TrellisClient {
             &event,
         )
         .await
-    }
-
-    /// Subscribe to one descriptor-backed event subject from the default JetStream event stream.
-    pub async fn subscribe<D>(
-        &self,
-    ) -> Result<BoxStream<'static, Result<D::Event, TrellisClientError>>, TrellisClientError>
-    where
-        D: EventDescriptor,
-        D::Event: Send + 'static,
-    {
-        self.subscribe_with_options::<D>(EventSubscribeOptions::default())
-            .await
     }
 
     /// Subscribe to one descriptor-backed event subject with explicit subscription options.
@@ -1184,15 +1159,8 @@ impl TrellisClient {
             match subscriber.next().await {
                 Some(message) => {
                     let value: Value = serde_json::from_slice(&message.payload)?;
-                    crate::service::validate_input_schema(D::EVENT_SCHEMA_JSON, &value).map_err(
-                        |error| {
-                            TrellisClientError::EventSubscriptionProtocol(format!(
-                                "event `{}` violated its contract schema: {error}",
-                                D::KEY
-                            ))
-                        },
-                    )?;
-                    let event: D::Event = serde_json::from_value(value)?;
+                    let event = D::Event::decode(value)
+                        .map_err(|error| TrellisClientError::Codec(error.to_string()))?;
                     Ok(Some((event, subscriber)))
                 }
                 None => Ok(None),
@@ -1308,13 +1276,9 @@ impl TrellisClient {
         D: FeedDescriptor,
         D::Event: Send + 'static,
     {
-        let input = serde_json::to_value(input)?;
-        crate::service::validate_input_schema(D::INPUT_SCHEMA_JSON, &input).map_err(|error| {
-            TrellisClientError::FeedProtocol(format!(
-                "feed `{}` input violated its contract schema: {error}",
-                D::KEY
-            ))
-        })?;
+        let input = input
+            .encode()
+            .map_err(|error| TrellisClientError::Codec(error.to_string()))?;
         let payload = Bytes::from(serde_json::to_vec(&input)?);
         let subject = self.descriptor_subject(D::SUBJECT);
         let context_digest = self.authorization_context_digest()?;
@@ -1549,62 +1513,6 @@ impl OperationTransport for TrellisClient {
     }
 }
 
-fn validate_caller_input<E>(schema_json: &str, value: &Value) -> Result<(), CallError<E>>
-where
-    E: crate::client::DeclaredError,
-{
-    match crate::service::validate_input_schema(schema_json, value) {
-        Ok(()) => Ok(()),
-        Err(crate::service::ServerError::Validation { issues }) => Err(CallError::Validation(
-            Box::new(crate::client::ValidationFailure::Validation(
-                crate::client::ValidationErrorPayload {
-                    id: "local".to_string(),
-                    error_type: "ValidationError".to_string(),
-                    message: "Input validation failed".to_string(),
-                    issues: (*issues)
-                        .into_iter()
-                        .map(|issue| crate::client::ValidationIssue {
-                            path: issue.path,
-                            message: issue.message,
-                        })
-                        .collect(),
-                    context: None,
-                    trace_id: None,
-                },
-            )),
-        )),
-        Err(crate::service::ServerError::SchemaValidation { issues }) => Err(
-            CallError::Validation(Box::new(crate::client::ValidationFailure::Schema(
-                crate::client::SchemaValidationErrorPayload {
-                    id: "local".to_string(),
-                    error_type: "SchemaValidationError".to_string(),
-                    message: "Input validation failed".to_string(),
-                    issues: (*issues)
-                        .into_iter()
-                        .map(|issue| crate::client::SchemaValidationIssue {
-                            path: issue.path,
-                            schema_path: issue.schema_path,
-                            keyword: issue.keyword,
-                            code: issue.code,
-                            message: issue.message,
-                            label: issue.label,
-                            note: issue.note,
-                            i18n_key: issue.i18n_key,
-                            severity: issue.severity,
-                            params: issue.params,
-                        })
-                        .collect(),
-                    context: None,
-                    trace_id: None,
-                },
-            ))),
-        ),
-        Err(error) => Err(CallError::Protocol(crate::client::ProtocolError::new(
-            error.to_string(),
-        ))),
-    }
-}
-
 fn decode_json_message(message: async_nats::Message) -> Result<Value, TrellisClientError> {
     if let Some(headers) = &message.headers {
         if headers
@@ -1663,13 +1571,9 @@ where
     }
 
     let value: Value = serde_json::from_slice(payload)?;
-    crate::service::validate_input_schema(D::EVENT_SCHEMA_JSON, &value).map_err(|error| {
-        TrellisClientError::FeedProtocol(format!(
-            "feed `{}` emitted an invalid event: {error}",
-            D::KEY
-        ))
-    })?;
-    Ok(Some(serde_json::from_value(value)?))
+    Ok(Some(D::Event::decode(value).map_err(|error| {
+        TrellisClientError::Codec(error.to_string())
+    })?))
 }
 
 fn is_terminal_event(event: &Value) -> bool {

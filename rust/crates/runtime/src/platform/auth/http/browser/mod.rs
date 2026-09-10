@@ -7,14 +7,17 @@ pub(super) fn complete_participant_grants(
     binding: &crate::platform::auth::ParticipantBindingRecord,
 ) -> Result<trellis_protocol::GrantSet, super::HttpError> {
     let resolved = binding.resolve()?;
-    let proposal = resolved.proposal();
     Ok(trellis_protocol::GrantSet::new(
-        proposal
-            .required()
-            .grant_set()
+        resolved
+            .required_grants
             .permissions()
             .iter()
-            .chain(proposal.optional().grant_set().permissions())
+            .chain(
+                resolved
+                    .optional_grant_bundles
+                    .values()
+                    .flat_map(|grant| grant.permissions()),
+            )
             .cloned()
             .collect(),
     ))

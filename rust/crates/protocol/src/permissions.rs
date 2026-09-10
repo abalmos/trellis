@@ -122,7 +122,7 @@ impl PermissionAction {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind")]
 pub enum PermissionTarget {
-    /// An externally visible surface owned by an API artifact.
+    /// An externally visible surface owned by an API definition.
     #[serde(rename = "apiSurface")]
     ApiSurface {
         /// The owning versioned API identifier.
@@ -132,7 +132,7 @@ pub enum PermissionTarget {
         /// The API-local surface name.
         name: String,
     },
-    /// A private resource owned by a participant artifact.
+    /// A private resource owned by a participant definition.
     #[serde(rename = "participantResource")]
     ParticipantResource {
         /// The owning participant identifier.

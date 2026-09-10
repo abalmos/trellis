@@ -20,6 +20,7 @@ pub struct AuthorizationContextCache {
     pub(crate) name: Option<String>,
     pub(crate) session_key: String,
     state: Arc<RwLock<CachedAuthorizationState>>,
+    availability: tokio::sync::watch::Sender<crate::generated::AvailabilitySnapshot>,
     refresh: Arc<tokio::sync::Mutex<()>>,
     refresh_requested: Arc<tokio::sync::Notify>,
     refresh_requested_digest: Arc<Mutex<Option<Option<String>>>>,
@@ -34,6 +35,7 @@ impl AuthorizationContextCache {
         credential: AuthorizationCredential,
         name: Option<String>,
     ) -> Result<Self, TrellisClientError> {
+        let (availability, _) = tokio::sync::watch::channel(Default::default());
         Ok(Self {
             http: BootstrapHttp::new(trellis_url)?,
             credential: Arc::new(credential),
@@ -42,6 +44,7 @@ impl AuthorizationContextCache {
             name,
             session_key,
             state: Arc::new(RwLock::new(CachedAuthorizationState::default())),
+            availability,
             refresh: Arc::new(tokio::sync::Mutex::new(())),
             refresh_requested: Arc::new(tokio::sync::Notify::new()),
             refresh_requested_digest: Arc::new(Mutex::new(None)),
@@ -56,6 +59,7 @@ impl AuthorizationContextCache {
             context: bundle,
             routing,
             runtime,
+            api_bindings: _,
             server_clock_offset_ms,
             authorization,
         } = installation;
@@ -77,7 +81,7 @@ impl AuthorizationContextCache {
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         let context = &signed.unsigned;
         let credential_matches = match self.credential.as_ref() {
-            AuthorizationCredential::Native { kind, identity } => {
+            AuthorizationCredential::Native { kind, identity, .. } => {
                 context.principal_kind == *kind
                     && context.identity_key_id.as_deref() == Some(identity.key_id().as_str())
                     && context.login_session_id.is_none()
@@ -128,6 +132,17 @@ impl AuthorizationContextCache {
             bundle.policy.refresh_jitter_seconds,
         )
         .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        let resources = authorization
+            .as_ref()
+            .and_then(|value| value.get("resourceRuntime"))
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()?
+            .unwrap_or_default();
+        let availability = crate::generated::AvailabilitySnapshot::new(
+            context.grants.permissions().to_vec(),
+            resources,
+        );
         let current = CurrentContext {
             context_digest: verified.context_digest().to_owned(),
             not_before: context.not_before,
@@ -135,17 +150,18 @@ impl AuthorizationContextCache {
             refresh_at,
             bundle,
         };
-        *self
+        let mut state = self
             .state
             .write()
-            .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))? =
-            CachedAuthorizationState {
-                current: Some(current),
-                runtime: Some(runtime),
-                routing: Some(routing),
-                server_clock_offset_ms,
-                authorization,
-            };
+            .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))?;
+        *state = CachedAuthorizationState {
+            current: Some(current),
+            runtime: Some(runtime),
+            routing: Some(routing),
+            server_clock_offset_ms,
+            authorization,
+        };
+        self.availability.send_replace(availability);
         Ok(())
     }
 
@@ -275,6 +291,16 @@ impl AuthorizationContextCache {
             .read()
             .map(|state| state.clone())
             .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))
+    }
+
+    pub(crate) fn availability(&self) -> crate::generated::AvailabilitySnapshot {
+        self.availability.borrow().clone()
+    }
+
+    pub(crate) fn watch_availability(
+        &self,
+    ) -> tokio::sync::watch::Receiver<crate::generated::AvailabilitySnapshot> {
+        self.availability.subscribe()
     }
 
     pub(crate) fn http(&self) -> &BootstrapHttp {

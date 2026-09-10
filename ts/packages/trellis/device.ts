@@ -15,12 +15,10 @@ import {
 } from "@qlever-llc/result";
 import { ulid } from "ulid";
 import { decodeTrellisHttpError, TrellisHttpError } from "./auth/http_error.ts";
-import { ContractResourceBindingsSchema } from "./participant.ts";
 import {
-  PARTICIPANT_STATE_METADATA,
-  type ParticipantStateMetadata,
-} from "./participant_runtime/metadata.ts";
-import type { GeneratedParticipantEvidence } from "./participant_runtime/artifacts.ts";
+  type ContractResourceBindings,
+  ContractResourceBindingsSchema,
+} from "./participant.ts";
 
 import {
   deriveDeviceConfirmationCode,
@@ -54,7 +52,10 @@ import { logger as noopLogger, type LoggerLike } from "./globals.ts";
 import { TransportError } from "./errors/index.ts";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { observeNatsTrellisConnection } from "./connection.ts";
+import {
+  installConnectionAvailability,
+  observeNatsTrellisConnection,
+} from "./connection.ts";
 import {
   type AuthorizationContextBundle,
   AuthorizationContextCache,
@@ -66,19 +67,11 @@ import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
   type GeneratedParticipant,
   getParticipantRuntime,
+  participantAvailability,
+  participantEvidence,
 } from "./participant_runtime/participant.ts";
 
-type DeviceContract<
-  TContract extends {
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  } = {
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  },
-> = GeneratedParticipant & GeneratedParticipantEvidence & {
-  readonly [PARTICIPANT_STATE_METADATA]?: ParticipantStateMetadata;
-};
+type DeviceContract = GeneratedParticipant;
 
 type RuntimeStateShape = Record<
   string,
@@ -137,7 +130,7 @@ type DeviceConnectDeps = {
 
 export type TrellisDevicePendingActivationState = {
   status: "pending";
-  participantDigest: string;
+  participantId: string;
   publicIdentityKey: string;
   instanceId: string;
   deploymentId: string;
@@ -148,7 +141,7 @@ export type TrellisDevicePendingActivationState = {
 
 export type TrellisDeviceActivatedActivationState = {
   status: "activated";
-  participantDigest: string;
+  participantId: string;
   publicIdentityKey: string;
   instanceId: string;
   deploymentId: string;
@@ -176,13 +169,7 @@ export type TrellisDeviceActivationSession<
 };
 
 export type TrellisDeviceActivationArgs<
-  TContract extends DeviceContract<{
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  }> = DeviceContract<{
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  }>,
+  TContract extends DeviceContract = DeviceContract,
 > = {
   trellisUrl: string;
   participant: TContract;
@@ -196,32 +183,20 @@ export type TrellisDeviceProvisionedIdentity = {
   instanceId: string;
   principalId: string;
   participantId: string;
-  participantArtifactDigest: string;
+  participantDigest: string;
   participantNeedsDigest: string;
   provisioningSecret?: string;
   expectedSecretVersion?: number;
 };
 
 export type TrellisDeviceResumeActivationArgs<
-  TContract extends DeviceContract<{
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  }> = DeviceContract<{
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  }>,
+  TContract extends DeviceContract = DeviceContract,
 > = TrellisDeviceActivationArgs<TContract> & {
   localState: TrellisDeviceLocalActivationState;
 };
 
 export type TrellisDeviceConnectArgs<
-  TContract extends DeviceContract<{
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  }> = DeviceContract<{
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  }>,
+  TContract extends DeviceContract = DeviceContract,
 > = {
   trellisUrl: string;
   participant: TContract;
@@ -233,7 +208,7 @@ const DeviceBootstrapReadySchema = Type.Object({
   ...AuthorizationContextRefreshResponseSchema.properties,
   authorization: Type.Object({
     participantId: Type.String({ minLength: 1 }),
-    participantArtifactDigest: Type.String({ minLength: 1 }),
+    participantDigest: Type.String({ minLength: 1 }),
     resourceRuntime: ContractResourceBindingsSchema,
   }),
 });
@@ -250,6 +225,8 @@ type DeviceBootstrapReady = {
     };
     transport: { jwt: string; jwtExpiresAt: number; inboxPrefix: string };
     authorizationContext: AuthorizationContextBundle;
+    apiBindings: Readonly<Record<string, unknown>>;
+    resourceBindings: ContractResourceBindings;
   };
   sessionAuth: Awaited<ReturnType<typeof createAuth>>;
 };
@@ -370,9 +347,9 @@ function assertActivationStateMatchesIdentity(args: {
 
 function assertActivationStateMatchesContract(args: {
   localState: TrellisDeviceLocalActivationState;
-  participantDigest: string;
+  participantId: string;
 }): void {
-  if (args.localState.participantDigest !== args.participantDigest) {
+  if (args.localState.participantId !== args.participantId) {
     throw createTransportError({
       code: "trellis.device.activation_state_contract_mismatch",
       message:
@@ -380,8 +357,8 @@ function assertActivationStateMatchesContract(args: {
       hint:
         "Use activation state for the same device contract, or start activation again for this contract digest.",
       context: {
-        stateParticipantDigest: args.localState.participantDigest,
-        participantDigest: args.participantDigest,
+        stateParticipantId: args.localState.participantId,
+        participantId: args.participantId,
       },
     });
   }
@@ -391,7 +368,7 @@ function createActivationSession<
   TLocalState extends TrellisDeviceLocalActivationState,
 >(args: {
   trellisUrl: string;
-  participantDigest: string;
+  participantId: string;
   identity: Awaited<ReturnType<typeof deriveDeviceIdentity>>;
   provisioned: Pick<
     TrellisDeviceProvisionedIdentity,
@@ -409,7 +386,7 @@ function createActivationSession<
   });
   assertActivationStateMatchesContract({
     localState: args.localState,
-    participantDigest: args.participantDigest,
+    participantId: args.participantId,
   });
 
   const activatedState = createActivatedLocalState(args.localState);
@@ -427,6 +404,7 @@ function createActivationSession<
         identitySeed: args.identity.identitySeed,
         activationKey: args.identity.activationKey,
         participantId: args.provisioned.participantId,
+        ...participantEvidence(args.participant),
         provisioningSecret: args.provisioned.provisioningSecret ?? undefined,
         nonce: args.localState.nonce,
         signal: opts?.signal,
@@ -490,7 +468,8 @@ async function fetchDeviceBootstrap(args: {
     connectionId: args.connectionId ?? ulid(),
     requestId,
     iat: issuedAt,
-    name: args.participant.id,
+    name: args.participant.identity,
+    ...participantEvidence(args.participant),
   };
   const response = await fetch(
     new URL("/bootstrap/device", args.trellisUrl),
@@ -531,7 +510,7 @@ async function fetchDeviceBootstrap(args: {
     connectInfo: {
       connectionId: ready.runtime.connectionId,
       participantId: ready.runtime.participantId,
-      participantDigest: ready.authorization.participantArtifactDigest,
+      participantDigest: ready.authorization.participantDigest,
       transports: ready.transports,
       transport: {
         jwt: ready.routing.bootstrapJwt,
@@ -539,6 +518,8 @@ async function fetchDeviceBootstrap(args: {
         inboxPrefix: ready.runtime.inboxPrefix,
       },
       authorizationContext: ready.authorizationContext,
+      apiBindings: ready.apiBindings,
+      resourceBindings: ready.authorization.resourceRuntime,
     },
   };
 }
@@ -547,10 +528,7 @@ async function fetchDeviceBootstrap(args: {
  * @internal Exported for focused tests and platform-specific wrappers.
  */
 export async function startDeviceActivationWithDeps<
-  TContract extends DeviceContract<{
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  }>,
+  TContract extends DeviceContract,
 >(
   args: TrellisDeviceActivationArgs<TContract>,
   deps: Pick<DeviceConnectDeps, "now">,
@@ -572,7 +550,8 @@ export async function startDeviceActivationWithDeps<
     identitySeed: identity.identitySeed,
     sessionIdentity,
     connectionId,
-    participantId: args.participant.id,
+    participantId: args.participant.identity,
+    ...participantEvidence(args.participant),
     provisioningSecret: args.provisioningSecret,
     challengeDigest: base64urlEncode(await sha256(utf8(nonce))),
     confirmationCode: await deriveDeviceConfirmationCode({
@@ -601,17 +580,17 @@ export async function startDeviceActivationWithDeps<
   }
   return await createActivationSession({
     trellisUrl: args.trellisUrl,
-    participantDigest: args.participant.digest,
+    participantId: args.participant.identity,
     identity,
     provisioned: {
-      participantId: args.participant.id,
+      participantId: args.participant.identity,
       provisioningSecret: args.provisioningSecret,
     },
     participant: args.participant,
     now: deps.now,
     localState: {
       status: "pending",
-      participantDigest: args.participant.digest,
+      participantId: args.participant.identity,
       publicIdentityKey: identity.publicIdentityKey,
       instanceId: activationState.instanceId,
       deploymentId: activationState.deploymentId,
@@ -629,10 +608,7 @@ export async function startDeviceActivationWithDeps<
  */
 export async function resumeDeviceActivationWithDeps<
   TLocalState extends TrellisDeviceLocalActivationState,
-  TContract extends DeviceContract<{
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  }>,
+  TContract extends DeviceContract,
 >(
   args:
     & TrellisDeviceResumeActivationArgs<TContract>
@@ -646,9 +622,9 @@ export async function resumeDeviceActivationWithDeps<
 
   return await createActivationSession({
     trellisUrl: args.trellisUrl,
-    participantDigest: args.participant.digest,
+    participantId: args.participant.identity,
     identity,
-    provisioned: { participantId: args.participant.id },
+    provisioned: { participantId: args.participant.identity },
     participant: args.participant,
     now: deps.now,
     localState: args.localState,
@@ -660,10 +636,7 @@ export async function resumeDeviceActivationWithDeps<
  * `TrellisDevice.connect`.
  */
 export async function connectDeviceWithDeps<
-  TContract extends DeviceContract<{
-    state?: Readonly<Record<string, unknown>>;
-    schemas?: Readonly<Record<string, unknown>>;
-  }>,
+  TContract extends DeviceContract,
 >(
   args: TrellisDeviceConnectArgs<TContract>,
   deps: DeviceConnectDeps,
@@ -698,7 +671,7 @@ export async function connectDeviceWithDeps<
     bootstrapJwtExpiresAt: connectInfo.transport.jwtExpiresAt,
   });
   const verifiedContext = authorizationContexts.current();
-  if (verifiedContext.context.participantId !== args.participant.id) {
+  if (verifiedContext.context.participantId !== args.participant.identity) {
     throw new Error(
       "device authorization context belongs to another participant",
     );
@@ -747,7 +720,7 @@ export async function connectDeviceWithDeps<
       hint:
         "Retry the connection. If it keeps failing, check Trellis transport availability.",
       cause,
-      context: { participantId: args.participant.id },
+      context: { participantId: args.participant.identity },
     });
   }
 
@@ -758,10 +731,15 @@ export async function connectDeviceWithDeps<
   const connection = observeNatsTrellisConnection({
     kind: "device",
     nc,
+    availability: participantAvailability(
+      args.participant,
+      connectInfo.apiBindings,
+      connectInfo.resourceBindings,
+    ),
     log: false,
     lifecycleLog: {
       log,
-      context: { participantId: args.participant.id },
+      context: { participantId: args.participant.identity },
     },
   });
   connection.subscribe((status) =>
@@ -786,7 +764,7 @@ export async function connectDeviceWithDeps<
         authorizationContexts.setServerClockOffsetMs(
           offsetState.serverClockOffsetMs,
         );
-        return await authorizationContexts.install(
+        const context = await authorizationContexts.install(
           next.connectInfo.authorizationContext,
           {
             bootstrapJwt: next.connectInfo.transport.jwt,
@@ -795,6 +773,15 @@ export async function connectDeviceWithDeps<
           undefined,
           shouldInstall,
         );
+        installConnectionAvailability(
+          connection,
+          participantAvailability(
+            args.participant,
+            next.connectInfo.apiBindings,
+            next.connectInfo.resourceBindings,
+          ),
+        );
+        return context;
       } catch (error) {
         if (error instanceof TrellisHttpError) {
           throw new AuthorizationContextRefreshError(error.status, error.code);
@@ -815,7 +802,7 @@ export async function connectDeviceWithDeps<
     "client",
     RuntimeStateStoresForContract<TContract>
   >(
-    args.participant.id,
+    args.participant.identity,
     nc,
     {
       sessionKey: bootstrap.sessionAuth.sessionKey,
@@ -826,16 +813,14 @@ export async function connectDeviceWithDeps<
     {
       log,
       api: getParticipantRuntime(args.participant).api as RuntimeApi,
-      state: args.participant[PARTICIPANT_STATE_METADATA],
+      state: getParticipantRuntime(args.participant).state,
       connection,
     },
     connectInfo.transport.inboxPrefix,
   );
 
   const health = new ServiceHealthRuntime({
-    serviceName: typeof args.participant.artifact.displayName === "string"
-      ? args.participant.artifact.displayName
-      : args.participant.id,
+    serviceName: args.participant.identity,
     kind: "device",
     instanceId,
     contractId: connectInfo.participantId,
@@ -899,10 +884,7 @@ export async function connectDeviceWithDeps<
 
 export const TrellisDevice = {
   connect<
-    TContract extends DeviceContract<{
-      state?: Readonly<Record<string, unknown>>;
-      schemas?: Readonly<Record<string, unknown>>;
-    }>,
+    TContract extends DeviceContract,
   >(
     args: TrellisDeviceConnectArgs<TContract>,
   ): AsyncResult<

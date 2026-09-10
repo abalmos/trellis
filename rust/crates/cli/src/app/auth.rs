@@ -1,4 +1,4 @@
-use crate::app::connect_authenticated_cli_client;
+use crate::app::{connect_authenticated_cli_client, wire, wire_u64};
 use crate::cli::*;
 use crate::output;
 use miette::IntoDiagnostic;
@@ -6,8 +6,10 @@ use qrcode::{render::unicode, QrCode};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use trellis_rs::auth as authlib;
-use trellis_runtime_apis::auth::types as auth_types;
-use trellis_runtime_apis::auth::{rpc::AuthParticipantsGetError, AuthClient};
+use trellis_runtime_apis::apis::trellis_auth_v1::{
+    rpc::ParticipantsGetError as AuthParticipantsGetError, Client as AuthClient,
+};
+use trellis_runtime_apis::types as auth_types;
 use ulid::Ulid;
 
 pub(crate) fn render_agent_login_instructions(login_url: &str) -> miette::Result<String> {
@@ -224,14 +226,12 @@ fn user_row(user: &Value, last_auth_by_user: &BTreeMap<String, String>) -> Vec<S
 
 async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
-    let auth_client = AuthClient::new(&connected);
+    let auth_client = AuthClient::from_generated(connected.clone());
     let users = auth_client
-        .rpc()
-        .auth()
         .users_list(&auth_types::AuthUsersListRequest {
             state: None,
             cursor: None,
-            limit: Some(100),
+            limit: Some(wire("100")?),
         })
         .await
         .into_diagnostic()?;
@@ -242,14 +242,12 @@ async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
         .collect::<Result<Vec<_>, _>>()
         .into_diagnostic()?;
     let sessions = auth_client
-        .rpc()
-        .auth()
         .sessions_list(&auth_types::AuthSessionsListRequest {
             principal_id: None,
             participant_id: None,
             state: None,
             cursor: None,
-            limit: Some(100),
+            limit: Some(wire("100")?),
         })
         .await
         .map(|response| response.entries)
@@ -293,12 +291,10 @@ async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
 
 async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
-    let auth_client = AuthClient::new(&connected);
+    let auth_client = AuthClient::from_generated(connected.clone());
     let user = auth_client
-        .rpc()
-        .auth()
         .users_get(&auth_types::AuthUsersGetRequest {
-            user_id: args.user_id.clone(),
+            user_id: wire(&args.user_id)?,
         })
         .await
         .into_diagnostic()?
@@ -312,8 +308,16 @@ async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette:
     let user_value = serde_json::to_value(&user).into_diagnostic()?;
     output::print_info(&format!("userId={}", user.user_id));
     output::print_info(&format!("state={}", user.state));
-    output::print_info(&format!("name={}", user.name.as_deref().unwrap_or("")));
-    output::print_info(&format!("email={}", user.email.as_deref().unwrap_or("")));
+    output::print_info(&format!(
+        "name={}",
+        wire::<Option<String>>(&user.name)?.as_deref().unwrap_or("")
+    ));
+    output::print_info(&format!(
+        "email={}",
+        wire::<Option<String>>(&user.email)?
+            .as_deref()
+            .unwrap_or("")
+    ));
     output::print_info(&format!("direct={}", direct_capabilities(&user_value)));
     output::print_info(&format!("groups={}", capability_groups(&user_value)));
     output::print_info(&format!("identities={}", identities_field(&user_value)));
@@ -322,28 +326,24 @@ async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette:
 
 async fn users_create_command(format: OutputFormat, args: &UserCreateArgs) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
-    let auth_client = AuthClient::new(&connected);
+    let auth_client = AuthClient::from_generated(connected.clone());
     let _username = trimmed_optional(&args.username)
         .ok_or_else(|| miette::miette!("--username is required to create a local user"))?;
     let user = auth_client
-        .rpc()
-        .auth()
         .users_create(&auth_types::AuthUsersCreateRequest {
-            email: trimmed_optional(&args.email),
-            name: trimmed_optional(&args.name),
-            image: None,
-            idempotency_key: cli_idempotency_key(),
+            email: wire(trimmed_optional(&args.email))?,
+            name: wire(trimmed_optional(&args.name))?,
+            image: wire(None::<String>)?,
+            idempotency_key: wire(cli_idempotency_key())?,
         })
         .await
         .into_diagnostic()?
         .user;
     let setup_flow = auth_client
-        .rpc()
-        .auth()
         .users_password_reset_create(&auth_types::AuthUsersPasswordResetCreateRequest {
-            user_id: user.user_id.clone(),
-            return_target: None,
-            idempotency_key: cli_idempotency_key(),
+            user_id: wire(&user.user_id)?,
+            return_target: wire(None::<String>)?,
+            idempotency_key: wire(cli_idempotency_key())?,
         })
         .await
         .into_diagnostic()?;
@@ -367,12 +367,10 @@ async fn users_create_command(format: OutputFormat, args: &UserCreateArgs) -> mi
 
 async fn users_edit_command(format: OutputFormat, args: &UserEditArgs) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
-    let auth_client = AuthClient::new(&connected);
+    let auth_client = AuthClient::from_generated(connected.clone());
     let current = auth_client
-        .rpc()
-        .auth()
         .users_get(&auth_types::AuthUsersGetRequest {
-            user_id: args.user_id.clone(),
+            user_id: wire(&args.user_id)?,
         })
         .await
         .into_diagnostic()?
@@ -381,30 +379,24 @@ async fn users_edit_command(format: OutputFormat, args: &UserEditArgs) -> miette
     let next_email = trimmed_optional(&args.email);
 
     let user = auth_client
-        .rpc()
-        .auth()
         .users_update(&auth_types::AuthUsersUpdateRequest {
-            email: next_email.or(current.email),
-            name: next_name.or(current.name),
+            email: wire(next_email.or(wire::<Option<String>>(&current.email)?))?,
+            name: wire(next_name.or(wire::<Option<String>>(&current.name)?))?,
             image: current.image,
             state: if args.active {
                 auth_types::AuthUsersUpdateRequestState::Active
             } else if args.inactive {
                 auth_types::AuthUsersUpdateRequestState::Disabled
             } else {
-                match current.state {
-                    auth_types::AuthUsersGetResponseUserState::Active => {
-                        auth_types::AuthUsersUpdateRequestState::Active
-                    }
-                    auth_types::AuthUsersGetResponseUserState::Disabled
-                    | auth_types::AuthUsersGetResponseUserState::Revoked => {
-                        auth_types::AuthUsersUpdateRequestState::Disabled
-                    }
+                if current.state.to_string() == "active" {
+                    auth_types::AuthUsersUpdateRequestState::Active
+                } else {
+                    auth_types::AuthUsersUpdateRequestState::Disabled
                 }
             },
-            user_id: args.user_id.clone(),
-            expected_version: current.version,
-            idempotency_key: cli_idempotency_key(),
+            user_id: wire(&args.user_id)?,
+            expected_version: wire(current.version)?,
+            idempotency_key: wire(cli_idempotency_key())?,
         })
         .await
         .into_diagnostic()?
@@ -426,6 +418,7 @@ async fn users_edit_command(format: OutputFormat, args: &UserEditArgs) -> miette
 async fn login_command(format: OutputFormat, args: &LoginArgs) -> miette::Result<()> {
     let challenge = authlib::start_agent_login(&authlib::StartAgentLoginOpts {
         trellis_url: &args.trellis_url,
+        participant_id: trellis_runtime_apis::participants::trellis_cli::PARTICIPANT_ID,
     })
     .await
     .into_diagnostic()?;
@@ -503,29 +496,27 @@ async fn logout_command(format: OutputFormat) -> miette::Result<()> {
 }
 
 pub(super) async fn current_user(
-    connected: &trellis_rs::generated::Caller,
+    connected: &trellis_rs::generated::Client,
 ) -> Result<authlib::AuthenticatedUser, authlib::TrellisAuthError> {
-    let response = AuthClient::new(connected)
-        .rpc()
-        .auth()
-        .sessions_me()
+    let response = AuthClient::from_generated(connected.clone())
+        .sessions_me(&auth_types::AuthSessionsMeRequest {})
         .await
         .map_err(|error| authlib::TrellisAuthError::OperationFailed(error.to_string()))?;
-    let user = response.user.ok_or_else(|| {
-        authlib::TrellisAuthError::NotUserSession(
-            response.connection.principal_kind.as_str().to_owned(),
-        )
-    })?;
+    let user = wire::<Option<auth_types::AuthUsersGetResponseuser>>(response.user)
+        .map_err(|error| authlib::TrellisAuthError::OperationFailed(error.to_string()))?
+        .ok_or_else(|| {
+            authlib::TrellisAuthError::NotUserSession(
+                response.connection.principal_kind.as_str().to_owned(),
+            )
+        })?;
     Ok(serde_json::from_value(serde_json::to_value(user)?)?)
 }
 
 async fn revoke_current_session(
-    connected: &trellis_rs::generated::Caller,
+    connected: &trellis_rs::generated::Client,
 ) -> Result<(), authlib::TrellisAuthError> {
-    let auth = AuthClient::new(connected);
-    auth.rpc()
-        .auth()
-        .sessions_logout()
+    let auth = AuthClient::from_generated(connected.clone());
+    auth.sessions_logout(&auth_types::AuthSessionsLogoutRequest {})
         .await
         .map_err(|error| authlib::TrellisAuthError::OperationFailed(error.to_string()))?;
     Ok(())
@@ -565,15 +556,13 @@ async fn identity_grants_list_command(
         Some(user) => user.clone(),
         None => current_user(&connected).await.into_diagnostic()?.user_id,
     };
-    let response = AuthClient::new(&connected)
-        .rpc()
-        .auth()
+    let response = AuthClient::from_generated(connected.clone())
         .grants_list(&auth_types::AuthGrantsListRequest {
             cursor: None,
-            limit: Some(100),
-            owner_id: Some(owner_id.clone()),
+            limit: Some(wire("100")?),
+            owner_id: Some(wire(&owner_id)?),
             owner_kind: Some(auth_types::AuthGrantsListRequestOwnerKind::User),
-            participant_id: args.participant.clone(),
+            participant_id: args.participant.as_ref().map(wire).transpose()?,
             state: None,
         })
         .await
@@ -588,8 +577,8 @@ async fn identity_grants_list_command(
             .iter()
             .map(|entry| {
                 vec![
-                    entry.owner_id.clone(),
-                    entry.participant_id.clone(),
+                    entry.owner_id.to_string(),
+                    entry.participant_id.to_string(),
                     entry.state.to_string(),
                     entry.revision.to_string(),
                     entry.installed_revision.to_string(),
@@ -616,7 +605,7 @@ async fn identity_grants_revoke_command(
         Some(user) => user.clone(),
         None => current_user(&connected).await.into_diagnostic()?.user_id,
     };
-    let auth = AuthClient::new(&connected);
+    let auth = AuthClient::from_generated(connected.clone());
     let expected_revision = match args.expected_revision {
         Some(revision) => revision,
         None => current_grant_revision(&connected, &owner_id, &args.participant_id)
@@ -624,15 +613,13 @@ async fn identity_grants_revoke_command(
             .ok_or_else(|| miette::miette!("grant binding does not exist"))?,
     };
     let response = auth
-        .rpc()
-        .auth()
         .grants_revoke(&auth_types::AuthGrantsRevokeRequest {
-            expected_revision: i64::try_from(expected_revision).into_diagnostic()?,
-            idempotency_key: cli_idempotency_key(),
-            owner_id: owner_id.clone(),
+            expected_revision: wire(expected_revision.to_string())?,
+            idempotency_key: wire(cli_idempotency_key())?,
+            owner_id: wire(&owner_id)?,
             owner_kind: auth_types::AuthGrantsRevokeRequestOwnerKind::User,
-            participant_id: args.participant_id.clone(),
-            reason: args.reason.clone(),
+            participant_id: wire(&args.participant_id)?,
+            reason: wire(&args.reason)?,
         })
         .await
         .into_diagnostic()?;
@@ -655,19 +642,17 @@ async fn identity_grants_get_command(
         Some(user) => user.clone(),
         None => current_user(&connected).await.into_diagnostic()?.user_id,
     };
-    let response = AuthClient::new(&connected)
-        .rpc()
-        .auth()
+    let response = AuthClient::from_generated(connected.clone())
         .grants_get(&auth_types::AuthGrantsGetRequest {
-            owner_id: owner_id.clone(),
+            owner_id: wire(&owner_id)?,
             owner_kind: auth_types::AuthGrantsGetRequestOwnerKind::User,
-            participant_id: args.participant_id.clone(),
+            participant_id: wire(&args.participant_id)?,
         })
         .await
         .into_diagnostic()?;
     if output::is_json(format) {
         output::print_json(&serde_json::to_value(response).into_diagnostic()?)?;
-    } else if let Some(binding) = response.binding {
+    } else if let Some(binding) = wire::<Option<auth_types::AuthGrantBinding>>(response.binding)? {
         output::print_json(&binding)?;
     } else {
         output::print_info("no matching identity grant");
@@ -709,9 +694,7 @@ async fn identity_grants_set_command(
     object.insert("idempotencyKey".to_owned(), json!(cli_idempotency_key()));
     let request: auth_types::AuthGrantsSetRequest =
         serde_json::from_value(input).into_diagnostic()?;
-    let response = AuthClient::new(&connected)
-        .rpc()
-        .auth()
+    let response = AuthClient::from_generated(connected.clone())
         .grants_set(&request)
         .await
         .into_diagnostic()?;
@@ -726,23 +709,27 @@ async fn identity_grants_set_command(
 }
 
 async fn current_grant_revision(
-    connected: &trellis_rs::generated::Caller,
+    connected: &trellis_rs::generated::Client,
     owner_id: &str,
     participant_id: &str,
 ) -> miette::Result<Option<u64>> {
-    let response = AuthClient::new(connected)
-        .rpc()
-        .auth()
+    let response = AuthClient::from_generated(connected.clone())
         .grants_get(&auth_types::AuthGrantsGetRequest {
-            owner_id: owner_id.to_owned(),
+            owner_id: wire(owner_id)?,
             owner_kind: auth_types::AuthGrantsGetRequestOwnerKind::User,
-            participant_id: participant_id.to_owned(),
+            participant_id: wire(participant_id)?,
         })
         .await
         .into_diagnostic()?;
-    Ok(response
-        .binding
-        .and_then(|binding| binding.get("revision").and_then(Value::as_u64)))
+    let binding = wire::<Option<auth_types::AuthGrantBinding>>(response.binding)?;
+    Ok(binding.and_then(|binding| {
+        serde_json::to_value(binding)
+            .ok()?
+            .get("revision")?
+            .as_str()?
+            .parse()
+            .ok()
+    }))
 }
 
 async fn participants_install_command(
@@ -752,23 +739,22 @@ async fn participants_install_command(
     let participant =
         super::deploy::compile_participant_input(&args.source, args.participant.as_deref(), None)?;
     let (_state, connected) = connect_authenticated_cli_client().await?;
-    let auth = AuthClient::new(&connected);
+    let auth = AuthClient::from_generated(connected.clone());
     let expected_revision = match args.expected_revision {
         Some(revision) => revision,
         None => match auth
-            .rpc()
-            .auth()
             .participants_get(&auth_types::AuthParticipantsGetRequest {
-                participant_id: participant.participant_id.clone(),
+                participant_id: wire(&participant.participant_id)?,
                 revision: None,
             })
             .await
         {
-            Ok(current) => u64::try_from(current.participant.revision).into_diagnostic()?,
+            Ok(current) => wire_u64(current.participant.revision)?,
             Err(trellis_rs::client::CallError::Declared(error))
                 if matches!(
                     error.as_ref(),
-                    AuthParticipantsGetError::AuthError(error) if error.reason == "not_found"
+                    AuthParticipantsGetError::AuthError(error)
+                        if error.payload().is_ok_and(|details| details.code.as_ref() == "not_found")
                 ) =>
             {
                 0
@@ -777,13 +763,13 @@ async fn participants_install_command(
         },
     };
     let response = auth
-        .rpc()
-        .auth()
         .participants_install(&auth_types::AuthParticipantsInstallRequest {
-            api_artifacts: participant.api_artifacts,
-            expected_revision: i64::try_from(expected_revision).into_diagnostic()?,
-            idempotency_key: cli_idempotency_key(),
-            participant_artifact: participant.participant_artifact,
+            expected_revision: wire(expected_revision.to_string())?,
+            idempotency_key: wire(cli_idempotency_key())?,
+            package_digest: wire(participant.package_digest)?,
+            package_evidence: participant.package_evidence,
+            participant_path: wire(participant.participant_path)?,
+            platform_trust: Some(args.platform_trust),
         })
         .await
         .into_diagnostic()?;
@@ -795,7 +781,10 @@ async fn participants_install_command(
             "participantId={}",
             response.participant.participant_id
         ));
-        output::print_info(&format!("revision={}", response.participant.revision));
+        output::print_info(&format!(
+            "revision={}",
+            wire::<String>(response.participant.revision)?
+        ));
     }
     Ok(())
 }
@@ -805,13 +794,11 @@ async fn issuers_revoke_command(
     args: &IssuersRevokeArgs,
 ) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
-    let response = AuthClient::new(&connected)
-        .rpc()
-        .auth()
+    let response = AuthClient::from_generated(connected.clone())
         .issuers_revoke(&auth_types::AuthIssuersRevokeRequest {
-            idempotency_key: cli_idempotency_key(),
-            key_id: args.key_id.clone(),
-            reason: args.reason.clone(),
+            idempotency_key: wire(cli_idempotency_key())?,
+            key_id: wire(&args.key_id)?,
+            reason: wire(&args.reason)?,
         })
         .await
         .into_diagnostic()?;

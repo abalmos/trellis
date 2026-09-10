@@ -18,10 +18,12 @@
 mod account;
 mod application;
 mod authority;
+mod builtin_semantics;
 mod builtins;
 pub(crate) mod context;
 mod domain;
 mod ephemeral;
+mod evidence;
 mod grant_repository;
 mod http;
 
@@ -87,13 +89,12 @@ pub(crate) use context::{
 pub(crate) use domain::MutationActor;
 pub(crate) use domain::{validate_ed25519_public_key, GrantBindingReplacement};
 pub use domain::{
-    AuthorizationStateError, DelegationEvidence, DependencyEvidence, DependencyState,
-    DeploymentRecord, DeviceDelegationRecord, DeviceDelegationState, DeviceEvidence, DeviceRecord,
-    DeviceState, GrantBinding, GrantBindingState, GrantOwnerKind, IssuableAuthorizationState,
-    NewSession, ParticipantBindingRecord, ParticipantBindingState, PortalGrantProvenance,
-    PrincipalKind, PrincipalRecord, PrincipalState, ProviderIdentityLink, ResourceBindingEvidence,
-    ResourceBindingState, ResourceProviderIdentity, RuntimeInstanceRecord, RuntimeInstanceState,
-    ServiceEvidence, SessionRecord, SessionRuntimeBinding, SessionState, MAX_PROTOCOL_INTEGER,
+    AuthorizationStateError, DeploymentRecord, DeviceDelegationRecord, DeviceDelegationState,
+    DeviceRecord, DeviceState, GrantBinding, GrantBindingState, GrantOwnerKind,
+    IssuableAuthorizationState, NewSession, ParticipantBindingRecord, ParticipantBindingState,
+    PortalGrantProvenance, PrincipalKind, PrincipalRecord, PrincipalState, ProviderIdentityLink,
+    ResourceBindingEvidence, ResourceBindingState, ResourceProviderIdentity, RuntimeInstanceRecord,
+    RuntimeInstanceState, SessionRecord, SessionRuntimeBinding, SessionState, MAX_PROTOCOL_INTEGER,
 };
 pub(crate) use model::PortalPolicySnapshot;
 pub(crate) use model::{activation_review_event, activation_review_event_action_id};

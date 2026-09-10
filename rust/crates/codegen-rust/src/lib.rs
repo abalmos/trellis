@@ -1,842 +1,249 @@
-//! Rust SDK generation from canonical Trellis contract manifests.
+//! Rust source generation from native Trellis package semantics.
 
-use std::collections::BTreeSet;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
-use serde_json::Value;
-use syn::visit_mut::VisitMut;
-use trellis_protocol::{canonicalize_json, ApiArtifact, ParticipantArtifact};
-
-mod projection;
-use projection::{
-    ApiInput, ApiProjection, ParticipantInput, ParticipantKind, ParticipantUse, StateKind,
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
 };
 
-/// Errors returned while generating a Rust SDK crate.
-#[derive(thiserror::Error, Debug)]
+use trellis_idl::{
+    api_digest, canonical_package, participant_digest, ActionDefinition, ActionKind, ApiDefinition,
+    ApiId, CanonicalMode, InteractionDirection, ModelField, PackageGraph, PackageId,
+    ParticipantDefinition, ParticipantKind, Primitive, ResourceDefinition, TypeDefinition,
+    TypeExpression, TypeRef,
+};
+
+/// A failure while generating a Rust package.
+#[derive(Debug, thiserror::Error)]
 pub enum CodegenRustError {
-    #[error("protocol error: {0}")]
-    Protocol(#[from] trellis_protocol::ProtocolError),
-
-    #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("json error: {0}")]
-    Json(#[from] serde_json::Error),
-
-    #[error("participant mapping alias '{alias}' is not declared in the participant uses")]
-    UnknownParticipantMappingAlias { alias: String },
-
-    #[error(
-        "participant uses alias '{alias}' for API '{contract}' requires an explicit alias mapping"
-    )]
-    MissingParticipantMappingAlias { alias: String, contract: String },
-
-    #[error("participant mapping alias '{alias}' targets API '{actual_contract}', expected '{expected_contract}'")]
-    InvalidParticipantMappingApi {
-        alias: String,
-        expected_contract: String,
-        actual_contract: String,
-    },
-
-    #[error("participant mapping alias '{alias}' does not expose rpc '{key}'")]
-    MissingMappedRpc { alias: String, key: String },
-
-    #[error("participant mapping alias '{alias}' does not expose operation '{key}'")]
-    MissingMappedOperation { alias: String, key: String },
-
-    #[error("participant mapping alias '{alias}' does not expose event '{key}'")]
-    MissingMappedEvent { alias: String, key: String },
-
-    #[error("participant mapping alias '{alias}' cannot publish owner-only event '{key}'")]
-    OwnerOnlyMappedEvent { alias: String, key: String },
-
-    #[error("participant mapping alias '{alias}' does not expose feed '{key}'")]
-    MissingMappedFeed { alias: String, key: String },
-
-    #[error("invalid generated Rust source for {path}: {message}")]
-    RustSyntax { path: String, message: String },
-
-    #[error("failed to format generated Rust source for {path}: {message}")]
-    RustFormat { path: String, message: String },
-
-    #[error(
-        "generated Rust identifier collision in {scope}: '{identifier}' comes from {originals:?}"
-    )]
+    /// Generated names collide after Rust normalization.
+    #[error("generated Rust identifier collision in {scope}: {identifier} from {originals:?}")]
     IdentifierCollision {
+        /// Namespace containing the collision.
         scope: String,
+        /// Colliding Rust identifier.
         identifier: String,
+        /// Source names that normalize to the identifier.
         originals: Vec<String>,
     },
-
-    #[error("unsupported schema at {path}: {reason}")]
-    UnsupportedSchema { path: String, reason: String },
-
-    #[error("participant contract '{contract}' owns public surfaces but has no generated owner SDK mapping")]
-    MissingOwnedSdk { contract: String },
+    /// Native semantic projection failed.
+    #[error("could not project native Trellis semantics: {0}")]
+    Semantic(String),
+    /// Generated Rust did not parse.
+    #[error("generated Rust source {path} is invalid: {source}")]
+    InvalidRust {
+        /// Relative generated source path.
+        path: PathBuf,
+        /// Parser diagnostic.
+        source: syn::Error,
+    },
+    /// Filesystem access failed.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
-fn project_api(api: &ApiArtifact) -> Result<ApiInput, CodegenRustError> {
-    let value = api.normalized_value()?;
-    let mut render_model = serde_json::from_value::<ApiProjection>(value.clone())?;
-    for (name, error) in &mut render_model.errors {
-        error.error_type.clone_from(name);
-    }
-    Ok(ApiInput {
-        render_model,
-        subjects: api.derived_subjects()?,
-        canonical: api.canonical_json()?,
-        digest: api.digest()?,
-        api: api.clone(),
-        value,
-    })
+#[derive(Debug)]
+struct Source {
+    path: PathBuf,
+    contents: String,
 }
 
-fn project_participant(
-    participant: &ParticipantArtifact,
-) -> Result<ParticipantInput, CodegenRustError> {
-    let value = participant.normalized_value()?;
-    Ok(ParticipantInput {
-        render_model: serde_json::from_value(value.clone())?,
-        canonical: participant.canonical_json()?,
-        digest: participant.digest()?,
-        participant: participant.clone(),
-    })
-}
-
-/// One resolved `uses` alias within the generated package.
-#[derive(Debug, Clone)]
-struct ParticipantAliasMapping<'a> {
-    /// Local `uses` alias from the participant manifest.
-    pub alias: String,
-    /// Rust module path that satisfies the alias at compile time.
-    pub crate_name: String,
-    /// Native dependency API; used to validate exposed RPCs/events.
-    pub api: &'a ApiArtifact,
-}
-
-/// Derive the module stem used for API and participant naming.
-pub fn default_sdk_stem(contract_id: &str) -> String {
-    let stem = contract_id
-        .split('@')
-        .next()
-        .unwrap_or_default()
-        .replace('.', "-");
-    stem.strip_prefix("trellis-").unwrap_or(&stem).to_string()
-}
-
-/// Render one ordinary generated crate with API and participant modules.
-/// The caller owns staging and publication of the completed package.
+/// Render one ordinary generated crate from a resolved native package graph.
+///
+/// The caller owns staging and atomic publication of `out_dir`.
+///
+/// # Errors
+///
+/// Returns an error before writing when generated identifiers collide or source
+/// rendering fails, and returns I/O errors while writing the caller's staging tree.
 pub fn generate_rust_package(
-    apis: &std::collections::BTreeMap<&str, &ApiArtifact>,
-    participants: &[ParticipantArtifact],
+    graph: &PackageGraph,
     out_dir: &Path,
     name: &str,
 ) -> Result<(), CodegenRustError> {
-    fs::create_dir_all(out_dir.join("src"))?;
-    let mut sources = Vec::new();
-    let mut dependencies = BTreeSet::from([
-        format!("trellis-rs = \"{}\"", env!("CARGO_PKG_VERSION")),
-        "serde = { version = \"1.0\", features = [\"derive\"] }".to_owned(),
-        "serde_json = \"1.0\"".to_owned(),
-    ]);
-    for (namespace, ids) in [
-        ("apis", apis.keys().copied().collect::<Vec<_>>()),
-        (
-            "participants",
-            participants.iter().map(ParticipantArtifact::id).collect(),
-        ),
-    ] {
-        let mut names = std::collections::BTreeMap::new();
-        let mut exports = String::new();
-        for id in ids {
-            let module = rust_ident(&key_to_snake(&default_sdk_stem(id)));
-            if let Some(previous) = names.insert(module.clone(), id) {
-                return Err(CodegenRustError::IdentifierCollision {
-                    scope: namespace.into(),
-                    identifier: module,
-                    originals: vec![previous.to_owned(), id.to_owned()],
-                });
-            }
-            exports.push_str(&format!("pub mod {module};\n"));
-        }
-        sources.push((
-            PathBuf::from(namespace).join("mod.rs"),
-            exports,
-            String::new(),
-        ));
-    }
-    let mut guide = vec!["# Generated by Trellis.".to_owned(), String::new(), format!("Package `{name}` contains `apis` and `participants` modules. Use an ordinary Cargo path dependency; regeneration is not part of a consumer build."), String::new()];
-    for (id, api) in apis {
-        let api = project_api(api)?;
-        validate_generated_identifiers(&api)?;
-        validate_supported_schemas(&api)?;
-        if !api.render_model.events.is_empty() || !api.render_model.feeds.is_empty() {
-            dependencies.insert("futures-util = \"0.3\"".into());
-        }
-        let module = rust_ident(&key_to_snake(&default_sdk_stem(id)));
-        guide.push(format!("## API `{id}`"));
-        push_rust_owned_surfaces(
-            &mut guide,
-            &api,
-            &format!("{}::apis::{module}", crate_ident(name)),
-            false,
-        );
-        for (file, source) in render_api_sources(&api)? {
-            sources.push((
-                PathBuf::from("apis")
-                    .join(module.trim_start_matches("r#"))
-                    .join(file),
-                source,
-                module_root(file),
-            ));
-        }
-    }
-    for participant in participants {
-        let participant = project_participant(participant)?;
-        let value = participant.participant.normalized_value()?;
-        let implemented = value["implements"]
-            .as_object()
-            .and_then(|entries| entries.values().next())
-            .and_then(|entry| entry["api"].as_str())
-            .and_then(|id| apis.get(id))
-            .ok_or_else(|| CodegenRustError::MissingOwnedSdk {
-                contract: participant.participant.id().into(),
-            })?;
-        let api = project_api(implemented)?;
-        let owned = format!(
-            "crate::apis::{}",
-            rust_ident(&key_to_snake(&default_sdk_stem(implemented.id())))
-        );
-        let alias_mappings = participant
-            .render_model
-            .uses
-            .iter()
-            .filter_map(|(alias, used)| {
-                apis.get(used.api.as_str())
-                    .map(|api| ParticipantAliasMapping {
-                        alias: alias.clone(),
-                        api,
-                        crate_name: format!(
-                            "crate::apis::{}",
-                            rust_ident(&key_to_snake(&default_sdk_stem(api.id())))
-                        ),
-                    })
-            })
-            .collect::<Vec<_>>();
-        let mappings = validate_participant_mappings(&participant, &alias_mappings)?;
-        if mappings.iter().any(|mapping| {
-            mapping
-                .use_ref
-                .rpc
-                .as_ref()
-                .and_then(|rpc| rpc.call.as_ref())
-                .is_some_and(|calls| {
-                    calls
-                        .iter()
-                        .any(|key| mapping.manifest.render_model.rpc[key].transfer.is_some())
-                })
-        }) {
-            dependencies.insert("tokio = { version = \"1\", features = [\"io-util\"] }".into());
-        }
-        let module = rust_ident(&key_to_snake(&default_sdk_stem(
-            participant.participant.id(),
-        )));
-        guide.push(format!("## Participant `{}`", participant.participant.id()));
-        guide.push(format!(
-            "Connect through `{}::participants::{module}::Participant`.",
-            crate_ident(name)
-        ));
-        for mapping in &mappings {
-            push_rust_used_mapping_surfaces(&mut guide, mapping);
-        }
-        let mut files = vec![
-            (
-                "mod.rs".to_owned(),
-                render_participant_shim_lib_rs(&participant),
-            ),
-            (
-                "connect.rs".to_owned(),
-                render_participant_connect_rs(&participant, &mappings),
-            ),
-            (
-                "participant.rs".to_owned(),
-                render_participant_metadata_rs(&api, &participant, &mappings)?,
-            ),
-            (
-                "facade.rs".to_owned(),
-                render_participant_facade_rs(&participant, &mappings),
-            ),
-            (
-                "owned.rs".to_owned(),
-                render_participant_owned_rs(
-                    &api,
-                    &participant,
-                    Some(&owned),
-                    mappings
-                        .iter()
-                        .map(|mapping| (mapping.contract_id.clone(), mapping.manifest.api.clone()))
-                        .collect(),
-                )?,
-            ),
-            ("schemas.rs".to_owned(), render_schemas_rs(&api)),
-            (
-                "state.rs".to_owned(),
-                render_participant_state_rs(&participant)?,
-            ),
-            (
-                "uses/mod.rs".to_owned(),
-                render_participant_uses_mod_rs(&mappings),
-            ),
-        ];
-        if !participant.render_model.jobs.is_empty() {
-            files.push((
-                "jobs.rs".into(),
-                format!(
-                    "{}\n{}",
-                    render_participant_job_descriptors_rs(&participant)?,
-                    render_participant_jobs_facade_rs(&participant)
-                ),
-            ));
-        }
-        if !participant.render_model.event_consumers.is_empty() {
-            files.push((
-                "event_consumers.rs".into(),
-                render_participant_event_consumers_rs(&participant, &mappings, Some(&owned)),
-            ));
-        }
-        for mapping in &mappings {
-            files.push((
-                format!("uses/{}.rs", key_to_snake(&mapping.alias)),
-                render_participant_use_alias_rs(mapping),
-            ));
-        }
-        for (file, source) in files {
-            sources.push((
-                PathBuf::from("participants")
-                    .join(module.trim_start_matches("r#"))
-                    .join(&file),
-                source,
-                module_root(&file),
-            ));
-        }
-    }
-    write_if_changed(&out_dir.join("Cargo.toml"), &format!("# Generated by Trellis. Do not edit.\n[package]\nname = {}\nversion = \"0.0.0\"\nedition = \"2021\"\npublish = false\n\n[package.metadata.trellis]\ngenerated = true\n\n[dependencies]\n{}\n", string_literal(name), dependencies.into_iter().collect::<Vec<_>>().join("\n")))?;
-    write_if_changed(&out_dir.join("src/lib.rs"), "// Generated by Trellis. Do not edit.\n//! Generated Trellis APIs and participants.\npub mod apis;\npub mod participants;\n")?;
-    push_rust_prepared_events(&mut guide);
-    write_if_changed(&out_dir.join("README.md"), &(guide.join("\n") + "\n"))?;
-    write_module_sources(&out_dir.join("src"), sources)?;
-    format_generated_rust_files(out_dir)
-}
-
-fn render_api_sources(api: &ApiInput) -> Result<Vec<(&'static str, String)>, CodegenRustError> {
-    Ok(vec![
-        ("mod.rs", render_lib_rs(api)),
-        ("api.rs", render_api_rs(api, &api.canonical, &api.digest)),
-        ("types.rs", render_types_rs(api)?),
-        ("rpc.rs", render_rpc_rs(api)),
-        ("operations.rs", render_operations_rs(api)),
-        ("events.rs", render_events_rs(api)),
-        ("feeds.rs", render_feeds_rs(api)),
-        ("schemas.rs", render_schemas_rs(api)),
-        ("client.rs", render_client_rs(api)),
-    ])
-}
-
-/// Render an API module embedded in a Trellis-owned runtime crate, without package metadata.
-///
-/// # Errors
-/// Returns source validation, formatting, or I/O errors.
-pub fn generate_rust_api_module(api: &ApiArtifact, out_dir: &Path) -> Result<(), CodegenRustError> {
-    let api = project_api(api)?;
-    validate_generated_identifiers(&api)?;
-    validate_supported_schemas(&api)?;
-    let sources = render_api_sources(&api)?
-        .into_iter()
-        .map(|(file, source)| (PathBuf::from(file), source, module_root(file)));
-    write_module_sources(out_dir, sources)?;
-    format_generated_rust_files(out_dir)
-}
-
-fn module_root(file: &str) -> String {
-    let path = Path::new(file);
-    let parents = path.components().count()
-        - usize::from(path.file_name().is_some_and(|name| name == "mod.rs"));
-    if parents == 0 {
-        "self".to_owned()
-    } else {
-        vec!["super"; parents].join("::")
-    }
-}
-
-fn write_module_sources(
-    out_dir: &Path,
-    sources: impl IntoIterator<Item = (PathBuf, String, String)>,
-) -> Result<(), CodegenRustError> {
-    for (file, source, scope) in sources {
-        let path = out_dir.join(file);
-        let mut parsed =
-            syn::parse_file(&source).map_err(|error| CodegenRustError::RustSyntax {
-                path: path.display().to_string(),
-                message: error.to_string(),
-            })?;
-        if !scope.is_empty() {
-            ModuleRoot(
-                syn::parse_str(&scope).map_err(|error| CodegenRustError::RustSyntax {
-                    path: path.display().to_string(),
-                    message: format!("invalid module root: {error}"),
-                })?,
-            )
-            .visit_file_mut(&mut parsed);
-        }
-        fs::create_dir_all(path.parent().expect("module parent"))?;
-        write_if_changed(
-            &path,
-            &format!(
-                "// Generated by Trellis. Do not edit.\n{}",
-                prettyplease::unparse(&parsed)
-            ),
-        )?;
-    }
-    Ok(())
-}
-
-// Rebase syntax paths, never string literals containing canonical application data.
-struct ModuleRoot(syn::Path);
-
-impl VisitMut for ModuleRoot {
-    fn visit_use_tree_mut(&mut self, tree: &mut syn::UseTree) {
-        syn::visit_mut::visit_use_tree_mut(self, tree);
-        let syn::UseTree::Path(root) = tree else {
-            return;
-        };
-        if root.ident != "crate"
-            || matches!(root.tree.as_ref(), syn::UseTree::Path(path) if path.ident == "apis" || path.ident == "participants")
-        {
-            return;
-        }
-        let mut scoped = *root.tree.clone();
-        for segment in self.0.segments.iter().rev() {
-            scoped = syn::UseTree::Path(syn::UsePath {
-                ident: segment.ident.clone(),
-                colon2_token: Default::default(),
-                tree: Box::new(scoped),
-            });
-        }
-        *tree = scoped;
-    }
-
-    fn visit_path_mut(&mut self, path: &mut syn::Path) {
-        syn::visit_mut::visit_path_mut(self, path);
-        if path
-            .segments
-            .first()
-            .is_some_and(|segment| segment.ident == "crate")
-            && !path
-                .segments
-                .iter()
-                .nth(1)
-                .is_some_and(|segment| segment.ident == "apis" || segment.ident == "participants")
-        {
-            path.segments = self
-                .0
-                .segments
-                .iter()
-                .cloned()
-                .chain(path.segments.iter().skip(1).cloned())
-                .collect();
-        }
-    }
-}
-
-fn push_rust_owned_surfaces(
-    lines: &mut Vec<String>,
-    loaded: &ApiInput,
-    crate_prefix: &str,
-    include_service_handlers: bool,
-) {
-    for key in public_rpc_keys(loaded) {
-        let base = key_to_pascal(key);
-        let (group, method) = surface_group_and_method(key);
-        let handler = if include_service_handlers {
-            format!(", service handler `service.handle().rpc().{group}().{method}(handler)`")
-        } else {
-            String::new()
-        };
-        lines.push(format!("- RPC `{key}`: descriptor `{crate_prefix}::rpc::{base}Rpc`, low-level `trellis_client.call::<{crate_prefix}::rpc::{base}Rpc>(...)`, generated wrapper `.rpc().{group}().{method}(...)`{handler}"));
-    }
-    for key in loaded.render_model.events.keys() {
-        let base = key_to_pascal(key);
-        let (group, method) = surface_group_and_method(key);
-        lines.push(format!("- Event `{key}`: `trellis_client.publish::<{crate_prefix}::events::{base}EventDescriptor>(...)`, generated wrapper `.event().{group}().{method}().publish(...)`, prepare with `trellis_client.prepare_event::<{crate_prefix}::events::{base}EventDescriptor>(...)`"));
-    }
-    for key in loaded.render_model.feeds.keys() {
-        let base = key_to_pascal(key);
-        let (group, method) = surface_group_and_method(key);
-        let handler = if include_service_handlers {
-            format!(", service handler `service.handle().feed().{group}().{method}(handler)`")
-        } else {
-            String::new()
-        };
-        lines.push(format!("- Feed `{key}`: `trellis_client.feed::<{crate_prefix}::feeds::{base}FeedDescriptor>(input)`, generated wrapper `.feed().{group}().{method}(...)`{handler}"));
-    }
-    for key in loaded.render_model.operations.keys() {
-        let base = key_to_pascal(key);
-        let (group, method) = surface_group_and_method(key);
-        let provider = if include_service_handlers {
-            format!(
-                ", service provider `service.handle().operation().{group}().{method}(provider)`"
-            )
-        } else {
-            String::new()
-        };
-        lines.push(format!("- Operation `{key}`: `trellis_client.operation::<{crate_prefix}::operations::{base}Operation>().start(...)`, generated wrapper `.operation().{group}().{method}().start(...)`{provider}"));
-    }
-    if public_rpc_keys(loaded).is_empty()
-        && loaded.render_model.events.is_empty()
-        && loaded.render_model.feeds.is_empty()
-        && loaded.render_model.operations.is_empty()
-    {
-        lines.push("- No owned RPC, event, feed, or operation surfaces.".to_string());
-    }
-}
-
-fn push_rust_used_mapping_surfaces(lines: &mut Vec<String>, mapping: &ValidatedParticipantAlias) {
-    push_rust_use_ref_lines(lines, &mapping.use_ref, &mapping.crate_ident);
-}
-
-fn push_rust_use_ref_lines(lines: &mut Vec<String>, use_ref: &ParticipantUse, crate_prefix: &str) {
-    if let Some(rpc) = &use_ref.rpc {
-        for key in rpc.call.as_deref().unwrap_or(&[]) {
-            let base = key_to_pascal(key);
-            let (group, method) = surface_group_and_method(key);
-            lines.push(format!("  - RPC call `{key}`: `trellis_client.call::<{crate_prefix}::rpc::{base}Rpc>(...)` or generated wrapper `.rpc().{group}().{method}(...)`"));
-        }
-    }
-    if let Some(operations) = &use_ref.operations {
-        for key in operations.invoke.as_deref().unwrap_or(&[]) {
-            let base = key_to_pascal(key);
-            let (group, method) = surface_group_and_method(key);
-            lines.push(format!("  - Operation call `{key}`: `trellis_client.operation::<{crate_prefix}::operations::{base}Operation>().start(...)` or generated wrapper `.operation().{group}().{method}().start(...)`"));
-        }
-    }
-    if let Some(events) = &use_ref.events {
-        for key in events.publish.as_deref().unwrap_or(&[]) {
-            let base = key_to_pascal(key);
-            let (group, method) = surface_group_and_method(key);
-            lines.push(format!("  - Event publish `{key}`: `trellis_client.publish::<{crate_prefix}::events::{base}EventDescriptor>(...)` or generated wrapper `.event().{group}().{method}().publish(...)`"));
-        }
-        for key in events.subscribe.as_deref().unwrap_or(&[]) {
-            let base = key_to_pascal(key);
-            lines.push(format!("  - Event subscribe `{key}`: `trellis_client.subscribe::<{crate_prefix}::events::{base}EventDescriptor>(...)`"));
-        }
-    }
-    if let Some(feeds) = &use_ref.feeds {
-        for key in feeds.subscribe.as_deref().unwrap_or(&[]) {
-            let base = key_to_pascal(key);
-            let (group, method) = surface_group_and_method(key);
-            lines.push(format!("  - Feed subscribe `{key}`: `trellis_client.feed::<{crate_prefix}::feeds::{base}FeedDescriptor>(input)` or generated wrapper `.feed().{group}().{method}(...)`"));
-        }
-    }
-}
-
-fn push_rust_prepared_events(lines: &mut Vec<String>) {
-    lines.extend([
-        String::new(),
-        "Prepared events and outbox/inbox:".to_string(),
-        "- Generated event structs are event bodies only; runtime metadata is separate from the body payload.".to_string(),
-        "- `PreparedTrellisEvent` captures a validated subject, encoded body payload, preserved transport headers, event id, and event time.".to_string(),
-        "- Published prepared events send the runtime event id from `event_id()` and `Trellis-Event-Time` from `event_time()`.".to_string(),
-        "- Use `subscribe_messages::<Descriptor>(...)` and `EventMessage::event_id()` / `event_time()` when subscribers need metadata.".to_string(),
-        "- Use `prepare_event::<Descriptor>(...)`, `publish_prepared(...)`, and `dispatch_outbox_once(...)` for durable publish flows.".to_string(),
-        "- Runtime stores include `OutboxStore`, `InboxStore`, `SqliteOutboxStore`, `SqliteInboxStore`, `PostgresOutboxStore`, and `PostgresInboxStore`.".to_string(),
-        String::new(),
-    ]);
-}
-
-#[derive(Debug, Clone)]
-struct ValidatedParticipantAlias {
-    alias: String,
-    alias_ident: String,
-    crate_name: String,
-    crate_ident: String,
-    contract_id: String,
-    manifest: ApiInput,
-    use_ref: ParticipantUse,
-}
-
-fn validate_participant_mappings(
-    local: &ParticipantInput,
-    mappings: &[ParticipantAliasMapping],
-) -> Result<Vec<ValidatedParticipantAlias>, CodegenRustError> {
-    let mut validated = Vec::new();
-    let mut mapped_aliases = std::collections::BTreeSet::new();
-    let mut generated_aliases = std::collections::BTreeMap::<String, Vec<String>>::new();
-
-    for mapping in mappings {
-        generated_aliases
-            .entry(rust_ident(&key_to_snake(&mapping.alias)))
-            .or_default()
-            .push(mapping.alias.clone());
-        let use_ref = local.render_model.uses.get(&mapping.alias).ok_or_else(|| {
-            CodegenRustError::UnknownParticipantMappingAlias {
-                alias: mapping.alias.clone(),
-            }
-        })?;
-        let manifest = project_api(mapping.api)?;
-        if manifest.render_model.id != use_ref.api {
-            return Err(CodegenRustError::InvalidParticipantMappingApi {
-                alias: mapping.alias.clone(),
-                expected_contract: use_ref.api.clone(),
-                actual_contract: manifest.render_model.id.clone(),
-            });
-        }
-
-        if let Some(rpc) = &use_ref.rpc {
-            for key in rpc.call.as_deref().unwrap_or(&[]) {
-                if !manifest.render_model.rpc.contains_key(key) {
-                    return Err(CodegenRustError::MissingMappedRpc {
-                        alias: mapping.alias.clone(),
-                        key: key.clone(),
-                    });
-                }
-            }
-        }
-        if let Some(operations) = &use_ref.operations {
-            for key in operations.selected() {
-                if !manifest.render_model.operations.contains_key(key) {
-                    return Err(CodegenRustError::MissingMappedOperation {
-                        alias: mapping.alias.clone(),
-                        key: key.clone(),
-                    });
-                }
-            }
-        }
-        if let Some(events) = &use_ref.events {
-            for key in events.publish.as_deref().unwrap_or(&[]) {
-                let Some(event) = manifest.render_model.events.get(key) else {
-                    return Err(CodegenRustError::MissingMappedEvent {
-                        alias: mapping.alias.clone(),
-                        key: key.clone(),
-                    });
-                };
-                if event
-                    .capabilities
-                    .as_ref()
-                    .is_some_and(|capabilities| capabilities.publish.is_none())
-                {
-                    return Err(CodegenRustError::OwnerOnlyMappedEvent {
-                        alias: mapping.alias.clone(),
-                        key: key.clone(),
-                    });
-                }
-            }
-            for key in events.subscribe.as_deref().unwrap_or(&[]) {
-                if !manifest.render_model.events.contains_key(key) {
-                    return Err(CodegenRustError::MissingMappedEvent {
-                        alias: mapping.alias.clone(),
-                        key: key.clone(),
-                    });
-                }
-            }
-        }
-        if let Some(feeds) = &use_ref.feeds {
-            for key in feeds.subscribe.as_deref().unwrap_or(&[]) {
-                if !manifest.render_model.feeds.contains_key(key) {
-                    return Err(CodegenRustError::MissingMappedFeed {
-                        alias: mapping.alias.clone(),
-                        key: key.clone(),
-                    });
-                }
-            }
-        }
-        validated.push(ValidatedParticipantAlias {
-            alias: mapping.alias.clone(),
-            alias_ident: rust_ident(&key_to_snake(&mapping.alias)),
-            crate_name: mapping.crate_name.clone(),
-            crate_ident: crate_ident(&mapping.crate_name),
-            contract_id: manifest.render_model.id.clone(),
-            manifest,
-            use_ref: use_ref.clone(),
-        });
-        mapped_aliases.insert(mapping.alias.clone());
-    }
-
-    if let Some((identifier, originals)) = generated_aliases
-        .into_iter()
-        .find(|(_, originals)| originals.len() > 1)
-    {
-        return Err(CodegenRustError::IdentifierCollision {
-            scope: "participant aliases".to_string(),
-            identifier,
-            originals,
-        });
-    }
-
-    for (alias, use_ref) in local.render_model.uses.iter() {
-        if !mapped_aliases.contains(alias)
-            && participant_use_requires_mapping(local, alias, use_ref)
-        {
-            return Err(CodegenRustError::MissingParticipantMappingAlias {
-                alias: alias.clone(),
-                contract: use_ref.api.clone(),
-            });
-        }
-    }
-
-    validated.sort_by(|left, right| left.alias.cmp(&right.alias));
-    Ok(validated)
-}
-
-fn validate_generated_identifiers(loaded: &ApiInput) -> Result<(), CodegenRustError> {
-    let mut types = Vec::new();
-    for (key, rpc) in &loaded.render_model.rpc {
-        if rpc.internal != Some(true) {
-            for suffix in ["Request", "Response"] {
-                types.push((
-                    format!("rpc.{key}.{suffix}"),
-                    format!("{}{suffix}", key_to_pascal(key)),
-                ));
-            }
-        }
-    }
-    for (key, operation) in &loaded.render_model.operations {
-        for (suffix, present) in [
-            ("Input", true),
-            ("Progress", operation.progress.is_some()),
-            ("Update", operation.update.is_some()),
-            ("Output", operation.output.is_some()),
-        ] {
-            if present {
-                types.push((
-                    format!("operations.{key}.{suffix}"),
-                    format!("{}{suffix}", key_to_pascal(key)),
-                ));
-            }
-        }
-    }
-    for key in loaded.render_model.events.keys() {
-        types.push((
-            format!("events.{key}"),
-            format!("{}Event", key_to_pascal(key)),
-        ));
-    }
-    for key in loaded.render_model.feeds.keys() {
-        for suffix in ["Input", "Event"] {
-            types.push((
-                format!("feeds.{key}.{suffix}"),
-                format!("{}{suffix}", key_to_pascal(key)),
-            ));
-        }
-    }
-    let schemas = loaded
-        .render_model
-        .exports
-        .schemas
+    let root = graph.root_package();
+    let public_types = api_reachable_types(graph);
+    let participant_types = root
+        .participants()
         .iter()
-        .chain(
-            loaded
-                .render_model
-                .errors
-                .values()
-                .filter_map(|error| error.schema.as_ref().map(|schema| &schema.schema)),
-        )
-        .collect::<BTreeSet<_>>();
-    types.extend(
-        schemas
-            .into_iter()
-            .map(|name| (format!("schemas.{name}"), key_to_pascal(name))),
-    );
-    reject_identifier_collisions("shared types", types)?;
-    for (scope, keys) in [
-        (
-            "RPC types",
-            loaded.render_model.rpc.keys().collect::<Vec<_>>(),
-        ),
-        (
-            "operation types",
-            loaded.render_model.operations.keys().collect::<Vec<_>>(),
-        ),
-        (
-            "event types",
-            loaded.render_model.events.keys().collect::<Vec<_>>(),
-        ),
-        (
-            "feed types",
-            loaded.render_model.feeds.keys().collect::<Vec<_>>(),
-        ),
-    ] {
-        reject_identifier_collisions(
-            scope,
-            keys.into_iter()
-                .map(|key| (key.to_string(), key_to_pascal(key))),
-        )?;
+        .map(|(id, participant)| (id, participant_reachable_types(graph, participant)))
+        .collect::<BTreeMap<_, _>>();
+
+    validate_names(graph, &public_types, &participant_types)?;
+
+    let mut sources = vec![
+        Source {
+            path: "src/lib.rs".into(),
+            contents: "// Generated by Trellis. Do not edit.\n//! Generated Trellis APIs, participants, and wire types.\n\nconst _: () = trellis_rs::generated::assert_abi(1);\n\n#[doc(hidden)]\npub mod __types;\npub mod apis;\npub mod participants;\npub mod types;\n".into(),
+        },
+        Source {
+            path: "src/__types.rs".into(),
+            contents: render_internal_types(graph),
+        },
+        Source {
+            path: "src/types.rs".into(),
+            contents: render_type_exports(graph, &public_types, true),
+        },
+        Source {
+            path: "src/apis/mod.rs".into(),
+            contents: render_namespace(
+                graph
+                    .packages()
+                    .values()
+                    .flat_map(|package| package.apis().keys())
+                    .map(ApiId::as_str),
+            ),
+        },
+        Source {
+            path: "src/participants/mod.rs".into(),
+            contents: render_namespace(root.participants().keys().map(|id| id.as_str())),
+        },
+    ];
+
+    for package in graph.packages().values() {
+        for api in package.apis().values() {
+            sources.push(Source {
+                path: PathBuf::from("src/apis")
+                    .join(module_name(api.identity().as_str()))
+                    .join("mod.rs"),
+                contents: render_api(graph, api)?,
+            });
+        }
     }
 
-    reject_identifier_collisions(
-        "RPC methods",
-        loaded.render_model.rpc.keys().map(|key| {
-            let (group, method) = surface_group_and_method(key);
-            (key.clone(), format!("{group}::{method}"))
-        }),
-    )?;
+    let evidence = render_evidence(graph)?;
+    for (id, participant) in root.participants() {
+        sources.push(Source {
+            path: PathBuf::from("src/participants")
+                .join(module_name(id.as_str()))
+                .join("mod.rs"),
+            contents: render_participant(
+                graph,
+                participant,
+                participant_types.get(id).expect("participant type closure"),
+                &evidence,
+            )?,
+        });
+    }
 
-    for (schema_name, schema) in &loaded.render_model.schemas {
-        validate_schema_field_identifiers(schema, &format!("schemas.{schema_name}"))?;
+    for source in &mut sources {
+        let syntax =
+            syn::parse_file(&source.contents).map_err(|error| CodegenRustError::InvalidRust {
+                path: source.path.clone(),
+                source: error,
+            })?;
+        source.contents = prettyplease::unparse(&syntax);
+    }
+
+    sources.push(Source {
+        path: "Cargo.toml".into(),
+        contents: format!(
+            "# Generated by Trellis. Do not edit.\n[package]\nname = {name:?}\nversion = {:?}\nedition = \"2021\"\npublish = false\n\n[package.metadata.trellis]\ngenerated = true\n\n[dependencies]\ntrellis-rs = \"{}\"\nserde = {{ version = \"1.0\", features = [\"derive\"] }}\nserde_json = \"1.0\"\nfutures-util = \"0.3\"\n",
+            root.version().to_string(),
+            env!("CARGO_PKG_VERSION")
+        ),
+    });
+
+    for source in sources {
+        let path = out_dir.join(source.path);
+        fs::create_dir_all(path.parent().expect("generated file parent"))?;
+        fs::write(path, source.contents)?;
     }
     Ok(())
 }
 
-fn validate_schema_field_identifiers(
-    schema: &serde_json::Value,
-    path: &str,
+fn validate_names(
+    graph: &PackageGraph,
+    public_types: &BTreeSet<TypeRef>,
+    participant_types: &BTreeMap<&trellis_idl::ParticipantId, BTreeSet<TypeRef>>,
 ) -> Result<(), CodegenRustError> {
-    if let Some(properties) = schema
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-    {
-        reject_identifier_collisions(
-            path,
-            properties
-                .keys()
-                .map(|field| (field.clone(), rust_ident(&rust_schema_field_base(field)))),
+    let root = graph.root_package();
+    reject_collisions(
+        "apis",
+        graph
+            .packages()
+            .values()
+            .flat_map(|package| package.apis().keys())
+            .map(|id| (id.as_str(), module_name(id.as_str()))),
+    )?;
+    reject_collisions(
+        "participants",
+        root.participants()
+            .keys()
+            .map(|id| (id.as_str(), module_name(id.as_str()))),
+    )?;
+    reject_collisions(
+        "types",
+        public_types
+            .iter()
+            .map(|reference| (reference.id.as_str(), type_name(reference.id.as_str()))),
+    )?;
+    reject_collisions(
+        "type packages",
+        graph
+            .packages()
+            .keys()
+            .map(|id| (id.as_str(), module_name(id.as_str()))),
+    )?;
+    for (participant, types) in participant_types {
+        reject_collisions(
+            &format!("participant {} types", participant.as_str()),
+            types
+                .iter()
+                .map(|reference| (reference.id.as_str(), type_name(reference.id.as_str()))),
         )?;
-        for (field, child) in properties {
-            validate_schema_field_identifiers(child, &format!("{path}.properties.{field}"))?;
-        }
     }
-    for keyword in ["items", "additionalProperties"] {
-        if let Some(child) = schema.get(keyword) {
-            validate_schema_field_identifiers(child, &format!("{path}.{keyword}"))?;
-        }
-    }
-    for keyword in ["allOf", "anyOf", "oneOf"] {
-        if let Some(children) = schema.get(keyword).and_then(serde_json::Value::as_array) {
-            for (index, child) in children.iter().enumerate() {
-                validate_schema_field_identifiers(child, &format!("{path}.{keyword}[{index}]"))?;
+    for package in graph.packages().values() {
+        for (id, definition) in package.types() {
+            match definition {
+                TypeDefinition::Model(fields) => reject_collisions(
+                    &format!("model {id}"),
+                    fields
+                        .keys()
+                        .map(|field| (field.as_str(), rust_ident(&key_to_snake(field)))),
+                )?,
+                TypeDefinition::Enum(values) => reject_collisions(
+                    &format!("enum {id}"),
+                    values
+                        .iter()
+                        .map(|value| (value.as_str(), variant_name(value))),
+                )?,
+                TypeDefinition::Alias(_) => {}
             }
         }
+        for api in package.apis().values() {
+            reject_collisions(
+                &format!("API {} actions", api.identity()),
+                api.actions()
+                    .keys()
+                    .map(|action| (action.name.as_str(), type_name(&action.name))),
+            )?;
+            reject_collisions(
+                &format!("API {} errors", api.identity()),
+                api.errors()
+                    .keys()
+                    .map(|error| (error.as_str(), type_name(error))),
+            )?;
+        }
     }
     Ok(())
 }
 
-fn reject_identifier_collisions(
-    scope: impl Into<String>,
-    identifiers: impl IntoIterator<Item = (String, String)>,
+fn reject_collisions<'a>(
+    scope: &str,
+    values: impl IntoIterator<Item = (&'a str, String)>,
 ) -> Result<(), CodegenRustError> {
-    let scope = scope.into();
-    let mut grouped = std::collections::BTreeMap::<String, Vec<String>>::new();
-    for (original, generated) in identifiers {
-        grouped.entry(generated).or_default().push(original);
+    let mut normalized: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (source, identifier) in values {
+        normalized
+            .entry(identifier)
+            .or_default()
+            .push(source.into());
     }
-    if let Some((identifier, originals)) = grouped
-        .into_iter()
-        .find(|(_, originals)| originals.len() > 1)
+    if let Some((identifier, originals)) = normalized.into_iter().find(|(_, names)| names.len() > 1)
     {
         return Err(CodegenRustError::IdentifierCollision {
-            scope,
+            scope: scope.into(),
             identifier,
             originals,
         });
@@ -844,2492 +251,1248 @@ fn reject_identifier_collisions(
     Ok(())
 }
 
-fn validate_supported_schemas(loaded: &ApiInput) -> Result<(), CodegenRustError> {
-    for (name, schema) in &loaded.render_model.schemas {
-        validate_supported_schema(schema, &format!("schemas.{name}"))?;
-    }
-    Ok(())
+fn render_namespace<'a>(ids: impl IntoIterator<Item = &'a str>) -> String {
+    ids.into_iter()
+        .map(|id| format!("pub mod {};", module_name(id)))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
 }
 
-fn validate_supported_schema(
-    schema: &serde_json::Value,
-    path: &str,
-) -> Result<(), CodegenRustError> {
-    for keyword in ["anyOf", "oneOf"] {
-        if let Some(variants) = schema.get(keyword).and_then(serde_json::Value::as_array) {
-            let non_null = variants
-                .iter()
-                .filter(|variant| !is_null_schema(variant))
-                .collect::<Vec<_>>();
-            if non_null.len() > 1
-                && !matches!(
-                    union_base_type(schema),
-                    Some("String" | "bool" | "i64" | "f64")
-                )
-                && string_enum_values(schema).is_none()
-                && tagged_object_union(schema).is_none()
-                && object_union_variants(schema).is_none()
+fn render_internal_types(graph: &PackageGraph) -> String {
+    let mut out = String::from(
+        "//! Shared nominal wire definitions.\n\n#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]\n#[serde(untagged)]\npub enum Nullable<T> { Null, Value(T) }\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]\npub struct Int64(pub i64);\nimpl From<i64> for Int64 { fn from(value: i64) -> Self { Self(value) } }\nimpl From<Int64> for i64 { fn from(value: Int64) -> Self { value.0 } }\nimpl std::ops::Deref for Int64 { type Target = i64; fn deref(&self) -> &Self::Target { &self.0 } }\nimpl serde::Serialize for Int64 { fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> { trellis_rs::generated::serde_i64::serialize(&self.0, serializer) } }\nimpl<'de> serde::Deserialize<'de> for Int64 { fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> { trellis_rs::generated::serde_i64::deserialize(deserializer).map(Self) } }\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]\npub struct Uint64(pub u64);\nimpl From<u64> for Uint64 { fn from(value: u64) -> Self { Self(value) } }\nimpl From<Uint64> for u64 { fn from(value: Uint64) -> Self { value.0 } }\nimpl std::ops::Deref for Uint64 { type Target = u64; fn deref(&self) -> &Self::Target { &self.0 } }\nimpl serde::Serialize for Uint64 { fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> { trellis_rs::generated::serde_u64::serialize(&self.0, serializer) } }\nimpl<'de> serde::Deserialize<'de> for Uint64 { fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> { trellis_rs::generated::serde_u64::deserialize(deserializer).map(Self) } }\n\n#[derive(Clone, Debug, PartialEq, Eq)]\npub struct Bytes(pub Vec<u8>);\nimpl From<Vec<u8>> for Bytes { fn from(value: Vec<u8>) -> Self { Self(value) } }\nimpl std::ops::Deref for Bytes { type Target = [u8]; fn deref(&self) -> &Self::Target { &self.0 } }\nimpl serde::Serialize for Bytes { fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> { trellis_rs::generated::serde_base64::serialize(&self.0, serializer) } }\nimpl<'de> serde::Deserialize<'de> for Bytes { fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> { trellis_rs::generated::serde_base64::deserialize(deserializer).map(Self) } }\n\n",
+    );
+    out.push_str(
+        r#"#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct Number(pub f64);
+impl From<f64> for Number { fn from(value: f64) -> Self { Self(value) } }
+impl From<Number> for f64 { fn from(value: Number) -> Self { value.0 } }
+impl std::ops::Deref for Number { type Target = f64; fn deref(&self) -> &Self::Target { &self.0 } }
+impl serde::Serialize for Number { fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> { trellis_rs::generated::serde_f64::serialize(&self.0, serializer) } }
+impl<'de> serde::Deserialize<'de> for Number { fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> { trellis_rs::generated::serde_f64::deserialize(deserializer).map(Self) } }
+
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CursorQuery { #[serde(default, skip_serializing_if = "Option::is_none")] pub cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] pub limit: Option<Uint64> }
+
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CursorPage<T> { pub items: Vec<T>, pub page: CursorPageInfo }
+
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CursorPageInfo { #[serde(default, skip_serializing_if = "Option::is_none")] pub next_cursor: Option<String> }
+
+"#,
+    );
+    let recursive = recursive_model_edges(graph);
+    for package in graph.packages().values() {
+        out.push_str(&format!(
+            "pub mod {} {{\n",
+            module_name(package.identity().as_str())
+        ));
+        for (id, definition) in package.types() {
+            out.push_str(&render_type_definition(
+                graph,
+                package.identity(),
+                id.as_str(),
+                definition,
+                &recursive,
+            ));
+        }
+        out.push_str("}\n");
+    }
+    out
+}
+
+fn render_type_definition(
+    graph: &PackageGraph,
+    package: &PackageId,
+    id: &str,
+    definition: &TypeDefinition,
+    recursive: &BTreeSet<(TypeRef, TypeRef)>,
+) -> String {
+    let name = type_name(id);
+    match definition {
+        TypeDefinition::Model(fields) => {
+            let source = TypeRef {
+                package: package.clone(),
+                id: graph
+                    .package(package)
+                    .expect("package")
+                    .types()
+                    .keys()
+                    .find(|value| value.as_str() == id)
+                    .expect("type")
+                    .clone(),
+            };
+            let mut out = format!(
+                "#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]\npub struct {name} {{\n"
+            );
+            for (field, value) in fields {
+                let rust_field = rust_ident(&key_to_snake(field));
+                if rust_field.trim_start_matches("r#") != field {
+                    out.push_str(&format!("#[serde(rename = {field:?})]\n"));
+                }
+                if value.optional {
+                    out.push_str("#[serde(default, skip_serializing_if = \"Option::is_none\")]\n");
+                }
+                let ty = render_expr(&value.ty, Some(&source), recursive);
+                let ty = if value.optional {
+                    format!("Option<{ty}>")
+                } else {
+                    ty
+                };
+                out.push_str(&format!("pub {rust_field}: {ty},\n"));
+            }
+            out.push_str("}\n");
+            out
+        }
+        TypeDefinition::Enum(values) => {
+            let mut out = format!("#[derive(Clone, Debug, PartialEq, Eq)]\npub enum {name} {{\n");
+            for value in values {
+                out.push_str(&format!("{},\n", variant_name(value)));
+            }
+            out.push_str("Unknown(String),\n}\n");
+            out.push_str(&format!(
+                "impl {name} {{ pub fn as_str(&self) -> &str {{ match self {{\n"
+            ));
+            for value in values {
+                out.push_str(&format!("Self::{} => {value:?},\n", variant_name(value)));
+            }
+            out.push_str("Self::Unknown(value) => value,\n} } }\n");
+            out.push_str(&format!("impl AsRef<str> for {name} {{ fn as_ref(&self) -> &str {{ self.as_str() }} }}\nimpl std::fmt::Display for {name} {{ fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ formatter.write_str(self.as_str()) }} }}\nimpl serde::Serialize for {name} {{ fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {{ serializer.serialize_str(self.as_str()) }} }}\n"));
+            out.push_str(&format!("impl<'de> serde::Deserialize<'de> for {name} {{ fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {{ let value = <String as serde::Deserialize>::deserialize(deserializer)?; Ok(match value.as_str() {{\n"));
+            for value in values {
+                out.push_str(&format!("{value:?} => Self::{},\n", variant_name(value)));
+            }
+            out.push_str("_ => Self::Unknown(value),\n}) } }\n");
+            out
+        }
+        TypeDefinition::Alias(expression) if is_named_scalar(graph, expression) => {
+            let inner = render_expr(expression, None, recursive);
+            let primitive = scalar_primitive(graph, expression).expect("named scalar primitive");
+            let derives = match primitive {
+                Primitive::Number => "Clone, Copy, Debug, PartialEq, PartialOrd",
+                Primitive::Bytes => "Clone, Debug, PartialEq, Eq",
+                Primitive::Bool
+                | Primitive::Int32
+                | Primitive::Uint32
+                | Primitive::Int64
+                | Primitive::Uint64 => "Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord",
+                Primitive::String | Primitive::Timestamp | Primitive::Ulid => {
+                    "Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash"
+                }
+            };
+            let mut out = format!(
+                "#[derive({derives}, serde::Serialize, serde::Deserialize)]\n#[serde(transparent)]\npub struct {name}(pub {inner});\nimpl std::ops::Deref for {name} {{ type Target = {inner}; fn deref(&self) -> &Self::Target {{ &self.0 }} }}\nimpl From<{inner}> for {name} {{ fn from(value: {inner}) -> Self {{ Self(value) }} }}\n"
+            );
+            if matches!(
+                primitive,
+                Primitive::String | Primitive::Timestamp | Primitive::Ulid
+            ) {
+                out.push_str(&format!("impl AsRef<str> for {name} {{ fn as_ref(&self) -> &str {{ self.0.as_ref() }} }}\nimpl std::fmt::Display for {name} {{ fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ formatter.write_str(self.as_ref()) }} }}\n"));
+            }
+            out
+        }
+        TypeDefinition::Alias(expression) => {
+            format!(
+                "pub type {name} = {};\n",
+                render_expr(expression, None, recursive)
+            )
+        }
+    }
+}
+
+fn is_named_scalar(graph: &PackageGraph, expression: &TypeExpression) -> bool {
+    match expression {
+        TypeExpression::Primitive(..) => true,
+        TypeExpression::Named(reference) => graph
+            .package(&reference.package)
+            .and_then(|package| package.types().get(&reference.id))
+            .is_some_and(|definition| {
+                matches!(definition, TypeDefinition::Alias(value) if is_named_scalar(graph, value))
+            }),
+        _ => false,
+    }
+}
+
+fn scalar_primitive(graph: &PackageGraph, expression: &TypeExpression) -> Option<Primitive> {
+    match expression {
+        TypeExpression::Primitive(primitive, _) => Some(*primitive),
+        TypeExpression::Named(reference) => graph
+            .package(&reference.package)
+            .and_then(|package| package.types().get(&reference.id))
+            .and_then(|definition| match definition {
+                TypeDefinition::Alias(value) => scalar_primitive(graph, value),
+                _ => None,
+            }),
+        _ => None,
+    }
+}
+
+fn render_expr(
+    expression: &TypeExpression,
+    model: Option<&TypeRef>,
+    recursive: &BTreeSet<(TypeRef, TypeRef)>,
+) -> String {
+    match expression {
+        TypeExpression::Primitive(primitive, _) => match primitive {
+            Primitive::String => "String".into(),
+            Primitive::Bool => "bool".into(),
+            Primitive::Int32 => "i32".into(),
+            Primitive::Uint32 => "u32".into(),
+            Primitive::Int64 => "crate::__types::Int64".into(),
+            Primitive::Uint64 => "crate::__types::Uint64".into(),
+            Primitive::Number => "crate::__types::Number".into(),
+            Primitive::Bytes => "crate::__types::Bytes".into(),
+            Primitive::Timestamp => "trellis_rs::generated::Timestamp".into(),
+            Primitive::Ulid => "trellis_rs::generated::Ulid".into(),
+        },
+        TypeExpression::Named(reference) => {
+            let path = type_path(reference);
+            if model.is_some_and(|source| recursive.contains(&(source.clone(), reference.clone())))
             {
-                return Err(CodegenRustError::UnsupportedSchema {
-                    path: format!("{path}.{keyword}"),
-                    reason: "ambiguous union cannot be represented faithfully".to_string(),
-                });
-            }
-            for (index, variant) in variants.iter().enumerate() {
-                validate_supported_schema(variant, &format!("{path}.{keyword}[{index}]"))?;
+                format!("Box<{path}>")
+            } else {
+                path
             }
         }
-    }
-    if let Some(properties) = schema
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-    {
-        for (field, child) in properties {
-            validate_supported_schema(child, &format!("{path}.properties.{field}"))?;
+        TypeExpression::List(item, _) => {
+            format!("Vec<{}>", render_expr(item, None, recursive))
         }
+        TypeExpression::Map(value) => format!(
+            "std::collections::BTreeMap<String, {}>",
+            render_expr(value, None, recursive)
+        ),
+        TypeExpression::Nullable(value) => format!(
+            "crate::__types::Nullable<{}>",
+            render_expr(value, model, recursive)
+        ),
+        TypeExpression::CursorQuery => "crate::__types::CursorQuery".into(),
+        TypeExpression::CursorPage(value) => format!(
+            "crate::__types::CursorPage<{}>",
+            render_expr(value, None, recursive)
+        ),
     }
-    if let Some(items) = schema.get("items") {
-        validate_supported_schema(items, &format!("{path}.items"))?;
-    }
-    Ok(())
 }
 
-/// Return whether a participant `uses` alias requires an explicit local SDK mapping.
-pub(crate) fn participant_use_requires_mapping(
-    local: &ParticipantInput,
-    alias: &str,
-    use_ref: &ParticipantUse,
-) -> bool {
-    !is_runtime_owned_baseline_use(local, alias, use_ref)
-}
-
-fn is_runtime_owned_baseline_use(
-    local: &ParticipantInput,
-    alias: &str,
-    use_ref: &ParticipantUse,
-) -> bool {
-    if alias == "state"
-        && use_ref.api == "trellis.state@v1"
-        && !local.render_model.state.is_empty()
-        && use_ref.operations.is_none()
-        && use_ref.events.is_none()
-    {
-        return use_ref.rpc.as_ref().is_some_and(|rpc| {
-            rpc.call.as_deref().unwrap_or(&[]).iter().all(|key| {
-                matches!(
-                    key.as_str(),
-                    "State.Get" | "State.Put" | "State.Delete" | "State.List"
-                )
-            })
-        });
-    }
-
-    false
-}
-
-fn render_participant_shim_lib_rs(loaded: &ParticipantInput) -> String {
-    let jobs_module = if loaded.render_model.jobs.is_empty() {
-        ""
-    } else {
-        "pub mod jobs;\n"
-    };
-    let event_consumers_module = if loaded.render_model.event_consumers.is_empty() {
-        ""
-    } else {
-        "pub mod event_consumers;\n"
-    };
-    let exports = match loaded.render_model.kind {
-        ParticipantKind::Service => {
-            "pub use connect::{connect, ConnectedService, Participant, ServiceConnectOptions};\npub use trellis_rs::service::{GeneratedServiceParticipant, ServiceHandlerContext, ServiceRuntimeError};"
-        }
-        ParticipantKind::App | ParticipantKind::Agent => {
-            "pub use connect::{connect, ConnectOptions, ConnectedClient};"
-        }
-        ParticipantKind::Device => {
-            "pub use connect::{connect, ConnectOptions, ConnectedClient, Participant};"
-        }
-    };
+fn type_path(reference: &TypeRef) -> String {
     format!(
-        "//! Generated Rust participant facade crate.\n\nconst _: () = trellis_rs::generated::assert_abi(1);\n\npub mod connect;\npub mod participant;\n{event_consumers_module}{jobs_module}include!(\"facade.rs\");\n{exports}\n"
+        "crate::__types::{}::{}",
+        module_name(reference.package.as_str()),
+        type_name(reference.id.as_str())
     )
 }
 
-fn render_participant_event_consumers_rs(
-    loaded: &ParticipantInput,
-    mappings: &[ValidatedParticipantAlias],
-    owned_sdk_crate_name: Option<&str>,
-) -> String {
-    let mut lines = vec![
-        "//! Generated durable event-consumer facade.".to_string(),
-        String::new(),
-        "/// Durable event consumers declared by this participant contract.".to_string(),
-        "pub struct EventConsumers<'a> { service: &'a crate::ConnectedService }".to_string(),
-        "impl EventConsumers<'_> {".to_string(),
-    ];
-    for group in loaded.render_model.event_consumers.keys() {
-        let method = rust_ident(&key_to_snake(group));
-        let group_type = format!("{}Consumer", key_to_pascal(group));
-        lines.push(format!("    /// Access the `{group}` consumer group.\n    pub fn {method}(&self) -> {group_type}<'_> {{ {group_type} {{ service: self.service }} }}"));
+fn render_type_exports(graph: &PackageGraph, types: &BTreeSet<TypeRef>, public: bool) -> String {
+    let visibility = if public { "pub " } else { "" };
+    let mut out = String::from("//! Generated wire type exports.\n");
+    for reference in types {
+        out.push_str(&format!(
+            "{visibility}use crate::__types::{}::{};\n",
+            module_name(reference.package.as_str()),
+            type_name(reference.id.as_str())
+        ));
     }
-    lines.extend([
-        "}".to_string(),
-        String::new(),
-        "impl crate::ConnectedService {".to_string(),
-        "    /// Access durable event consumers declared by this participant contract.".to_string(),
-        "    pub fn event_consumers(&self) -> EventConsumers<'_> { EventConsumers { service: self } }"
-            .to_string(),
-        "}".to_string(),
-        String::new(),
-    ]);
+    if types.iter().any(|reference| {
+        type_contains_special(graph, reference, Primitive::Int64)
+            || type_contains_special(graph, reference, Primitive::Uint64)
+            || type_contains_special(graph, reference, Primitive::Number)
+            || type_contains_special(graph, reference, Primitive::Bytes)
+    }) {
+        out.push_str(&format!(
+            "{visibility}use crate::__types::{{Bytes, Int64, Number, Uint64}};\n"
+        ));
+    }
+    out
+}
 
-    for (group, spec) in &loaded.render_model.event_consumers {
-        let group_type = format!("{}Consumer", key_to_pascal(group));
-        lines.push(format!(
-            "/// Typed registrations for the `{group}` consumer group."
+fn render_api(graph: &PackageGraph, api: &ApiDefinition) -> Result<String, CodegenRustError> {
+    let digest = api_digest(graph, api.identity()).map_err(semantic)?;
+    let mut out = format!(
+        "//! Generated API `{}`.\n\npub const API_ID: &str = {:?};\npub const API_DIGEST: &str = {digest:?};\n\npub struct Api;\nimpl trellis_rs::generated::ApiDescriptor for Api {{ const ID: &'static str = API_ID; }}\n",
+        api.identity(),
+        api.identity().as_str()
+    );
+    out.push_str("\npub mod errors {\n");
+    for (name, payload) in api.errors() {
+        let rust_name = type_name(name);
+        out.push_str(&format!(
+            "#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]\npub struct {rust_name} {{ #[serde(flatten)] pub error: trellis_rs::generated::SerializableErrorData,"
         ));
-        lines.push(format!(
-            "pub struct {group_type}<'a> {{ service: &'a crate::ConnectedService }}"
+        out.push_str(" }\n");
+        if let Some(payload) = payload {
+            out.push_str(&format!("impl {rust_name} {{ pub fn payload(&self) -> Result<{}, serde_json::Error> {{ serde_json::from_value(serde_json::Value::Object(self.error.extra.clone())) }} }}\n", type_path(payload)));
+        }
+        let qualified = format!("{}::{name}", api.identity());
+        out.push_str(&format!("impl std::fmt::Display for {rust_name} {{ fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ formatter.write_str(&self.error.message) }} }}\nimpl std::error::Error for {rust_name} {{}}\nimpl trellis_rs::generated::TrellisError for {rust_name} {{ const TYPE: &'static str = {qualified:?}; }}\n"));
+    }
+    out.push_str("}\n");
+
+    for kind in [
+        ActionKind::Rpc,
+        ActionKind::Operation,
+        ActionKind::Event,
+        ActionKind::Feed,
+    ] {
+        out.push_str(&format!("\npub mod {} {{\n", action_module(kind)));
+        for (id, action) in api.actions().iter().filter(|(id, _)| id.kind == kind) {
+            out.push_str(&render_action(graph, api, &id.name, action)?);
+        }
+        out.push_str("}\n");
+    }
+    out.push_str("\n/// Registers metadata for every RPC in this API.\npub fn register_rpc_metadata(router: &mut trellis_rs::service::Router) {\n");
+    for (id, _) in api
+        .actions()
+        .iter()
+        .filter(|(id, _)| id.kind == ActionKind::Rpc)
+    {
+        out.push_str(&format!(
+            "router.register_rpc_metadata::<rpc::{}>();\n",
+            type_name(&id.name)
         ));
-        lines.push(format!("impl {group_type}<'_> {{"));
-        for (alias, keys) in &spec.events {
-            let sdk = if loaded.render_model.implements.contains_key(alias) {
-                crate_ident(owned_sdk_crate_name.expect("owned event requires owner SDK"))
+    }
+    out.push_str("}\n");
+    out.push_str(&render_api_facades(api));
+    Ok(out)
+}
+
+fn render_api_facades(api: &ApiDefinition) -> String {
+    let mut out = String::from(
+        "#[derive(Clone)]\npub struct Client { inner: trellis_rs::generated::Client }\nimpl Client {\npub fn from_generated(inner: trellis_rs::generated::Client) -> Self { Self { inner } }\n",
+    );
+    for (id, action) in api.actions() {
+        let name = type_name(&id.name);
+        let method = rust_ident(&key_to_snake(&id.name));
+        match action {
+            ActionDefinition::Rpc { errors, .. } => {
+                let error = if errors.is_empty() {
+                    "std::convert::Infallible".to_owned()
+                } else {
+                    format!("rpc::{name}Error")
+                };
+                out.push_str(&format!(
+                    "pub async fn {method}(&self, input: &rpc::{name}Input) -> Result<rpc::{name}Output, trellis_rs::client::CallError<{error}>> {{ self.inner.call::<rpc::{name}>(input).await }}\n"
+                ));
+            }
+            ActionDefinition::Event { .. } => {
+                out.push_str(&format!(
+                    "pub async fn publish_{method}(&self, event: &events::{name}Event) -> Result<(), trellis_rs::client::TrellisClientError> {{ self.inner.publish::<events::{name}>(event).await }}\npub async fn subscribe_{method}(&self, options: trellis_rs::client::EventSubscribeOptions) -> Result<futures_util::stream::BoxStream<'static, Result<events::{name}Event, trellis_rs::client::TrellisClientError>>, trellis_rs::client::TrellisClientError> {{ self.inner.subscribe::<events::{name}>(options).await }}\n"
+                ));
+            }
+            ActionDefinition::Feed { .. } => {
+                out.push_str(&format!(
+                    "pub async fn {method}(&self, input: &feeds::{name}Input) -> Result<futures_util::stream::BoxStream<'static, Result<feeds::{name}Event, trellis_rs::client::TrellisClientError>>, trellis_rs::client::TrellisClientError> {{ self.inner.feed::<feeds::{name}>(input).await }}\n"
+                ));
+            }
+            ActionDefinition::Operation { .. } => out.push_str(&format!(
+                "pub fn {method}(&self) -> trellis_rs::generated::Operation<'_, operations::{name}> {{ self.inner.operation::<operations::{name}>() }}\n"
+            )),
+        }
+    }
+    out.push_str("}\n");
+    if api.actions().values().any(|action| {
+        matches!(
+            action,
+            ActionDefinition::Rpc { .. }
+                | ActionDefinition::Feed { .. }
+                | ActionDefinition::Operation { .. }
+        )
+    }) {
+        out.push_str("pub struct Provider<'a, P> { runtime: &'a mut trellis_rs::service::ConnectedServiceRuntime<P> }\nimpl<'a, P: trellis_rs::generated::ParticipantDescriptor> Provider<'a, P> {\npub fn new(runtime: &'a mut trellis_rs::service::ConnectedServiceRuntime<P>) -> Self { Self { runtime } }\n");
+        for (id, action) in api.actions() {
+            let name = type_name(&id.name);
+            let method = rust_ident(&key_to_snake(&id.name));
+            match action {
+                ActionDefinition::Rpc { .. } => out.push_str(&format!(
+                    "pub fn register_{method}<F, Fut>(&mut self, handler: F) where F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::{name}Input) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = trellis_rs::service::HandlerResult<rpc::{name}Output>> + Send + 'static {{ self.runtime.register_rpc::<rpc::{name}, _, _>(handler); }}\n"
+                )),
+                ActionDefinition::Feed { .. } => out.push_str(&format!(
+                    "pub fn register_{method}<F, S>(&mut self, handler: F) where F: Fn(trellis_rs::service::ServiceHandlerContext, feeds::{name}Input) -> S + Send + Sync + 'static, S: futures_util::Stream<Item = Result<feeds::{name}Event, trellis_rs::service::ServerError>> + Send + 'static {{ self.runtime.register_feed::<feeds::{name}, _, _>(handler); }}\n"
+                )),
+                ActionDefinition::Operation { .. } => out.push_str(&format!(
+                    "pub fn register_{method}<O>(&mut self, provider: O) where O: trellis_rs::generated::OperationProvider<operations::{name}> {{ self.runtime.register_operation_provider::<trellis_rs::generated::OperationAdapter<operations::{name}>, O>(provider); }}\n"
+                )),
+                _ => {}
+            }
+        }
+        out.push_str("}\n");
+    }
+    out
+}
+
+fn render_action(
+    _graph: &PackageGraph,
+    api: &ApiDefinition,
+    name: &str,
+    action: &ActionDefinition,
+) -> Result<String, CodegenRustError> {
+    let rust_name = type_name(name);
+    let key = format!("{}.{}", api.name(), name);
+    let version = format!("v{}", api.major());
+    let capabilities = |direction| action_capabilities(api, action_kind(action), name, direction);
+    match action {
+        ActionDefinition::Rpc {
+            input,
+            output,
+            errors,
+            download,
+            pagination,
+        } => {
+            let error_type = if errors.is_empty() {
+                "std::convert::Infallible".to_owned()
             } else {
-                let mapping = mappings
-                    .iter()
-                    .find(|mapping| mapping.alias == *alias)
-                    .expect("validated event consumer alias mapping");
-                crate_ident(&mapping.crate_name)
+                format!("{rust_name}Error")
             };
-            for key in keys {
-                let base = key_to_pascal(key);
-                let method = rust_ident(&key_to_snake(key));
-                let api_identity = format!("{sdk}::API_ID");
-                lines.push(render_event_consumer_method(
-                    group,
-                    &method,
-                    &sdk,
-                    &base,
-                    &api_identity,
+            let mut out = format!(
+                "pub type {rust_name}Input = {};\npub type {rust_name}Output = {};\npub struct {rust_name};\nimpl {rust_name} {{ pub const API_ID: &'static str = super::API_ID; pub const DESCRIPTOR_NAME: &'static str = {:?}; pub const KEY: &'static str = {key:?}; pub const SUBJECT: &'static str = {:?}; pub const CALLER_CAPABILITIES: &'static [&'static str] = &{}; pub const ERRORS: &'static [&'static str] = &{}; pub const DOWNLOAD: bool = {download}; pub const CURSOR_PAGINATION: bool = {}; }}\n",
+                type_path(input), type_path(output), format!("rpc.{name}"),
+                format!("rpc.{version}.{key}"),
+                string_slice(capabilities(InteractionDirection::Call)),
+                qualified_errors(api, errors), pagination.is_some(),
+            );
+            out.push_str(&render_action_errors(api, &rust_name, errors));
+            let decode_error = if errors.is_empty() {
+                "let _ = value; Ok(None)".to_owned()
+            } else {
+                format!("{rust_name}Error::decode(value)")
+            };
+            out.push_str(&format!(
+                "impl trellis_rs::generated::RpcDescriptor for {rust_name} {{ type Input = {rust_name}Input; type Output = {rust_name}Output; type Error = {error_type}; const API_ID: &'static str = super::API_ID; const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME; const SUBJECT: &'static str = Self::SUBJECT; const KEY: &'static str = Self::KEY; const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES; fn decode_error(value: serde_json::Value) -> Result<Option<Self::Error>, serde_json::Error> {{ {decode_error} }} }}\n"
+            ));
+            Ok(out)
+        }
+        ActionDefinition::Event { payload, parameters } => {
+            let base = format!("events.{version}.{key}");
+            let template = parameters.iter().fold(base.clone(), |mut value, path| {
+                value.push_str(".{/");
+                value.push_str(&path.join("/"));
+                value.push('}');
+                value
+            });
+            let wildcard = format!("{base}{}", ".*".repeat(parameters.len()));
+            Ok(format!(
+                "pub type {rust_name}Event = {};\npub struct {rust_name};\nimpl {rust_name} {{ pub const API_ID: &'static str = super::API_ID; pub const DESCRIPTOR_NAME: &'static str = {:?}; pub const KEY: &'static str = {key:?}; pub const SUBJECT: &'static str = {template:?}; pub const SUBSCRIBE_SUBJECT: &'static str = {wildcard:?}; pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &{}; pub const DELEGATED_PUBLISH: bool = {}; pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &{}; }}\nimpl trellis_rs::generated::EventDescriptor for {rust_name} {{ type Event = {rust_name}Event; const API_ID: &'static str = super::API_ID; const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME; const SUBJECT: &'static str = Self::SUBJECT; const KEY: &'static str = Self::KEY; const SUBSCRIBE_SUBJECT: &'static str = Self::SUBSCRIBE_SUBJECT; const PUBLISH_CAPABILITIES: &'static [&'static str] = Self::PUBLISH_CAPABILITIES; const DELEGATED_PUBLISH: bool = Self::DELEGATED_PUBLISH; const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = Self::SUBSCRIBE_CAPABILITIES; }}\n",
+                type_path(payload), format!("event.{name}"),
+                string_slice(capabilities(InteractionDirection::Publish)),
+                !capabilities(InteractionDirection::Publish).is_empty(),
+                string_slice(capabilities(InteractionDirection::Subscribe)),
+            ))
+        }
+        ActionDefinition::Feed { input, event } => Ok(format!(
+            "pub type {rust_name}Input = {};\npub type {rust_name}Event = {};\npub struct {rust_name};\nimpl {rust_name} {{ pub const API_ID: &'static str = super::API_ID; pub const DESCRIPTOR_NAME: &'static str = {:?}; pub const KEY: &'static str = {key:?}; pub const SUBJECT: &'static str = {:?}; pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &{}; }}\nimpl trellis_rs::generated::FeedDescriptor for {rust_name} {{ type Input = {rust_name}Input; type Event = {rust_name}Event; const API_ID: &'static str = super::API_ID; const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME; const SUBJECT: &'static str = Self::SUBJECT; const KEY: &'static str = Self::KEY; const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = Self::SUBSCRIBE_CAPABILITIES; }}\n",
+            type_path(input), type_path(event), format!("feed.{name}"), format!("feed.{version}.{key}"),
+            string_slice(capabilities(InteractionDirection::Subscribe)),
+        )),
+        ActionDefinition::Operation { input, output, update, errors, signals, upload } => {
+            let error_type = if errors.is_empty() {
+                "std::convert::Infallible".to_owned()
+            } else {
+                format!("{rust_name}Error")
+            };
+            let mut out = format!(
+                "pub type {rust_name}Input = {};\npub type {rust_name}Output = {};\n",
+                type_path(input), type_path(output)
+            );
+            if let Some(update) = update {
+                out.push_str(&format!("pub type {rust_name}Progress = {};\n", type_path(update)));
+            }
+            for (signal, ty) in signals {
+                out.push_str(&format!("pub type {rust_name}{}SignalInput = {};\n", type_name(signal), type_path(ty)));
+            }
+            out.push_str(&format!(
+                "pub struct {rust_name};\nimpl {rust_name} {{ pub const API_ID: &'static str = super::API_ID; pub const DESCRIPTOR_NAME: &'static str = {:?}; pub const KEY: &'static str = {key:?}; pub const SUBJECT: &'static str = {:?}; pub const CALLER_CAPABILITIES: &'static [&'static str] = &{}; pub const ERRORS: &'static [&'static str] = &{}; pub const UPLOAD: bool = {upload}; }}\n",
+                format!("operation.{name}"), format!("operations.{version}.{key}"),
+                string_slice(capabilities(InteractionDirection::Invoke)), qualified_errors(api, errors),
+            ));
+            out.push_str(&render_action_errors(api, &rust_name, errors));
+            if !errors.is_empty() {
+                out.push_str(&format!("impl trellis_rs::generated::OperationDeclaredError for {rust_name}Error {{ fn data(&self) -> &trellis_rs::generated::SerializableErrorData {{ match self {{\n"));
+                for error in errors {
+                    out.push_str(&format!("Self::{}(value) => &value.error,\n", variant_name(error)));
+                }
+                out.push_str("} } }\n");
+                out.push_str(&format!("impl {rust_name}Error {{ pub fn into_provider_failure(self) -> trellis_rs::generated::DeclaredOperationFailure<Self> {{ trellis_rs::generated::DeclaredOperationFailure::new(self) }} }}\n"));
+            }
+            let progress = update
+                .as_ref()
+                .map_or_else(|| "serde_json::Value".to_owned(), |_| format!("{rust_name}Progress"));
+            let decode_error = if errors.is_empty() {
+                "let _ = value; Ok(None)".to_owned()
+            } else {
+                format!("{rust_name}Error::decode(value)")
+            };
+            out.push_str(&format!(
+                "impl trellis_rs::generated::OperationDescriptor for {rust_name} {{ type Input = {rust_name}Input; type Output = {rust_name}Output; type Progress = {progress}; type Error = {error_type}; const API_ID: &'static str = super::API_ID; const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME; const SUBJECT: &'static str = Self::SUBJECT; const KEY: &'static str = Self::KEY; const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES; const ERRORS: &'static [&'static str] = &{}; const SIGNALS: &'static [&'static str] = &{}; const UPLOAD: bool = Self::UPLOAD; const HAS_PROGRESS: bool = {}; fn decode_error(value: serde_json::Value) -> Result<Option<Self::Error>, serde_json::Error> {{ {decode_error} }} }}\n",
+                qualified_errors(api, errors),
+                string_slice(signals.keys().map(String::as_str)),
+                update.is_some(),
+            ));
+            for signal in signals.keys() {
+                let signal_name = type_name(signal);
+                out.push_str(&format!(
+                    "pub struct {rust_name}{signal_name}Signal;\nimpl trellis_rs::generated::OperationSignal for {rust_name}{signal_name}Signal {{ type Operation = {rust_name}; type Input = {rust_name}{signal_name}SignalInput; const NAME: &'static str = {signal:?}; }}\n"
+                ));
+            }
+            Ok(out)
+        }
+    }
+}
+
+fn qualified_errors(api: &ApiDefinition, errors: &BTreeSet<String>) -> String {
+    format!(
+        "[{}]",
+        errors
+            .iter()
+            .map(|error| format!("{:?}", format!("{}::{error}", api.identity())))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn render_action_errors(api: &ApiDefinition, action: &str, errors: &BTreeSet<String>) -> String {
+    if errors.is_empty() {
+        return String::new();
+    }
+    let mut out = format!("#[derive(Clone, Debug, PartialEq)]\npub enum {action}Error {{\n");
+    for error in errors {
+        out.push_str(&format!(
+            "{}(super::errors::{}),\n",
+            variant_name(error),
+            type_name(error)
+        ));
+    }
+    out.push_str("}\n");
+    out.push_str(&format!("impl {action}Error {{ pub fn decode(value: serde_json::Value) -> Result<Option<Self>, serde_json::Error> {{ let error_type = value.get(\"type\").and_then(serde_json::Value::as_str); match error_type {{\n"));
+    for error in errors {
+        let qualified = format!("{}::{error}", api.identity());
+        out.push_str(&format!("Some({qualified:?}) => trellis_rs::generated::decode_typed_error::<super::errors::{}>(value).map(|value| value.map(Self::{})),\n", type_name(error), variant_name(error)));
+    }
+    out.push_str("_ => Ok(None),\n} } }\n");
+    out
+}
+
+fn render_participant(
+    graph: &PackageGraph,
+    participant: &ParticipantDefinition,
+    private_types: &BTreeSet<TypeRef>,
+    evidence: &str,
+) -> Result<String, CodegenRustError> {
+    let digest = participant_digest(graph, participant.identity()).map_err(semantic)?;
+    let path = participant
+        .identity()
+        .as_str()
+        .strip_prefix(&format!("{}.", graph.root().as_str()))
+        .ok_or_else(|| {
+            CodegenRustError::Semantic("participant is outside the root package".into())
+        })?;
+    let kind = match participant.kind() {
+        ParticipantKind::Service => "Service",
+        ParticipantKind::Device => "Device",
+        ParticipantKind::App => "App",
+        ParticipantKind::Agent => "Agent",
+    };
+    let mut out = format!(
+        "//! Generated participant `{}`.\n\npub const PARTICIPANT_ID: &str = {:?};\npub const PARTICIPANT_PATH: &str = {path:?};\npub const PARTICIPANT_DIGEST: &str = {digest:?};\npub const IMPLEMENTED_API_IDS: &[&str] = &{};\n\npub struct Participant;\nimpl trellis_rs::generated::ParticipantDescriptor for Participant {{ const ID: &'static str = PARTICIPANT_ID; const PATH: &'static str = PARTICIPANT_PATH; const KIND: trellis_rs::generated::ParticipantKind = trellis_rs::generated::ParticipantKind::{kind}; const IMPLEMENTED_API_IDS: &'static [&'static str] = IMPLEMENTED_API_IDS; fn package_evidence() -> trellis_rs::generated::PackageEvidence {{ PACKAGE_EVIDENCE }} }}\n\n{evidence}\n",
+        participant.identity(), participant.identity().as_str(),
+        string_slice(participant.implements().iter().map(ApiId::as_str)),
+    );
+    out.push_str("pub mod types {\n");
+    out.push_str(&render_type_exports(graph, private_types, true));
+    out.push_str("}\n");
+    out.push_str(&render_resources(participant));
+    out.push_str(&render_migrations(participant));
+    out.push_str(&render_availability(graph, participant));
+    out.push_str(&render_participant_facades(graph, participant));
+    Ok(out)
+}
+
+fn render_participant_facades(graph: &PackageGraph, participant: &ParticipantDefinition) -> String {
+    let optional_actions = optional_actions(graph, participant)
+        .into_iter()
+        .map(|(api, kind, name, direction)| optional_action(&api, kind, &name, direction))
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut out = format!("const OPTIONAL_ACTIONS: &[trellis_rs::generated::OptionalAction] = &[{optional_actions}];\n#[derive(Clone)]\npub struct Client {{ inner: trellis_rs::generated::Client }}\nimpl Client {{\npub fn from_generated(inner: trellis_rs::generated::Client) -> Self {{ Self {{ inner: inner.with_optional_actions(OPTIONAL_ACTIONS) }} }}\npub fn availability(&self) -> Availability {{ Availability::from_runtime(&self.inner.availability()) }}\npub fn watch_availability(&self) -> futures_util::stream::BoxStream<'static, Availability> {{ futures_util::StreamExt::boxed(futures_util::stream::unfold(self.inner.watch_availability(), |mut receiver| async move {{ receiver.changed().await.ok()?; let availability = Availability::from_runtime(&receiver.borrow()); Some((availability, receiver)) }})) }}\n");
+    match participant.kind() {
+        ParticipantKind::App | ParticipantKind::Agent => out.push_str(
+            "pub async fn connect(options: trellis_rs::client::UserConnectOptions<'_>) -> Result<Self, trellis_rs::client::TrellisClientError> { trellis_rs::generated::Client::connect_user(options).await.map(Self::from_generated) }\n",
+        ),
+        ParticipantKind::Device => out.push_str(
+            "pub async fn connect(options: trellis_rs::client::DeviceConnectOptions<'_, Participant>) -> Result<Self, trellis_rs::client::TrellisClientError> { trellis_rs::generated::Client::connect_device(options).await.map(Self::from_generated) }\n",
+        ),
+        ParticipantKind::Service => {}
+    }
+    let client_apis = participant
+        .uses()
+        .keys()
+        .chain(participant.implements())
+        .collect::<BTreeSet<_>>();
+    for api in client_apis {
+        let module = module_name(api.as_str());
+        out.push_str(&format!(
+            "pub fn {module}(&self) -> crate::apis::{module}::Client {{ crate::apis::{module}::Client::from_generated(self.inner.clone()) }}\n"
+        ));
+    }
+    out.push_str("}\n");
+    if participant.kind() == ParticipantKind::Service && !participant.implements().is_empty() {
+        out.push_str("impl Participant { pub async fn connect(options: trellis_rs::service::ServiceConnectOptions<'_>) -> Result<trellis_rs::service::ConnectedServiceRuntime<Self>, trellis_rs::service::ServiceRuntimeError> { trellis_rs::service::ConnectedServiceRuntime::<Self>::connect(options).await } }\n");
+        out.push_str("pub struct Provider<'a> { runtime: &'a mut trellis_rs::service::ConnectedServiceRuntime<Participant> }\nimpl<'a> Provider<'a> {\npub fn new(runtime: &'a mut trellis_rs::service::ConnectedServiceRuntime<Participant>) -> Self { Self { runtime } }\npub fn client(&self) -> Client { Client::from_generated(self.runtime.generated_client()) }\n");
+        for api in participant.implements() {
+            let module = module_name(api.as_str());
+            if graph
+                .packages()
+                .values()
+                .find_map(|package| package.apis().get(api))
+                .is_some_and(|definition| {
+                    definition.actions().values().any(|action| {
+                        matches!(
+                            action,
+                            ActionDefinition::Rpc { .. }
+                                | ActionDefinition::Feed { .. }
+                                | ActionDefinition::Operation { .. }
+                        )
+                    })
+                })
+            {
+                out.push_str(&format!(
+                    "pub fn {module}(&mut self) -> crate::apis::{module}::Provider<'_, Participant> {{ crate::apis::{module}::Provider::new(self.runtime) }}\n"
                 ));
             }
         }
-        lines.extend(["}".to_string(), String::new()]);
-    }
-    format!("{}\n", lines.join("\n"))
-}
-
-fn render_event_consumer_method(
-    group: &str,
-    method: &str,
-    sdk: &str,
-    base: &str,
-    api_identity: &str,
-) -> String {
-    format!("    /// Register a typed `{base}` event handler.\n    pub async fn {method}<F, Fut>(&self, handler: F) -> Result<trellis_rs::service::ServiceEventListenerHandle, crate::ServiceRuntimeError> where F: Fn({sdk}::{base}Event, trellis_rs::service::ServiceEventListenerContext) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = Result<(), trellis_rs::service::ServerError>> + Send + 'static {{ self.service.inner.listen_event_with_api_id::<{sdk}::events::{base}EventDescriptor, _, _>({api_identity}, handler, trellis_rs::service::ServiceEventListenOptions {{ group: Some({group:?}.to_string()), ..Default::default() }}).await }}")
-}
-
-fn render_participant_jobs_facade_rs(loaded: &ParticipantInput) -> String {
-    let mut lines = vec![
-        "// Generated service-private jobs facade.".to_string(),
-        String::new(),
-        "use trellis_rs::service::{ActiveJob, JobRef, JobsError};".to_string(),
-        String::new(),
-        "/// Service-private jobs declared by this participant contract.".to_string(),
-        "pub struct Jobs<'a> { service: &'a mut crate::ConnectedService }".to_string(),
-        "/// Cloneable service-private job submission facade.".to_string(),
-        "#[derive(Clone)]".to_string(),
-        "pub struct JobsClient { handle: trellis_rs::service::ServiceHandle }".to_string(),
-        "impl<'a> Jobs<'a> {".to_string(),
-    ];
-    for key in loaded.render_model.jobs.keys() {
-        let method = key_to_snake(key);
-        let queue = format!("{}Queue", key_to_pascal(key));
-        lines.push(format!(
-            "    /// Access the `{key}` queue.\n    pub fn {method}(&mut self) -> {queue}<'_> {{ {queue} {{ service: self.service }} }}"
-        ));
-    }
-    lines.extend([
-        "}".to_string(),
-        String::new(),
-        "impl JobsClient {".to_string(),
-    ]);
-    for key in loaded.render_model.jobs.keys() {
-        let method = key_to_snake(key);
-        let queue = format!("{}QueueClient", key_to_pascal(key));
-        lines.push(format!(
-            "    /// Access the `{key}` queue for submission.\n    pub fn {method}(&self) -> {queue} {{ {queue} {{ handle: self.handle.clone() }} }}"
-        ));
-    }
-    lines.extend([
-        "}".to_string(),
-        String::new(),
-        "impl crate::ConnectedService {".to_string(),
-        "    /// Access service-private jobs declared by this participant contract.".to_string(),
-        "    pub fn jobs(&mut self) -> Jobs<'_> { Jobs { service: self } }".to_string(),
-        "    /// Clone a service-private job submission facade for handlers and background tasks."
-            .to_string(),
-        "    pub fn jobs_client(&self) -> JobsClient { JobsClient { handle: self.inner.generated_handle() } }"
-            .to_string(),
-        "}".to_string(),
-        String::new(),
-    ]);
-    for key in loaded.render_model.jobs.keys() {
-        let base = key_to_pascal(key);
-        let queue = format!("{base}Queue");
-        let descriptor = format!("crate::jobs::{base}Job");
-        lines.extend([
-            format!("/// Typed `{key}` jobs queue."),
-            format!("pub struct {queue}<'a> {{ service: &'a mut crate::ConnectedService }}"),
-            format!("impl {queue}<'_> {{"),
-            format!("    /// Submit one `{key}` job.\n    pub async fn submit(&self, payload: <{descriptor} as JobDescriptor>::Payload) -> Result<JobRef<<{descriptor} as JobDescriptor>::Payload, <{descriptor} as JobDescriptor>::Result>, JobsError> {{ self.service.inner.generated_submit_job::<{descriptor}>(payload).await }}"),
-            format!("    /// Register the worker handler for `{key}`.\n    pub async fn handle<H, Fut, E>(&mut self, handler: H) -> Result<(), crate::ServiceRuntimeError> where H: Fn(ActiveJob<<{descriptor} as JobDescriptor>::Payload, <{descriptor} as JobDescriptor>::Result>) -> Fut + Clone + Send + Sync + 'static, Fut: std::future::Future<Output = Result<<{descriptor} as JobDescriptor>::Result, E>> + Send + 'static, E: ToString + Send + 'static {{ self.service.runtime_mut().register_generated_job_worker::<{descriptor}, _, _, _>(handler).await }}"),
-            "}".to_string(),
-            String::new(),
-            format!("/// Cloneable `{key}` job submission queue."),
-            "#[derive(Clone)]".to_string(),
-            format!("pub struct {base}QueueClient {{ handle: trellis_rs::service::ServiceHandle }}"),
-            format!("impl {base}QueueClient {{"),
-            format!("    /// Submit one `{key}` job.\n    pub async fn submit(&self, payload: <{descriptor} as JobDescriptor>::Payload) -> Result<JobRef<<{descriptor} as JobDescriptor>::Payload, <{descriptor} as JobDescriptor>::Result>, JobsError> {{ self.handle.generated_submit_job::<{descriptor}>(payload).await }}"),
-            "}".to_string(),
-            String::new(),
-        ]);
-    }
-    format!("{}\n", lines.join("\n"))
-}
-
-fn render_participant_connect_rs(
-    loaded: &ParticipantInput,
-    mappings: &[ValidatedParticipantAlias],
-) -> String {
-    let mappings: Vec<_> = mappings
-        .iter()
-        .filter(|mapping| !is_runtime_owned_baseline_use(loaded, &mapping.alias, &mapping.use_ref))
-        .cloned()
-        .collect();
-    match loaded.render_model.kind {
-        ParticipantKind::Service => render_service_participant_connect_rs(&mappings),
-        ParticipantKind::App | ParticipantKind::Agent => {
-            render_user_participant_connect_rs(&mappings)
+        for (name, resource) in participant.resources() {
+            let method = rust_ident(&key_to_snake(name.as_str()));
+            let accessor = match resource {
+                ResourceDefinition::State { .. } | ResourceDefinition::Kv { .. } => {
+                    Some(("trellis_rs::service::KvHandle", "generated_kv_handle"))
+                }
+                ResourceDefinition::Store { .. } => {
+                    Some(("trellis_rs::service::StoreHandle", "generated_store_handle"))
+                }
+                ResourceDefinition::Job { .. } | ResourceDefinition::Consumer { .. } => None,
+            };
+            if let Some((handle, accessor)) = accessor {
+                out.push_str(&format!(
+                    "pub fn {method}(&self) -> Option<&{handle}> {{ self.runtime.{accessor}({:?}) }}\n",
+                    name.as_str()
+                ));
+            }
         }
-        ParticipantKind::Device => render_device_participant_connect_rs(&mappings),
+        out.push_str("}\n");
     }
+    out
 }
 
-fn render_service_participant_connect_rs(mappings: &[ValidatedParticipantAlias]) -> String {
-    let mut source = r#"//! Service connection entry point for this participant.
-
-use crate::Service;
-
-/// Runtime and credential options; participant evidence comes from [`Participant`].
-pub use trellis_rs::service::ServiceConnectOptions;
-
-/// Exact generated participant and API evidence used for service bootstrap.
-pub struct Participant;
-
-impl trellis_rs::service::GeneratedServiceParticipant for Participant {
-    const PARTICIPANT_ID: &'static str = crate::participant::PARTICIPANT_ID;
-    const PARTICIPANT_DIGEST: &'static str = crate::participant::PARTICIPANT_DIGEST;
-    const PARTICIPANT_NEEDS_DIGEST: &'static str = crate::participant::PARTICIPANT_NEEDS_DIGEST;
-    const PARTICIPANT_JSON: &'static str = crate::participant::PARTICIPANT;
-    const API_JSON: &'static str = crate::participant::API_JSON;
-    const API_DIGEST: &'static str = crate::participant::API_DIGEST;
-    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = crate::participant::REFERENCED_API_ARTIFACTS;
-}
-
-/// Connected service runtime for this participant contract.
-pub struct ConnectedService {
-    pub(crate) inner: trellis_rs::service::ConnectedServiceRuntime<Participant>,
-}
-
-impl ConnectedService {
-    /// Connect this service through Trellis bootstrap.
-    pub async fn connect(opts: ServiceConnectOptions<'_>) -> Result<Self, trellis_rs::service::ServiceRuntimeError> {
-        Ok(Self { inner: trellis_rs::service::ConnectedServiceRuntime::<Participant>::connect(opts).await? })
+fn render_resources(participant: &ParticipantDefinition) -> String {
+    if participant.resources().is_empty() {
+        return String::new();
     }
-
-    /// Access contract-shaped owned and used surfaces.
-    pub fn service(&self) -> Service<'_> { Service::new(self.inner.caller()) }
-
-    /// Clone the service handle for providers that need resolved runtime resources.
-    pub fn generated_handle(&self) -> trellis_rs::service::ServiceHandle { self.inner.generated_handle() }
-
-    pub(crate) fn runtime_mut(&mut self) -> &mut trellis_rs::service::ConnectedServiceRuntime<Participant> { &mut self.inner }
-
-    /// Run all registered providers and service-private workers until shutdown.
-    pub async fn run(self) -> Result<(), trellis_rs::service::ServiceRuntimeError> { self.inner.run().await }
-}
-
-/// Connect this service through Trellis bootstrap.
-pub async fn connect(opts: ServiceConnectOptions<'_>) -> Result<ConnectedService, trellis_rs::service::ServiceRuntimeError> {
-    ConnectedService::connect(opts).await
-}
-"#
-    .to_string();
-    source.push_str("\nimpl ConnectedService {\n");
-    source.push_str(&render_connected_alias_methods(mappings, true));
-    source.push_str("}\n");
-    source
-}
-
-fn render_user_participant_connect_rs(mappings: &[ValidatedParticipantAlias]) -> String {
-    let mut source = r#"//! User-authenticated connection entry point for this participant.
-
-use trellis_rs::generated::{Caller, TrellisClientError, UserConnectOptions, UserSessionCredentials};
-
-use crate::Client;
-use crate::participant::PARTICIPANT_ID;
-
-/// User-authenticated participant connection options.
-pub struct ConnectOptions<'a> {
-    trellis_url: &'a str,
-    login_session_id: &'a str,
-    session_key_seed_base64url: &'a str,
-    timeout_ms: u64,
-}
-
-impl<'a> ConnectOptions<'a> {
-    /// Create user-authenticated connection options.
-    pub fn new(trellis_url: &'a str, login_session_id: &'a str, session_key_seed_base64url: &'a str, timeout_ms: u64) -> Self {
-        Self { trellis_url, login_session_id, session_key_seed_base64url, timeout_ms }
+    let mut out = String::from("pub mod resources {\n");
+    for (name, resource) in participant.resources() {
+        let rust_name = type_name(name.as_str());
+        let optional = match resource {
+            ResourceDefinition::State { optional, .. }
+            | ResourceDefinition::Kv { optional, .. }
+            | ResourceDefinition::Store { optional, .. }
+            | ResourceDefinition::Job { optional, .. }
+            | ResourceDefinition::Consumer { optional, .. } => optional,
+        };
+        match resource {
+            ResourceDefinition::State {
+                schema, version, ..
+            }
+            | ResourceDefinition::Kv {
+                schema, version, ..
+            } => {
+                out.push_str(&format!(
+                    "pub type {rust_name}Value = {};\npub struct {rust_name};\nimpl {rust_name} {{ pub const NAME: &'static str = {:?}; pub const OPTIONAL: bool = {optional}; pub const VERSION: u32 = {version}; }}\n",
+                    type_path(schema), name.as_str()
+                ));
+            }
+            ResourceDefinition::Store { .. } => out.push_str(&format!(
+                "pub struct {rust_name};\nimpl {rust_name} {{ pub const NAME: &'static str = {:?}; pub const OPTIONAL: bool = {optional}; }}\n",
+                name.as_str()
+            )),
+            ResourceDefinition::Job {
+                payload,
+                result,
+                update,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "pub type {rust_name}Payload = {};\n",
+                    type_path(payload)
+                ));
+                if let Some(result) = result {
+                    out.push_str(&format!(
+                        "pub type {rust_name}Result = {};\n",
+                        type_path(result)
+                    ));
+                }
+                if let Some(update) = update {
+                    out.push_str(&format!(
+                        "pub type {rust_name}Update = {};\n",
+                        type_path(update)
+                    ));
+                }
+                out.push_str(&format!(
+                    "pub struct {rust_name};\nimpl {rust_name} {{ pub const NAME: &'static str = {:?}; pub const OPTIONAL: bool = {optional}; }}\n",
+                    name.as_str()
+                ));
+            }
+            ResourceDefinition::Consumer { .. } => out.push_str(&format!(
+                "pub struct {rust_name};\nimpl {rust_name} {{ pub const NAME: &'static str = {:?}; pub const OPTIONAL: bool = {optional}; }}\n",
+                name.as_str()
+            )),
+        }
     }
+    out.push_str("}\n");
+    out
 }
 
-/// Connected caller facade for this participant contract.
-pub struct ConnectedClient { inner: Caller }
-
-impl ConnectedClient {
-    /// Access only the contract surfaces declared by this participant.
-    pub fn client(&self) -> Client<'_> { Client::new(&self.inner) }
-}
-
-/// Connect this participant with a user-authenticated session.
-pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, TrellisClientError> {
-    Ok(ConnectedClient {
-        inner: Caller::connect_user(UserConnectOptions::new(
-            opts.trellis_url,
-            opts.timeout_ms,
-            UserSessionCredentials {
-                login_session_id: opts.login_session_id,
-                session_key_seed_base64url: opts.session_key_seed_base64url,
-            },
-            PARTICIPANT_ID,
-        )).await?,
-    })
-}
-"#
-    .to_string();
-    source.push_str("\nimpl ConnectedClient {\n");
-    source.push_str(&render_connected_alias_methods(mappings, false));
-    source.push_str("}\n");
-    source
-}
-
-fn render_device_participant_connect_rs(mappings: &[ValidatedParticipantAlias]) -> String {
-    let mut source = r#"//! Activated-device connection entry point for this participant.
-
-use trellis_rs::generated::{Caller, DeviceConnectOptions, TrellisClientError};
-
-use crate::Client;
-
-/// Generated participant identity and local contract metadata.
-pub struct Participant;
-
-impl trellis_rs::service::GeneratedServiceParticipant for Participant {
-    const PARTICIPANT_ID: &'static str = crate::participant::PARTICIPANT_ID;
-    const PARTICIPANT_DIGEST: &'static str = crate::participant::PARTICIPANT_DIGEST;
-    const PARTICIPANT_NEEDS_DIGEST: &'static str = crate::participant::PARTICIPANT_NEEDS_DIGEST;
-    const PARTICIPANT_JSON: &'static str = crate::participant::PARTICIPANT;
-    const API_JSON: &'static str = crate::participant::API_JSON;
-    const API_DIGEST: &'static str = crate::participant::API_DIGEST;
-    const REFERENCED_API_ARTIFACTS: &'static [(&'static str, &'static str)] = crate::participant::REFERENCED_API_ARTIFACTS;
-}
-
-/// Activated-device participant connection options.
-pub type ConnectOptions<'a> = DeviceConnectOptions<'a, Participant>;
-
-/// Connected caller facade for this participant contract.
-pub struct ConnectedClient { inner: Caller }
-
-impl ConnectedClient {
-    /// Access only the contract surfaces declared by this participant.
-    pub fn client(&self) -> Client<'_> { Client::new(&self.inner) }
-
-    /// Finish enrollment, then obtain fresh connection authority from the server.
-    pub async fn connect_activated(
-        options: trellis_rs::auth::DeviceActivationOptions<'_, Participant>,
-        session: trellis_rs::auth::DeviceActivationSession,
-    ) -> Result<Self, trellis_rs::auth::DeviceActivationError> {
-        Ok(Self {
-            inner: Caller::connect_device(options.into_connect_options(session)?).await?,
-        })
-    }
-}
-
-/// Connect this activated device.
-pub async fn connect(opts: ConnectOptions<'_>) -> Result<ConnectedClient, TrellisClientError> {
-    Ok(ConnectedClient {
-        inner: Caller::connect_device(opts).await?,
-    })
-}
-"#
-    .to_string();
-    source.push_str("\nimpl ConnectedClient {\n");
-    source.push_str(&render_connected_alias_methods(mappings, false));
-    source.push_str("}\n");
-    source
-}
-
-fn render_connected_alias_methods(mappings: &[ValidatedParticipantAlias], service: bool) -> String {
-    let receiver = if service {
-        "crate::Service::new(self.inner.caller())"
-    } else {
-        "crate::Client::new(&self.inner)"
-    };
-    let mut methods = String::new();
-    for mapping in mappings {
-        let alias = &mapping.alias;
-        let alias_ident = &mapping.alias_ident;
-        methods.push_str(&format!(
-            "    /// Access the `{alias}` dependency surface.\n    pub fn {alias_ident}(&self) -> crate::uses::{alias_ident}::Client<'_> {{ {receiver}.{alias_ident}() }}\n"
+fn render_evidence(graph: &PackageGraph) -> Result<String, CodegenRustError> {
+    let mut entries = String::new();
+    for (id, package) in graph.packages() {
+        let digest = graph.digest(id).expect("graph digest");
+        let source = canonical_package(graph, id, CanonicalMode::Presentation).map_err(semantic)?;
+        entries.push_str(&format!(
+            "trellis_rs::generated::PackageSourceEvidence::from_generated({:?}, {:?}, {digest:?}, {source:?}),",
+            id.as_str(), package.version().to_string()
         ));
     }
-    methods
-}
-
-fn render_participant_metadata_rs(
-    api: &ApiInput,
-    loaded: &ParticipantInput,
-    mappings: &[ValidatedParticipantAlias],
-) -> Result<String, CodegenRustError> {
-    let mut apis = std::collections::BTreeMap::from([(api.api.id().to_owned(), api.api.clone())]);
-    let mut referenced = Vec::new();
-    for mapping in mappings {
-        let referenced_api = &mapping.manifest.api;
-        let json = referenced_api.canonical_json()?;
-        let digest = referenced_api.digest()?;
-        referenced.push(format!(
-            "    ({}, {}),",
-            string_literal(&json),
-            string_literal(&digest),
-        ));
-        apis.insert(referenced_api.id().to_owned(), referenced_api.clone());
-    }
-    let resolved = trellis_protocol::resolve_participant(&loaded.participant, &apis)?;
     Ok(format!(
-        "//! Native participant metadata for `{}`.\n\n/// Participant id.\npub const PARTICIPANT_ID: &str = {};\n\n/// Semantic participant artifact digest.\npub const PARTICIPANT_DIGEST: &str = {};\n\n/// Canonical participant artifact JSON.\npub const PARTICIPANT: &str = {};\n\n/// Authoritative participant-needs digest.\npub const PARTICIPANT_NEEDS_DIGEST: &str = {};\n\n/// Canonical owned API artifact JSON.\npub const API_JSON: &str = {};\n\n/// Semantic owned API digest.\npub const API_DIGEST: &str = {};\n\n/// Exact referenced API JSON and digest evidence.\npub const REFERENCED_API_ARTIFACTS: &[(&str, &str)] = &[\n{}];\n",
-        loaded.render_model.id,
-        string_literal(&loaded.render_model.id),
-         string_literal(&loaded.digest),
-         string_literal(&loaded.canonical),
-         string_literal(&resolved.needs().digest()?),
-        string_literal(&api.canonical),
-        string_literal(&api.digest),
-        referenced.join("\n"),
+        "const PACKAGE_SOURCES: &[trellis_rs::generated::PackageSourceEvidence] = &[{entries}];\npub const PACKAGE_EVIDENCE: trellis_rs::generated::PackageEvidence = trellis_rs::generated::PackageEvidence::from_generated({:?}, {:?}, PACKAGE_SOURCES);",
+        graph.root().as_str(), graph.root_digest()
     ))
 }
 
-fn render_participant_facade_rs(
-    loaded: &ParticipantInput,
-    mappings: &[ValidatedParticipantAlias],
-) -> String {
-    let mut lines = vec![
-        "pub mod owned;".to_string(),
-        String::new(),
-        "pub mod schemas;".to_string(),
-        String::new(),
-        "pub mod state;".to_string(),
-        String::new(),
-        "pub mod uses;".to_string(),
-    ];
-    lines.extend([
-        String::new(),
-        "/// API-shaped outbound facade for this participant.".to_string(),
-        "pub struct Client<'a> {".to_string(),
-        "    inner: &'a trellis_rs::generated::Caller,".to_string(),
-        "}".to_string(),
-        String::new(),
-        "/// Service-side facade for owned handlers plus outbound alias access.".to_string(),
-        "pub struct Service<'a> {".to_string(),
-        "    inner: &'a trellis_rs::generated::Caller,".to_string(),
-        "}".to_string(),
-        String::new(),
-        "impl<'a> Client<'a> {".to_string(),
-        "    /// Wrap an already connected low-level Trellis client.".to_string(),
-        "    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self { Self { inner } }"
-            .to_string(),
-        "    /// Access the participant's owned contract surface.".to_string(),
-        "    pub fn owned(&self) -> owned::Client<'a> { owned::Client::new(self.inner) }"
-            .to_string(),
-        "    /// Access typed state stores declared by this participant.".to_string(),
-        "    pub fn state(&self) -> state::State<'a> { state::State::new(self.inner) }".to_string(),
-    ]);
-    for mapping in mappings {
-        if is_runtime_owned_baseline_use(loaded, &mapping.alias, &mapping.use_ref) {
-            continue;
-        }
-        lines.push(format!(
-            "    /// Access the `{}` dependency alias facade.",
-            mapping.alias
-        ));
-        lines.push(format!(
-            "    pub fn {}(&self) -> uses::{}::Client<'a> {{ uses::{}::Client::new(self.inner) }}",
-            mapping.alias_ident, mapping.alias_ident, mapping.alias_ident
-        ));
-    }
-    lines.push("}".to_string());
-    lines.push(String::new());
-    lines.push("impl<'a> Service<'a> {".to_string());
-    lines.push(
-        "    /// Wrap an already connected low-level Trellis client for outbound service calls."
-            .to_string(),
-    );
-    lines.push(
-        "    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self { Self { inner } }"
-            .to_string(),
-    );
-    lines.push("    /// Access owned handler and publish helpers.".to_string());
-    lines.push(
-        "    pub fn owned(&self) -> owned::Service<'a> { owned::Service::new(self.inner) }"
-            .to_string(),
-    );
-    for mapping in mappings {
-        if is_runtime_owned_baseline_use(loaded, &mapping.alias, &mapping.use_ref) {
-            continue;
-        }
-        lines.push(format!(
-            "    /// Access the `{}` dependency alias facade for outbound calls.",
-            mapping.alias
-        ));
-        lines.push(format!(
-            "    pub fn {}(&self) -> uses::{}::Client<'a> {{ uses::{}::Client::new(self.inner) }}",
-            mapping.alias_ident, mapping.alias_ident, mapping.alias_ident
-        ));
-    }
-    lines.push("}".to_string());
-    lines.push(String::new());
-    format!("{}\n", lines.join("\n"))
-}
-
-fn render_participant_owned_rs(
-    loaded: &ApiInput,
-    participant: &ParticipantInput,
-    owned_sdk_crate_name: Option<&str>,
-    referenced_apis: std::collections::BTreeMap<String, ApiArtifact>,
-) -> Result<String, CodegenRustError> {
-    if public_rpc_keys(loaded).is_empty()
-        && loaded.render_model.operations.is_empty()
-        && loaded.render_model.events.is_empty()
-        && loaded.render_model.feeds.is_empty()
-        && participant.render_model.jobs.is_empty()
-        && participant.render_model.event_consumers.is_empty()
-        && participant.render_model.resources.kv.is_empty()
-        && participant.render_model.resources.store.is_empty()
-    {
-        let mut apis =
-            std::collections::BTreeMap::from([(loaded.api.id().to_owned(), loaded.api.clone())]);
-        for api in referenced_apis.into_values() {
-            apis.insert(api.id().to_owned(), api);
-        }
-        let resolved = trellis_protocol::resolve_participant(&participant.participant, &apis)?;
-        return Ok(format!(
-            "/// Owned facade for `{}`.\n/// Reusable native participant vocabulary for this participant.\npub struct OwnedParticipant;\n\nimpl OwnedParticipant {{\n    pub const PARTICIPANT_ID: &'static str = {};\n    pub const PARTICIPANT_DIGEST: &'static str = {};\n    pub const PARTICIPANT_NEEDS_DIGEST: &'static str = {};\n    pub const PARTICIPANT_JSON: &'static str = {};\n    pub const API_JSON: &'static str = {};\n    pub const API_DIGEST: &'static str = {};\n}}\n\npub struct Client<'a> {{ _inner: &'a trellis_rs::generated::Caller }}\nimpl<'a> Client<'a> {{ pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {{ Self {{ _inner: inner }} }} }}\n\npub struct Service<'a> {{ _inner: &'a trellis_rs::generated::Caller }}\nimpl<'a> Service<'a> {{ pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {{ Self {{ _inner: inner }} }} }}\n",
-            participant.render_model.id,
-            string_literal(participant.participant.id()),
-            string_literal(&participant.digest),
-            string_literal(&resolved.needs().digest()?),
-            string_literal(&participant.canonical),
-            string_literal(&loaded.canonical),
-            string_literal(&loaded.digest),
-        ));
-    }
-
-    let owned_sdk_crate_name = owned_sdk_crate_name.expect("owned sdk crate required");
-    let owned_crate_ident = crate_ident(owned_sdk_crate_name);
-    let owned_client_name = format!("{}Client", sdk_stem_pascal(loaded));
-    let mut lines = vec![
-        format!("/// Owned facade for `{}`.", participant.render_model.id),
-        String::new(),
-        format!("use {} as sdk;", owned_crate_ident),
-        String::new(),
-        "/// Reusable owned participant vocabulary.".to_string(),
-        "pub struct OwnedParticipant;".to_string(),
-        String::new(),
-        "impl OwnedParticipant {".to_string(),
-        "    pub const PARTICIPANT_ID: &'static str = crate::participant::PARTICIPANT_ID;".to_string(),
-        "    pub const PARTICIPANT_DIGEST: &'static str = crate::participant::PARTICIPANT_DIGEST;".to_string(),
-        "    pub const PARTICIPANT: &'static str = crate::participant::PARTICIPANT;".to_string(),
-        "    pub const PARTICIPANT_NEEDS_DIGEST: &'static str = crate::participant::PARTICIPANT_NEEDS_DIGEST;".to_string(),
-        "    pub const API_JSON: &'static str = sdk::API_JSON;".to_string(),
-        "    pub const API_DIGEST: &'static str = sdk::API_DIGEST;".to_string(),
-        "}".to_string(),
-        String::new(),
-        "pub struct Client<'a> { inner: sdk::".to_string() + &owned_client_name + "<'a> }",
-        "impl<'a> Client<'a> {".to_string(),
-        "    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self { Self { inner: sdk::"
-            .to_string()
-            + &owned_client_name
-            + "::new(inner) } }",
-    ];
-    for key in public_rpc_keys(loaded) {
-        let method = key_to_snake(key);
-        let base = key_to_pascal(key);
-        let input_empty = is_empty_object_schema(resolve_schema_ref(
-            loaded,
-            &loaded.render_model.rpc[key].input.schema,
-        ));
-        let output_type = if is_empty_object_schema(resolve_schema_ref(
-            loaded,
-            &loaded.render_model.rpc[key].output.schema,
-        )) {
-            "sdk::rpc::Empty".to_string()
-        } else {
-            format!("sdk::{base}Response")
-        };
-        let error_type = rpc_call_error_type(loaded, key, "sdk::rpc");
-        if input_empty {
-            let (group, surface_method) = surface_group_and_method(key);
-            lines.push(format!("    pub async fn {method}(&self) -> Result<{output_type}, trellis_rs::generated::CallError<{error_type}>> {{ self.inner.rpc().{group}().{surface_method}().await }}"));
-        } else {
-            let (group, surface_method) = surface_group_and_method(key);
-            lines.push(format!("    pub async fn {method}(&self, input: &sdk::{base}Request) -> Result<{output_type}, trellis_rs::generated::CallError<{error_type}>> {{ self.inner.rpc().{group}().{surface_method}(input).await }}"));
-        }
-    }
-    for key in loaded.render_model.events.keys() {
-        let method = format!("publish_{}", key_to_snake(key));
-        let base = key_to_pascal(key);
-        let (group, surface_method) = surface_group_and_method(key);
-        lines.push(format!("    pub async fn {method}(&self, event: &sdk::{base}Event) -> Result<(), trellis_rs::generated::TrellisClientError> {{ self.inner.event().{group}().{surface_method}().publish(event).await }}"));
-    }
-    for (key, feed) in &loaded.render_model.feeds {
-        let method = key_to_snake(key);
-        let base = key_to_pascal(key);
-        if is_empty_object_schema(resolve_schema_ref(loaded, &feed.input.schema)) {
-            let (group, surface_method) = surface_group_and_method(key);
-            lines.push(format!("    pub async fn {method}(&self) -> Result<futures_util::stream::BoxStream<'static, Result<sdk::{base}Event, trellis_rs::generated::TrellisClientError>>, trellis_rs::generated::TrellisClientError> {{ self.inner.feed().{group}().{surface_method}().await }}"));
-        } else {
-            let (group, surface_method) = surface_group_and_method(key);
-            lines.push(format!("    pub async fn {method}(&self, input: &sdk::{base}Input) -> Result<futures_util::stream::BoxStream<'static, Result<sdk::{base}Event, trellis_rs::generated::TrellisClientError>>, trellis_rs::generated::TrellisClientError> {{ self.inner.feed().{group}().{surface_method}(input).await }}"));
-        }
-    }
-    lines.push("}".to_string());
-    lines.push(String::new());
-    lines.push("pub struct Service<'a> { inner: &'a trellis_rs::generated::Caller }".to_string());
-    lines.push("impl<'a> Service<'a> {".to_string());
-    lines.push(
-        "    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self { Self { inner } }"
-            .to_string(),
-    );
-    lines.push("    pub fn client(&self) -> Client<'a> { Client::new(self.inner) }".to_string());
-    for key in loaded.render_model.events.keys() {
-        let method = format!("publish_{}", key_to_snake(key));
-        let base = key_to_pascal(key);
-        lines.push(format!("    pub async fn {method}(&self, publisher: &trellis_rs::service::EventPublisher, event: &sdk::{base}Event) -> Result<(), trellis_rs::service::ServerError> {{ publisher.publish::<sdk::events::{base}EventDescriptor>(event).await }}"));
-    }
-    lines.push("}".to_string());
-    lines.push(String::new());
-    if participant.render_model.kind == ParticipantKind::Service
-        && !loaded.render_model.events.is_empty()
-    {
-        lines.push("/// Cloneable typed publisher for events owned by this service.".to_string());
-        lines.push("#[derive(Clone)]".to_string());
-        lines.push(
-            "pub struct Publisher { inner: trellis_rs::service::EventPublisher }".to_string(),
-        );
-        lines.push("impl crate::ConnectedService {".to_string());
-        lines.push("    /// Clone a typed publisher for owned events.\n    pub fn publisher(&self) -> Publisher { Publisher { inner: self.inner.event_publisher() } }".to_string());
-        lines.push("}".to_string());
-        lines.push("impl Publisher {".to_string());
-        for key in loaded.render_model.events.keys() {
-            let method = format!("publish_{}", key_to_snake(key));
-            let base = key_to_pascal(key);
-            lines.push(format!("    /// Publish `{key}`.\n    pub async fn {method}(&self, event: &sdk::{base}Event) -> Result<(), trellis_rs::service::ServerError> {{ self.inner.publish::<sdk::events::{base}EventDescriptor>(event).await }}"));
-        }
-        lines.push("}".to_string());
-        lines.push(String::new());
-    }
-    if participant.render_model.kind == ParticipantKind::Service
-        && (!public_rpc_keys(loaded).is_empty()
-            || !loaded.render_model.operations.is_empty()
-            || !loaded.render_model.events.is_empty()
-            || !loaded.render_model.feeds.is_empty())
-    {
-        render_participant_owned_provider_surface(loaded, &mut lines);
-        lines.push("impl crate::ConnectedService {".to_string());
-        for key in public_rpc_keys(loaded) {
-            let method = format!("register_{}", key_to_snake(key));
-            let base = key_to_pascal(key);
-            let input_type = if is_empty_object_schema(resolve_schema_ref(
-                loaded,
-                &loaded.render_model.rpc[key].input.schema,
-            )) {
-                "sdk::rpc::Empty".to_string()
-            } else {
-                format!("sdk::{base}Request")
-            };
-            let output_type = if is_empty_object_schema(resolve_schema_ref(
-                loaded,
-                &loaded.render_model.rpc[key].output.schema,
-            )) {
-                "sdk::rpc::Empty".to_string()
-            } else {
-                format!("sdk::{base}Response")
-            };
-            lines.push(format!("    fn {method}<F, Fut>(&mut self, handler: F) where F: Fn(trellis_rs::service::ServiceHandlerContext, {input_type}) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = trellis_rs::service::HandlerResult<{output_type}>> + Send + 'static {{ self.runtime_mut().register_rpc::<sdk::rpc::{base}Rpc, _, _>(handler); }}"));
-        }
-        for key in loaded.render_model.operations.keys() {
-            let method = format!("register_{}_provider", key_to_snake(key));
-            let base = key_to_pascal(key);
-            lines.push(format!("    fn {method}<P>(&mut self, provider: P) where P: trellis_rs::service::ServiceOperationProvider<sdk::operations::{base}Operation> {{ self.runtime_mut().register_operation_provider::<sdk::operations::{base}Operation, _>(provider); }}"));
-        }
-        for key in loaded.render_model.events.keys() {
-            let method = format!("publish_{}", key_to_snake(key));
-            let base = key_to_pascal(key);
-            lines.push(format!("    pub async fn {method}(&self, event: &sdk::{base}Event) -> Result<(), trellis_rs::service::ServerError> {{ self.inner.event_publisher().publish::<sdk::events::{base}EventDescriptor>(event).await }}"));
-        }
-        for (key, feed) in &loaded.render_model.feeds {
-            let method = format!("register_{}", key_to_snake(key));
-            let base = key_to_pascal(key);
-            let input_type =
-                if is_empty_object_schema(resolve_schema_ref(loaded, &feed.input.schema)) {
-                    "sdk::rpc::Empty".to_string()
-                } else {
-                    format!("sdk::{base}Input")
-                };
-            lines.push(format!("    fn {method}<F, S>(&mut self, handler: F) where F: Fn(trellis_rs::service::ServiceHandlerContext, {input_type}) -> S + Send + Sync + 'static, S: futures_util::Stream<Item = Result<sdk::{base}Event, trellis_rs::service::ServerError>> + Send + 'static {{ self.runtime_mut().register_feed::<sdk::feeds::{base}FeedDescriptor, _, _>(handler); }}"));
-        }
-        lines.push("}".to_string());
-        lines.push(String::new());
-    }
-    if participant.render_model.kind == ParticipantKind::Service {
-        render_participant_resource_surfaces(participant, &mut lines);
-    }
-    Ok(format!("{}\n", lines.join("\n")))
-}
-
-fn render_participant_resource_surfaces(loaded: &ParticipantInput, lines: &mut Vec<String>) {
-    if !loaded.render_model.resources.kv.is_empty() {
-        lines.extend([
-            "/// Participant-declared key-value resources.".to_string(),
-            "pub struct Kv<'a> { service: &'a crate::ConnectedService }".to_string(),
-            "impl crate::ConnectedService {".to_string(),
-            "    /// Access contract-declared key-value resources.".to_string(),
-            "    pub fn kv(&self) -> Kv<'_> { Kv { service: self } }".to_string(),
-            "}".to_string(),
-            "impl<'a> Kv<'a> {".to_string(),
-        ]);
-        for name in loaded.render_model.resources.kv.keys() {
-            let method = rust_ident(&key_to_snake(name));
-            lines.push(format!("    /// Open the `{name}` key-value resource."));
-            lines.push(format!("    pub async fn {method}(&self) -> Result<trellis_rs::service::KvHandle, trellis_rs::service::ServerError> {{ self.service.inner.kv_client({}).await }}", string_literal(name)));
-        }
-        lines.extend(["}".to_string(), String::new()]);
-    }
-
-    if !loaded.render_model.resources.store.is_empty() {
-        lines.extend([
-            "/// Participant-declared object-store resources.".to_string(),
-            "pub struct Store<'a> { service: &'a crate::ConnectedService }".to_string(),
-            "impl crate::ConnectedService {".to_string(),
-            "    /// Access contract-declared object-store resources.".to_string(),
-            "    pub fn store(&self) -> Store<'_> { Store { service: self } }".to_string(),
-            "}".to_string(),
-            "impl<'a> Store<'a> {".to_string(),
-        ]);
-        for name in loaded.render_model.resources.store.keys() {
-            let method = rust_ident(&key_to_snake(name));
-            lines.push(format!("    /// Open the `{name}` object-store resource."));
-            lines.push(format!("    pub async fn {method}(&self) -> Result<trellis_rs::service::StoreHandle, trellis_rs::service::ServerError> {{ self.service.inner.store_client({}).await }}", string_literal(name)));
-        }
-        lines.extend(["}".to_string(), String::new()]);
-    }
-}
-
-fn render_participant_owned_provider_surface(loaded: &ApiInput, lines: &mut Vec<String>) {
-    lines.extend([
-        "impl crate::ConnectedService {".to_string(),
-        "    pub fn handle(&mut self) -> ServiceHandle<'_> { ServiceHandle { service: self } }"
-            .to_string(),
-        "}".to_string(),
-        String::new(),
-        "pub struct ServiceHandle<'a> { service: &'a mut crate::ConnectedService }".to_string(),
-        "impl<'a> ServiceHandle<'a> {".to_string(),
-    ]);
-    if !grouped_public_rpc_keys(loaded).is_empty() {
-        lines.push("    pub fn rpc(&mut self) -> ProviderRpc<'_> { ProviderRpc { service: self.service } }".to_string());
-    }
-    if !loaded.render_model.feeds.is_empty() {
-        lines.push("    pub fn feed(&mut self) -> ProviderFeed<'_> { ProviderFeed { service: self.service } }".to_string());
-    }
-    if !loaded.render_model.operations.is_empty() {
-        lines.push("    pub fn operation(&mut self) -> ProviderOperation<'_> { ProviderOperation { service: self.service } }".to_string());
-    }
-    lines.extend(["}".to_string(), String::new()]);
-
-    if !grouped_public_rpc_keys(loaded).is_empty() {
-        lines.extend([
-            "pub struct ProviderRpc<'a> { service: &'a mut crate::ConnectedService }".to_string(),
-            "impl<'a> ProviderRpc<'a> {".to_string(),
-        ]);
-        for group in grouped_public_rpc_keys(loaded).keys() {
-            let group_ty = format!("{}ProviderRpc", key_to_pascal(group));
-            lines.push(format!("    pub fn {group}(&mut self) -> {group_ty}<'_> {{ {group_ty} {{ service: self.service }} }}"));
-        }
-        lines.extend(["}".to_string(), String::new()]);
-        for (group, keys) in grouped_public_rpc_keys(loaded) {
-            let group_ty = format!("{}ProviderRpc", key_to_pascal(&group));
-            lines.push(format!(
-                "pub struct {group_ty}<'a> {{ service: &'a mut crate::ConnectedService }}"
-            ));
-            lines.push(format!("impl<'a> {group_ty}<'a> {{"));
-            for key in keys {
-                let (_, method) = surface_group_and_method(key);
-                let register = format!("register_{}", key_to_snake(key));
-                let base = key_to_pascal(key);
-                let rpc = &loaded.render_model.rpc[key];
-                let input_type =
-                    if is_empty_object_schema(resolve_schema_ref(loaded, &rpc.input.schema)) {
-                        "sdk::rpc::Empty".to_string()
-                    } else {
-                        format!("sdk::{base}Request")
-                    };
-                let output_type =
-                    if is_empty_object_schema(resolve_schema_ref(loaded, &rpc.output.schema)) {
-                        "sdk::rpc::Empty".to_string()
-                    } else {
-                        format!("sdk::{base}Response")
-                    };
-                lines.push(format!("    pub fn {method}<F, Fut>(&mut self, handler: F) where F: Fn(trellis_rs::service::ServiceHandlerContext, {input_type}) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = trellis_rs::service::HandlerResult<{output_type}>> + Send + 'static {{ self.service.{register}(handler); }}"));
-            }
-            lines.extend(["}".to_string(), String::new()]);
-        }
-    }
-
-    if !loaded.render_model.feeds.is_empty() {
-        lines.extend([
-            "pub struct ProviderFeed<'a> { service: &'a mut crate::ConnectedService }".to_string(),
-            "impl<'a> ProviderFeed<'a> {".to_string(),
-        ]);
-        for group in grouped_keys(&loaded.render_model.feeds).keys() {
-            let group_ty = format!("{}ProviderFeed", key_to_pascal(group));
-            lines.push(format!("    pub fn {group}(&mut self) -> {group_ty}<'_> {{ {group_ty} {{ service: self.service }} }}"));
-        }
-        lines.extend(["}".to_string(), String::new()]);
-        for (group, keys) in grouped_keys(&loaded.render_model.feeds) {
-            let group_ty = format!("{}ProviderFeed", key_to_pascal(&group));
-            lines.push(format!(
-                "pub struct {group_ty}<'a> {{ service: &'a mut crate::ConnectedService }}"
-            ));
-            lines.push(format!("impl<'a> {group_ty}<'a> {{"));
-            for key in keys {
-                let (_, method) = surface_group_and_method(key);
-                let register = format!("register_{}", key_to_snake(key));
-                let base = key_to_pascal(key);
-                let feed = &loaded.render_model.feeds[key];
-                let input_type =
-                    if is_empty_object_schema(resolve_schema_ref(loaded, &feed.input.schema)) {
-                        "sdk::rpc::Empty".to_string()
-                    } else {
-                        format!("sdk::{base}Input")
-                    };
-                lines.push(format!("    pub fn {method}<F, S>(&mut self, handler: F) where F: Fn(trellis_rs::service::ServiceHandlerContext, {input_type}) -> S + Send + Sync + 'static, S: futures_util::Stream<Item = Result<sdk::{base}Event, trellis_rs::service::ServerError>> + Send + 'static {{ self.service.{register}(handler); }}"));
-            }
-            lines.extend(["}".to_string(), String::new()]);
-        }
-    }
-
-    if !loaded.render_model.operations.is_empty() {
-        lines.extend([
-            "pub struct ProviderOperation<'a> { service: &'a mut crate::ConnectedService }"
-                .to_string(),
-            "impl<'a> ProviderOperation<'a> {".to_string(),
-        ]);
-        for group in grouped_keys(&loaded.render_model.operations).keys() {
-            let group_ty = format!("{}ProviderOperation", key_to_pascal(group));
-            lines.push(format!("    pub fn {group}(&mut self) -> {group_ty}<'_> {{ {group_ty} {{ service: self.service }} }}"));
-        }
-        lines.extend(["}".to_string(), String::new()]);
-        for (group, keys) in grouped_keys(&loaded.render_model.operations) {
-            let group_ty = format!("{}ProviderOperation", key_to_pascal(&group));
-            lines.push(format!(
-                "pub struct {group_ty}<'a> {{ service: &'a mut crate::ConnectedService }}"
-            ));
-            lines.push(format!("impl<'a> {group_ty}<'a> {{"));
-            for key in keys {
-                let (_, method) = surface_group_and_method(key);
-                let register = format!("register_{}_provider", key_to_snake(key));
-                let base = key_to_pascal(key);
-                lines.push(format!("    pub fn {method}<P>(&mut self, provider: P) where P: trellis_rs::service::ServiceOperationProvider<sdk::operations::{base}Operation> {{ self.service.{register}(provider); }}"));
-            }
-            lines.extend(["}".to_string(), String::new()]);
-        }
-    }
-}
-
-fn render_participant_state_rs(loaded: &ParticipantInput) -> Result<String, CodegenRustError> {
-    let mut renderer = TypeRenderer::default();
-    let mut stores = loaded.render_model.state.iter().collect::<Vec<_>>();
-    stores.sort_by(|left, right| left.0.cmp(right.0));
-
-    let schema_names = stores
+fn render_migrations(participant: &ParticipantDefinition) -> String {
+    let historic = participant
+        .resources()
         .iter()
-        .map(|(_, store)| store.schema.schema.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    reject_identifier_collisions(
-        "participant state schemas",
-        schema_names
-            .iter()
-            .map(|name| (name.clone(), state_type_name(name))),
-    )?;
-    let mut schema_type_names = std::collections::BTreeMap::new();
-    for schema_name in schema_names {
-        let base = state_type_name(&schema_name);
-        schema_type_names.insert(schema_name, base);
-    }
-
-    for (_, store) in &stores {
-        let type_name = schema_type_names
-            .get(&store.schema.schema)
-            .expect("state schema type name");
-        renderer.render_named_type(
-            type_name,
-            loaded
-                .render_model
-                .schemas
-                .get(&store.schema.schema)
-                .expect("validated participant state schema"),
-        );
-    }
-
-    let rendered = renderer.finish()?;
-    let mut lines = vec![format!(
-        "// Typed state store helpers for `{}`.",
-        loaded.render_model.id
-    )];
-
-    if !rendered.is_empty() {
-        lines.push(String::new());
-        lines.push("use serde::{Deserialize, Serialize};".to_string());
-        if rendered.iter().any(|line| line.contains("BTreeMap<")) {
-            lines.push("use std::collections::BTreeMap;".to_string());
-        }
-    }
-
-    lines.push(String::new());
-    lines.push("/// Typed access to state stores declared by this participant.".to_string());
-    lines.push("pub struct State<'a> {".to_string());
-    lines.push(if stores.is_empty() {
-        "    _inner: &'a trellis_rs::generated::Caller,".to_string()
-    } else {
-        "    inner: &'a trellis_rs::generated::Caller,".to_string()
-    });
-    lines.push("}".to_string());
-    lines.push(String::new());
-    lines.push("impl<'a> State<'a> {".to_string());
-    lines.push("    /// Wrap an already connected low-level Trellis client.".to_string());
-    lines.push(if stores.is_empty() {
-        "    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self { Self { _inner: inner } }"
-            .to_string()
-    } else {
-        "    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self { Self { inner } }"
-            .to_string()
-    });
-
-    for (name, store) in stores {
-        let method_name = rust_ident(&key_to_snake(name));
-        let ty = schema_type_names
-            .get(&store.schema.schema)
-            .expect("state schema type name");
-        match &store.kind {
-            StateKind::Value => {
-                lines.push(format!("    /// Access the `{name}` value state store."));
-                lines.push(format!("    pub fn {method_name}(&self) -> trellis_rs::generated::ValueStateStore<'a, trellis_rs::generated::Caller, {ty}> {{"));
-                lines.push(format!(
-                    "        trellis_rs::generated::ValueStateStore::new(self.inner, {})",
-                    string_literal(name)
-                ));
-                lines.push("    }".to_string());
+        .flat_map(|(name, resource)| match resource {
+            ResourceDefinition::State {
+                schema, accepts, ..
             }
-            StateKind::Map => {
-                lines.push(format!("    /// Access the `{name}` map state store."));
-                lines.push(format!("    pub fn {method_name}(&self) -> trellis_rs::generated::MapStateStore<'a, trellis_rs::generated::Caller, {ty}> {{"));
-                lines.push(format!(
-                    "        trellis_rs::generated::MapStateStore::new(self.inner, {})",
-                    string_literal(name)
-                ));
-                lines.push("    }".to_string());
-            }
-        }
-    }
-
-    lines.push("}".to_string());
-    lines.push(String::new());
-    lines.extend(rendered);
-    Ok(format!("{}\n", lines.join("\n")))
-}
-
-fn state_type_name(schema_name: &str) -> String {
-    let base = key_to_pascal(schema_name);
-    if base == "State" {
-        return "StateValue".to_string();
-    }
-    if base.ends_with("State") {
-        base
-    } else {
-        format!("{base}State")
-    }
-}
-
-fn render_participant_uses_mod_rs(mappings: &[ValidatedParticipantAlias]) -> String {
-    let mut lines = vec![
-        "//! Generated dependency alias facades.".to_string(),
-        String::new(),
-    ];
-    for mapping in mappings {
-        lines.push(format!("pub mod {};", mapping.alias_ident));
-    }
-    lines.push(String::new());
-    format!("{}\n", lines.join("\n"))
-}
-
-fn render_participant_use_alias_rs(mapping: &ValidatedParticipantAlias) -> String {
-    let remote_client_name = format!(
-        "{}Client",
-        sdk_stem_from_contract_id_pascal(&mapping.contract_id)
-    );
-    let has_download_transfer = mapping
-        .use_ref
-        .rpc
-        .as_ref()
-        .and_then(|rpc| rpc.call.as_ref())
-        .is_some_and(|calls| {
-            calls
+            | ResourceDefinition::Kv {
+                schema, accepts, ..
+            } => accepts
                 .iter()
-                .any(|key| mapping.manifest.render_model.rpc[key].transfer.is_some())
-        });
-    let needs_transport = has_download_transfer
-        || mapping
-            .use_ref
-            .operations
-            .as_ref()
-            .is_some_and(|operations| !operations.selected().is_empty())
-        || mapping.use_ref.events.as_ref().is_some_and(|events| {
-            events
-                .publish
-                .as_ref()
-                .is_some_and(|publish| !publish.is_empty())
-                || events
-                    .subscribe
-                    .as_ref()
-                    .is_some_and(|subscribe| !subscribe.is_empty())
+                .map(move |old| (name.as_str(), old.version, &old.ty, schema))
+                .collect::<Vec<_>>(),
+            _ => Vec::new(),
         })
-        || mapping
-            .use_ref
-            .feeds
-            .as_ref()
-            .and_then(|feeds| feeds.subscribe.as_ref())
-            .is_some_and(|subscribe| !subscribe.is_empty());
-    let client_struct = if needs_transport {
-        "pub struct Client<'a> { inner: sdk::".to_string()
-            + &remote_client_name
-            + "<'a>, transport: &'a trellis_rs::generated::Caller }"
-    } else {
-        "pub struct Client<'a> { inner: sdk::".to_string() + &remote_client_name + "<'a> }"
-    };
-    let client_new = if needs_transport {
-        "    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self { Self { inner: sdk::"
-            .to_string()
-            + &remote_client_name
-            + "::new(inner), transport: inner } }"
-    } else {
-        "    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self { Self { inner: sdk::"
-            .to_string()
-            + &remote_client_name
-            + "::new(inner) } }"
-    };
-    let mut lines = vec![
-        format!("/// Facade for the `{}` dependency alias.", mapping.alias),
-        format!("use {} as sdk;", mapping.crate_ident),
-        String::new(),
-        client_struct,
-        "impl<'a> Client<'a> {".to_string(),
-        client_new,
-        format!(
-            "    pub const API_ID: &'static str = {};",
-            string_literal(&mapping.contract_id)
-        ),
-    ];
-
-    if let Some(rpc) = &mapping.use_ref.rpc {
-        for key in rpc.call.as_deref().unwrap_or(&[]) {
-            if mapping.manifest.render_model.rpc[key].internal == Some(true) {
-                continue;
-            }
-            let method = key_to_snake(key);
-            let base = key_to_pascal(key);
-            let (group, leaf) = surface_group_and_method(key);
-            let input_empty = is_empty_object_schema(resolve_schema_ref(
-                &mapping.manifest,
-                &mapping.manifest.render_model.rpc[key].input.schema,
-            ));
-            let output_type = if is_empty_object_schema(resolve_schema_ref(
-                &mapping.manifest,
-                &mapping.manifest.render_model.rpc[key].output.schema,
-            )) {
-                "sdk::Empty".to_string()
-            } else {
-                format!("sdk::{base}Response")
-            };
-            let error_type = rpc_call_error_type(&mapping.manifest, key, "sdk::rpc");
-            if input_empty {
-                lines.push(format!("    pub async fn {method}(&self) -> Result<{output_type}, trellis_rs::generated::CallError<{error_type}>> {{ self.inner.rpc().{group}().{leaf}().await }}"));
-            } else {
-                lines.push(format!("    pub async fn {method}(&self, input: &sdk::{base}Request) -> Result<{output_type}, trellis_rs::generated::CallError<{error_type}>> {{ self.inner.rpc().{group}().{leaf}(input).await }}"));
-            }
-        }
-    }
-    if has_download_transfer {
-        lines.push(
-            "    /// Download bytes from a transfer grant returned by this dependency.".to_string(),
-        );
-        lines.push("    pub async fn download_transfer(&self, grant: &trellis_rs::generated::DownloadTransferGrant) -> Result<Vec<u8>, trellis_rs::generated::TrellisClientError> { self.transport.download_transfer(grant).await }".to_string());
-        lines.push(
-            "    /// Stream bytes from a transfer grant into a caller-owned writer.".to_string(),
-        );
-        lines.push("    pub async fn download_transfer_into<W>(&self, grant: &trellis_rs::generated::DownloadTransferGrant, writer: &mut W) -> Result<trellis_rs::generated::FileInfo, trellis_rs::generated::TrellisClientError> where W: tokio::io::AsyncWrite + Unpin + Send + ?Sized { self.transport.download_transfer_into(grant, writer).await }".to_string());
-        lines.push(
-            "    /// Stream bytes into a writer with authenticated cancellation.".to_string(),
-        );
-        lines.push("    pub async fn download_transfer_into_with_cancel<W>(&self, grant: &trellis_rs::generated::DownloadTransferGrant, writer: &mut W, cancellation: &trellis_rs::generated::TransferCancellation) -> Result<trellis_rs::generated::FileInfo, trellis_rs::generated::TrellisClientError> where W: tokio::io::AsyncWrite + Unpin + Send + ?Sized { self.transport.download_transfer_into_with_cancel(grant, writer, cancellation).await }".to_string());
-    }
-    if let Some(operations) = &mapping.use_ref.operations {
-        for key in operations.selected() {
-            let method = key_to_snake(key);
-            let base = key_to_pascal(key);
-            if operations
-                .invoke
-                .as_ref()
-                .is_some_and(|names| names.contains(key))
-            {
-                lines.push(format!("    pub fn {method}(&self) -> trellis_rs::generated::OperationInvoker<'a, trellis_rs::generated::Caller, sdk::operations::{base}Operation> {{ self.transport.operation::<sdk::operations::{base}Operation>() }}"));
-            } else {
-                lines.push(
-                    "    /// Access an existing operation without exposing operation start."
-                        .to_owned(),
-                );
-                lines.push(format!("    pub fn {method}(&self, operation_id: impl Into<String>) -> Result<trellis_rs::generated::OperationRef<'a, trellis_rs::generated::Caller, sdk::operations::{base}Operation>, trellis_rs::generated::TrellisClientError> {{ self.transport.operation::<sdk::operations::{base}Operation>().control(operation_id) }}"));
-            }
-        }
-    }
-    if let Some(events) = &mapping.use_ref.events {
-        for key in events.publish.as_deref().unwrap_or(&[]) {
-            let method = format!("publish_{}", key_to_snake(key));
-            let base = key_to_pascal(key);
-            lines.push(format!("    pub async fn {method}(&self, event: &sdk::{base}Event) -> Result<(), trellis_rs::generated::TrellisClientError> {{ self.transport.publish::<sdk::events::{base}EventDescriptor>(event).await }}"));
-        }
-        for key in events.subscribe.as_deref().unwrap_or(&[]) {
-            let method = format!("subscribe_{}", key_to_snake(key));
-            let base = key_to_pascal(key);
-            lines.push(format!("    pub async fn {method}(&self) -> Result<futures_util::stream::BoxStream<'static, Result<sdk::{base}Event, trellis_rs::generated::TrellisClientError>>, trellis_rs::generated::TrellisClientError> {{ self.transport.subscribe::<sdk::events::{base}EventDescriptor>().await }}"));
-        }
-    }
-    if let Some(feeds) = &mapping.use_ref.feeds {
-        for key in feeds.subscribe.as_deref().unwrap_or(&[]) {
-            let method = key_to_snake(key);
-            let base = key_to_pascal(key);
-            let input_empty = is_empty_object_schema(resolve_schema_ref(
-                &mapping.manifest,
-                &mapping.manifest.render_model.feeds[key].input.schema,
-            ));
-            if input_empty {
-                lines.push(format!("    pub async fn {method}(&self) -> Result<futures_util::stream::BoxStream<'static, Result<sdk::{base}Event, trellis_rs::generated::TrellisClientError>>, trellis_rs::generated::TrellisClientError> {{ self.transport.feed::<sdk::feeds::{base}FeedDescriptor>(&sdk::rpc::Empty {{}}).await }}"));
-            } else {
-                lines.push(format!("    pub async fn {method}(&self, input: &sdk::{base}Input) -> Result<futures_util::stream::BoxStream<'static, Result<sdk::{base}Event, trellis_rs::generated::TrellisClientError>>, trellis_rs::generated::TrellisClientError> {{ self.transport.feed::<sdk::feeds::{base}FeedDescriptor>(input).await }}"));
-            }
-        }
-    }
-    lines.push("}".to_string());
-
-    lines.push(String::new());
-    format!("{}\n", lines.join("\n"))
-}
-
-fn render_api_rs(loaded: &ApiInput, artifact_canonical: &str, artifact_digest: &str) -> String {
-    let api_name = manifest_display_name(loaded);
-    let source_reference = &loaded.render_model.id;
-    let rpc_metadata = loaded
-        .render_model
-        .rpc
-        .keys()
-        .map(|key| {
-            format!(
-                "    router.register_rpc_metadata::<super::rpc::{}Rpc>();",
-                key_to_pascal(key)
-            )
-        })
-        .chain(loaded.render_model.operations.keys().map(|key| {
-            format!(
-                "    router.register_operation_metadata::<super::operations::{}Operation>();",
-                key_to_pascal(key)
-            )
-        }))
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!(
-        "//! API metadata for `{}`.\n//! Generated from {}\n\n/// Canonical Trellis API id.\npub const API_ID: &str = {};\n\n/// Stable digest for the canonical API JSON.\npub const API_DIGEST: &str = {};\n\n/// Human-readable API name.\npub const API_NAME: &str = {};\n\n/// Canonical API JSON embedded in the SDK crate.\npub const API_JSON: &str = {};\n\n/// Deserialize the embedded API artifact as JSON.\npub fn api_artifact() -> serde_json::Value {{\n    serde_json::from_str(API_JSON).expect(\"generated API JSON\")\n}}\n\n/// Register every generated RPC descriptor as router metadata.\npub fn register_rpc_metadata(router: &mut trellis_rs::service::Router) {{\n    router.set_api_id(API_ID);\n{}\n}}\n",
-        loaded.render_model.id,
-        source_reference,
-        string_literal(&loaded.render_model.id),
-         string_literal(artifact_digest),
-        string_literal(&api_name),
-         string_literal(artifact_canonical),
-        rpc_metadata,
-    )
-}
-
-fn render_types_rs(loaded: &ApiInput) -> Result<String, CodegenRustError> {
-    let mut renderer = TypeRenderer::default();
-    let mut lines = vec![format!(
-        "//! Shared request and response types for `{}`.",
-        loaded.render_model.id
-    )];
-
-    for (key, rpc) in &loaded.render_model.rpc {
-        if rpc.internal == Some(true) {
-            continue;
-        }
-        let base = key_to_pascal(key);
-        if !is_empty_object_schema(resolve_schema_ref(loaded, &rpc.input.schema)) {
-            renderer.render_named_type(
-                &format!("{base}Request"),
-                resolve_schema_ref(loaded, &rpc.input.schema),
-            );
-        }
-        if !is_empty_object_schema(resolve_schema_ref(loaded, &rpc.output.schema)) {
-            renderer.render_named_type(
-                &format!("{base}Response"),
-                resolve_schema_ref(loaded, &rpc.output.schema),
-            );
-        }
-    }
-
-    for (key, operation) in &loaded.render_model.operations {
-        let base = key_to_pascal(key);
-        if !is_empty_object_schema(resolve_schema_ref(loaded, &operation.input.schema)) {
-            renderer.render_named_type(
-                &format!("{base}Input"),
-                resolve_schema_ref(loaded, &operation.input.schema),
-            );
-        }
-        if let Some(progress) = &operation.progress {
-            if !is_empty_object_schema(resolve_schema_ref(loaded, &progress.schema)) {
-                renderer.render_named_type(
-                    &format!("{base}Progress"),
-                    resolve_schema_ref(loaded, &progress.schema),
-                );
-            }
-        }
-        if let Some(update) = &operation.update {
-            if !is_empty_object_schema(resolve_schema_ref(loaded, &update.schema)) {
-                renderer.render_named_type(
-                    &format!("{base}Update"),
-                    resolve_schema_ref(loaded, &update.schema),
-                );
-            }
-        }
-        if let Some(output) = &operation.output {
-            if !is_empty_object_schema(resolve_schema_ref(loaded, &output.schema)) {
-                renderer.render_named_type(
-                    &format!("{base}Output"),
-                    resolve_schema_ref(loaded, &output.schema),
-                );
-            }
-        }
-    }
-
-    for key in loaded.render_model.events.keys() {
-        let base = key_to_pascal(key);
-        renderer.render_named_type(
-            &format!("{base}Event"),
-            resolve_schema_ref(loaded, &loaded.render_model.events[key].event.schema),
-        );
-    }
-
-    for (key, feed) in &loaded.render_model.feeds {
-        let base = key_to_pascal(key);
-        if !is_empty_object_schema(resolve_schema_ref(loaded, &feed.input.schema)) {
-            renderer.render_named_type(
-                &format!("{base}Input"),
-                resolve_schema_ref(loaded, &feed.input.schema),
-            );
-        }
-        renderer.render_named_type(
-            &format!("{base}Event"),
-            resolve_schema_ref(loaded, &feed.event.schema),
-        );
-    }
-
-    for error in loaded.render_model.errors.values() {
-        if let Some(schema) = &error.schema {
-            renderer.render_named_type(
-                &key_to_pascal(&schema.schema),
-                resolve_schema_ref(loaded, &schema.schema),
-            );
-        }
-    }
-
-    for schema_name in &loaded.render_model.exports.schemas {
-        renderer.render_named_type(
-            key_to_pascal(schema_name).as_str(),
-            resolve_schema_ref(loaded, schema_name),
-        );
-    }
-
-    let rendered = renderer.finish()?;
-    if rendered.is_empty() {
-        lines.push(String::new());
-        lines.push(
-            "/// Marker emitted when this contract declares no shared wire types.".to_string(),
-        );
-        lines.push("#[doc(hidden)]".to_string());
-        lines.push("pub struct GeneratedTypes;".to_string());
-    } else {
-        lines.push(String::new());
-        lines.push("use serde::{Deserialize, Serialize};".to_string());
-        if rendered.iter().any(|line| line.contains("BTreeMap<")) {
-            lines.push("use std::collections::BTreeMap;".to_string());
-        }
-        lines.push(String::new());
-        lines.extend(rendered);
-    }
-    Ok(format!("{}\n", lines.join("\n")))
-}
-
-fn render_rpc_rs(loaded: &ApiInput) -> String {
-    let mut lines = vec![
-        format!(
-            "//! Typed RPC descriptors for `{}`.",
-            loaded.render_model.id
-        ),
-        String::new(),
-        "use serde::{Deserialize, Serialize};".to_string(),
-        String::new(),
-    ];
-
-    if loaded
-        .render_model
-        .rpc
-        .values()
-        .any(|rpc| rpc.internal != Some(true))
-    {
-        lines.push("use trellis_rs::generated::RpcDescriptor;".to_string());
-        lines.push(String::new());
-    }
-
-    lines.push("/// Empty request or response payload used by zero-argument RPCs.".to_string());
-    lines.push(
-        "#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]".to_string(),
-    );
-    lines.push("pub struct Empty {}".to_string());
-    lines.push(String::new());
-
-    for (key, rpc) in &loaded.render_model.rpc {
-        if rpc.internal == Some(true) {
-            continue;
-        }
-        let base = key_to_pascal(key);
-        let input_type = if is_empty_object_schema(resolve_schema_ref(loaded, &rpc.input.schema)) {
-            "Empty".to_string()
-        } else {
-            format!("crate::types::{base}Request")
-        };
-        let output_type = if is_empty_object_schema(resolve_schema_ref(loaded, &rpc.output.schema))
-        {
-            "Empty".to_string()
-        } else {
-            format!("crate::types::{base}Response")
-        };
-        let capabilities = capability_names(&loaded.value, "rpc", key, "call");
-        let errors = rpc
-            .errors
-            .as_ref()
-            .map(|values| {
-                values
-                    .iter()
-                    .map(|value| value.error_type.clone())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        lines.push(format!("/// Descriptor for `{key}`."));
-        lines.push(format!("pub struct {base}Rpc;"));
-        lines.push(String::new());
-        let schema_base = key_to_schema_constant_base(key);
-        lines.push(format!("impl RpcDescriptor for {base}Rpc {{"));
-        lines.push(format!("    type Input = {input_type};"));
-        lines.push(format!("    type Output = {output_type};"));
-        lines.push(format!(
-            "    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_INPUT_SCHEMA_JSON;"
-        ));
-        lines.push(format!(
-            "    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_OUTPUT_SCHEMA_JSON;"
-        ));
-        lines.push(format!(
-            "    const KEY: &'static str = {};",
-            string_literal(key)
-        ));
-        lines.push(format!(
-            "    const SUBJECT: &'static str = {};",
-            string_literal(&loaded.subjects.rpc[key])
-        ));
-        lines.push(format!(
-            "    const CALLER_CAPABILITIES: &'static [&'static str] = &[{}];",
-            join_string_literals(&capabilities)
-        ));
-        lines.push(format!(
-            "    const ERRORS: &'static [&'static str] = &[{}];",
-            join_string_literals(&errors)
-        ));
-        lines.push("}".to_string());
-        lines.push(String::new());
-
-        if !errors.is_empty() {
-            lines.push(format!("/// Errors declared by `{key}`."));
-            lines.push("#[derive(Debug, Clone, PartialEq)]".to_string());
-            lines.push(format!("pub enum {base}Error {{"));
-            for error_type in &errors {
-                let variant = key_to_pascal(error_type);
-                let payload = declared_error_payload_type(loaded, error_type);
-                lines.push(format!("    /// `{error_type}` error payload."));
-                lines.push(format!("    {variant}({payload}),"));
-            }
-            lines.push("}".to_string());
-            lines.push(String::new());
-            lines.push(format!(
-                "impl trellis_rs::generated::DeclaredError for {base}Error {{"
-            ));
-            lines.push("    fn decode(payload: &trellis_rs::generated::RemoteErrorPayload) -> Result<Option<Self>, serde_json::Error> {".to_string());
-            lines.push("        match payload.error_type() {".to_string());
-            for error_type in &errors {
-                let variant = key_to_pascal(error_type);
-                let payload_type = declared_error_payload_type(loaded, error_type);
-                lines.push(format!(
-                    "            Some({}) => payload.decode_declared::<{payload_type}>({}).map(|value| value.map(Self::{variant})),",
-                    string_literal(error_type),
-                    string_literal(error_type),
-                ));
-            }
-            lines.push("            _ => Ok(None),".to_string());
-            lines.push("        }".to_string());
-            lines.push("    }".to_string());
-            if errors.iter().any(|error| error == "AuthError") {
-                lines.push("    fn auth_error_reason(&self) -> Option<&str> {".to_string());
-                lines.push(
-                    "        match self { Self::AuthError(payload) => Some(payload.reason.as_str()), _ => None }"
-                        .to_string(),
-                );
-                lines.push("    }".to_string());
-            }
-            lines.push("}".to_string());
-            lines.push(String::new());
-        }
-    }
-
-    format!("{}\n", lines.join("\n"))
-}
-
-fn render_events_rs(loaded: &ApiInput) -> String {
-    let mut lines = vec![
-        format!(
-            "//! Typed event descriptors for `{}`.",
-            loaded.render_model.id
-        ),
-        String::new(),
-    ];
-
-    if !loaded.render_model.events.is_empty() {
-        lines.push("use trellis_rs::generated::EventDescriptor;".to_string());
-        lines.push(String::new());
-    }
-
-    for key in loaded.render_model.events.keys() {
-        let base = key_to_pascal(key);
-        let publish = capability_names(&loaded.value, "event", key, "publish");
-        let subscribe = capability_names(&loaded.value, "event", key, "subscribe");
-        lines.push(format!("/// Descriptor for `{key}`."));
-        lines.push(format!("pub struct {base}EventDescriptor;"));
-        lines.push(String::new());
-        lines.push(format!("impl EventDescriptor for {base}EventDescriptor {{"));
-        lines.push(format!("    type Event = crate::types::{base}Event;"));
-        lines.push(format!(
-            "    const KEY: &'static str = {};",
-            string_literal(key)
-        ));
-        lines.push(format!(
-            "    const SUBJECT: &'static str = {};",
-            string_literal(&loaded.subjects.events[key].template)
-        ));
-        lines.push(format!(
-            "    const SUBSCRIBE_SUBJECT: &'static str = {};",
-            string_literal(&loaded.subjects.events[key].wildcard)
-        ));
-        lines.push(format!(
-            "    const EVENT_SCHEMA_JSON: &'static str = crate::schemas::{}_EVENT_SCHEMA_JSON;",
-            key_to_schema_constant_base(key)
-        ));
-        lines.push(format!(
-            "    const PUBLISH_CAPABILITIES: &'static [&'static str] = &[{}];",
-            join_string_literals(&publish)
-        ));
-        lines.push(format!(
-            "    const DELEGATED_PUBLISH: bool = {};",
-            !publish.is_empty()
-        ));
-        lines.push(format!(
-            "    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[{}];",
-            join_string_literals(&subscribe)
-        ));
-        lines.push("}".to_string());
-        lines.push(String::new());
-    }
-
-    format!("{}\n", lines.join("\n"))
-}
-
-fn render_feeds_rs(loaded: &ApiInput) -> String {
-    let mut lines = vec![
-        format!(
-            "//! Typed feed descriptors for `{}`.",
-            loaded.render_model.id
-        ),
-        String::new(),
-    ];
-
-    if !loaded.render_model.feeds.is_empty() {
-        lines.push("use trellis_rs::generated::FeedDescriptor;".to_string());
-        lines.push(String::new());
-    }
-
-    for (key, feed) in &loaded.render_model.feeds {
-        let base = key_to_pascal(key);
-        let input_type = if is_empty_object_schema(resolve_schema_ref(loaded, &feed.input.schema)) {
-            "crate::rpc::Empty".to_string()
-        } else {
-            format!("crate::types::{base}Input")
-        };
-        let event_type = format!("crate::types::{base}Event");
-        let subscribe = capability_names(&loaded.value, "feed", key, "subscribe");
-
-        lines.push(format!("/// Descriptor for `{key}`."));
-        lines.push(format!("pub struct {base}FeedDescriptor;"));
-        lines.push(String::new());
-        let schema_base = key_to_schema_constant_base(key);
-        lines.push(format!("impl FeedDescriptor for {base}FeedDescriptor {{"));
-        lines.push(format!("    type Input = {input_type};"));
-        lines.push(format!("    type Event = {event_type};"));
-        lines.push(format!(
-            "    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_INPUT_SCHEMA_JSON;"
-        ));
-        lines.push(format!(
-            "    const EVENT_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_EVENT_SCHEMA_JSON;"
-        ));
-        lines.push(format!(
-            "    const KEY: &'static str = {};",
-            string_literal(key)
-        ));
-        lines.push(format!(
-            "    const SUBJECT: &'static str = {};",
-            string_literal(&loaded.subjects.feeds[key])
-        ));
-        lines.push(format!(
-            "    const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[{}];",
-            join_string_literals(&subscribe)
-        ));
-        lines.push("}".to_string());
-        lines.push(String::new());
-    }
-
-    format!("{}\n", lines.join("\n"))
-}
-
-fn render_operations_rs(loaded: &ApiInput) -> String {
-    let mut lines = vec![format!(
-        "//! Typed operation descriptors for `{}`.",
-        loaded.render_model.id
-    )];
-
-    if loaded.render_model.operations.is_empty() {
-        lines.push(String::new());
-        return format!("{}\n", lines.join("\n"));
-    }
-
-    lines.push(String::new());
-    let mut operation_imports = vec!["OperationDescriptor"];
-    if loaded
-        .render_model
-        .operations
-        .values()
-        .any(|operation| operation.update.is_some())
-    {
-        operation_imports.push("DeclaredOperationUpdates");
-    }
-    if loaded
-        .render_model
-        .operations
-        .values()
-        .any(|operation| operation.update.is_none())
-    {
-        operation_imports.push("NoOperationUpdates");
-    }
-    if loaded
-        .render_model
-        .operations
-        .values()
-        .any(|operation| operation.transfer.is_some())
-    {
-        operation_imports.push("TransferOperationDescriptor");
-    }
-    operation_imports.sort_unstable();
-    lines.push(format!(
-        "use trellis_rs::generated::{{{}}};",
-        operation_imports.join(", ")
-    ));
-    if loaded
-        .render_model
-        .operations
-        .values()
-        .any(|op| !op.errors.is_empty())
-    {
-        lines.push("use trellis_rs::service::OperationFailureLike;".to_string());
-    }
-    lines.push(String::new());
-
-    for (key, operation) in &loaded.render_model.operations {
-        let base = key_to_pascal(key);
-        let input_type =
-            if is_empty_object_schema(resolve_schema_ref(loaded, &operation.input.schema)) {
-                "crate::rpc::Empty".to_string()
-            } else {
-                format!("crate::types::{base}Input")
-            };
-        let progress_type = match &operation.progress {
-            Some(progress)
-                if !is_empty_object_schema(resolve_schema_ref(loaded, &progress.schema)) =>
-            {
-                format!("crate::types::{base}Progress")
-            }
-            _ => "crate::rpc::Empty".to_string(),
-        };
-        let output_type = match &operation.output {
-            Some(output) if !is_empty_object_schema(resolve_schema_ref(loaded, &output.schema)) => {
-                format!("crate::types::{base}Output")
-            }
-            _ => "crate::rpc::Empty".to_string(),
-        };
-        let caller = capability_names(&loaded.value, "operation", key, "invoke");
-        let observe = capability_names(&loaded.value, "operation", key, "observe");
-        let cancel = capability_names(&loaded.value, "operation", key, "cancel");
-        let control = capability_names(&loaded.value, "operation", key, "control");
-        let error_types: Vec<String> = operation
-            .errors
-            .iter()
-            .map(|error| error.error_type.clone())
-            .collect();
-
-        lines.push(format!("/// Descriptor for `{key}`."));
-        lines.push(format!("pub struct {base}Operation;"));
-        lines.push(String::new());
-        let schema_base = key_to_schema_constant_base(key);
-        lines.push(format!("impl OperationDescriptor for {base}Operation {{"));
-        lines.push(format!("    type Input = {input_type};"));
-        lines.push(format!("    type Progress = {progress_type};"));
-        lines.push(format!("    type Output = {output_type};"));
-        let update_type = operation.update.as_ref().map_or_else(
-            || "serde_json::Value".to_string(),
-            |update| {
-                if is_empty_object_schema(resolve_schema_ref(loaded, &update.schema)) {
-                    "crate::rpc::Empty".to_string()
-                } else {
-                    format!("crate::types::{base}Update")
-                }
-            },
-        );
-        lines.push(format!("    type Update = {update_type};"));
-        lines.push(format!(
-            "    type UpdateEvidence = {};",
-            if operation.update.is_some() {
-                "DeclaredOperationUpdates"
-            } else {
-                "NoOperationUpdates"
-            }
-        ));
-        lines.push(format!(
-            "    type Error = {};",
-            if error_types.is_empty() {
-                "trellis_rs::service::OperationFailure".to_string()
-            } else {
-                format!("{base}OperationError")
-            }
-        ));
-        lines.push(format!(
-            "    const INPUT_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_INPUT_SCHEMA_JSON;"
-        ));
-        if operation.progress.is_some() {
-            lines.push(format!(
-                "    const PROGRESS_SCHEMA_JSON: Option<&'static str> = Some(crate::schemas::{schema_base}_PROGRESS_SCHEMA_JSON);"
-            ));
-        } else {
-            lines.push("    const PROGRESS_SCHEMA_JSON: Option<&'static str> = None;".to_string());
-        }
-        lines.push(format!(
-            "    const OUTPUT_SCHEMA_JSON: &'static str = crate::schemas::{schema_base}_OUTPUT_SCHEMA_JSON;"
-        ));
-        if operation.update.is_some() {
-            lines.push(format!(
-                "    const UPDATE_SCHEMA_JSON: Option<&'static str> = Some(crate::schemas::{schema_base}_UPDATE_SCHEMA_JSON);"
-            ));
-        } else {
-            lines.push("    const UPDATE_SCHEMA_JSON: Option<&'static str> = None;".to_string());
-        }
-        lines.push(format!(
-            "    const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = crate::schemas::{schema_base}_SIGNAL_INPUT_SCHEMAS_JSON;"
-        ));
-        lines.push(format!(
-            "    const ERRORS: &'static [&'static str] = &[{}];",
-            join_string_literals(&error_types)
-        ));
-        lines.push(format!(
-            "    const KEY: &'static str = {};",
-            string_literal(key)
-        ));
-        lines.push(format!(
-            "    const SUBJECT: &'static str = {};",
-            string_literal(&loaded.subjects.operations[key])
-        ));
-        lines.push(format!(
-            "    const CALLER_CAPABILITIES: &'static [&'static str] = &[{}];",
-            join_string_literals(&caller)
-        ));
-        lines.push(format!(
-            "    const OBSERVE_CAPABILITIES: &'static [&'static str] = &[{}];",
-            join_string_literals(&observe)
-        ));
-        lines.push(format!(
-            "    const CANCEL_CAPABILITIES: &'static [&'static str] = &[{}];",
-            join_string_literals(&cancel)
-        ));
-        lines.push(format!(
-            "    const CONTROL_CAPABILITIES: &'static [&'static str] = &[{}];",
-            join_string_literals(&control)
-        ));
-        lines.push(format!(
-            "    const CANCELABLE: bool = {};",
-            operation.cancel.unwrap_or(false)
-        ));
-        lines.push("}".to_string());
-        lines.push(String::new());
-
-        // Emit typed error enum when the operation declares errors.
-        if !error_types.is_empty() {
-            lines.push(format!("/// Errors declared by `{key}`."));
-            lines.push("#[derive(Debug, Clone, PartialEq)]".to_string());
-            lines.push(format!("pub enum {base}OperationError {{"));
-            for error_type in &error_types {
-                let variant = key_to_pascal(error_type);
-                let payload = declared_error_payload_type(loaded, error_type);
-                lines.push(format!("    /// `{error_type}` failure."));
-                lines.push(format!("    {variant}({payload}),"));
-            }
-            lines.push("}".to_string());
-            lines.push(String::new());
-            lines.push(format!(
-                "impl trellis_rs::generated::DeclaredError for {base}OperationError {{"
-            ));
-            lines.push("    fn decode(payload: &trellis_rs::generated::RemoteErrorPayload) -> Result<Option<Self>, serde_json::Error> {".to_string());
-            lines.push("        match payload.error_type() {".to_string());
-            for error_type in &error_types {
-                let variant = key_to_pascal(error_type);
-                let payload_type = declared_error_payload_type(loaded, error_type);
-                lines.push(format!(
-                    "            Some({}) => payload.decode_declared::<{payload_type}>({}).map(|value| value.map(Self::{variant})),",
-                    string_literal(error_type),
-                    string_literal(error_type),
-                ));
-            }
-            lines.push("            _ => Ok(None),".to_string());
-            lines.push("        }".to_string());
-            lines.push("    }".to_string());
-            if error_types.iter().any(|error| error == "AuthError") {
-                lines.push("    fn auth_error_reason(&self) -> Option<&str> {".to_string());
-                lines.push(
-                    "        match self { Self::AuthError(payload) => Some(payload.reason.as_str()), _ => None }"
-                        .to_string(),
-                );
-                lines.push("    }".to_string());
-            }
-            lines.push("}".to_string());
-            lines.push(String::new());
-            lines.push(format!(
-                "impl OperationFailureLike for {base}OperationError {{"
-            ));
-            lines.push("    fn error_type(&self) -> &str {".to_string());
-            lines.push("        match self {".to_string());
-            for error_type in &error_types {
-                let variant = key_to_pascal(error_type);
-                lines.push(format!(
-                    "            Self::{variant}(..) => {},",
-                    string_literal(error_type)
-                ));
-            }
-            lines.push("        }".to_string());
-            lines.push("    }".to_string());
-            lines.push("    fn message(&self) -> String {".to_string());
-            lines.push("        self.fields().remove(\"message\").and_then(|value| value.as_str().map(ToOwned::to_owned)).unwrap_or_else(|| self.error_type().to_string())".to_string());
-            lines.push("    }".to_string());
-            lines.push(
-                "    fn fields(&self) -> serde_json::Map<String, serde_json::Value> {".to_string(),
-            );
-            lines.push("        let value = match self {".to_string());
-            for error_type in &error_types {
-                let variant = key_to_pascal(error_type);
-                lines.push(format!(
-                    "            Self::{variant}(payload) => serde_json::to_value(payload),"
-                ));
-            }
-            lines.push("        };".to_string());
-            lines.push("        value.ok().and_then(|value| value.as_object().cloned()).unwrap_or_default()".to_string());
-            lines.push("    }".to_string());
-            lines.push("}".to_string());
-            lines.push(String::new());
-        }
-
-        if operation.transfer.is_some() {
-            lines.push(format!(
-                "impl TransferOperationDescriptor for {base}Operation {{}}"
-            ));
-            lines.push(String::new());
-        }
-    }
-
-    format!("{}\n", lines.join("\n"))
-}
-
-fn render_participant_job_descriptors_rs(
-    loaded: &ParticipantInput,
-) -> Result<String, CodegenRustError> {
-    let mut lines = vec![
-        format!(
-            "//! Typed jobs descriptors for `{}`.",
-            loaded.render_model.id
-        ),
-        String::new(),
-    ];
-    if !loaded.render_model.jobs.is_empty() {
-        let mut renderer = TypeRenderer::default();
-        for job in loaded.render_model.jobs.values() {
-            for schema_name in [
-                Some(job.payload.schema.as_str()),
-                job.result.as_ref().map(|schema| schema.schema.as_str()),
-                job.update.as_ref().map(|schema| schema.schema.as_str()),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                let schema = loaded
-                    .render_model
-                    .schemas
-                    .get(schema_name)
-                    .expect("validated job schema");
-                if !is_empty_object_schema(schema) {
-                    renderer.render_named_type(&key_to_pascal(schema_name), schema);
-                }
-            }
-        }
-        reject_identifier_collisions(
-            "participant jobs types",
-            renderer
-                .rendered
-                .keys()
-                .map(|name| (format!("schema type {name}"), name.clone()))
-                .chain(loaded.render_model.jobs.keys().flat_map(|key| {
-                    ["Job", "Queue", "QueueClient"].map(|suffix| {
-                        (
-                            format!("jobQueues.{key}.{suffix}"),
-                            format!("{}{suffix}", key_to_pascal(key)),
-                        )
-                    })
-                }))
-                .chain(
-                    ["Jobs", "JobsClient"]
-                        .map(|name| (format!("jobs facade {name}"), name.to_owned())),
-                ),
-        )?;
-        let rendered = renderer.finish()?;
-        if !rendered.is_empty() {
-            lines.push("use serde::{Deserialize, Serialize};".to_string());
-            lines.push(String::new());
-            lines.extend(rendered);
-            lines.push(String::new());
-        }
-        lines.push("use trellis_rs::service::JobDescriptor;".to_string());
-    }
-    if loaded
-        .render_model
-        .jobs
-        .values()
-        .any(|job| job.update.is_some())
-    {
-        lines.push("use trellis_rs::service::JobUpdateDescriptor;".to_string());
-    }
-    if !loaded.render_model.jobs.is_empty() {
-        lines.push(String::new());
-    }
-
-    for (key, job) in &loaded.render_model.jobs {
-        let base = key_to_pascal(key);
-        let payload_type = if is_empty_object_schema(
-            loaded
-                .render_model
-                .schemas
-                .get(&job.payload.schema)
-                .expect("validated job payload schema"),
-        ) {
-            "serde_json::Value".to_string()
-        } else {
-            format!("crate::jobs::{}", key_to_pascal(&job.payload.schema))
-        };
-        let result_type = job
-            .result
-            .as_ref()
-            .map(|result| {
-                if is_empty_object_schema(
-                    loaded
-                        .render_model
-                        .schemas
-                        .get(&result.schema)
-                        .expect("validated job result schema"),
-                ) {
-                    "serde_json::Value".to_string()
-                } else {
-                    format!("crate::jobs::{}", key_to_pascal(&result.schema))
-                }
-            })
-            .unwrap_or_else(|| "serde_json::Value".to_string());
-        lines.push(format!("/// Descriptor for jobs queue `{key}`."));
-        lines.push(format!("pub struct {base}Job;"));
-        lines.push(String::new());
-        lines.push(format!("impl JobDescriptor for {base}Job {{"));
-        lines.push(format!("    type Payload = {payload_type};"));
-        lines.push(format!("    type Result = {result_type};"));
-        lines.push(format!(
-            "    const QUEUE_TYPE: &'static str = {};",
-            string_literal(key)
-        ));
-        let payload_schema = loaded
-            .render_model
-            .schemas
-            .get(&job.payload.schema)
-            .expect("validated job payload schema");
-        lines.push(format!(
-            "    const PAYLOAD_SCHEMA_JSON: &'static str = {};",
-            string_literal(&canonicalize_json(payload_schema).expect("valid job payload schema"))
-        ));
-        match &job.result {
-            Some(result) => {
-                let schema = loaded
-                    .render_model
-                    .schemas
-                    .get(&result.schema)
-                    .expect("validated job result schema");
-                lines.push(format!(
-                    "    const RESULT_SCHEMA_JSON: Option<&'static str> = Some({});",
-                    string_literal(&canonicalize_json(schema).expect("valid job result schema"))
-                ));
-            }
-            None => {
-                lines.push("    const RESULT_SCHEMA_JSON: Option<&'static str> = None;".to_string())
-            }
-        }
-        lines.push("}".to_string());
-        lines.push(String::new());
-
-        if let Some(update) = &job.update {
-            let update_type = if is_empty_object_schema(
-                loaded
-                    .render_model
-                    .schemas
-                    .get(&update.schema)
-                    .expect("validated job update schema"),
-            ) {
-                "serde_json::Value".to_string()
-            } else {
-                format!("crate::jobs::{}", key_to_pascal(&update.schema))
-            };
-            lines.push(format!("impl JobUpdateDescriptor for {base}Job {{"));
-            lines.push(format!("    type Update = {update_type};"));
-            lines.push(format!(
-                "    const UPDATE_SCHEMA: &'static str = {};",
-                string_literal(&update.schema)
-            ));
-            let schema = loaded
-                .render_model
-                .schemas
-                .get(&update.schema)
-                .expect("validated job update schema");
-            lines.push(format!(
-                "    const UPDATE_SCHEMA_JSON: &'static str = {};",
-                string_literal(&canonicalize_json(schema).expect("valid job update schema"))
-            ));
-            lines.push("}".to_string());
-            lines.push(String::new());
-        }
-    }
-    Ok(format!("{}\n", lines.join("\n")))
-}
-
-fn render_client_rs(loaded: &ApiInput) -> String {
-    let client_name = format!("{}Client", sdk_stem_pascal(loaded));
-    let mut lines = vec![
-        format!(
-            "//! Thin typed client helpers for `{}`.",
-            loaded.render_model.id
-        ),
-        String::new(),
-        format!(
-            "/// Typed API wrapper for the `{}` contract.",
-            loaded.render_model.id
-        ),
-        format!("pub struct {client_name}<'a> {{"),
-        "    inner: &'a trellis_rs::generated::Caller,".to_string(),
-        "}".to_string(),
-        String::new(),
-        format!("impl<'a> {client_name}<'a> {{"),
-        "    /// Wrap an already connected low-level Trellis client.".to_string(),
-        "    pub fn new(inner: &'a trellis_rs::generated::Caller) -> Self {".to_string(),
-        "        Self { inner }".to_string(),
-        "    }".to_string(),
-        String::new(),
-        "    /// Access typed RPC calls.".to_string(),
-        "    pub fn rpc(&self) -> Rpc<'a> { Rpc { _inner: self.inner } }".to_string(),
-        String::new(),
-        "    /// Access typed events.".to_string(),
-        "    pub fn event(&self) -> Event<'a> { Event { _inner: self.inner } }".to_string(),
-        String::new(),
-        "    /// Access typed feeds.".to_string(),
-        "    pub fn feed(&self) -> Feed<'a> { Feed { _inner: self.inner } }".to_string(),
-        String::new(),
-        "    /// Access typed operations.".to_string(),
-        "    pub fn operation(&self) -> Operation<'a> { Operation { _inner: self.inner } }"
-            .to_string(),
-        String::new(),
-        "}".to_string(),
-        String::new(),
-    ];
-
-    if !loaded.render_model.events.is_empty()
-        || !loaded.render_model.feeds.is_empty()
-        || !loaded.render_model.operations.is_empty()
-    {
-        lines.insert(
-            2,
-            "use trellis_rs::generated::TrellisClientError;".to_string(),
-        );
-        lines.insert(3, String::new());
-    }
-
-    render_client_rpc_surface(loaded, &mut lines);
-    render_client_event_surface(loaded, &mut lines);
-    render_client_feed_surface(loaded, &mut lines);
-    render_client_operation_surface(loaded, &mut lines);
-
-    format!("{}\n", lines.join("\n"))
-}
-
-fn surface_group_and_method(key: &str) -> (String, String) {
-    let parts = key
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .filter(|segment| !segment.is_empty())
         .collect::<Vec<_>>();
-    let group = parts.first().copied().unwrap_or(key);
-    let tail = if parts.len() > 1 {
-        parts[1..].join(".")
-    } else {
-        key.to_string()
-    };
-    (
-        rust_ident(&key_to_snake(group)),
-        rust_ident(&key_to_snake(&tail)),
-    )
-}
-
-fn grouped_keys<'a, T>(
-    items: &'a std::collections::BTreeMap<String, T>,
-) -> std::collections::BTreeMap<String, Vec<&'a str>> {
-    let mut groups = std::collections::BTreeMap::<String, Vec<&'a str>>::new();
-    for key in items.keys() {
-        groups
-            .entry(surface_group_and_method(key).0)
-            .or_default()
-            .push(key.as_str());
+    if historic.is_empty() {
+        return "".into();
     }
-    groups
+    let mut out = String::from("/// Required direct migrations from accepted historic representations.\npub struct Migrations {\n");
+    for (resource, version, old, current) in &historic {
+        out.push_str(&format!(
+            "{}_v{version}: fn({}) -> {},\n",
+            rust_ident(&key_to_snake(resource)),
+            type_path(old),
+            type_path(current)
+        ));
+    }
+    out.push_str("}\nimpl Migrations {\npub fn new(\n");
+    for (resource, version, old, current) in &historic {
+        out.push_str(&format!(
+            "{}_v{version}: fn({}) -> {},\n",
+            rust_ident(&key_to_snake(resource)),
+            type_path(old),
+            type_path(current)
+        ));
+    }
+    out.push_str(") -> Self { Self {\n");
+    for (resource, version, ..) in &historic {
+        out.push_str(&format!(
+            "{}_v{version},\n",
+            rust_ident(&key_to_snake(resource))
+        ));
+    }
+    out.push_str("} }\n");
+    for (resource, version, old, current) in &historic {
+        let name = rust_ident(&key_to_snake(resource));
+        let old = type_path(old);
+        let current = type_path(current);
+        out.push_str(&format!(
+            "pub fn migrate_{name}_v{version}(&self, value: {old}) -> Result<{current}, trellis_rs::generated::CodecError> {{ let current = (self.{name}_v{version})(value); let wire = trellis_rs::generated::Codec::encode(&current)?; <{current} as trellis_rs::generated::Codec>::decode(wire) }}\n"
+        ));
+    }
+    out.push_str("}\n");
+    out
 }
 
-fn public_rpc_keys(loaded: &ApiInput) -> Vec<&str> {
-    loaded
-        .render_model
-        .rpc
+fn render_availability(graph: &PackageGraph, participant: &ParticipantDefinition) -> String {
+    let mut fields = BTreeMap::<String, (String, String)>::new();
+    for (name, resource) in participant.resources() {
+        let (optional, kind) = match resource {
+            ResourceDefinition::State { optional, .. } => (*optional, "State"),
+            ResourceDefinition::Kv { optional, .. } => (*optional, "Kv"),
+            ResourceDefinition::Store { optional, .. } => (*optional, "Store"),
+            ResourceDefinition::Job { optional, .. } => (*optional, "Job"),
+            ResourceDefinition::Consumer { optional, .. } => (*optional, "Consumer"),
+        };
+        if optional {
+            fields.insert(
+                format!("resource_{}", name.as_str()),
+                (
+                    format!("resource {}", name.as_str()),
+                    format!(
+                        "snapshot.has_resource(trellis_rs::generated::ResourceKind::{kind}, {:?})",
+                        name.as_str()
+                    ),
+                ),
+            );
+        }
+    }
+    for (api, selection) in participant.uses() {
+        if let Some(definition) = graph
+            .packages()
+            .values()
+            .find_map(|package| package.apis().get(api))
+        {
+            for capability in &selection.optional_capabilities {
+                let expression = definition
+                    .capabilities()
+                    .get(capability)
+                    .map(|capability| {
+                        selection
+                            .actions
+                            .iter()
+                            .filter(|selected| capability.allows.contains(selected))
+                            .map(|selected| {
+                                format!(
+                                    "snapshot.allows_action({})",
+                                    optional_action(
+                                        api.as_str(),
+                                        selected.action.kind,
+                                        &selected.action.name,
+                                        selected.direction,
+                                    )
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" && ")
+                    })
+                    .filter(|expression| !expression.is_empty())
+                    .unwrap_or_else(|| "false".into());
+                fields.insert(
+                    capability.as_str().to_owned(),
+                    (format!("capability {}", capability.as_str()), expression),
+                );
+            }
+        }
+    }
+    for (api, kind, name, direction) in optional_actions(graph, participant) {
+        fields.insert(
+            format!("action_{api}_{}_{}", action_module(kind), name),
+            (
+                format!("optional action {api} {name}"),
+                format!(
+                    "snapshot.allows_action({})",
+                    optional_action(&api, kind, &name, direction)
+                ),
+            ),
+        );
+    }
+    let mut out = String::from("/// Immutable snapshot of optional installed surfaces.\n#[derive(Clone, Debug, Default, PartialEq, Eq)]\npub struct Availability {\n");
+    for (field, (docs, _)) in &fields {
+        out.push_str(&format!(
+            "/// Availability of {docs}.\npub {}: bool,\n",
+            rust_ident(&key_to_snake(&field))
+        ));
+    }
+    out.push_str("}\nimpl Availability {\n#[doc(hidden)]\npub fn from_runtime(snapshot: &trellis_rs::generated::AvailabilitySnapshot) -> Self { let _ = snapshot; Self {\n");
+    for (field, (_, expression)) in fields {
+        out.push_str(&format!(
+            "{}: {expression},\n",
+            rust_ident(&key_to_snake(&field))
+        ));
+    }
+    out.push_str("} } }\n");
+    out
+}
+
+fn optional_actions(
+    graph: &PackageGraph,
+    participant: &ParticipantDefinition,
+) -> Vec<(String, ActionKind, String, InteractionDirection)> {
+    let mut actions = BTreeSet::new();
+    for (api, selection) in participant.uses() {
+        let Some(definition) = graph
+            .packages()
+            .values()
+            .find_map(|package| package.apis().get(api))
+        else {
+            continue;
+        };
+        for selected in &selection.actions {
+            if action_capabilities(
+                definition,
+                selected.action.kind,
+                &selected.action.name,
+                selected.direction,
+            )
+            .iter()
+            .any(|capability| {
+                selection
+                    .optional_capabilities
+                    .iter()
+                    .any(|optional| optional.as_str() == *capability)
+            }) {
+                actions.insert((
+                    api.as_str().to_owned(),
+                    selected.action.kind,
+                    selected.action.name.clone(),
+                    selected.direction,
+                ));
+            }
+        }
+    }
+    actions.into_iter().collect()
+}
+
+fn optional_action(
+    api: &str,
+    kind: ActionKind,
+    name: &str,
+    direction: InteractionDirection,
+) -> String {
+    let constructor = match (kind, direction) {
+        (ActionKind::Rpc, InteractionDirection::Call) => "rpc",
+        (ActionKind::Operation, InteractionDirection::Invoke) => "operation",
+        (ActionKind::Event, InteractionDirection::Publish) => "publish_event",
+        (ActionKind::Event, InteractionDirection::Subscribe) => "subscribe_event",
+        (ActionKind::Feed, InteractionDirection::Subscribe) => "feed",
+        _ => unreachable!("validated participant action direction"),
+    };
+    format!("trellis_rs::generated::OptionalAction::{constructor}({api:?}, {name:?})")
+}
+
+fn api_reachable_types(graph: &PackageGraph) -> BTreeSet<TypeRef> {
+    let mut result = BTreeSet::new();
+    for package in graph.packages().values() {
+        for api in package.apis().values() {
+            for reference in api.errors().values().flatten() {
+                collect_type(graph, reference, &mut result);
+            }
+            for action in api.actions().values() {
+                for reference in action_references(action) {
+                    collect_type(graph, reference, &mut result);
+                }
+            }
+        }
+    }
+    result
+}
+
+fn participant_reachable_types(
+    graph: &PackageGraph,
+    participant: &ParticipantDefinition,
+) -> BTreeSet<TypeRef> {
+    let mut result = BTreeSet::new();
+    for resource in participant.resources().values() {
+        match resource {
+            ResourceDefinition::State {
+                schema, accepts, ..
+            }
+            | ResourceDefinition::Kv {
+                schema, accepts, ..
+            } => {
+                collect_type(graph, schema, &mut result);
+                for historic in accepts {
+                    collect_type(graph, &historic.ty, &mut result);
+                }
+            }
+            ResourceDefinition::Job {
+                payload,
+                result: output,
+                update,
+                ..
+            } => {
+                collect_type(graph, payload, &mut result);
+                for reference in output.iter().chain(update) {
+                    collect_type(graph, reference, &mut result);
+                }
+            }
+            ResourceDefinition::Store { .. } | ResourceDefinition::Consumer { .. } => {}
+        }
+    }
+    result
+}
+
+fn collect_type(graph: &PackageGraph, reference: &TypeRef, result: &mut BTreeSet<TypeRef>) {
+    if !result.insert(reference.clone()) {
+        return;
+    }
+    let definition = &graph
+        .package(&reference.package)
+        .expect("resolved type package")
+        .types()[&reference.id];
+    match definition {
+        TypeDefinition::Model(fields) => {
+            for field in fields.values() {
+                collect_expr(graph, &field.ty, result);
+            }
+        }
+        TypeDefinition::Alias(expression) => collect_expr(graph, expression, result),
+        TypeDefinition::Enum(_) => {}
+    }
+}
+
+fn collect_expr(graph: &PackageGraph, expression: &TypeExpression, result: &mut BTreeSet<TypeRef>) {
+    match expression {
+        TypeExpression::Named(reference) => collect_type(graph, reference, result),
+        TypeExpression::List(value, _)
+        | TypeExpression::Map(value)
+        | TypeExpression::Nullable(value)
+        | TypeExpression::CursorPage(value) => collect_expr(graph, value, result),
+        TypeExpression::Primitive(..) | TypeExpression::CursorQuery => {}
+    }
+}
+
+fn recursive_model_edges(graph: &PackageGraph) -> BTreeSet<(TypeRef, TypeRef)> {
+    let mut edges: BTreeMap<TypeRef, BTreeSet<TypeRef>> = BTreeMap::new();
+    for package in graph.packages().values() {
+        for (id, definition) in package.types() {
+            let TypeDefinition::Model(fields) = definition else {
+                continue;
+            };
+            let source = TypeRef {
+                package: package.identity().clone(),
+                id: id.clone(),
+            };
+            for ModelField { ty, .. } in fields.values() {
+                if let Some(target) = direct_named(ty) {
+                    if matches!(
+                        graph
+                            .package(&target.package)
+                            .and_then(|package| package.types().get(&target.id)),
+                        Some(TypeDefinition::Model(_))
+                    ) {
+                        edges
+                            .entry(source.clone())
+                            .or_default()
+                            .insert(target.clone());
+                    }
+                }
+            }
+        }
+    }
+    let mut recursive = BTreeSet::new();
+    for (source, targets) in &edges {
+        for target in targets {
+            if source == target || reachable(&edges, target, source, &mut BTreeSet::new()) {
+                recursive.insert((source.clone(), target.clone()));
+            }
+        }
+    }
+    recursive
+}
+
+fn direct_named(expression: &TypeExpression) -> Option<&TypeRef> {
+    match expression {
+        TypeExpression::Named(reference) => Some(reference),
+        TypeExpression::Nullable(value) => direct_named(value),
+        _ => None,
+    }
+}
+
+fn reachable(
+    edges: &BTreeMap<TypeRef, BTreeSet<TypeRef>>,
+    current: &TypeRef,
+    wanted: &TypeRef,
+    visited: &mut BTreeSet<TypeRef>,
+) -> bool {
+    if current == wanted {
+        return true;
+    }
+    visited.insert(current.clone())
+        && edges.get(current).is_some_and(|next| {
+            next.iter()
+                .any(|value| reachable(edges, value, wanted, visited))
+        })
+}
+
+fn type_contains_special(graph: &PackageGraph, reference: &TypeRef, wanted: Primitive) -> bool {
+    fn expression_contains(
+        graph: &PackageGraph,
+        expression: &TypeExpression,
+        wanted: Primitive,
+        seen: &mut BTreeSet<TypeRef>,
+    ) -> bool {
+        match expression {
+            TypeExpression::Primitive(value, _) => *value == wanted,
+            TypeExpression::Named(reference) => contains(graph, reference, wanted, seen),
+            TypeExpression::List(value, _)
+            | TypeExpression::Map(value)
+            | TypeExpression::Nullable(value)
+            | TypeExpression::CursorPage(value) => expression_contains(graph, value, wanted, seen),
+            TypeExpression::CursorQuery => false,
+        }
+    }
+    fn contains(
+        graph: &PackageGraph,
+        reference: &TypeRef,
+        wanted: Primitive,
+        seen: &mut BTreeSet<TypeRef>,
+    ) -> bool {
+        if !seen.insert(reference.clone()) {
+            return false;
+        }
+        match &graph.package(&reference.package).expect("package").types()[&reference.id] {
+            TypeDefinition::Model(fields) => fields
+                .values()
+                .any(|field| expression_contains(graph, &field.ty, wanted, seen)),
+            TypeDefinition::Alias(expression) => {
+                expression_contains(graph, expression, wanted, seen)
+            }
+            TypeDefinition::Enum(_) => false,
+        }
+    }
+    contains(graph, reference, wanted, &mut BTreeSet::new())
+}
+
+fn action_references(action: &ActionDefinition) -> Vec<&TypeRef> {
+    match action {
+        ActionDefinition::Rpc { input, output, .. }
+        | ActionDefinition::Feed {
+            input,
+            event: output,
+        } => vec![input, output],
+        ActionDefinition::Operation {
+            input,
+            output,
+            update,
+            signals,
+            ..
+        } => std::iter::once(input)
+            .chain(std::iter::once(output))
+            .chain(update)
+            .chain(signals.values())
+            .collect(),
+        ActionDefinition::Event { payload, .. } => vec![payload],
+    }
+}
+
+fn action_kind(action: &ActionDefinition) -> ActionKind {
+    match action {
+        ActionDefinition::Rpc { .. } => ActionKind::Rpc,
+        ActionDefinition::Operation { .. } => ActionKind::Operation,
+        ActionDefinition::Event { .. } => ActionKind::Event,
+        ActionDefinition::Feed { .. } => ActionKind::Feed,
+    }
+}
+
+fn action_capabilities<'a>(
+    api: &'a ApiDefinition,
+    kind: ActionKind,
+    name: &str,
+    direction: InteractionDirection,
+) -> Vec<&'a str> {
+    api.capabilities()
         .iter()
-        .filter_map(|(key, rpc)| (rpc.internal != Some(true)).then_some(key.as_str()))
+        .filter_map(|(id, capability)| {
+            capability
+                .allows
+                .iter()
+                .any(|selection| {
+                    selection.action.kind == kind
+                        && selection.action.name == name
+                        && selection.direction == direction
+                })
+                .then_some(id.as_str())
+        })
         .collect()
 }
 
-fn grouped_public_rpc_keys(loaded: &ApiInput) -> std::collections::BTreeMap<String, Vec<&str>> {
-    let mut groups = std::collections::BTreeMap::<String, Vec<&str>>::new();
-    for key in public_rpc_keys(loaded) {
-        groups
-            .entry(surface_group_and_method(key).0)
-            .or_default()
-            .push(key);
-    }
-    groups
+fn semantic(error: impl std::fmt::Display) -> CodegenRustError {
+    CodegenRustError::Semantic(error.to_string())
 }
 
-fn render_client_rpc_surface(loaded: &ApiInput, lines: &mut Vec<String>) {
-    lines.extend([
-        "/// Typed RPC surface.".to_string(),
-        "pub struct Rpc<'a> { pub(crate) _inner: &'a trellis_rs::generated::Caller }".to_string(),
-        "impl<'a> Rpc<'a> {".to_string(),
-    ]);
-    for group in grouped_public_rpc_keys(loaded).keys() {
-        let group_ty = format!("{}Rpc", key_to_pascal(group));
-        lines.push(format!("    /// Access the `{group}` RPC group."));
-        lines.push(format!(
-            "    pub fn {group}(&self) -> {group_ty}<'a> {{ {group_ty} {{ inner: self._inner }} }}"
-        ));
-    }
-    lines.extend(["}".to_string(), String::new()]);
-
-    for (group, keys) in grouped_public_rpc_keys(loaded) {
-        let group_ty = format!("{}Rpc", key_to_pascal(&group));
-        lines.push(format!("/// Typed RPC methods in the `{group}` group."));
-        lines.push(format!(
-            "pub struct {group_ty}<'a> {{ inner: &'a trellis_rs::generated::Caller }}"
-        ));
-        lines.push(format!("impl<'a> {group_ty}<'a> {{"));
-        for key in keys {
-            let rpc = &loaded.render_model.rpc[key];
-            let base = key_to_pascal(key);
-            let (_, method_name) = surface_group_and_method(key);
-            let output_type =
-                if is_empty_object_schema(resolve_schema_ref(loaded, &rpc.output.schema)) {
-                    "crate::rpc::Empty".to_string()
-                } else {
-                    format!("crate::types::{base}Response")
-                };
-            let errors = rpc
-                .errors
-                .as_ref()
-                .map(|errors| {
-                    errors
-                        .iter()
-                        .map(|error| error.error_type.as_str())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let error_type = if errors.is_empty() {
-                "trellis_rs::generated::NoDeclaredError".to_string()
-            } else {
-                format!("crate::rpc::{base}Error")
-            };
-            lines.push(format!("    /// Call `{key}`."));
-            if is_empty_object_schema(resolve_schema_ref(loaded, &rpc.input.schema)) {
-                lines.push(format!(
-                    "    pub async fn {method_name}(&self) -> Result<{output_type}, trellis_rs::generated::CallError<{error_type}>> {{"
-                ));
-                lines.push(format!(
-                    "        self.inner.call_typed::<crate::rpc::{base}Rpc, {error_type}>(&crate::rpc::Empty {{}}).await"
-                ));
-            } else {
-                lines.push(format!(
-                    "    pub async fn {method_name}(&self, input: &crate::types::{base}Request) -> Result<{output_type}, trellis_rs::generated::CallError<{error_type}>> {{"
-                ));
-                lines.push(format!(
-                    "        self.inner.call_typed::<crate::rpc::{base}Rpc, {error_type}>(input).await"
-                ));
-            }
-            lines.push("    }".to_string());
-            lines.push(String::new());
-        }
-        lines.extend(["}".to_string(), String::new()]);
+fn action_module(kind: ActionKind) -> &'static str {
+    match kind {
+        ActionKind::Rpc => "rpc",
+        ActionKind::Operation => "operations",
+        ActionKind::Event => "events",
+        ActionKind::Feed => "feeds",
     }
 }
 
-fn render_client_event_surface(loaded: &ApiInput, lines: &mut Vec<String>) {
-    lines.extend([
-        "/// Typed event surface.".to_string(),
-        "pub struct Event<'a> { pub(crate) _inner: &'a trellis_rs::generated::Caller }".to_string(),
-        "impl<'a> Event<'a> {".to_string(),
-    ]);
-    for group in grouped_keys(&loaded.render_model.events).keys() {
-        let group_ty = format!("{}Event", key_to_pascal(group));
-        lines.push(format!("    /// Access the `{group}` event group."));
-        lines.push(format!(
-            "    pub fn {group}(&self) -> {group_ty}<'a> {{ {group_ty} {{ inner: self._inner }} }}"
-        ));
-    }
-    lines.extend(["}".to_string(), String::new()]);
-
-    for (group, keys) in grouped_keys(&loaded.render_model.events) {
-        let group_ty = format!("{}Event", key_to_pascal(&group));
-        let mut leaf_lines = Vec::new();
-        lines.push(format!("/// Typed events in the `{group}` group."));
-        lines.push(format!(
-            "pub struct {group_ty}<'a> {{ inner: &'a trellis_rs::generated::Caller }}"
-        ));
-        lines.push(format!("impl<'a> {group_ty}<'a> {{"));
-        for key in keys {
-            let base = key_to_pascal(key);
-            let (_, method_name) = surface_group_and_method(key);
-            let leaf_ty = format!(
-                "{}{}Event",
-                key_to_pascal(&group),
-                key_to_pascal(&method_name)
-            );
-            lines.push(format!("    /// Access `{key}`."));
-            lines.push(format!(
-                "    pub fn {method_name}(&self) -> {leaf_ty}<'a> {{ {leaf_ty} {{ inner: self.inner }} }}"
-            ));
-            lines.push(String::new());
-            leaf_lines.push(format!("/// Typed `{key}` event operations."));
-            leaf_lines.push(format!(
-                "pub struct {leaf_ty}<'a> {{ inner: &'a trellis_rs::generated::Caller }}"
-            ));
-            leaf_lines.push(format!("impl<'a> {leaf_ty}<'a> {{"));
-            leaf_lines.push(format!("    /// Publish `{key}`."));
-            leaf_lines.push(format!(
-                "    pub async fn publish(&self, event: &crate::types::{base}Event) -> Result<(), TrellisClientError> {{"
-            ));
-            leaf_lines.push(format!(
-                "        self.inner.publish::<crate::events::{base}EventDescriptor>(event).await"
-            ));
-            leaf_lines.push("    }".to_string());
-            leaf_lines.push(format!("    /// Listen for live `{key}` events."));
-            leaf_lines.push(format!("    pub async fn listen<F, Fut>(&self, handler: F) -> Result<(), TrellisClientError> where F: Fn(crate::types::{base}Event) -> Fut, Fut: std::future::Future<Output = Result<(), TrellisClientError>> {{"));
-            leaf_lines.push(format!(
-                "        let mut stream = self.inner.subscribe::<crate::events::{base}EventDescriptor>().await?;"
-            ));
-            leaf_lines.push("        while let Some(event) = futures_util::StreamExt::next(&mut stream).await {".to_string());
-            leaf_lines.push("            handler(event?).await?;".to_string());
-            leaf_lines.push("        }".to_string());
-            leaf_lines.push("        Ok(())".to_string());
-            leaf_lines.push("    }".to_string());
-            leaf_lines.extend(["}".to_string(), String::new()]);
-        }
-        lines.extend(["}".to_string(), String::new()]);
-        lines.extend(leaf_lines);
-    }
+fn string_slice<'a>(values: impl IntoIterator<Item = &'a str>) -> String {
+    format!(
+        "[{}]",
+        values
+            .into_iter()
+            .map(|value| format!("{value:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
 }
 
-fn render_client_feed_surface(loaded: &ApiInput, lines: &mut Vec<String>) {
-    lines.extend([
-        "/// Typed feed surface.".to_string(),
-        "pub struct Feed<'a> { pub(crate) _inner: &'a trellis_rs::generated::Caller }".to_string(),
-        "impl<'a> Feed<'a> {".to_string(),
-    ]);
-    for group in grouped_keys(&loaded.render_model.feeds).keys() {
-        let group_ty = format!("{}Feed", key_to_pascal(group));
-        lines.push(format!("    /// Access the `{group}` feed group."));
-        lines.push(format!(
-            "    pub fn {group}(&self) -> {group_ty}<'a> {{ {group_ty} {{ inner: self._inner }} }}"
-        ));
-    }
-    lines.extend(["}".to_string(), String::new()]);
-
-    for (group, keys) in grouped_keys(&loaded.render_model.feeds) {
-        let group_ty = format!("{}Feed", key_to_pascal(&group));
-        lines.push(format!("/// Typed feeds in the `{group}` group."));
-        lines.push(format!(
-            "pub struct {group_ty}<'a> {{ inner: &'a trellis_rs::generated::Caller }}"
-        ));
-        lines.push(format!("impl<'a> {group_ty}<'a> {{"));
-        for key in keys {
-            let feed = &loaded.render_model.feeds[key];
-            let base = key_to_pascal(key);
-            let (_, method_name) = surface_group_and_method(key);
-            lines.push(format!("    /// Subscribe to `{key}`."));
-            if is_empty_object_schema(resolve_schema_ref(loaded, &feed.input.schema)) {
-                lines.push(format!("    pub async fn {method_name}(&self) -> Result<futures_util::stream::BoxStream<'static, Result<crate::types::{base}Event, TrellisClientError>>, TrellisClientError> {{"));
-                lines.push(format!("        self.inner.feed::<crate::feeds::{base}FeedDescriptor>(&crate::rpc::Empty {{}}).await"));
-            } else {
-                lines.push(format!("    pub async fn {method_name}(&self, input: &crate::types::{base}Input) -> Result<futures_util::stream::BoxStream<'static, Result<crate::types::{base}Event, TrellisClientError>>, TrellisClientError> {{"));
-                lines.push(format!(
-                    "        self.inner.feed::<crate::feeds::{base}FeedDescriptor>(input).await"
-                ));
-            }
-            lines.push("    }".to_string());
-            lines.push(String::new());
-        }
-        lines.extend(["}".to_string(), String::new()]);
-    }
+fn module_name(value: &str) -> String {
+    rust_ident(&key_to_snake(value))
 }
 
-fn render_client_operation_surface(loaded: &ApiInput, lines: &mut Vec<String>) {
-    lines.extend([
-        "/// Typed operation surface.".to_string(),
-        "pub struct Operation<'a> { pub(crate) _inner: &'a trellis_rs::generated::Caller }"
-            .to_string(),
-        "impl<'a> Operation<'a> {".to_string(),
-    ]);
-    for group in grouped_keys(&loaded.render_model.operations).keys() {
-        let group_ty = format!("{}Operation", key_to_pascal(group));
-        lines.push(format!("    /// Access the `{group}` operation group."));
-        lines.push(format!(
-            "    pub fn {group}(&self) -> {group_ty}<'a> {{ {group_ty} {{ inner: self._inner }} }}"
-        ));
-    }
-    lines.extend(["}".to_string(), String::new()]);
-
-    for (group, keys) in grouped_keys(&loaded.render_model.operations) {
-        let group_ty = format!("{}Operation", key_to_pascal(&group));
-        let mut leaf_lines = Vec::new();
-        lines.push(format!("/// Typed operations in the `{group}` group."));
-        lines.push(format!(
-            "pub struct {group_ty}<'a> {{ inner: &'a trellis_rs::generated::Caller }}"
-        ));
-        lines.push(format!("impl<'a> {group_ty}<'a> {{"));
-        for key in keys {
-            let base = key_to_pascal(key);
-            let (_, method_name) = surface_group_and_method(key);
-            let leaf_ty = format!(
-                "{}{}Operation",
-                key_to_pascal(&group),
-                key_to_pascal(&method_name)
-            );
-            lines.push(format!("    /// Access `{key}`."));
-            lines.push(format!(
-                "    pub fn {method_name}(&self) -> {leaf_ty}<'a> {{ {leaf_ty} {{ inner: self.inner }} }}"
-            ));
-            lines.push(String::new());
-            leaf_lines.push(format!("/// Typed `{key}` operation controls."));
-            leaf_lines.push(format!(
-                "pub struct {leaf_ty}<'a> {{ inner: &'a trellis_rs::generated::Caller }}"
-            ));
-            leaf_lines.push(format!("impl<'a> {leaf_ty}<'a> {{"));
-            leaf_lines.push(format!("    /// Start `{key}`."));
-            leaf_lines.push(format!("    pub async fn start(&self, input: &crate::types::{base}Input) -> Result<trellis_rs::generated::OperationRef<'a, trellis_rs::generated::Caller, crate::operations::{base}Operation>, TrellisClientError> {{"));
-            leaf_lines.push(format!(
-                "        self.inner.operation::<crate::operations::{base}Operation>().start(input).await"
-            ));
-            leaf_lines.push("    }".to_string());
-            leaf_lines.extend(["}".to_string(), String::new()]);
-        }
-        lines.extend(["}".to_string(), String::new()]);
-        lines.extend(leaf_lines);
-    }
-}
-
-fn write_if_changed(path: &Path, contents: &str) -> Result<(), CodegenRustError> {
-    if fs::read_to_string(path).ok().as_deref() == Some(contents) {
-        return Ok(());
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, contents)?;
-    Ok(())
-}
-
-fn format_generated_rust_files(root: &Path) -> Result<(), CodegenRustError> {
-    fn collect(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
-        for entry in fs::read_dir(dir)? {
-            let path = entry?.path();
-            if path.is_dir() {
-                collect(&path, files)?;
-            } else if path.extension().is_some_and(|extension| extension == "rs") {
-                files.push(path);
-            }
-        }
-        Ok(())
-    }
-
-    let mut files = Vec::new();
-    collect(root, &mut files)?;
-    files.sort();
-    if files.is_empty() {
-        return Ok(());
-    }
-    let output = Command::new("rustfmt")
-        .args(["--edition", "2021"])
-        .args(&files)
-        .output()
-        .map_err(|error| CodegenRustError::RustFormat {
-            path: root.display().to_string(),
-            message: format!("failed to start rustfmt: {error}"),
-        })?;
-
-    if !output.status.success() {
-        return Err(CodegenRustError::RustFormat {
-            path: root.display().to_string(),
-            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        });
-    }
-
-    Ok(())
-}
-
-fn key_to_pascal(value: &str) -> String {
-    value
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .filter(|segment| !segment.is_empty())
-        .map(|segment| {
-            let mut chars = segment.chars();
-            match chars.next() {
-                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
-                None => String::new(),
-            }
+fn type_name(value: &str) -> String {
+    let value = value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_ascii_uppercase().to_string() + chars.as_str()
+            })
         })
-        .collect::<String>()
+        .collect::<String>();
+    if value.starts_with(|character: char| character.is_ascii_digit()) {
+        format!("V{value}")
+    } else {
+        value
+    }
 }
 
-fn rust_variant_ident(value: &str) -> String {
-    let ident = key_to_pascal(value);
-    if ident.is_empty() {
-        "Value".to_string()
-    } else if ident.starts_with(|character: char| character.is_ascii_digit()) {
-        format!("V{ident}")
+fn variant_name(value: &str) -> String {
+    let value = type_name(value);
+    if value.is_empty() {
+        "Value".into()
     } else {
-        ident
+        value
     }
 }
 
 fn key_to_snake(value: &str) -> String {
     let chars = value.chars().collect::<Vec<_>>();
     let mut out = String::new();
-    let mut prev_was_sep = false;
-    for (index, ch) in chars.iter().copied().enumerate() {
-        if ch.is_ascii_alphanumeric() {
-            let prev = index.checked_sub(1).and_then(|i| chars.get(i)).copied();
+    let mut separator = false;
+    for (index, character) in chars.iter().copied().enumerate() {
+        if character.is_ascii_alphanumeric() {
+            let previous = index
+                .checked_sub(1)
+                .and_then(|position| chars.get(position))
+                .copied();
             let next = chars.get(index + 1).copied();
-            let starts_new_word = ch.is_ascii_uppercase()
+            if character.is_ascii_uppercase()
                 && !out.is_empty()
-                && !prev_was_sep
-                && (prev.is_some_and(|value| value.is_ascii_lowercase() || value.is_ascii_digit())
-                    || next.is_some_and(|value| value.is_ascii_lowercase()));
-
-            if starts_new_word {
+                && !separator
+                && (previous
+                    .is_some_and(|value| value.is_ascii_lowercase() || value.is_ascii_digit())
+                    || next.is_some_and(|value| value.is_ascii_lowercase()))
+            {
                 out.push('_');
             }
-            out.push(ch.to_ascii_lowercase());
-            prev_was_sep = false;
-        } else if !out.is_empty() && !prev_was_sep {
+            out.push(character.to_ascii_lowercase());
+            separator = false;
+        } else if !out.is_empty() && !separator {
             out.push('_');
-            prev_was_sep = true;
+            separator = true;
         }
     }
-    while out.ends_with('_') {
-        out.pop();
-    }
-    out
+    out.trim_end_matches('_').into()
 }
 
 fn rust_ident(value: &str) -> String {
@@ -3340,1480 +1503,200 @@ fn rust_ident(value: &str) -> String {
         | "trait" | "true" | "type" | "unsafe" | "use" | "where" | "while" | "async" | "await"
         | "dyn" | "abstract" | "become" | "box" | "do" | "final" | "macro" | "override"
         | "priv" | "typeof" | "unsized" | "virtual" | "yield" | "try" => format!("r#{value}"),
-        _ => value.to_string(),
+        _ => value.into(),
     }
-}
-
-fn rust_schema_type_segment(value: &str) -> String {
-    key_to_pascal(value).replace("Nats", "Transport")
-}
-
-fn rust_schema_field_base(value: &str) -> String {
-    match key_to_snake(value).as_str() {
-        "nats" => "transport_rules".to_string(),
-        "nats_servers" => "servers".to_string(),
-        other => other.replace("nats", "transport"),
-    }
-}
-
-#[derive(Default)]
-struct TypeRenderer {
-    rendered: std::collections::BTreeMap<String, serde_json::Value>,
-    collision: Option<String>,
-    defs: Vec<String>,
-    needs_optional_nullable_helper: bool,
-}
-
-impl TypeRenderer {
-    fn render_named_type(&mut self, type_name: &str, schema: &serde_json::Value) {
-        if let Some(previous) = self.rendered.get(type_name) {
-            if previous != schema {
-                self.collision = Some(type_name.to_owned());
-            }
-            return;
-        }
-        self.rendered.insert(type_name.to_string(), schema.clone());
-
-        if let Some(values) = string_enum_values(schema) {
-            self.defs
-                .push(format!("/// Generated schema type `{type_name}`."));
-            self.defs
-                .push("#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]".to_string());
-            self.defs.push(format!("pub enum {type_name} {{"));
-            for value in values {
-                let variant = rust_variant_ident(value);
-                self.defs.push(format!("    /// The `{value}` wire value."));
-                self.defs
-                    .push(format!("    #[serde(rename = {})]", string_literal(value)));
-                self.defs.push(format!("    {variant},"));
-            }
-            self.defs.push("}".to_string());
-            self.defs.push(format!("impl {type_name} {{"));
-            self.defs
-                .push("    /// Return the contract wire value.".to_string());
-            self.defs
-                .push("    pub const fn as_str(&self) -> &'static str {".to_string());
-            self.defs.push("        match self {".to_string());
-            for value in string_enum_values(schema).expect("rendered string enum") {
-                let variant = rust_variant_ident(value);
-                self.defs.push(format!(
-                    "            Self::{variant} => {},",
-                    string_literal(value)
-                ));
-            }
-            self.defs.push("        }".to_string());
-            self.defs.push("    }".to_string());
-            self.defs.push("}".to_string());
-            self.defs
-                .push(format!("impl AsRef<str> for {type_name} {{"));
-            self.defs
-                .push("    fn as_ref(&self) -> &str { self.as_str() }".to_string());
-            self.defs.push("}".to_string());
-            self.defs
-                .push(format!("impl std::fmt::Display for {type_name} {{"));
-            self.defs.push(
-                "    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { formatter.write_str(self.as_str()) }"
-                    .to_string(),
-            );
-            self.defs.push("}".to_string());
-            self.defs
-                .push(format!("impl PartialEq<&str> for {type_name} {{"));
-            self.defs.push(
-                "    fn eq(&self, other: &&str) -> bool { self.as_str() == *other }".to_string(),
-            );
-            self.defs.push("}".to_string());
-            self.defs
-                .push(format!("impl PartialEq<{type_name}> for &str {{"));
-            self.defs.push(format!(
-                "    fn eq(&self, other: &{type_name}) -> bool {{ *self == other.as_str() }}"
-            ));
-            self.defs.push("}".to_string());
-            self.defs.push(String::new());
-            return;
-        }
-
-        if let Some((tag, variants)) = tagged_object_union(schema) {
-            let rendered = variants
-                .into_iter()
-                .map(|(tag_value, variant_schema)| {
-                    let variant = rust_variant_ident(&tag_value);
-                    let fields = self
-                        .render_object_fields(
-                            &format!("{type_name}{variant}"),
-                            variant_schema,
-                            Some(&tag),
-                        )
-                        .into_iter()
-                        .map(|line| line.replacen("    pub ", "    ", 1))
-                        .collect::<Vec<_>>();
-                    (tag_value, variant, fields)
-                })
-                .collect::<Vec<_>>();
-            self.defs
-                .push(format!("/// Generated schema type `{type_name}`."));
-            self.defs
-                .push("#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]".to_string());
-            self.defs
-                .push(format!("#[serde(tag = {})]", string_literal(&tag)));
-            self.defs.push(format!("pub enum {type_name} {{"));
-            for (tag_value, variant, fields) in rendered {
-                self.defs
-                    .push(format!("    /// The `{tag_value}` variant."));
-                self.defs.push(format!(
-                    "    #[serde(rename = {})]",
-                    string_literal(&tag_value)
-                ));
-                self.defs.push(format!("    {variant} {{"));
-                self.defs
-                    .extend(fields.into_iter().map(|line| format!("    {line}")));
-                self.defs.push("    },".to_string());
-            }
-            self.defs.push("}".to_string());
-            self.defs.push(String::new());
-            return;
-        }
-
-        if let Some(variants) = object_union_variants(schema) {
-            let mut used_names = BTreeSet::new();
-            let mut rendered = variants
-                .iter()
-                .enumerate()
-                .map(|(index, variant_schema)| {
-                    let mut variant = object_variant_name(variant_schema)
-                        .unwrap_or_else(|| format!("Variant{}", index + 1));
-                    if !used_names.insert(variant.clone()) {
-                        variant.push_str(&(index + 1).to_string());
-                        used_names.insert(variant.clone());
-                    }
-                    let fields = self
-                        .render_object_fields(
-                            &format!("{type_name}{variant}"),
-                            variant_schema,
-                            None,
-                        )
-                        .into_iter()
-                        .map(|line| line.replacen("    pub ", "    ", 1))
-                        .collect::<Vec<_>>();
-                    let required = variant_schema
-                        .get("required")
-                        .and_then(serde_json::Value::as_array)
-                        .map_or(0, Vec::len);
-                    let properties = variant_schema
-                        .get("properties")
-                        .and_then(serde_json::Value::as_object)
-                        .map_or(0, serde_json::Map::len);
-                    (required, properties, index, variant, fields)
-                })
-                .collect::<Vec<_>>();
-            rendered.sort_by(|left, right| {
-                right
-                    .0
-                    .cmp(&left.0)
-                    .then_with(|| right.1.cmp(&left.1))
-                    .then_with(|| left.2.cmp(&right.2))
-            });
-            self.defs
-                .push(format!("/// Generated schema type `{type_name}`."));
-            self.defs
-                .push("#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]".to_string());
-            self.defs.push("#[serde(untagged)]".to_string());
-            self.defs.push(format!("pub enum {type_name} {{"));
-            for (_, _, _, variant, fields) in rendered {
-                self.defs.push(format!("    /// The `{variant}` variant."));
-                self.defs.push(format!("    {variant} {{"));
-                self.defs
-                    .extend(fields.into_iter().map(|line| format!("    {line}")));
-                self.defs.push("    },".to_string());
-            }
-            self.defs.push("}".to_string());
-            self.defs.push(String::new());
-            return;
-        }
-
-        if object_fields(schema).is_some() {
-            let field_lines = self.render_object_fields(type_name, schema, None);
-            self.defs
-                .push(format!("/// Generated schema type `{type_name}`."));
-            self.defs
-                .push("#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]".to_string());
-            self.defs.push(format!("pub struct {type_name} {{"));
-            self.defs.extend(field_lines);
-            self.defs.push("}".to_string());
-            self.defs.push(String::new());
-            return;
-        }
-
-        let expr = self.scalar_or_container_expr(type_name, schema);
-        self.defs
-            .push(format!("/// Generated schema type `{type_name}`."));
-        self.defs
-            .push("#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]".to_string());
-        self.defs.push(format!(
-            "pub struct {type_name}(#[doc = \"The wrapped wire value.\"] pub {expr});"
-        ));
-        self.defs.push(String::new());
-    }
-
-    fn render_object_fields(
-        &mut self,
-        type_name: &str,
-        schema: &serde_json::Value,
-        skip: Option<&str>,
-    ) -> Vec<String> {
-        let mut field_lines = Vec::new();
-        for (field_name, field_schema) in object_fields(schema).into_iter().flatten() {
-            if skip == Some(field_name.as_str()) {
-                continue;
-            }
-            let rust_field_base = rust_schema_field_base(field_name);
-            let rust_field = rust_ident(&rust_field_base);
-            field_lines.push(format!("    /// The `{field_name}` wire field."));
-            if rust_field_base != *field_name {
-                field_lines.push(format!(
-                    "    #[serde(rename = {})]",
-                    string_literal(field_name)
-                ));
-            }
-            let required = schema_required(schema, field_name);
-            let field_type_name = format!("{type_name}{}", rust_schema_type_segment(field_name));
-            let ty = self.type_expr(&field_type_name, field_schema);
-            let nullable = schema_is_nullable(field_schema);
-            if required && nullable {
-                field_lines.push(format!("    pub {rust_field}: Option<{ty}>,"));
-            } else if required {
-                field_lines.push(format!("    pub {rust_field}: {ty},"));
-            } else if nullable {
-                self.needs_optional_nullable_helper = true;
-                field_lines.push(
-                    "    #[serde(default, deserialize_with = \"deserialize_optional_nullable\", skip_serializing_if = \"Option::is_none\")]"
-                        .to_string(),
-                );
-                field_lines.push(format!("    pub {rust_field}: Option<Option<{ty}>>,"));
-            } else {
-                field_lines
-                    .push("    #[serde(skip_serializing_if = \"Option::is_none\")]".to_string());
-                field_lines.push(format!("    pub {rust_field}: Option<{ty}>,"));
-            }
-        }
-        field_lines
-    }
-
-    fn type_expr(&mut self, type_name: &str, schema: &serde_json::Value) -> String {
-        if object_fields(schema).is_some()
-            || string_enum_values(schema).is_some()
-            || tagged_object_union(schema).is_some()
-            || object_union_variants(schema).is_some()
-        {
-            self.render_named_type(type_name, schema);
-            return type_name.to_string();
-        }
-
-        self.scalar_or_container_expr(type_name, schema)
-    }
-
-    fn scalar_or_container_expr(&mut self, type_name: &str, schema: &serde_json::Value) -> String {
-        if let Some(non_null) = single_non_null_variant(schema) {
-            return self.scalar_or_container_expr(type_name, non_null);
-        }
-        if let Some(ty) = union_base_type(schema) {
-            return ty.to_string();
-        }
-
-        if let Some(types) = schema.get("type").and_then(serde_json::Value::as_array) {
-            let non_null = types
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .filter(|kind| *kind != "null")
-                .collect::<Vec<_>>();
-            if non_null.len() == 1 {
-                let mut cloned = schema.clone();
-                cloned["type"] = serde_json::Value::String(non_null[0].to_string());
-                return self.scalar_or_container_expr(type_name, &cloned);
-            }
-            return "serde_json::Value".to_string();
-        }
-
-        if schema.get("enum").is_some() || schema.get("const").is_some() {
-            return literal_base_type(schema)
-                .unwrap_or("serde_json::Value")
-                .to_string();
-        }
-
-        match schema.get("type").and_then(serde_json::Value::as_str) {
-            Some("string") => "String".to_string(),
-            Some("boolean") => "bool".to_string(),
-            Some("integer") => "i64".to_string(),
-            Some("number") => "f64".to_string(),
-            Some("array") => {
-                let item_schema = schema.get("items").unwrap_or(&serde_json::Value::Null);
-                let item_name = format!("{type_name}Item");
-                let item_type = self.type_expr(&item_name, item_schema);
-                format!("Vec<{item_type}>")
-            }
-            Some("object") => {
-                if let Some(value_schema) = object_map_value_schema(schema) {
-                    let value_name = format!("{type_name}Value");
-                    let value_type = self.type_expr(&value_name, value_schema);
-                    return format!("BTreeMap<String, {value_type}>");
-                }
-                "BTreeMap<String, serde_json::Value>".to_string()
-            }
-            _ => "serde_json::Value".to_string(),
-        }
-    }
-
-    fn finish(mut self) -> Result<Vec<String>, CodegenRustError> {
-        if let Some(identifier) = self.collision {
-            return Err(CodegenRustError::IdentifierCollision {
-                scope: "schema types".into(),
-                identifier,
-                originals: vec!["distinct schemas normalize to the same type".into()],
-            });
-        }
-        if self.needs_optional_nullable_helper {
-            self.defs.splice(
-                0..0,
-                [
-                    "fn deserialize_optional_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>".to_string(),
-                    "where".to_string(),
-                    "    D: serde::Deserializer<'de>,".to_string(),
-                    "    T: serde::Deserialize<'de>,".to_string(),
-                    "{".to_string(),
-                    "    Option::<T>::deserialize(deserializer).map(Some)".to_string(),
-                    "}".to_string(),
-                    String::new(),
-                ],
-            );
-        }
-        Ok(self.defs)
-    }
-}
-
-fn single_non_null_variant(schema: &serde_json::Value) -> Option<&serde_json::Value> {
-    let variants = schema
-        .get("anyOf")
-        .or_else(|| schema.get("oneOf"))?
-        .as_array()?;
-    let non_null = variants
-        .iter()
-        .filter(|variant| !is_null_schema(variant))
-        .collect::<Vec<_>>();
-    (non_null.len() == 1 && non_null.len() != variants.len()).then_some(non_null[0])
-}
-
-fn is_null_schema(schema: &serde_json::Value) -> bool {
-    schema.get("type").and_then(serde_json::Value::as_str) == Some("null")
-}
-
-fn schema_is_nullable(schema: &serde_json::Value) -> bool {
-    schema
-        .get("type")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|types| types.iter().any(|kind| kind.as_str() == Some("null")))
-        || schema
-            .get("anyOf")
-            .or_else(|| schema.get("oneOf"))
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|variants| variants.iter().any(is_null_schema))
-}
-
-fn string_enum_values(schema: &serde_json::Value) -> Option<Vec<&str>> {
-    if let Some(value) = schema.get("const").and_then(serde_json::Value::as_str) {
-        return Some(vec![value]);
-    }
-    if let Some(values) = schema.get("enum").and_then(serde_json::Value::as_array) {
-        let values = values
-            .iter()
-            .map(serde_json::Value::as_str)
-            .collect::<Option<Vec<_>>>()?;
-        return (!values.is_empty()).then_some(values);
-    }
-    let variants = schema
-        .get("anyOf")
-        .or_else(|| schema.get("oneOf"))?
-        .as_array()?;
-    let mut values = Vec::new();
-    for variant in variants {
-        if is_null_schema(variant) {
-            continue;
-        }
-        for value in string_enum_values(variant)? {
-            if !values.contains(&value) {
-                values.push(value);
-            }
-        }
-    }
-    (!values.is_empty()).then_some(values)
-}
-
-fn object_fields(
-    schema: &serde_json::Value,
-) -> Option<&serde_json::Map<String, serde_json::Value>> {
-    let is_object = schema.get("type").and_then(serde_json::Value::as_str) == Some("object");
-    if !is_object {
-        return None;
-    }
-    schema
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-        .filter(|properties| !properties.is_empty())
-}
-
-fn schema_required(schema: &serde_json::Value, field_name: &str) -> bool {
-    schema
-        .get("required")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|required| {
-            required
-                .iter()
-                .any(|value| value.as_str() == Some(field_name))
-        })
-}
-
-fn object_map_value_schema(schema: &serde_json::Value) -> Option<&serde_json::Value> {
-    if let Some(additional) = schema.get("additionalProperties") {
-        if additional.as_bool() == Some(false) {
-            return schema
-                .get("patternProperties")
-                .and_then(serde_json::Value::as_object)
-                .and_then(single_map_schema_value);
-        }
-        return Some(additional);
-    }
-
-    schema
-        .get("patternProperties")
-        .and_then(serde_json::Value::as_object)
-        .and_then(single_map_schema_value)
-}
-
-fn single_map_schema_value(
-    schemas: &serde_json::Map<String, serde_json::Value>,
-) -> Option<&serde_json::Value> {
-    if schemas.len() == 1 {
-        schemas.values().next()
-    } else {
-        None
-    }
-}
-
-fn literal_base_type(schema: &serde_json::Value) -> Option<&'static str> {
-    if let Some(value) = schema.get("const") {
-        return match value {
-            serde_json::Value::String(_) => Some("String"),
-            serde_json::Value::Bool(_) => Some("bool"),
-            serde_json::Value::Number(number) if number.is_i64() => Some("i64"),
-            serde_json::Value::Number(_) => Some("f64"),
-            _ => Some("Value"),
-        };
-    }
-
-    let values = schema.get("enum")?.as_array()?;
-    let first = values.first()?;
-    match first {
-        serde_json::Value::String(_) => Some("String"),
-        serde_json::Value::Bool(_) => Some("bool"),
-        serde_json::Value::Number(number) if number.is_i64() => Some("i64"),
-        serde_json::Value::Number(_) => Some("f64"),
-        _ => Some("Value"),
-    }
-}
-
-fn union_base_type(schema: &serde_json::Value) -> Option<&'static str> {
-    let variants = schema
-        .get("anyOf")
-        .or_else(|| schema.get("oneOf"))?
-        .as_array()?;
-    let mut ty = None;
-
-    for variant in variants {
-        if variant.get("type").and_then(serde_json::Value::as_str) == Some("null") {
-            continue;
-        }
-
-        let variant_ty = literal_base_type(variant)?;
-        if ty.is_some_and(|ty| ty != variant_ty) {
-            return Some("Value");
-        }
-        ty = Some(variant_ty);
-    }
-
-    ty
-}
-
-fn tagged_object_union(
-    schema: &serde_json::Value,
-) -> Option<(String, Vec<(String, &serde_json::Value)>)> {
-    let variants = schema
-        .get("anyOf")
-        .or_else(|| schema.get("oneOf"))?
-        .as_array()?;
-    let first = variants.first()?;
-    let first_properties = object_fields(first)?;
-
-    for (candidate, candidate_schema) in first_properties {
-        let Some(first_value) = candidate_schema
-            .get("const")
-            .and_then(serde_json::Value::as_str)
-        else {
-            continue;
-        };
-        let mut tagged = vec![(first_value.to_string(), first)];
-        for variant in variants.iter().skip(1) {
-            let value = object_fields(variant)?
-                .get(candidate)?
-                .get("const")?
-                .as_str()?;
-            if tagged.iter().any(|(existing, _)| existing == value) {
-                tagged.clear();
-                break;
-            }
-            tagged.push((value.to_string(), variant));
-        }
-        if tagged.len() == variants.len() {
-            return Some((candidate.clone(), tagged));
-        }
-    }
-    None
-}
-
-fn object_union_variants(schema: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
-    let variants = schema
-        .get("anyOf")
-        .or_else(|| schema.get("oneOf"))?
-        .as_array()?;
-    (!variants.is_empty()
-        && variants
-            .iter()
-            .all(|variant| object_fields(variant).is_some()))
-    .then_some(variants)
-}
-
-fn object_variant_name(schema: &serde_json::Value) -> Option<String> {
-    let parts = object_fields(schema)?
-        .values()
-        .filter_map(|field| field.get("const").and_then(serde_json::Value::as_str))
-        .map(rust_variant_ident)
-        .collect::<String>();
-    (!parts.is_empty()).then_some(parts)
-}
-
-fn join_string_literals(values: &[String]) -> String {
-    values
-        .iter()
-        .map(|value| string_literal(value))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn capability_names(api: &Value, surface: &str, name: &str, action: &str) -> Vec<String> {
-    let mut names = api
-        .get("capabilities")
-        .and_then(Value::as_object)
-        .into_iter()
-        .flat_map(|capabilities| capabilities.iter())
-        .filter(|(_, capability)| {
-            capability
-                .get("allows")
-                .and_then(Value::as_array)
-                .is_some_and(|allows| {
-                    allows.iter().any(|permission| {
-                        permission.get("action").and_then(Value::as_str) == Some(action)
-                            && permission.pointer("/target/kind").and_then(Value::as_str)
-                                == Some("apiSurface")
-                            && permission
-                                .pointer("/target/surface")
-                                .and_then(Value::as_str)
-                                == Some(surface)
-                            && permission.pointer("/target/name").and_then(Value::as_str)
-                                == Some(name)
-                    })
-                })
-        })
-        .map(|(name, _)| name.clone())
-        .collect::<Vec<_>>();
-    names.sort();
-    names
-}
-
-fn string_literal(value: &str) -> String {
-    serde_json::to_string(value).expect("string literal")
-}
-
-fn manifest_display_name(loaded: &ApiInput) -> String {
-    loaded.render_model.display_name.clone()
-}
-
-fn sdk_stem_pascal(loaded: &ApiInput) -> String {
-    sdk_stem_from_contract_id_pascal(&loaded.render_model.id)
-}
-
-fn sdk_stem_from_contract_id_pascal(contract_id: &str) -> String {
-    default_sdk_stem(contract_id)
-        .split('.')
-        .flat_map(|segment| segment.split('-'))
-        .map(key_to_pascal)
-        .collect::<String>()
-}
-
-fn crate_ident(crate_name: &str) -> String {
-    crate_name.replace('-', "_")
-}
-
-fn resolve_schema_ref<'a>(loaded: &'a ApiInput, schema_name: &str) -> &'a serde_json::Value {
-    loaded
-        .render_model
-        .schemas
-        .get(schema_name)
-        .unwrap_or_else(|| panic!("missing schema '{schema_name}' in manifest"))
-}
-
-fn schema_value_matches_types(loaded: &ApiInput, schema_name: &str) -> serde_json::Value {
-    let mut schema = resolve_schema_ref(loaded, schema_name).clone();
-    inline_local_schema_refs(&mut schema, &loaded.render_model.schemas);
-    schema
-}
-
-fn inline_local_schema_refs(
-    value: &mut serde_json::Value,
-    schemas: &std::collections::BTreeMap<String, serde_json::Value>,
-) {
-    match value {
-        serde_json::Value::Object(object) => {
-            if let Some(name) = object
-                .get("$ref")
-                .and_then(serde_json::Value::as_str)
-                .and_then(|reference| reference.strip_prefix("#/schemas/"))
-            {
-                if let Some(schema) = schemas.get(name) {
-                    *value = schema.clone();
-                    inline_local_schema_refs(value, schemas);
-                }
-                return;
-            }
-            for nested in object.values_mut() {
-                inline_local_schema_refs(nested, schemas);
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for nested in values {
-                inline_local_schema_refs(nested, schemas);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn declared_error_payload_type(loaded: &ApiInput, error_type: &str) -> String {
-    if error_type == "AuthError" {
-        return "trellis_rs::generated::AuthErrorPayload".to_string();
-    }
-    loaded
-        .render_model
-        .errors
-        .values()
-        .find(|error| error.error_type == error_type)
-        .and_then(|error| error.schema.as_ref())
-        .map(|schema| format!("crate::types::{}", key_to_pascal(&schema.schema)))
-        .unwrap_or_else(|| "trellis_rs::generated::DeclaredErrorPayload".to_string())
-}
-
-fn rpc_call_error_type(loaded: &ApiInput, key: &str, module: &str) -> String {
-    if loaded.render_model.rpc[key]
-        .errors
-        .as_ref()
-        .is_some_and(|errors| !errors.is_empty())
-    {
-        format!("{module}::{}Error", key_to_pascal(key))
-    } else {
-        "trellis_rs::generated::NoDeclaredError".to_string()
-    }
-}
-
-fn is_empty_object_schema(schema: &serde_json::Value) -> bool {
-    let Some(kind) = schema.get("type").and_then(serde_json::Value::as_str) else {
-        return false;
-    };
-    if kind != "object" {
-        return false;
-    }
-
-    let properties_empty = schema
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-        .is_none_or(|properties| properties.is_empty());
-    let required_empty = schema
-        .get("required")
-        .and_then(serde_json::Value::as_array)
-        .is_none_or(|required| required.is_empty());
-
-    properties_empty && required_empty
-}
-
-fn render_lib_rs(loaded: &ApiInput) -> String {
-    let client_name = format!("{}Client", sdk_stem_pascal(loaded));
-    let operations_reexport = if loaded.render_model.operations.is_empty() {
-        String::new()
-    } else {
-        "pub use operations::*;\n".to_string()
-    };
-    let events_reexport = if loaded.render_model.events.is_empty() {
-        String::new()
-    } else {
-        "pub use events::*;\n".to_string()
-    };
-    let feeds_reexport = if loaded.render_model.feeds.is_empty() {
-        String::new()
-    } else {
-        "pub use feeds::*;\n".to_string()
-    };
-    let feeds_module = if loaded.render_model.feeds.is_empty() {
-        String::new()
-    } else {
-        "/// Feed descriptors.\npub mod feeds;\n".to_string()
-    };
-    format!(
-        "//! Generated Rust SDK crate for one Trellis API.\n\nconst _: () = trellis_rs::generated::assert_abi(1);\n\n/// Typed outbound adapters.\npub mod client;\n/// Embedded API identity and artifact.\npub mod api;\n/// Event descriptors.\npub mod events;\n{feeds_module}/// Operation descriptors.\npub mod operations;\n/// RPC descriptors and declared errors.\npub mod rpc;\n/// JSON Schema constants.\npub mod schemas;\n/// Generated wire types.\npub mod types;\n\npub use client::{client_name};\npub use api::{{api_artifact, API_DIGEST, API_ID, API_JSON, API_NAME}};\n{events_reexport}{feeds_reexport}{operations_reexport}pub use rpc::*;\npub use types::*;\n"
-    )
-}
-
-fn key_to_schema_constant_base(key: &str) -> String {
-    key_to_snake(key).to_uppercase()
-}
-
-fn render_schemas_rs(loaded: &ApiInput) -> String {
-    use serde_json::Value;
-
-    let mut lines = vec![
-        format!(
-            "//! JSON Schema constants for `{}`.",
-            loaded.render_model.id
-        ),
-        String::new(),
-    ];
-
-    for (key, rpc) in &loaded.render_model.rpc {
-        if rpc.internal == Some(true) {
-            continue;
-        }
-        let base = key_to_schema_constant_base(key);
-        let input_schema = schema_value_matches_types(loaded, &rpc.input.schema);
-        let input_json = serde_json::to_string(&input_schema).expect("valid json");
-        lines.push(format!(
-            "pub const {}_INPUT_SCHEMA_JSON: &str = r#\"{}\"#;",
-            base, input_json
-        ));
-        let output_schema = schema_value_matches_types(loaded, &rpc.output.schema);
-        let output_json = serde_json::to_string(&output_schema).expect("valid json");
-        lines.push(format!(
-            "pub const {}_OUTPUT_SCHEMA_JSON: &str = r#\"{}\"#;",
-            base, output_json
-        ));
-        lines.push(String::new());
-    }
-
-    for (key, operation) in &loaded.render_model.operations {
-        let base = key_to_schema_constant_base(key);
-        let input_schema = resolve_schema_ref(loaded, &operation.input.schema);
-        let input_json = serde_json::to_string(input_schema).expect("valid json");
-        lines.push(format!(
-            "pub const {}_INPUT_SCHEMA_JSON: &str = r#\"{}\"#;",
-            base, input_json
-        ));
-        if let Some(update) = &operation.update {
-            let update_schema = resolve_schema_ref(loaded, &update.schema);
-            let update_json = serde_json::to_string(update_schema).expect("valid json");
-            lines.push(format!(
-                "pub const {}_UPDATE_SCHEMA_JSON: &str = r#\"{}\"#;",
-                base, update_json
-            ));
-        }
-        match &operation.progress {
-            Some(progress) => {
-                let progress_schema = resolve_schema_ref(loaded, &progress.schema);
-                let progress_json = serde_json::to_string(progress_schema).expect("valid json");
-                lines.push(format!(
-                    "pub const {}_PROGRESS_SCHEMA_JSON: &str = r#\"{}\"#;",
-                    base, progress_json
-                ));
-            }
-            None => {
-                lines.push(format!(
-                    "pub const {}_PROGRESS_SCHEMA_JSON: Option<&str> = None;",
-                    base
-                ));
-            }
-        }
-        match &operation.output {
-            Some(output) => {
-                let output_schema = resolve_schema_ref(loaded, &output.schema);
-                let output_json = serde_json::to_string(output_schema).expect("valid json");
-                lines.push(format!(
-                    "pub const {}_OUTPUT_SCHEMA_JSON: &str = r#\"{}\"#;",
-                    base, output_json
-                ));
-            }
-            None => {
-                lines.push(format!(
-                    "pub const {}_OUTPUT_SCHEMA_JSON: &str = r#\"{{}}\"#;",
-                    base
-                ));
-            }
-        }
-        if !operation.signals.is_empty() {
-            let mut signal_map = serde_json::Map::new();
-            for (signal_name, signal) in &operation.signals {
-                let signal_schema = resolve_schema_ref(loaded, &signal.input.schema);
-                signal_map.insert(signal_name.clone(), signal_schema.clone());
-            }
-            let signal_json =
-                serde_json::to_string(&Value::Object(signal_map)).expect("valid json");
-            lines.push(format!(
-                "pub const {}_SIGNAL_INPUT_SCHEMAS_JSON: &str = r#\"{}\"#;",
-                base, signal_json
-            ));
-        } else {
-            lines.push(format!(
-                "pub const {}_SIGNAL_INPUT_SCHEMAS_JSON: &str = r#\"{{}}\"#;",
-                base
-            ));
-        }
-        lines.push(String::new());
-    }
-
-    for (key, event) in &loaded.render_model.events {
-        let base = key_to_schema_constant_base(key);
-        let event_json = serde_json::to_string(resolve_schema_ref(loaded, &event.event.schema))
-            .expect("valid json");
-        lines.push(format!(
-            "pub const {}_EVENT_SCHEMA_JSON: &str = r#\"{}\"#;",
-            base, event_json
-        ));
-        lines.push(String::new());
-    }
-
-    for (key, feed) in &loaded.render_model.feeds {
-        let base = key_to_schema_constant_base(key);
-        let input_schema = resolve_schema_ref(loaded, &feed.input.schema);
-        let input_json = serde_json::to_string(input_schema).expect("valid json");
-        lines.push(format!(
-            "pub const {}_INPUT_SCHEMA_JSON: &str = r#\"{}\"#;",
-            base, input_json
-        ));
-        let event_schema = resolve_schema_ref(loaded, &feed.event.schema);
-        let event_json = serde_json::to_string(event_schema).expect("valid json");
-        lines.push(format!(
-            "pub const {}_EVENT_SCHEMA_JSON: &str = r#\"{}\"#;",
-            base, event_json
-        ));
-        lines.push(String::new());
-    }
-
-    for schema_name in &loaded.render_model.exports.schemas {
-        let base = key_to_schema_constant_base(schema_name);
-        let schema = resolve_schema_ref(loaded, schema_name);
-        let schema_json = serde_json::to_string(schema).expect("valid json");
-        lines.push(format!(
-            "pub const {}_SCHEMA_JSON: &str = r#\"{}\"#;",
-            base, schema_json
-        ));
-        lines.push(String::new());
-    }
-
-    // Ensure at least one item exists so empty-contract modules compile.
-    if lines.len() <= 2 {
-        lines.push("pub const _SCHEMA_MODULE_LOADED: bool = true;".to_string());
-    }
-
-    let mut documented = Vec::with_capacity(lines.len() * 2);
-    for line in lines {
-        if let Some(name) = line
-            .strip_prefix("pub const ")
-            .and_then(|rest| rest.split_once(':').map(|(name, _)| name))
-        {
-            documented.push(format!("/// Generated JSON Schema constant `{name}`."));
-        }
-        documented.push(line);
-    }
-    format!("{}\n", documented.join("\n"))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeMap, path::PathBuf, process::Command};
+
+    use semver::Version;
+    use trellis_idl::{
+        compile_project,
+        project::{GenerateConfig, PackageManifest, PackageMetadata},
+        SourceUnit,
+    };
+
     use super::*;
-    use serde_json::json;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use trellis_protocol::{parse_api, parse_participant};
 
-    fn unique_temp_dir(label: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("trellis-codegen-rust-{label}-{nanos}"))
-    }
-
-    #[test]
-    fn generated_runtime_consumer_compiles() {
-        cargo_check(
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../integration/fixtures/runtime/Cargo.toml"),
-        );
-    }
-
-    fn self_participant_value(api: &ApiArtifact, kind: &str) -> serde_json::Value {
-        let value = api.normalized_value().unwrap();
-        let mut participant = json!({
-            "format": "trellis.participant.v1",
-            "id": api.id(),
-            "displayName": value["displayName"],
-            "description": value["description"],
-            "kind": kind,
-            "implements": {
-                "self": {"api": api.id(), "apiDigest": api.digest().unwrap()}
-            }
-        });
-        for field in ["schemas", "state"] {
-            if let Some(value) = value.get(field) {
-                participant[field] = value.clone();
-            }
-        }
-        participant
-    }
-
-    fn add_required_use(
-        participant: &mut serde_json::Value,
-        alias: &str,
-        api: &ApiArtifact,
-        selections: serde_json::Value,
-    ) {
-        let mut used = selections.as_object().cloned().unwrap();
-        used.insert("api".to_string(), json!(api.id()));
-        used.insert("apiDigest".to_string(), json!(api.digest().unwrap()));
-        participant["uses"]["required"][alias] = serde_json::Value::Object(used);
-    }
-
-    fn cargo_check(manifest_path: &Path) {
-        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-        let output = std::process::Command::new(cargo)
-            .arg("check")
-            .arg("--manifest-path")
-            .arg(manifest_path)
-            .arg("--config")
-            .arg(format!(
-                "patch.crates-io.trellis-rs.path={:?}",
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../trellis")
-                    .canonicalize()
-                    .unwrap()
-            ))
-            .arg("--quiet")
-            .env(
-                "CARGO_TARGET_DIR",
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/codegen-consumers"),
-            )
-            .output()
-            .expect("run cargo check");
-        if !output.status.success() {
-            panic!(
-                "cargo check failed\nstdout:\n{}\nstderr:\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr),
-            );
-        }
-    }
-
-    #[test]
-    fn shared_type_collisions_are_rejected_before_writes() {
-        let root = unique_temp_dir("shared-type-collision");
-        for (schemas, exports, feeds) in [
-            (
-                json!({"Input": {"type": "string"}}),
-                json!([]),
-                json!({"Work": {"version": "v1", "input": {"schema": "Input"}, "event": {"schema": "Input"}}}),
-            ),
-            (
-                json!({"Input": {"type": "string"}, "WorkInput": {"type": "integer"}}),
-                json!(["WorkInput"]),
-                json!({}),
-            ),
-        ] {
-            let api = parse_api(&json!({
-                "format": "trellis.api.v1", "id": "collision@v1", "version": "1.0.0",
-                "displayName": "Collision", "description": "Shared type collision.",
-                "schemas": schemas, "exports": {"schemas": exports}, "feeds": feeds,
-                "operations": {"Work": {"version": "v1", "input": {"schema": "Input"}}}
-            }))
-            .unwrap();
-            let error =
-                generate_rust_package(&[(api.id(), &api)].into(), &[], &root, "collision-trellis")
-                    .unwrap_err();
-            assert!(matches!(
-                error,
-                CodegenRustError::IdentifierCollision { .. }
-            ));
-            assert!(!root.join("Cargo.toml").exists());
-            assert!(!root.join("src/lib.rs").exists());
-        }
-        let api = parse_api(&json!({
-            "format": "trellis.api.v1", "id": "collision@v1", "version": "1.0.0",
-            "displayName": "Collision", "description": "Job descriptor collision."
-        }))
-        .unwrap();
-        let mut participant = self_participant_value(&api, "service");
-        participant["schemas"] = json!({"CleanupJob": {"type": "string"}});
-        participant["jobQueues"] = json!({"Cleanup": {"payload": {"schema": "CleanupJob"}}});
-        let error = generate_rust_package(
-            &[(api.id(), &api)].into(),
-            &[parse_participant(&participant).unwrap()],
-            &root,
-            "collision-trellis",
-        )
-        .unwrap_err();
-        assert!(
-            matches!(error, CodegenRustError::IdentifierCollision { identifier, .. } if identifier == "CleanupJob")
-        );
-        assert!(!root.join("Cargo.toml").exists());
-        assert!(!root.join("src/lib.rs").exists());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn cargo_toml_uses_registry_dependencies() {
-        let out_dir = unique_temp_dir("package-metadata");
-        generate_rust_package(&Default::default(), &[], &out_dir, "sample-trellis").unwrap();
-        let cargo = fs::read_to_string(out_dir.join("Cargo.toml")).unwrap();
-        let manifest: toml::Value = toml::from_str(&cargo).unwrap();
-        assert_eq!(
-            manifest["package"]["metadata"]["trellis"]["generated"].as_bool(),
-            Some(true)
-        );
-        let dependency = &manifest["dependencies"]["trellis-rs"];
-        assert_eq!(
-            dependency
-                .as_str()
-                .or_else(|| dependency.get("version").and_then(toml::Value::as_str)),
-            Some(env!("CARGO_PKG_VERSION"))
-        );
-        assert!(dependency.get("path").is_none());
-        assert_eq!(manifest["package"]["publish"].as_bool(), Some(false));
-        assert_eq!(manifest["package"]["name"].as_str(), Some("sample-trellis"));
-        assert_eq!(manifest["package"]["version"].as_str(), Some("0.0.0"));
-        fs::remove_dir_all(out_dir).unwrap();
-    }
-
-    #[test]
-    fn cargo_toml_is_independent_of_repository_ancestry() {
-        let repo_root = unique_temp_dir("workspace-runtime-paths");
-        fs::create_dir_all(repo_root.join("rust/crates/runtime-client")).unwrap();
-        fs::write(
-            repo_root.join("rust/Cargo.toml"),
-            concat!(
-                "[workspace]\n",
-                "members = [\n",
-                "  \"crates/runtime-client\",\n",
-                "]\n",
-            ),
-        )
-        .unwrap();
-        fs::write(
-            repo_root.join("rust/crates/runtime-client/Cargo.toml"),
-            "[package]\nname = \"trellis-rs\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        )
-        .unwrap();
-
-        let external = unique_temp_dir("external-package");
-        for out in [repo_root.join("trellis"), external.clone()] {
-            generate_rust_package(&Default::default(), &[], &out, "sample-trellis").unwrap();
-        }
-        assert_eq!(
-            fs::read(repo_root.join("trellis/Cargo.toml")).unwrap(),
-            fs::read(external.join("Cargo.toml")).unwrap()
-        );
-        fs::remove_dir_all(repo_root).unwrap();
-        fs::remove_dir_all(external).unwrap();
-    }
-
-    #[test]
-    fn invalid_generated_rust_is_rejected_before_write() {
-        let out_dir = unique_temp_dir("invalid-rust-before-write");
-        let target = out_dir.join("broken.rs");
-
-        let error = write_module_sources(
-            &out_dir,
-            [(
-                PathBuf::from("broken.rs"),
-                "pub fn broken(".to_owned(),
-                String::new(),
-            )],
-        )
-        .unwrap_err();
-
-        assert!(matches!(error, CodegenRustError::RustSyntax { .. }));
-        assert!(!target.exists());
-
-        if out_dir.exists() {
-            fs::remove_dir_all(out_dir).unwrap();
-        }
-    }
-
-    #[test]
-    fn module_stem_drops_duplicate_trellis_prefix() {
-        assert_eq!(default_sdk_stem("trellis.core@v1"), "core");
-        assert_eq!(default_sdk_stem("trellis.auth@v1"), "auth");
-        assert_eq!(default_sdk_stem("graph@v1"), "graph");
-    }
-
-    #[test]
-    fn key_to_snake_keeps_acronyms_together() {
-        assert_eq!(key_to_snake("Jobs.ListDLQ"), "jobs_list_dlq");
-        assert_eq!(key_to_snake("Jobs.ReplayDLQ"), "jobs_replay_dlq");
-        assert_eq!(key_to_snake("HTTPServer"), "http_server");
-    }
-
-    #[test]
-    fn generated_participant_facade_rejects_partial_alias_mappings() {
-        let out_dir = unique_temp_dir("participant-partial-aliases");
-        fs::create_dir_all(&out_dir).unwrap();
-
-        let local_manifest = parse_api(&json!({
-            "format": "trellis.api.v1",
-            "id": "device@v1",
-            "version": "1.0.0",
-            "displayName": "Device",
-            "description": "Device.",
-        }))
-        .unwrap();
-        let core_manifest = parse_api(&json!({
-            "format": "trellis.api.v1",
-            "id": "trellis.core@v1",
-            "version": "1.0.0",
-            "displayName": "Trellis Core",
-            "description": "Core.",
-            "schemas": {
-                "CatalogInput": {"type":"object","properties":{},"required":[]},
-                "CatalogOutput": {"type":"object","properties":{},"required":[]}
-            },
-            "rpc": {
-                "Core.Info": {
-                    "version":"v1",
-                    "input":{"schema":"CatalogInput"},
-                    "output":{"schema":"CatalogOutput"}
-                }
-            }
-        }))
-        .unwrap();
-        let mut participant = self_participant_value(&local_manifest, "device");
-        add_required_use(
-            &mut participant,
-            "core",
-            &core_manifest,
-            json!({"rpc": {"call": ["Core.Info"]}}),
-        );
-        participant["uses"]["required"]["auth"] = json!({
-            "api": "trellis.auth@v1",
-            "apiDigest": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-            "rpc": {"call": ["Auth.Sessions.Me"]}
-        });
-
-        let error = generate_rust_package(
-            &[
-                (local_manifest.id(), &local_manifest),
-                (core_manifest.id(), &core_manifest),
-            ]
-            .into(),
-            &[parse_participant(&participant).unwrap()],
-            &out_dir,
-            "device-trellis",
-        )
-        .unwrap_err();
-
-        assert!(matches!(
-            error,
-            CodegenRustError::MissingParticipantMappingAlias { alias, contract }
-                if alias == "auth" && contract == "trellis.auth@v1"
-        ));
-
-        fs::remove_dir_all(out_dir).unwrap();
-    }
-
-    #[test]
-    fn generated_participant_facade_compiles_with_service_runtime() {
-        let out_dir = unique_temp_dir("participant-compile");
-        fs::create_dir_all(&out_dir).unwrap();
-
-        let local_manifest = parse_api(&json!({
-            "format": "trellis.api.v1",
-            "id": "compile@v1",
-            "version": "1.0.0",
-            "displayName": "Compile",
-            "description": "Compile-test service.",
-            "schemas": {
-                "PingInput": {"type":"object","properties":{"value":{"type":"string"}},"required":["value"]},
-                "PingOutput": {"type":"object","properties":{"value":{"type":"string"}},"required":["value"]},
-                "FeedInput": {"type":"object","properties":{},"required":[]},
-                "FeedEvent": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                "WorkPayload": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                "WorkResult": {"type":"object","properties":{"done":{"type":"boolean"}},"required":["done"]},
-                "ChangedEvent": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                "ProcessInput": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                "ProcessProgress": {"type":"object","properties":{"step":{"type":"string"}},"required":["step"]},
-                "ProcessOutput": {"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]},
-                "ProcessErrorData": {"type":"object","properties":{"type":{"const":"ProcessError"},"message":{"type":"string"},"id":{"type":"string"}},"required":["type","message","id"]},
-                "StateValue": {"type":"object","properties":{"requiredNullable":{"anyOf":[{"type":"string"},{"type":"null"}]},"optionalNullable":{"anyOf":[{"type":"string"},{"type":"null"}]}},"required":["requiredNullable"]},
-                "OpenRecord": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                "Proof": {"type":"object","properties":{"token":{"type":"string"}},"required":["token"],"additionalProperties":false}
-            },
-            "errors": {
-                "ProcessError": {"schema":{"schema":"ProcessErrorData"}}
-            },
-            "rpc": {
-                "Compile.Ping": {
-                    "version":"v1",
-                    "input":{"schema":"PingInput"},
-                    "output":{"schema":"PingOutput"},
-                    "errors":["ProcessError"]
-                }
-            },
-            "feeds": {
-                "Compile.Feed": {
-                    "version":"v1",
-                    "input":{"schema":"FeedInput"},
-                    "event":{"schema":"FeedEvent"}
-                }
-            },
-            "operations": {
-                "Compile.Process": {
-                    "version":"v1",
-                    "input":{"schema":"ProcessInput"},
-                    "progress":{"schema":"ProcessProgress"},
-                    "output":{"schema":"ProcessOutput"},
-                    "errors":["ProcessError"],
-                    "cancel":true
-                }
-            },
-            "state": {
-                "current": {"kind":"value","schema":{"schema":"StateValue"}},
-                "records": {"kind":"map","schema":{"schema":"OpenRecord"}}
-            },
-            "events": {
-                "Compile.Changed": {
-                    "version": "v1",
-                    "event": {"schema": "ChangedEvent"}
-                }
-            }
-        })).unwrap();
-        let mut remote = local_manifest.normalized_value().unwrap();
-        remote["id"] = json!("remote@v1");
-        remote["operations"]["Cancel"] = remote["operations"]["Compile.Process"].clone();
-        remote["operations"]["Signal"] = remote["operations"]["Compile.Process"].clone();
-        remote["operations"]["Signal"]["signals"] =
-            json!({"Update": {"input": {"schema": "ProcessInput"}}});
-        let remote = parse_api(&remote).unwrap();
-        let mut participant = self_participant_value(&local_manifest, "service");
-        add_required_use(
-            &mut participant,
-            "remote",
-            &remote,
-            json!({"operations": {"observe": ["Compile.Process"], "cancel": ["Cancel"], "control": {"Signal": ["Update"]}}}),
-        );
-        generate_rust_package(
-            &[
-                (local_manifest.id(), &local_manifest),
-                (remote.id(), &remote),
-            ]
-            .into(),
-            &[parse_participant(&participant).unwrap()],
-            &out_dir,
-            "compile-trellis",
-        )
-        .unwrap();
-
-        cargo_check(&out_dir.join("Cargo.toml"));
-        let consumer = unique_temp_dir("operation-control-consumer");
-        fs::create_dir_all(consumer.join("src")).unwrap();
-        fs::write(consumer.join("Cargo.toml"), format!("[package]\nname = \"control-consumer\"\nversion = \"0.0.0\"\nedition = \"2021\"\n[dependencies]\ncompile-trellis = {{ path = {:?} }}\n", out_dir)).unwrap();
-        fs::write(
-            consumer.join("src/lib.rs"),
-            r#"
-pub fn controls(client: &compile_trellis::participants::compile::uses::remote::Client<'_>) {
-    let _ = client.compile_process("existing");
-    let _ = client.cancel("existing");
-    let _ = client.signal("existing");
-}
-"#,
-        )
-        .unwrap();
-        cargo_check(&consumer.join("Cargo.toml"));
-        fs::remove_dir_all(consumer).unwrap();
-
-        fs::remove_dir_all(out_dir).unwrap();
-    }
-
-    #[test]
-    fn generated_caller_facades_compile_with_kind_specific_connections() {
-        for kind in ["app", "agent", "device"] {
-            let out_dir = unique_temp_dir(&format!("participant-{kind}-compile"));
-            fs::create_dir_all(&out_dir).unwrap();
-            let manifest = parse_api(&json!({
-                "format": "trellis.api.v1",
-                "id": format!("fixture.{kind}@v1"),
-                "version": "1.0.0",
-                "displayName": format!("Fixture {kind}"),
-                "description": "Compile fixture.",
-                "schemas": {
-                    "ChangedEvent": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}
+    fn graph(source: &str) -> PackageGraph {
+        compile_project(
+            &PackageManifest {
+                package: PackageMetadata {
+                    name: "fixture".into(),
+                    version: Version::new(2, 3, 4),
                 },
-                "events": {
-                    "Fixture.Changed": {
-                        "version":"v1",
-                        "event":{"schema":"ChangedEvent"}
-                    }
-                }
-            })).unwrap();
-            generate_rust_package(
-                &[(manifest.id(), &manifest)].into(),
-                &[parse_participant(&self_participant_value(&manifest, kind)).unwrap()],
-                &out_dir,
-                &format!("fixture-{kind}-trellis"),
-            )
-            .unwrap();
-
-            cargo_check(&out_dir.join("Cargo.toml"));
-            fs::remove_dir_all(out_dir).unwrap();
-        }
+                sources: BTreeMap::from([("main".into(), "main.trellis".into())]),
+                dependencies: BTreeMap::new(),
+                generate: GenerateConfig::default(),
+                default_registry: None,
+                registries: BTreeMap::new(),
+            },
+            vec![SourceUnit {
+                alias: "main".into(),
+                path: PathBuf::from("main.trellis"),
+                source: source.into(),
+            }],
+            BTreeMap::new(),
+        )
+        .unwrap()
     }
 
     #[test]
-    fn generated_participant_facade_rejects_missing_mapped_feed() {
-        let out_dir = unique_temp_dir("participant-missing-feed");
-        fs::create_dir_all(&out_dir).unwrap();
-
-        let local_manifest = parse_api(&json!({
-            "format": "trellis.api.v1",
-            "id": "participant@v1",
-            "version": "1.0.0",
-            "displayName": "Participant",
-            "description": "Participant.",
-        }))
-        .unwrap();
-        let evidence_manifest = parse_api(&json!({
-            "format": "trellis.api.v1",
-            "id": "evidence@v1",
-            "version": "1.0.0",
-            "displayName": "Evidence",
-            "description": "Evidence.",
-            "feeds": {}
-        }))
-        .unwrap();
-        let mut participant = self_participant_value(&local_manifest, "service");
-        add_required_use(
-            &mut participant,
-            "evidence",
-            &evidence_manifest,
-            json!({"feeds": {"subscribe": ["Evidence.Stream"]}}),
+    fn generates_native_types_evidence_and_multi_api_participant() {
+        let graph = graph(
+            r#"
+            type Count = uint64;
+            type Blob = bytes;
+            enum Status { ready; }
+            model Node { next?: Node; count: Count; blobs: list<Blob>; status: Status; note: string | null; }
+            model Empty {}
+             api First@v1 { title "First"; description "First API."; error Missing(Node); rpc Get { input Node; output Node; errors [Missing]; } capabilities { public { allows { rpc Get; operation Work; } } } operation Work { input Node; output Node; progress Node; errors [Missing]; } }
+            api Second@v2 { title "Second"; description "Second API."; event Changed { payload Node; } capabilities { public { allows { publish event Changed; subscribe event Changed; } } } }
+            device Backend { implements First; implements Second; state optional cache { title "Cache"; description "Cached node."; schema Node; version 2; accepts { 1: Empty; } } }
+        "#,
         );
-
-        let error = generate_rust_package(
-            &[
-                (local_manifest.id(), &local_manifest),
-                (evidence_manifest.id(), &evidence_manifest),
-            ]
-            .into(),
-            &[parse_participant(&participant).unwrap()],
-            &out_dir,
-            "participant-trellis",
+        let output = tempfile::tempdir().unwrap();
+        generate_rust_package(&graph, output.path(), "fixture-sdk").unwrap();
+        let cargo = fs::read_to_string(output.path().join("Cargo.toml")).unwrap();
+        let types = fs::read_to_string(output.path().join("src/__types.rs")).unwrap();
+        let participant = fs::read_to_string(
+            output
+                .path()
+                .join("src/participants/fixture_backend/mod.rs"),
         )
-        .unwrap_err();
-
-        assert!(matches!(
-            error,
-            CodegenRustError::MissingMappedFeed { alias, key }
-                if alias == "evidence" && key == "Evidence.Stream"
-        ));
-
-        fs::remove_dir_all(out_dir).unwrap();
+        .unwrap();
+        assert!(cargo.contains("version = \"2.3.4\""));
+        assert!(types.contains("next: Option<Box<crate::__types::fixture::Node>>"));
+        assert!(types.contains("pub struct Uint64"));
+        assert!(types.contains("Unknown(String)"));
+        assert!(types.contains("Nullable<String>"));
+        assert!(participant.contains("fixture.First@v1"));
+        assert!(participant.contains("fixture.Second@v2"));
+        assert!(participant.contains("pub struct Migrations"));
+        assert!(participant.contains("pub struct Availability"));
+        assert!(participant.contains("pub mod resources"));
+        assert!(participant.contains("migrate_cache_v1"));
+        assert!(!output.path().join("artifacts").exists());
+        let api =
+            fs::read_to_string(output.path().join("src/apis/fixture_first_v1/mod.rs")).unwrap();
+        assert!(api.contains("API_ID: &'static str = super::API_ID"));
+        assert!(!api.contains("super::super::API_ID"));
+        assert!(api.contains("pub type WorkProgress"));
+        assert!(api.contains("fixture.First@v1::Missing"));
+        assert!(!api.contains("SCHEMA_JSON"));
+        assert!(api.contains("trellis_rs::generated::RpcDescriptor"));
     }
 
     #[test]
-    fn generated_operation_descriptor_includes_error_types() {
-        let out_dir = unique_temp_dir("operation-descriptor-errors");
-        fs::create_dir_all(&out_dir).unwrap();
+    fn collisions_are_rejected_before_writes() {
+        let graph = graph("model FooBar {} model Foo_Bar {} api Main@v1 { title \"Main\"; description \"Main API.\"; rpc Get { input FooBar; output Foo_Bar; } capabilities { public { allows { rpc Get; } } } }");
+        let output = tempfile::tempdir().unwrap().path().join("generated");
+        assert!(matches!(
+            generate_rust_package(&graph, &output, "fixture"),
+            Err(CodegenRustError::IdentifierCollision { .. })
+        ));
+        assert!(!output.exists());
+    }
 
-        let manifest_path = parse_api(&json!({
-            "format": "trellis.api.v1",
-            "id": "ops@v1",
-            "version": "1.0.0",
-            "displayName": "Ops With Errors",
-            "description": "Operation with declared errors.",
-            "schemas": {
-                "Input": {"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},
-                "Progress": {"type":"object","properties":{"step":{"type":"string"}},"required":["step"]},
-                "Output": {"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]},
-                "NotFoundData": {
-                    "type":"object",
-                    "properties":{
-                        "type":{"const":"NotFoundError"},
-                        "message":{"type":"string"},
-                        "id":{"type":"string"}
-                    },
-                    "required":["type","message","id"]
-                }
-            },
-            "errors": {
-                "NotFoundError": {
-                    "schema": { "schema": "NotFoundData" }
-                }
-            },
-            "operations": {
-                "Example.Process": {
-                    "version": "v1",
-                    "input": { "schema": "Input" },
-                    "progress": { "schema": "Progress" },
-                    "output": { "schema": "Output" },
-                    "errors": ["NotFoundError"]
-                }
-            }
-        })).unwrap();
-
-        generate_rust_package(
-            &[(manifest_path.id(), &manifest_path)].into(),
-            &[],
-            &out_dir.join("generated"),
-            "ops-sdk",
-        )
-        .unwrap();
-
-        let consumer_dir = out_dir.join("consumer");
-        fs::create_dir_all(consumer_dir.join("src")).unwrap();
+    #[test]
+    fn generated_crate_compiles_against_current_abi() {
+        let graph = graph("type Name = string; enum Status { ready; } model Values { name: Name; status: Status; signed: int64; unsigned: uint64; finite: number; bytes: bytes; } api Main@v1 { title \"Main\"; description \"Main API.\"; error Bad(Values); rpc Get { input Values; output Values; errors [Bad]; } capabilities { public { allows { rpc Get; operation Work; } } } operation Work { input Values; output Values; progress Values; errors [Bad]; signals { resume Values; } upload; } } api Other@v2 { title \"Other\"; description \"Other API.\"; capabilities { public { allows { publish event Changed; subscribe event Changed; feed Watch; } } } event Changed { payload Values; } feed Watch { input Values; event Values; } } service Backend { implements Main; implements Other; } app Caller { use Main { rpc Get; operation Work; } use Other { subscribe event Changed; feed Watch; } }");
+        let output = tempfile::tempdir().unwrap();
+        generate_rust_package(&graph, output.path(), "fixture-sdk").unwrap();
+        let types = fs::read_to_string(output.path().join("src/__types.rs")).unwrap();
+        assert!(types.contains("generated::serde_i64::serialize"));
+        assert!(types.contains("generated::serde_u64::serialize"));
+        assert!(types.contains("generated::serde_f64::serialize"));
+        assert!(types.contains("generated::serde_base64::serialize"));
+        assert!(!types.contains("schema"));
+        let main_api =
+            fs::read_to_string(output.path().join("src/apis/fixture_main_v1/mod.rs")).unwrap();
+        assert!(main_api.contains("generated::OperationDescriptor for Work"));
+        assert!(main_api.contains("generated::OperationSignal for WorkResumeSignal"));
+        assert!(main_api.contains("pub fn register_work"));
+        assert!(main_api.contains("pub fn work(&self)"));
+        let runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../trellis")
+            .canonicalize()
+            .unwrap();
+        let cargo = fs::read_to_string(output.path().join("Cargo.toml"))
+            .unwrap()
+            .replace(
+                &format!("trellis-rs = \"{}\"", env!("CARGO_PKG_VERSION")),
+                &format!("trellis-rs = {{ path = {runtime:?} }}"),
+            );
+        fs::write(output.path().join("Cargo.toml"), cargo).unwrap();
+        fs::create_dir(output.path().join("tests")).unwrap();
         fs::write(
-            consumer_dir.join("Cargo.toml"),
-            format!(
-                "[package]\nname = \"ops-consumer\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nops-sdk = {{ path = {:?} }}\ntrellis-rs = {{ path = {:?} }}\n",
-                out_dir.join("generated"),
-                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../trellis"),
-            ),
-        )
-        .unwrap();
-        fs::write(
-            consumer_dir.join("src/main.rs"),
-            r#"use ops_sdk::apis::ops::operations::ExampleProcessOperationError;
-use trellis_rs::service::OperationFailureLike;
+            output.path().join("tests/abi.rs"),
+            r#"use fixture_sdk::{
+    apis::fixture_main_v1::{
+        operations::{Work, WorkResumeSignal},
+        rpc::Get,
+        Client as MainClient,
+    },
+    apis::fixture_other_v2::{events::Changed, feeds::Watch},
+    participants::{fixture_backend, fixture_caller},
+    types::{Name, Status},
+};
+use trellis_rs::generated::ParticipantDescriptor as _;
 
-fn main() {
-    let declared = ExampleProcessOperationError::NotFoundError(ops_sdk::apis::ops::NotFoundData {
-        r#type: ops_sdk::apis::ops::NotFoundDataType::NotFoundError,
-        message: "missing".to_string(),
-        id: "order-1".to_string(),
-    });
-    assert_eq!(declared.message(), "missing");
-    assert_eq!(declared.fields()["id"], "order-1");
+fn accepts_rpc<D: trellis_rs::generated::RpcDescriptor>() {}
+fn accepts_event<D: trellis_rs::generated::EventDescriptor>() {}
+fn accepts_feed<D: trellis_rs::generated::FeedDescriptor>() {}
+fn accepts_operation<D: trellis_rs::generated::OperationDescriptor>() {}
+fn accepts_signal<S: trellis_rs::generated::OperationSignal<Operation = Work>>() {}
+
+fn accepts_multi_api_provider(provider: &mut fixture_backend::Provider<'_>) {
+    let _ = provider.fixture_main_v1();
+    let _ = provider.fixture_other_v2();
+}
+
+#[test]
+fn descriptors_and_facades_use_generated_support() {
+    let name = Name::from("backend".to_owned());
+    assert_eq!(name.as_ref(), "backend");
+    assert_eq!(Status::Ready.as_ref(), "ready");
+    assert_eq!(*fixture_sdk::__types::Int64::from(1), 1);
+    accepts_rpc::<Get>();
+    accepts_event::<Changed>();
+    accepts_feed::<Watch>();
+    accepts_operation::<Work>();
+    accepts_signal::<WorkResumeSignal>();
+    assert_eq!(Get::API_ID, "fixture.Main@v1");
+    assert_eq!(Changed::API_ID, "fixture.Other@v2");
+    assert_eq!(Watch::API_ID, "fixture.Other@v2");
+    assert_eq!(Work::API_ID, "fixture.Main@v1");
+    assert!(Work::UPLOAD);
+    assert!(<Work as trellis_rs::generated::OperationDescriptor>::HAS_PROGRESS);
+    assert_eq!(
+        <Work as trellis_rs::generated::OperationDescriptor>::SIGNALS,
+        ["resume"]
+    );
+    assert_eq!(
+        fixture_backend::Participant::IMPLEMENTED_API_IDS,
+        ["fixture.Main@v1", "fixture.Other@v2"]
+    );
+    let _ = accepts_multi_api_provider;
+    let _: fn(trellis_rs::generated::Client) -> MainClient = MainClient::from_generated;
+    fn accepts_operation_client(client: &MainClient) {
+        let _: trellis_rs::generated::Operation<'_, Work> = client.work();
+    }
+    let _ = accepts_operation_client;
+    let _: fn(trellis_rs::generated::Client) -> fixture_caller::Client =
+        fixture_caller::Client::from_generated;
 }
 "#,
         )
         .unwrap();
-        cargo_check(&consumer_dir.join("Cargo.toml"));
-
-        fs::remove_dir_all(out_dir).unwrap();
+        assert!(Command::new("cargo")
+            .arg("test")
+            .arg("--quiet")
+            .current_dir(output.path())
+            .status()
+            .unwrap()
+            .success());
     }
 }

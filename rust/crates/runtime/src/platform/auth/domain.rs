@@ -1,14 +1,13 @@
-use std::collections::BTreeMap;
-
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use trellis_protocol::{
-    parse_api, parse_participant, resolve_participant, ApiArtifact, GrantSet, ParticipantKind,
-    PlatformPrivilege, ResolvedParticipant,
+use trellis_protocol::{GrantSet, ParticipantKind, PlatformPrivilege};
+
+use super::evidence::{
+    verify_package_evidence, PackageEvidenceInput, ParticipantRuntimeProjection,
 };
 
 /// Largest integer exactly representable by interoperable JSON security objects.
@@ -344,7 +343,7 @@ pub(crate) fn validate_ed25519_public_key(
     Ok(URL_SAFE_NO_PAD.encode(Sha256::digest(raw)))
 }
 
-/// Exact participant artifact and API-artifact binding.
+/// Exact verified package and participant projection binding.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParticipantBindingRecord {
@@ -352,14 +351,16 @@ pub struct ParticipantBindingRecord {
     pub participant_id: String,
     /// Participant class.
     pub participant_kind: ParticipantKind,
-    /// Exact participant artifact digest.
-    pub artifact_digest: String,
-    /// Exact resolved-needs digest.
+    /// Exact participant semantic digest.
+    pub participant_digest: String,
+    /// Exact native authority projection digest.
     pub needs_digest: String,
-    /// Canonical participant artifact JSON.
-    pub participant_json: String,
-    /// Canonical API artifacts keyed by canonical API ID.
-    pub api_artifacts_json: String,
+    /// Exact immutable source-package digest.
+    pub package_digest: String,
+    /// Exact participant path within the verified package closure.
+    pub participant_path: String,
+    /// Read-only projection reconstructed from verified source evidence.
+    pub projection: ParticipantRuntimeProjection,
     /// Resolution time in Unix milliseconds.
     pub resolved_at: i64,
     /// Whether the binding is currently usable.
@@ -369,126 +370,53 @@ pub struct ParticipantBindingRecord {
 }
 
 impl ParticipantBindingRecord {
-    /// Validate canonical participant/API input for server-owned installation.
-    pub fn from_artifacts(
-        participant: &serde_json::Value,
-        api_artifacts: &[serde_json::Value],
+    /// Verify source evidence and construct its read-only participant projection.
+    pub(crate) fn from_package_evidence(
+        input: &PackageEvidenceInput,
         now: i64,
-    ) -> Result<Self, AuthorizationStateError> {
+    ) -> Result<(Self, String), AuthorizationStateError> {
         require_protocol_timestamp("installedAt", now)?;
-        let participant = parse_participant(participant)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let mut apis = BTreeMap::<String, ApiArtifact>::new();
-        let mut canonical_apis = BTreeMap::new();
-        for value in api_artifacts {
-            let api = parse_api(value)
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-            let canonical = api
-                .normalized_value()
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-            if canonical_apis
-                .get(api.id())
-                .is_some_and(|previous| previous != &canonical)
-            {
-                return Err(AuthorizationStateError::InvalidRecord(format!(
-                    "conflicting API artifacts for {}",
-                    api.id(),
-                )));
-            }
-            canonical_apis.insert(api.id().to_owned(), canonical);
-            apis.insert(api.id().to_owned(), api);
-        }
-        let resolved = resolve_participant(&participant, &apis)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        Ok(Self {
-            participant_id: participant.id().to_owned(),
-            participant_kind: participant.kind(),
-            artifact_digest: resolved.participant_digest().to_owned(),
-            needs_digest: resolved
-                .needs()
-                .digest()
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-            participant_json: participant
-                .canonical_json()
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-            api_artifacts_json: trellis_protocol::canonicalize_json(
-                &serde_json::to_value(canonical_apis)
-                    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-            )
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-            resolved_at: now,
-            state: ParticipantBindingState::Resolved,
-            error: None,
-        })
+        let (participant_digest, needs_digest, projection, evidence_json) =
+            verify_package_evidence(input)?;
+        Ok((
+            Self {
+                participant_id: projection.participant_id.clone(),
+                participant_kind: projection.participant_kind,
+                participant_digest,
+                needs_digest,
+                package_digest: input.package_digest.clone(),
+                participant_path: input.participant_path.clone(),
+                projection,
+                resolved_at: now,
+                state: ParticipantBindingState::Resolved,
+                error: None,
+            },
+            evidence_json,
+        ))
     }
 
-    /// Parse and verify the exact participant and API artifacts retained by this binding.
+    /// Verify the retained participant projection against its semantic identity.
     ///
     /// # Errors
     ///
-    /// Returns a typed digest mismatch when the canonical artifact or needs
+    /// Returns a typed digest mismatch when the participant or needs
     /// digest differs from the stored identity, or [`AuthorizationStateError::InvalidRecord`]
     /// when the retained JSON cannot be parsed and contextually resolved.
-    pub fn resolve(&self) -> Result<ResolvedParticipant, AuthorizationStateError> {
+    pub(crate) fn resolve(&self) -> Result<&ParticipantRuntimeProjection, AuthorizationStateError> {
         if self.state != ParticipantBindingState::Resolved {
             return Err(AuthorizationStateError::ParticipantMissing);
         }
-        let participant_value = serde_json::from_str(&self.participant_json).map_err(|error| {
-            AuthorizationStateError::InvalidRecord(format!(
-                "participant artifact JSON is invalid: {error}"
-            ))
-        })?;
-        let participant = parse_participant(&participant_value).map_err(|error| {
-            AuthorizationStateError::InvalidRecord(format!(
-                "participant artifact is invalid: {error}"
-            ))
-        })?;
-        if participant.id() != self.participant_id || participant.kind() != self.participant_kind {
-            return Err(AuthorizationStateError::ParticipantDigestMismatch);
-        }
-        if participant
-            .digest()
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
-            != self.artifact_digest
+        if self.projection.participant_id != self.participant_id
+            || self.projection.participant_kind != self.participant_kind
+            || self.participant_id.split_once('.').map(|(_, path)| path)
+                != Some(self.participant_path.as_str())
         {
             return Err(AuthorizationStateError::ParticipantDigestMismatch);
         }
-        let api_values: BTreeMap<String, serde_json::Value> =
-            serde_json::from_str(&self.api_artifacts_json).map_err(|error| {
-                AuthorizationStateError::InvalidRecord(format!(
-                    "API artifact map JSON is invalid: {error}"
-                ))
-            })?;
-        let apis = api_values
-            .into_iter()
-            .map(|(id, value)| {
-                let api = parse_api(&value).map_err(|error| {
-                    AuthorizationStateError::InvalidRecord(format!(
-                        "API artifact {id} is invalid: {error}"
-                    ))
-                })?;
-                if api.id() != id {
-                    return Err(AuthorizationStateError::InvalidRecord(format!(
-                        "API artifact map key {id} does not match {}",
-                        api.id()
-                    )));
-                }
-                Ok((id, api))
-            })
-            .collect::<Result<BTreeMap<String, ApiArtifact>, AuthorizationStateError>>()?;
-        let resolved = resolve_participant(&participant, &apis).map_err(|error| {
-            AuthorizationStateError::InvalidRecord(format!(
-                "participant resolution failed: {error}"
-            ))
-        })?;
-        let needs_digest = resolved
-            .needs()
-            .digest()
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        if needs_digest != self.needs_digest {
+        if self.package_digest.len() != 43 || self.needs_digest.len() != 43 {
             return Err(AuthorizationStateError::NeedsDigestMismatch);
         }
-        Ok(resolved)
+        Ok(&self.projection)
     }
 }
 
@@ -496,7 +424,7 @@ impl ParticipantBindingRecord {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ParticipantBindingState {
-    /// The exact artifacts resolve and their digests match.
+    /// The exact semantic projection and its digests match.
     Resolved,
     /// Resolution failed and the binding cannot issue authority.
     Invalid,
@@ -624,42 +552,6 @@ pub struct DeviceDelegationRecord {
     pub expires_at: Option<i64>,
 }
 
-/// Current dependency availability state.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DependencyState {
-    /// A current provider satisfies the exact API evidence.
-    Available,
-    /// No current provider is available.
-    Unavailable,
-    /// The last provider evidence is stale.
-    Stale,
-}
-
-/// Structured dependency evidence used during materialization.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DependencyEvidence {
-    /// Participant-local dependency alias.
-    pub alias: String,
-    /// Whether missing evidence invalidates all materialization.
-    pub required: bool,
-    /// Canonical API ID.
-    pub api_id: String,
-    /// Exact API artifact digest.
-    pub api_digest: String,
-    /// Provider participant ID.
-    pub provider_participant_id: String,
-    /// Provider deployment ID when deployment-backed.
-    pub provider_deployment_id: Option<String>,
-    /// Current provider instance ID when instance-backed.
-    pub provider_instance_id: Option<String>,
-    /// Current availability state.
-    pub state: DependencyState,
-    /// Observation time in Unix milliseconds.
-    pub observed_at: i64,
-}
-
 /// Current resource-binding state.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -737,46 +629,6 @@ pub enum ResourceProviderIdentity {
         /// Exact event subjects selected by the durable consumer.
         filter_subjects: Vec<String>,
     },
-}
-
-/// Service deployment and instance authorization evidence.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ServiceEvidence {
-    /// Authorized deployment ID.
-    pub deployment_id: String,
-    /// Current runtime instance ID.
-    pub instance_id: String,
-    /// Whether the instance is active.
-    pub instance_active: bool,
-}
-
-/// Device deployment, instance, and lifecycle authorization evidence.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceEvidence {
-    /// Authorized deployment ID.
-    pub deployment_id: String,
-    /// Current device instance ID.
-    pub instance_id: String,
-    /// Whether the durable device is active.
-    pub device_active: bool,
-    /// Whether an applicable runtime instance is active.
-    pub instance_active: bool,
-    /// Activation and delegation evidence when required.
-    pub delegation: Option<DelegationEvidence>,
-}
-
-/// Device user-activation or delegation evidence.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DelegationEvidence {
-    /// Whether the activation/delegation remains active.
-    pub active: bool,
-    /// Whether this device lifecycle requires user delegation.
-    pub required: bool,
-    /// Optional delegation expiry in Unix milliseconds.
-    pub expires_at: Option<i64>,
 }
 
 /// Current, eligible authority and exact installed resource interpretation for one connection.
@@ -876,11 +728,11 @@ pub enum AuthorizationStateError {
     /// The requested provider identity does not exist for the principal.
     #[error("identity is missing")]
     IdentityMissing,
-    /// The exact participant artifact is missing.
+    /// The exact participant binding is missing.
     #[error("participant binding is missing")]
     ParticipantMissing,
-    /// Participant identity or artifact digest does not match.
-    #[error("participant artifact digest does not match")]
+    /// Participant identity or semantic digest does not match.
+    #[error("participant semantic digest does not match")]
     ParticipantDigestMismatch,
     /// Accepted-needs digest does not match.
     #[error("participant needs digest does not match")]

@@ -9,17 +9,7 @@ export type {
   BrowserAuthRecoveryKind,
   NatsConnectOptions,
 } from "./auth.ts";
-export {
-  canonicalizeJson,
-  digestJson,
-  isJsonValue,
-  schema,
-  unwrapSchema,
-} from "./participant.ts";
-export {
-  TrellisSurfaceStatusRequestSchema,
-  TrellisSurfaceStatusResponseSchema,
-} from "./models/trellis/rpc/TrellisSurfaceStatus.ts";
+export { isJsonValue } from "./participant.ts";
 export type { InferSchemaType, JsonValue } from "./participant.ts";
 export { TrellisConnection } from "./connection.ts";
 export type { TrellisConnectionStatus } from "./connection.ts";

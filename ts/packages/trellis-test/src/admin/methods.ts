@@ -1,156 +1,126 @@
 import type { CallerRuntime } from "@qlever-llc/trellis";
+import type { Codec } from "@qlever-llc/trellis/generated";
 import { apis, participants } from "../../trellis/index.js";
 
-import type { Static, TSchema } from "typebox";
-
-export const adminParticipant = participants.appCli.participant;
+export const adminParticipant = participants.cli.participant;
 
 export const ADMIN_USERNAME = "admin";
-export const ADMIN_PARTICIPANT = {
-  id: participants.appCli.participant.id,
-  artifactDigest: participants.appCli.participant.digest,
-} as const;
 
 export type AdminClient = CallerRuntime<
-  typeof participants.appCli.participant
+  typeof participants.cli.participant
 >;
 
-function adminMethod<const I extends TSchema, const O extends TSchema>(
-  input: I,
-  output: O,
-  call: (client: AdminClient, input: Static<I>) => Promise<Static<O>>,
+function adminMethod<I, O>(
+  descriptor: { input: Codec<I>; output: Codec<O> },
+  call: (client: AdminClient, input: I) => Promise<O>,
 ) {
   return {
-    input,
-    output,
-    call: (client: AdminClient, value: unknown) =>
-      call(client, value as Static<I>),
+    input: descriptor.input,
+    output: descriptor.output,
+    call: (client: AdminClient, value: unknown) => call(client, value as I),
   } as const;
 }
 
 /** @internal Concrete Auth RPCs available to the shared test host. */
 export const adminMethods = {
   authCapabilityGroupsPut: adminMethod(
-    apis.auth.AuthCapabilityGroupsPutRequestSchema,
-    apis.auth.AuthCapabilityGroupsPutResponseSchema,
-    (client, input) => client.authCapabilityGroupsPut(input).orThrow(),
+    apis.auth.API.actions["rpc:CapabilityGroups.Put"],
+    (client, input) => client.capabilityGroupsPut(input).orThrow(),
   ),
   authConnectionsList: adminMethod(
-    apis.auth.AuthConnectionsListRequestSchema,
-    apis.auth.AuthConnectionsListResponseSchema,
-    (client, input) => client.authConnectionsList(input).orThrow(),
+    apis.auth.API.actions["rpc:Connections.List"],
+    (client, input) => client.connectionsList(input).orThrow(),
   ),
   authPortalsGrantOverridesRemove: adminMethod(
-    apis.auth.AuthPortalsGrantOverridesRemoveRequestSchema,
-    apis.auth.AuthPortalsGrantOverridesRemoveResponseSchema,
-    (client, input) => client.authPortalsGrantOverridesRemove(input).orThrow(),
+    apis.auth.API.actions["rpc:Portals.GrantOverrides.Remove"],
+    (client, input) => client.portalsGrantOverridesRemove(input).orThrow(),
   ),
   authPortalsGrantOverridesPut: adminMethod(
-    apis.auth.AuthPortalsGrantOverridesPutRequestSchema,
-    apis.auth.AuthPortalsGrantOverridesPutResponseSchema,
-    (client, input) => client.authPortalsGrantOverridesPut(input).orThrow(),
+    apis.auth.API.actions["rpc:Portals.GrantOverrides.Put"],
+    (client, input) => client.portalsGrantOverridesPut(input).orThrow(),
   ),
   authPortalsGet: adminMethod(
-    apis.auth.AuthPortalsGetRequestSchema,
-    apis.auth.AuthPortalsGetResponseSchema,
-    (client, input) => client.authPortalsGet(input).orThrow(),
+    apis.auth.API.actions["rpc:Portals.Get"],
+    (client, input) => client.portalsGet(input).orThrow(),
   ),
   authPortalsList: adminMethod(
-    apis.auth.AuthPortalsListRequestSchema,
-    apis.auth.AuthPortalsListResponseSchema,
-    (client, input) => client.authPortalsList(input).orThrow(),
+    apis.auth.API.actions["rpc:Portals.List"],
+    (client, input) => client.portalsList(input).orThrow(),
   ),
   authPortalsLoginSettingsUpdate: adminMethod(
-    apis.auth.AuthPortalsLoginSettingsUpdateRequestSchema,
-    apis.auth.AuthPortalsLoginSettingsGetResponseSchema,
-    (client, input) => client.authPortalsLoginSettingsUpdate(input).orThrow(),
+    apis.auth.API.actions["rpc:Portals.LoginSettings.Update"],
+    (client, input) => client.portalsLoginSettingsUpdate(input).orThrow(),
   ),
   authPortalsPut: adminMethod(
-    apis.auth.AuthPortalsPutRequestSchema,
-    apis.auth.AuthPortalsPutResponseSchema,
-    (client, input) => client.authPortalsPut(input).orThrow(),
+    apis.auth.API.actions["rpc:Portals.Put"],
+    (client, input) => client.portalsPut(input).orThrow(),
   ),
   authPortalsRoutesPut: adminMethod(
-    apis.auth.AuthPortalsRoutesPutRequestSchema,
-    apis.auth.AuthPortalsRoutesPutResponseSchema,
-    (client, input) => client.authPortalsRoutesPut(input).orThrow(),
+    apis.auth.API.actions["rpc:Portals.Routes.Put"],
+    (client, input) => client.portalsRoutesPut(input).orThrow(),
   ),
   authDevicesProvision: adminMethod(
-    apis.auth.AuthDevicesProvisionRequestSchema,
-    apis.auth.AuthDevicesProvisionResponseSchema,
-    (client, input) => client.authDevicesProvision(input).orThrow(),
+    apis.auth.API.actions["rpc:Devices.Provision"],
+    (client, input) => client.devicesProvision(input).orThrow(),
   ),
   stateAdminDelete: adminMethod(
-    apis.state.StateAdminDeleteRequestSchema,
-    apis.state.StateAdminDeleteResponseSchema,
-    (client, input) => client.stateAdminDelete(input).orThrow(),
+    apis.state.API.actions["rpc:Admin.Delete"],
+    (client, input) => client.adminDelete(input).orThrow(),
   ),
   stateAdminGet: adminMethod(
-    apis.state.StateAdminGetRequestSchema,
-    apis.state.StateAdminGetResponseSchema,
-    (client, input) => client.stateAdminGet(input).orThrow(),
+    apis.state.API.actions["rpc:Admin.Get"],
+    (client, input) => client.adminGet(input).orThrow(),
   ),
   stateAdminList: adminMethod(
-    apis.state.StateAdminListRequestSchema,
-    apis.state.StateAdminListResponseSchema,
-    (client, input) => client.stateAdminList(input).orThrow(),
+    apis.state.API.actions["rpc:Admin.List"],
+    (client, input) => client.adminList(input).orThrow(),
   ),
   authDeploymentsCreate: adminMethod(
-    apis.auth.AuthDeploymentsCreateRequestSchema,
-    apis.auth.AuthDeploymentsCreateResponseSchema,
-    (client, input) => client.authDeploymentsCreate(input).orThrow(),
+    apis.auth.API.actions["rpc:Deployments.Create"],
+    (client, input) => client.deploymentsCreate(input).orThrow(),
   ),
   authDeploymentsGet: adminMethod(
-    apis.auth.AuthDeploymentsGetRequestSchema,
-    apis.auth.AuthDeploymentsGetResponseSchema,
-    (client, input) => client.authDeploymentsGet(input).orThrow(),
+    apis.auth.API.actions["rpc:Deployments.Get"],
+    (client, input) => client.deploymentsGet(input).orThrow(),
   ),
   authDeploymentsApply: adminMethod(
-    apis.auth.AuthDeploymentsApplyRequestSchema,
-    apis.auth.AuthDeploymentsApplyResponseSchema,
-    (client, input) => client.authDeploymentsApply(input).orThrow(),
+    apis.auth.API.actions["rpc:Deployments.Apply"],
+    (client, input) => client.deploymentsApply(input).orThrow(),
   ),
   authParticipantsInstall: adminMethod(
-    apis.auth.AuthParticipantsInstallRequestSchema,
-    apis.auth.AuthParticipantsInstallResponseSchema,
-    (client, input) => client.authParticipantsInstall(input).orThrow(),
+    apis.auth.API.actions["rpc:Participants.Install"],
+    (client, input) => client.participantsInstall(input).orThrow(),
   ),
   authGrantsGet: adminMethod(
-    apis.auth.AuthGrantsGetRequestSchema,
-    apis.auth.AuthGrantsGetResponseSchema,
-    (client, input) => client.authGrantsGet(input).orThrow(),
+    apis.auth.API.actions["rpc:Grants.Get"],
+    (client, input) => client.grantsGet(input).orThrow(),
   ),
   authGrantsList: adminMethod(
-    apis.auth.AuthGrantsListRequestSchema,
-    apis.auth.AuthGrantsListResponseSchema,
-    (client, input) => client.authGrantsList(input).orThrow(),
+    apis.auth.API.actions["rpc:Grants.List"],
+    (client, input) => client.grantsList(input).orThrow(),
   ),
   authGrantsSet: adminMethod(
-    apis.auth.AuthGrantsSetRequestSchema,
-    apis.auth.AuthGrantsMutationResponseSchema,
-    (client, input) => client.authGrantsSet(input).orThrow(),
+    apis.auth.API.actions["rpc:Grants.Set"],
+    (client, input) => client.grantsSet(input).orThrow(),
   ),
   authGrantsRevoke: adminMethod(
-    apis.auth.AuthGrantsRevokeRequestSchema,
-    apis.auth.AuthGrantsMutationResponseSchema,
-    (client, input) => client.authGrantsRevoke(input).orThrow(),
+    apis.auth.API.actions["rpc:Grants.Revoke"],
+    (client, input) => client.grantsRevoke(input).orThrow(),
   ),
   authServiceInstancesProvision: adminMethod(
-    apis.auth.AuthServiceInstancesProvisionRequestSchema,
-    apis.auth.AuthServiceInstancesProvisionResponseSchema,
-    (client, input) => client.authServiceInstancesProvision(input).orThrow(),
+    apis.auth.API.actions["rpc:ServiceInstances.Provision"],
+    (client, input) => client.serviceInstancesProvision(input).orThrow(),
   ),
   authSessionsRevoke: adminMethod(
-    apis.auth.AuthSessionsRevokeRequestSchema,
-    apis.auth.AuthSessionsRevokeResponseSchema,
-    (client, input) => client.authSessionsRevoke(input).orThrow(),
+    apis.auth.API.actions["rpc:Sessions.Revoke"],
+    (client, input) => client.sessionsRevoke(input).orThrow(),
   ),
 } as const;
 
 export type AdminRpc = {
   [M in keyof typeof adminMethods]: {
-    input: Static<(typeof adminMethods)[M]["input"]>;
-    output: Static<(typeof adminMethods)[M]["output"]>;
+    input: ReturnType<(typeof adminMethods)[M]["input"]["decode"]>;
+    output: ReturnType<(typeof adminMethods)[M]["output"]["decode"]>;
   };
 };
 

@@ -2,7 +2,7 @@
 //!
 //! This crate is the normal Rust authoring entrypoint. It re-exports stable,
 //! commonly used runtime types without exposing low-level service loops,
-//! bootstrap hosts, or generated artifact internals.
+//! bootstrap hosts, or generated descriptor internals.
 //!
 //! Generated SDK crates and participant facades include a package-local
 //! `TRELLIS.md` for AI-agent use. Participant facades are the connection
@@ -26,7 +26,7 @@
 //! private Jobs queues, and access resolved KV and object-store handles.
 //!
 //! Connection and request failures retain typed authentication, transport,
-//! validation, declared-RPC, and bootstrap errors. Callers should retry only
+//! generated declared-RPC, protocol, and bootstrap errors. Callers should retry only
 //! errors documented as transient. Native bootstrap resolves the server-owned
 //! assignment and current grants from a provisioned seed.
 //!
@@ -62,8 +62,6 @@ pub mod jobs;
     unused_imports,
     reason = "generated private projections are consumed selectively"
 )]
-pub(crate) mod internal_sdk;
-
 extern crate self as trellis_rs;
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 import type { StaticDecode, TSchema } from "typebox";
 
 import type { BaseError } from "@qlever-llc/result";
+import type { Codec } from "../generated.ts";
 type SubjectParam = `/${string}`;
 
 export type Schema<T> = {
@@ -8,7 +9,7 @@ export type Schema<T> = {
   readonly __trellisType?: T;
 };
 
-export type SchemaLike<T = unknown> = TSchema | Schema<T>;
+export type SchemaLike<T = unknown> = TSchema | Schema<T> | Codec<T>;
 
 export type SerializableErrorData = {
   id: string;
@@ -59,7 +60,7 @@ export function unwrapSchema(raw: SchemaLike): unknown {
 
 /** Exact permission metadata for one contract API surface action. */
 export type PermissionAtom = Readonly<{
-  /** Source API artifact identity. */
+  /** Source API semantic identity. */
   apiId: string;
   /** Version of the source API surface. */
   apiVersion: `v${number}`;

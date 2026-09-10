@@ -25,7 +25,7 @@ pub(super) use types::AuthorizationCredential;
 #[cfg(feature = "runtime-internals")]
 pub use types::AuthorizationRegistryBinding;
 pub use types::{
-    AuthorizationContextBundle, AuthorizationContextPolicy, AuthorizationInstallation,
-    AuthorizationNativeTransport, AuthorizationRoutingMaterial, AuthorizationRuntimeBinding,
-    AuthorizationRuntimeTransports,
+    AuthorizationApiBinding, AuthorizationContextBundle, AuthorizationContextPolicy,
+    AuthorizationInstallation, AuthorizationNativeTransport, AuthorizationRoutingMaterial,
+    AuthorizationRuntimeBinding, AuthorizationRuntimeTransports,
 };

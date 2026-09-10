@@ -15,13 +15,19 @@ use trellis_protocol::{
     AuthorizationPrincipalKind, GrantOwnerKind, ParticipantKind, ParticipantResourceKind,
     PermissionAction, PermissionAtom, PermissionTarget, StateKind,
 };
+use trellis_rs::generated::RpcDescriptor;
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, DeclaredRpcError, RequestContext, Router,
     ServerError, ValidationIssue,
 };
-use trellis_runtime_apis::state::rpc::{
-    StateAdminDeleteRpc, StateAdminGetRpc, StateAdminListRpc, StateDeleteRpc, StateGetRpc,
-    StateListRpc, StatePutRpc,
+use trellis_runtime_apis::apis::trellis_state_v1::rpc::{
+    AdminDelete as StateAdminDeleteRpc, AdminGet as StateAdminGetRpc,
+    AdminList as StateAdminListRpc, Delete as StateDeleteRpc, Get as StateGetRpc,
+    List as StateListRpc, Put as StatePutRpc,
+};
+use trellis_runtime_apis::types::{
+    Bytes as WireBytes, StateAdminDeleteResponse, StateAdminGetResponse, StateAdminListResponse,
+    StateDeleteResponse, StateGetResponse, StateListResponse, StatePutResponse, Uint64,
 };
 
 use super::auth::context::AuthorizationContextRepository;
@@ -38,13 +44,13 @@ const BUCKET: &str = "trellis_state";
 const STREAM: &str = "KV_trellis_state";
 const SUBJECT_PREFIX: &str = "$KV.trellis_state.";
 const SUBJECTS: &[&str] = &[
-    "rpc.v1.State.Get",
-    "rpc.v1.State.Put",
-    "rpc.v1.State.Delete",
-    "rpc.v1.State.List",
-    "rpc.v1.State.Admin.Get",
-    "rpc.v1.State.Admin.List",
-    "rpc.v1.State.Admin.Delete",
+    StateGetRpc::SUBJECT,
+    StatePutRpc::SUBJECT,
+    StateDeleteRpc::SUBJECT,
+    StateListRpc::SUBJECT,
+    StateAdminGetRpc::SUBJECT,
+    StateAdminListRpc::SUBJECT,
+    StateAdminDeleteRpc::SUBJECT,
 ];
 
 #[derive(Clone)]
@@ -214,37 +220,92 @@ impl StateRuntime {
         let state = self.clone();
         router.register_rpc::<StateGetRpc, _, _>(move |context, input| {
             let state = state.clone();
-            async move { output(state.get(context, serde_json::to_value(input)?).await?) }
+            async move {
+                let input = json!({
+                    "store": input.store.0,
+                    "key": input.key.map(|value| value.0),
+                });
+                json_bytes(state.get(context, input).await?).map(StateGetResponse)
+            }
         });
         let state = self.clone();
         router.register_rpc::<StatePutRpc, _, _>(move |context, input| {
             let state = state.clone();
-            async move { output(state.put(context, serde_json::to_value(input)?).await?) }
+            async move {
+                let value = serde_json::from_slice::<Value>(&input.value.0)?;
+                let ttl_ms = input.ttl_ms.as_ref().map(|value| value.0 .0);
+                let mut input = serde_json::to_value(input)?;
+                input["value"] = value;
+                input["ttlMs"] = serde_json::to_value(ttl_ms)?;
+                json_bytes(state.put(context, input).await?).map(StatePutResponse)
+            }
         });
         let state = self.clone();
         router.register_rpc::<StateDeleteRpc, _, _>(move |context, input| {
             let state = state.clone();
-            async move { output(state.delete(context, serde_json::to_value(input)?).await?) }
+            async move {
+                let input = json!({
+                    "store": input.store.0,
+                    "key": input.key.map(|value| value.0),
+                    "expectedRevision": input.expected_revision.map(|value| value.0),
+                });
+                serde_json::from_value::<StateDeleteResponse>(state.delete(context, input).await?)
+                    .map_err(ServerError::from)
+            }
         });
         let state = self.clone();
         router.register_rpc::<StateListRpc, _, _>(move |context, input| {
             let state = state.clone();
-            async move { output(state.list(context, serde_json::to_value(input)?).await?) }
+            async move {
+                let input = json!({
+                    "store": input.store.0,
+                    "prefix": input.prefix.map(|value| value.0),
+                    "offset": input.offset.map(|value| value.0),
+                    "limit": input.limit.0,
+                });
+                let (entries, count, offset, limit, next_offset) =
+                    list_output(state.list(context, input).await?)?;
+                Ok(StateListResponse {
+                    entries,
+                    count: Uint64(count),
+                    offset: Uint64(offset),
+                    limit: Uint64(limit),
+                    next_offset: next_offset.map(Uint64),
+                })
+            }
         });
         let state = self.clone();
         router.register_rpc::<StateAdminGetRpc, _, _>(move |_context, input| {
             let state = state.clone();
-            async move { output(state.admin_get(serde_json::to_value(input)?).await?) }
+            async move {
+                let input = serde_json::from_slice(&input.0 .0)?;
+                json_bytes(state.admin_get(input).await?).map(StateAdminGetResponse)
+            }
         });
         let state = self.clone();
         router.register_rpc::<StateAdminListRpc, _, _>(move |_context, input| {
             let state = state.clone();
-            async move { output(state.admin_list(serde_json::to_value(input)?).await?) }
+            async move {
+                let input = serde_json::from_slice(&input.0 .0)?;
+                let (entries, count, offset, limit, next_offset) =
+                    list_output(state.admin_list(input).await?)?;
+                Ok(StateAdminListResponse {
+                    entries,
+                    count: Uint64(count),
+                    offset: Uint64(offset),
+                    limit: Uint64(limit),
+                    next_offset: next_offset.map(Uint64),
+                })
+            }
         });
         let state = self.clone();
         router.register_rpc::<StateAdminDeleteRpc, _, _>(move |_context, input| {
             let state = state.clone();
-            async move { output(state.admin_delete(serde_json::to_value(input)?).await?) }
+            async move {
+                let input = serde_json::from_slice(&input.0 .0)?;
+                serde_json::from_value::<StateAdminDeleteResponse>(state.admin_delete(input).await?)
+                    .map_err(ServerError::from)
+            }
         });
         router
     }
@@ -830,7 +891,7 @@ fn declaration_from_binding(
         scope,
         owner_id,
         contract_id,
-        contract_digest: binding.artifact_digest,
+        contract_digest: binding.participant_digest,
         store: store.to_owned(),
         kind: definition.kind(),
         schema,
@@ -1114,8 +1175,35 @@ fn validate_schema(
     }
 }
 
-fn output<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T, ServerError> {
-    serde_json::from_value(value).map_err(ServerError::from)
+fn json_bytes(value: Value) -> Result<WireBytes, ServerError> {
+    serde_json::to_vec(&value)
+        .map(WireBytes)
+        .map_err(ServerError::from)
+}
+
+fn list_output(value: Value) -> Result<(Vec<WireBytes>, u64, u64, u64, Option<u64>), ServerError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ListOutput {
+        entries: Vec<Value>,
+        count: u64,
+        offset: u64,
+        limit: u64,
+        next_offset: Option<u64>,
+    }
+
+    let output: ListOutput = serde_json::from_value(value)?;
+    Ok((
+        output
+            .entries
+            .into_iter()
+            .map(json_bytes)
+            .collect::<Result<_, _>>()?,
+        output.count,
+        output.offset,
+        output.limit,
+        output.next_offset,
+    ))
 }
 
 fn validation(path: &str, message: &str) -> ServerError {
@@ -1163,8 +1251,6 @@ fn kv_error(error: impl std::fmt::Display) -> ServerError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trellis_protocol::parse_api;
-    use trellis_protocol::{parse_participant, resolve_participant};
 
     fn test_declaration(digest: &str) -> Declaration {
         Declaration {
@@ -1246,89 +1332,6 @@ mod tests {
         .err()
         .expect("conflicting candidates must fail");
         assert!(format!("{incoherent:?}").contains("UnexpectedError"));
-    }
-
-    #[test]
-    fn state_declaration_admin_and_writer_digests_match_participant_binding() {
-        let api = json!({
-            "format": "trellis.api.v1",
-            "id": "example.device@v1",
-            "version": "1.0.0",
-            "displayName": "Example Device",
-            "description": "State test API",
-            "schemas": {"State": {"type": "number"}},
-            "state": {"preferences": {"kind": "value", "schema": {"schema": "State"}}}
-        });
-        let parsed_api = parse_api(&api).expect("API");
-        let api_digest = parsed_api.digest().expect("API digest");
-        let shared_api = json!({
-            "format": "trellis.api.v1",
-            "id": "example.shared@v1",
-            "version": "1.0.0",
-            "displayName": "Shared",
-            "description": "State test dependency",
-            "schemas": {"State": {"type": "boolean"}},
-            "state": {"preferences": {"kind": "value", "schema": {"schema": "State"}}}
-        });
-        let parsed_shared_api = parse_api(&shared_api).expect("shared API");
-        let shared_api_digest = parsed_shared_api.digest().expect("shared API digest");
-        let participant = json!({
-            "format": "trellis.participant.v1",
-            "id": "example.device-participant@v1",
-            "displayName": "Example Device",
-            "description": "State test participant",
-            "kind": "device",
-            "schemas": {"State": {"type": "string"}},
-            "state": {"preferences": {"kind": "value", "schema": {"schema": "State"}}},
-            "implements": {
-                "shared": {"api": "example.shared@v1", "apiDigest": shared_api_digest},
-                "self": {"api": "example.device@v1", "apiDigest": api_digest}
-            }
-        });
-        let parsed_participant = parse_participant(&participant).expect("participant");
-        let participant_digest = parsed_participant.digest().expect("participant digest");
-        let resolved = resolve_participant(
-            &parsed_participant,
-            &BTreeMap::from([
-                ("example.device@v1".to_owned(), parsed_api),
-                ("example.shared@v1".to_owned(), parsed_shared_api),
-            ]),
-        )
-        .expect("resolved participant");
-        let binding = ParticipantBindingRecord {
-            participant_id: "example.device-participant@v1".to_owned(),
-            participant_kind: ParticipantKind::Device,
-            artifact_digest: participant_digest.clone(),
-            needs_digest: resolved.needs().digest().expect("needs digest"),
-            participant_json: serde_json::to_string(&participant).expect("participant JSON"),
-            api_artifacts_json: serde_json::to_string(&json!({
-                "example.device@v1": api,
-                "example.shared@v1": shared_api
-            }))
-            .expect("API map JSON"),
-            resolved_at: 0,
-            state: ParticipantBindingState::Resolved,
-            error: None,
-        };
-        let declaration = declaration_from_binding(
-            binding,
-            Scope::DeviceApp,
-            "device-1".to_owned(),
-            "example.device-participant@v1".to_owned(),
-            "preferences",
-        )
-        .expect("declaration");
-        assert_eq!(declaration.contract_digest, participant_digest);
-        assert_eq!(declaration.schema, json!({"type": "string"}));
-        assert!(validate_admin_digest(declaration.clone(), &participant_digest).is_ok());
-        let writer = StoredEnvelope {
-            value: json!("value"),
-            state_version: declaration.state_version.clone(),
-            writer_contract_digest: declaration.contract_digest.clone(),
-            updated_at: "2025-01-01T00:00:00Z".to_owned(),
-            expires_at: None,
-        };
-        assert_eq!(writer.writer_contract_digest, participant_digest);
     }
 
     #[test]

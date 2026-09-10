@@ -57,10 +57,18 @@ pub(crate) async fn refresh(
         request["name"] = json!(name);
     }
     let (route, input, signer) = match cache.credential.as_ref() {
-        AuthorizationCredential::Native { kind, identity } => {
+        AuthorizationCredential::Native {
+            kind,
+            identity,
+            package_evidence,
+            participant_path,
+        } => {
             request["identityKeyId"] = json!(identity.key_id());
             request["sessionKey"] = json!(auth.session_key);
             request["iat"] = json!(issued_at);
+            request["packageEvidence"] = serde_json::to_value(package_evidence)?;
+            request["participantPath"] = json!(participant_path);
+            request["packageDigest"] = json!(package_evidence.root_digest());
             let input = NativeBootstrapSessionProofInput {
                 origin: cache.http().origin(),
                 unsigned_request: request.clone(),
@@ -122,6 +130,7 @@ pub(crate) async fn refresh(
         context: serde_json::from_value(response["authorizationContext"].clone())?,
         routing: serde_json::from_value(response["routing"].clone())?,
         runtime: serde_json::from_value(runtime)?,
+        api_bindings: serde_json::from_value(response["apiBindings"].clone())?,
         server_clock_offset_ms: server_now
             .checked_sub(midpoint)
             .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap time overflow".into()))?,

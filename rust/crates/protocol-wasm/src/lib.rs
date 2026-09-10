@@ -2,13 +2,10 @@
 
 #![deny(missing_docs)]
 
-use std::collections::BTreeMap;
-
 use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_protocol::{
-    parse_api, parse_authorization_context, parse_participant,
-    resolve_participant as resolve_participant_protocol,
+    parse_authorization_context,
     session_proof_request_digest as session_proof_request_digest_protocol,
     session_proof_signing_digest as session_proof_signing_digest_protocol,
     verify_authorization_context as verify_authorization_context_protocol,
@@ -263,64 +260,6 @@ pub fn verify_authorization_context(
     policy_json: &str,
 ) -> Result<String, JsError> {
     create_authorization_context_handle(issuer_json, context_json, policy_json, false)?.projection()
-}
-
-/// Resolve one participant against its exact native API artifacts.
-#[wasm_bindgen]
-pub fn resolve_participant(participant_json: &str, apis_json: &str) -> Result<String, JsError> {
-    let participant_value: Value =
-        serde_json::from_str(participant_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let participant =
-        parse_participant(&participant_value).map_err(|error| JsError::new(&error.to_string()))?;
-    let api_values: BTreeMap<String, Value> =
-        serde_json::from_str(apis_json).map_err(|error| JsError::new(&error.to_string()))?;
-    let mut apis = BTreeMap::new();
-    for (id, value) in api_values {
-        let api = parse_api(&value).map_err(|error| JsError::new(&error.to_string()))?;
-        if api.id() != id {
-            return Err(JsError::new(&format!(
-                "API map key '{id}' does not match artifact id '{}'",
-                api.id()
-            )));
-        }
-        apis.insert(id, api);
-    }
-    let resolved = resolve_participant_protocol(&participant, &apis)
-        .map_err(|error| JsError::new(&error.to_string()))?;
-    let api_artifacts = apis
-        .iter()
-        .map(|(id, api)| {
-            Ok((
-                id.clone(),
-                api.normalized_value()
-                    .map_err(|error| JsError::new(&error.to_string()))?,
-            ))
-        })
-        .collect::<Result<BTreeMap<_, _>, JsError>>()?;
-    let api_digests = apis
-        .iter()
-        .map(|(id, api)| {
-            Ok((
-                id.clone(),
-                api.digest()
-                    .map_err(|error| JsError::new(&error.to_string()))?,
-            ))
-        })
-        .collect::<Result<BTreeMap<_, _>, JsError>>()?;
-    serde_json::to_string(&json!({
-        "apiArtifacts": api_artifacts,
-        "apiDigests": api_digests,
-        "participant": participant.normalized_value()
-            .map_err(|error| JsError::new(&error.to_string()))?,
-        "participantDigest": resolved.participant_digest(),
-        "participantNeeds": resolved.needs(),
-        "participantNeedsDigest": resolved.needs().digest()
-            .map_err(|error| JsError::new(&error.to_string()))?,
-        "requiredGrants": resolved.proposal().required().grant_set(),
-        "optionalGrants": resolved.proposal().optional().grant_set(),
-        "authorityProposal": resolved.proposal(),
-    }))
-    .map_err(|error| JsError::new(&error.to_string()))
 }
 
 /// Opaque Rust-owned authorization context retained for repeated proof verification.

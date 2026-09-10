@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use trellis_protocol::{GrantSet, PlatformPrivilege};
 
 use super::{
@@ -94,56 +94,31 @@ pub(crate) fn browser_consent_proposal(
     binding: &ParticipantBindingRecord,
 ) -> Result<BrowserConsentProposal, AuthorizationStateError> {
     let resolved = binding.resolve()?;
-    let proposal = resolved.proposal();
-    let participant: Value = serde_json::from_str(&binding.participant_json)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let consent_view = json!({
         "participant": {
             "id": binding.participant_id,
-            "digest": binding.artifact_digest,
-            "displayName": participant.get("displayName").and_then(Value::as_str).unwrap_or(&binding.participant_id),
-            "description": participant.get("description").and_then(Value::as_str).unwrap_or("Trellis participant"),
+            "digest": binding.participant_digest,
+            "displayName": resolved.display_name,
+            "description": "Trellis participant",
         },
         "required": {
-            "permissions": proposal.required().grant_set().permissions(),
-            "capabilities": proposal.required().capabilities().iter().map(|capability| capability.name()).collect::<Vec<_>>(),
+            "permissions": resolved.required_grants.permissions(),
+            "capabilities": resolved.required_capabilities,
         },
-        "optionalBundles": resolved.optional_apis().iter().map(|used| json!({
-            "id": used.alias(),
-            "apiId": used.api(),
-            "permissions": used.grant_set().permissions(),
+        "optionalBundles": resolved.optional_grant_bundles.iter().map(|(id, grant)| json!({
+            "id": id,
+            "permissions": grant.permissions(),
         })).collect::<Vec<_>>(),
     });
-    let required_grant_set = proposal.required().grant_set().clone();
-    let optional_grant_bundles = resolved
-        .optional_apis()
-        .iter()
-        .map(|used| (used.alias().to_owned(), used.grant_set().clone()))
-        .collect::<BTreeMap<_, _>>();
-    let mut required_capabilities = proposal
-        .required()
-        .capabilities()
-        .iter()
-        .map(|capability| capability.name().to_owned())
-        .collect::<Vec<_>>();
-    required_capabilities.sort();
-    required_capabilities.dedup();
-    let optional_capability_definitions = proposal
-        .optional()
-        .capabilities()
-        .iter()
-        .map(|capability| {
-            (
-                capability.name().to_owned(),
-                GrantSet::new(capability.allows().to_vec()),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
+    let required_grant_set = resolved.required_grants.clone();
+    let optional_grant_bundles = resolved.optional_grant_bundles.clone();
+    let required_capabilities = resolved.required_capabilities.clone();
+    let optional_capability_definitions = resolved.optional_capability_definitions.clone();
     let consent_view_digest = trellis_protocol::digest_json(&consent_view)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let proposal_digest = trellis_protocol::digest_json(&json!({
         "participantId": binding.participant_id,
-        "participantArtifactDigest": binding.artifact_digest,
+        "participantDigest": binding.participant_digest,
         "participantNeedsDigest": binding.needs_digest,
         "requiredGrantSet": required_grant_set,
         "optionalGrantBundles": optional_grant_bundles,
@@ -153,7 +128,7 @@ pub(crate) fn browser_consent_proposal(
     .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let consent = BrowserConsentProposal {
         participant_id: binding.participant_id.clone(),
-        participant_artifact_digest: binding.artifact_digest.clone(),
+        participant_digest: binding.participant_digest.clone(),
         participant_needs_digest: binding.needs_digest.clone(),
         consent_view,
         consent_view_digest,
@@ -187,7 +162,7 @@ struct EffectivePortalAuthority<'a> {
     format: &'static str,
     portal_id: &'a str,
     participant_id: &'a str,
-    participant_artifact_digest: &'a str,
+    participant_digest: &'a str,
     participant_needs_digest: &'a str,
     grant_set: &'a GrantSet,
     capabilities: &'a [String],
@@ -241,7 +216,7 @@ pub(crate) fn resolve_portal_authority_selection(
         format: "trellis.portal-effective-authority.v1",
         portal_id: &policy.portal_id,
         participant_id: &policy.participant_id,
-        participant_artifact_digest: &consent.participant_artifact_digest,
+        participant_digest: &consent.participant_digest,
         participant_needs_digest: &consent.participant_needs_digest,
         grant_set: &grant_set,
         capabilities: &capabilities,
@@ -319,7 +294,7 @@ mod tests {
     fn expands_nested_provider_scoped_roles_without_optional_bundles() {
         let consent = BrowserConsentProposal {
             participant_id: "app".to_owned(),
-            participant_artifact_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            participant_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
             participant_needs_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
             consent_view: json!({}),
             consent_view_digest: String::new(),
@@ -384,7 +359,7 @@ mod tests {
     fn roles_are_exact_and_order_independent() {
         let consent = BrowserConsentProposal {
             participant_id: "app".to_owned(),
-            participant_artifact_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            participant_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
             participant_needs_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
             consent_view: json!({}),
             consent_view_digest: String::new(),
@@ -460,7 +435,7 @@ mod tests {
     fn rejects_reserved_capabilities_outside_platform_administration() {
         let consent = BrowserConsentProposal {
             participant_id: "app".to_owned(),
-            participant_artifact_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
+            participant_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
             participant_needs_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
             consent_view: json!({}),
             consent_view_digest: String::new(),

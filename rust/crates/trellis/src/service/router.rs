@@ -268,10 +268,10 @@ impl Router {
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let handler = Arc::clone(&handler);
                     Box::pin(async move {
-                        let input = parse_validated_input::<D::Input>(&payload, D::INPUT_SCHEMA_JSON)?;
+                        let input = decode_generated_input::<D::Input>(&payload)?;
                         let output = handler(ctx, input).await?;
-                        let output = serde_json::to_value(output)?;
-                        validate_provider_value(D::KEY, D::OUTPUT_SCHEMA_JSON, &output)?;
+                        let output = crate::generated::Codec::encode(&output)
+                            .map_err(|error| ServerError::Nats(error.to_string()))?;
                         Ok(HandlerResponse::Frames(vec![Bytes::from(serde_json::to_vec(
                             &output,
                         )?)]))
@@ -384,7 +384,7 @@ impl Router {
                     let cancellations = Arc::clone(&cancellations);
                     let handler_subject = handler_subject.clone();
                     Box::pin(async move {
-                        let input = parse_validated_input::<D::Input>(&payload, D::INPUT_SCHEMA_JSON)?;
+                        let input = decode_generated_input::<D::Input>(&payload)?;
                         let reply_to = ctx.reply_to.clone().ok_or_else(|| {
                             ServerError::Nats("feed request is missing a reply inbox".to_string())
                         })?;
@@ -415,11 +415,9 @@ impl Router {
                             key,
                             cancellations,
                         };
-                         Ok(HandlerResponse::FeedStream(feed_response_stream(
+                        Ok(HandlerResponse::FeedStream(feed_response_stream(
                             handler(ctx, input).take_until(cancellation),
-                            D::KEY,
-                            D::EVENT_SCHEMA_JSON,
-                         )))
+                        )))
                     })
                 },
             ),
@@ -724,12 +722,25 @@ fn feed_cancel_reply_to(payload: &[u8]) -> Option<String> {
         .map(ToString::to_string)
 }
 
-/// Parse bytes into a valid JSON value, validate against JSON Schema, then
-/// deserialize into the target type.
-///
-/// JSON Schema validation failures become `ServerError::Validation` or
-/// `ServerError::SchemaValidation` before handler dispatch.
-/// Serde deserialization failures after successful validation are internal errors.
+fn decode_generated_input<T>(payload: &[u8]) -> Result<T, ServerError>
+where
+    T: crate::generated::Codec,
+{
+    let value: serde_json::Value =
+        serde_json::from_slice(payload).map_err(|error| ServerError::Validation {
+            issues: Box::new(vec![ValidationIssue {
+                path: String::new(),
+                message: format!("Invalid JSON: {error}"),
+            }]),
+        })?;
+    T::decode(value).map_err(|error| ServerError::Validation {
+        issues: Box::new(vec![ValidationIssue {
+            path: String::new(),
+            message: error.to_string(),
+        }]),
+    })
+}
+
 fn parse_validated_input<T>(payload: &[u8], schema_json: &str) -> Result<T, ServerError>
 where
     T: serde::de::DeserializeOwned,
@@ -741,28 +752,20 @@ where
                 message: format!("Invalid JSON: {error}"),
             }]),
         })?;
-
     validate_input_schema(schema_json, &value)?;
-
-    serde_json::from_value::<T>(value).map_err(|error| {
-        ServerError::Nats(format!(
-            "validated payload failed Rust type decoding: {error}"
-        ))
-    })
+    serde_json::from_value(value).map_err(ServerError::from)
 }
 
 fn feed_response_stream<TEvent>(
     events: impl Stream<Item = Result<TEvent, ServerError>> + Send + 'static,
-    key: &'static str,
-    schema_json: &'static str,
 ) -> ResponseStream
 where
-    TEvent: serde::Serialize + 'static,
+    TEvent: crate::generated::Codec + 'static,
 {
-    Box::pin(events.map(move |event| {
+    Box::pin(events.map(|event| {
         event.and_then(|event| {
-            let event = serde_json::to_value(event)?;
-            validate_provider_value(key, schema_json, &event)?;
+            let event = crate::generated::Codec::encode(&event)
+                .map_err(|error| ServerError::Nats(error.to_string()))?;
             Ok(Bytes::from(serde_json::to_vec(&event)?))
         })
     }))
@@ -1036,10 +1039,11 @@ mod tests {
         type Input = Value;
         type Event = Value;
 
+        const API_ID: &'static str = "test@v1";
+        const DESCRIPTOR_NAME: &'static str = "feed.Live";
         const KEY: &'static str = "Test.Live";
         const SUBJECT: &'static str = "feeds.v1.Test.Live";
-        const INPUT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
-        const EVENT_SCHEMA_JSON: &'static str = r#"{"type":"object"}"#;
+        const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[];
     }
 
     #[tokio::test]
