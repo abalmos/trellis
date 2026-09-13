@@ -15,8 +15,8 @@ path = "./../../../rust/crates/runtime"
 [[packages]]
 name = "trellis-test-generated"
 version = "0.12.0"
-digest = "a92NQfoZJMlqPGsv-XuzI7DBUuaXQXNKW4O_ZEzsj6w"
-distribution-digest = "sha256:e5d6527341080947e2bcb723cfa67e7dd02dea9527a4bc2f86a54dadabf2ad18"
+digest = "giqvRE9LOnXXUEnSlN1kBNAhoy8aQgWceJEsv74KjSo"
+distribution-digest = "sha256:ecfa5258f19635e166c57ded6a1a75a8c269c72e78b9beef531f7eccb5f9d30d"
 
 [[packages.dependencies]]
 name = "trellis"

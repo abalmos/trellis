@@ -564,7 +564,7 @@ async function createSessionKeyRuntimeIdentity(
   const seed = base64urlDecode(sessionKeySeed);
   const runtimeSeed = runtimeSessionKeySeed
     ? base64urlDecode(runtimeSessionKeySeed)
-    : crypto.getRandomValues(new Uint8Array(32));
+    : seed;
   const privateKey = await importEd25519PrivateKeyFromSeedBase64url(
     base64urlEncode(runtimeSeed),
   );

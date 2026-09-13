@@ -152,11 +152,17 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .as_ref()
         .and_then(|http| http.public_origin.clone())
         .unwrap_or_else(|| format!("http://localhost:{}", context.config.http_port()));
+    let allow_insecure_origin = context
+        .config
+        .http
+        .as_ref()
+        .is_some_and(|http| http.allows_insecure_origin(&public_origin));
     let authorization_contexts = auth::AuthorizationContextService::start(
         Arc::new(auth_store.clone()),
         context.trellis_nats.clone(),
         authorization_config.clone(),
         public_origin.clone(),
+        allow_insecure_origin,
         now / 1_000,
     )
     .await

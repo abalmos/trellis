@@ -373,3 +373,27 @@ fn administrator_grants_include_console_surfaces() {
     let json = serde_json::to_string(&grants).expect("serialize administration grants");
     assert!(json.contains("Capabilities.List"), "{json}");
 }
+
+#[tokio::test]
+async fn expired_flows_are_marked_expired_with_a_valid_completion_timestamp() {
+    use crate::platform::auth::ephemeral::tests::browser_flow;
+    use crate::platform::auth::ephemeral::{
+        AuthBrowserFlowState, AuthEphemeralRepository, InMemoryAuthEphemeralRepository,
+    };
+
+    let repository = InMemoryAuthEphemeralRepository::default();
+    let flow = browser_flow();
+    repository.create_browser_flow(flow.clone()).await.unwrap();
+    let error = super::load_flow(&repository, &flow.flow_id)
+        .await
+        .expect_err("expired flow is rejected");
+    assert_eq!(error.status, axum::http::StatusCode::GONE);
+    assert_eq!(error.code, "flow_expired");
+    let stored = repository
+        .get_browser_flow(&flow.flow_id)
+        .await
+        .unwrap()
+        .expect("flow remains stored");
+    assert_eq!(stored.state, AuthBrowserFlowState::Expired);
+    assert_eq!(stored.completed_at, Some(flow.expires_at));
+}

@@ -37,7 +37,7 @@ impl AuthorizationContextCache {
     ) -> Result<Self, TrellisClientError> {
         let (availability, _) = tokio::sync::watch::channel(Default::default());
         Ok(Self {
-            http: BootstrapHttp::new(trellis_url)?,
+            http: BootstrapHttp::new(trellis_url, false)?,
             credential: Arc::new(credential),
             connection_id,
             participant_id,

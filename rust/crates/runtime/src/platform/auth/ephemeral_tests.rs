@@ -17,7 +17,7 @@ fn connection_kick_response_rejects_system_errors() {
     .is_err());
 }
 
-fn browser_flow() -> AuthBrowserFlow {
+pub(crate) fn browser_flow() -> AuthBrowserFlow {
     let mut flow = AuthBrowserFlow {
         format: BROWSER_FLOW_FORMAT.to_owned(),
         flow_id: "flow-1".to_owned(),

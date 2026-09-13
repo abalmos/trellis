@@ -389,7 +389,7 @@ async fn load_flow(
         let expected = flow.version;
         let mut expired = flow;
         expired.state = AuthBrowserFlowState::Expired;
-        expired.completed_at = Some(now_ms()?);
+        expired.completed_at = Some(expired.expires_at);
         expired.version += 1;
         repository.replace_browser_flow(expected, expired).await?;
         return Err(HttpError::gone("flow_expired"));

@@ -10,7 +10,8 @@
     getInitials,
     getPageTitle,
     getRoleLabel,
-    requiresCapabilityRoute,
+    requiresAdministrativeRoute,
+    type Authority,
     type NavSection,
   } from "../control-panel.ts";
   import ActionMenu from "./ActionMenu.svelte";
@@ -26,6 +27,7 @@
   type Props = {
     children: Snippet;
     profile: apis.auth.SessionsMeOutput["user"] | null;
+    authority: Authority | null;
     profileLoaded: boolean;
     navSections: NavSection[];
     connectionStatus: ConnectionStatus["phase"];
@@ -36,6 +38,7 @@
   let {
     children,
     profile,
+    authority,
     profileLoaded,
     navSections,
     connectionStatus,
@@ -162,7 +165,7 @@
             <li class="menu-title px-2 py-2 normal-case">
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium">{profile.name}</p>
-                <p class="text-xs text-base-content/60">{getRoleLabel(profile)}</p>
+                <p class="text-xs text-base-content/60">{getRoleLabel(authority)}</p>
               </div>
             </li>
             <li><a class="btn btn-ghost btn-sm justify-start" href={resolveAppPath("/profile")}>Account</a></li>
@@ -177,7 +180,7 @@
         <Notice variant="error" class="mb-4">{authFailure}</Notice>
       {/if}
 
-      {#if requiresCapabilityRoute(routePath) && !profileLoaded}
+      {#if requiresAdministrativeRoute(routePath) && !profileLoaded}
         <LoadingState label="Loading operator profile" class="min-h-[40vh]" />
       {:else}
         {@render children()}

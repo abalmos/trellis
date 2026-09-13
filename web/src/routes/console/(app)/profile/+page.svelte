@@ -43,7 +43,7 @@
   const connectionStatus = $derived(connection.status.phase);
   const hasLocalIdentity = $derived(identities.some((identity) => identity.providerId.trim().toLowerCase() === "local"));
   const capabilityCount = $derived(platformPrivileges.length);
-  const accountRole = $derived(user ? getRoleLabel(user) : "Member");
+  const accountRole = $derived(getRoleLabel({ platformPrivileges }));
   const sessionStatusLabel = $derived(
     connectionStatus === "connected" ? "Connected" : connectionStatus === "reconnecting" ? "Reconnecting" : "Disconnected",
   );

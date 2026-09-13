@@ -9,6 +9,7 @@
   import {
     canAccessRoute,
     getVisibleNavSections,
+    type Authority,
     type NavSection,
   } from "../control-panel.ts";
   import { errorMessage } from "../format";
@@ -28,6 +29,7 @@
 
   let authFailure = $state<string | null>(null);
   const connectionStatus = $derived<ConnectionStatus["phase"]>(connection.status.phase);
+  let authority = $state<Authority | null>(null);
   let navSections = $state<NavSection[]>(getVisibleNavSections(null));
   let profile = $state<apis.auth.SessionsMeOutput["user"] | null>(null);
   let profileLoaded = $state(false);
@@ -44,8 +46,8 @@
     return pathname;
   }
 
-  function enforceCapabilityAccess(pathname: string): void {
-    if (!profileLoaded || canAccessRoute(pathname, profile)) {
+  function enforceAuthorityAccess(pathname: string): void {
+    if (!profileLoaded || canAccessRoute(pathname, authority)) {
       return;
     }
 
@@ -67,7 +69,7 @@
 
   afterNavigate(({ to }) => {
     if (!to) return;
-    enforceCapabilityAccess(toRoutePath(to.url.pathname));
+    enforceAuthorityAccess(toRoutePath(to.url.pathname));
   });
 
   onMount(() => {
@@ -78,9 +80,13 @@
         const me = await authMe();
         if (!active) return;
 
+        authority = {
+          platformPrivileges: me.connection.platformPrivileges,
+          grants: me.connection.grants,
+        };
+        navSections = getVisibleNavSections(authority);
         if (me.user) {
           profile = me.user;
-          navSections = getVisibleNavSections(profile);
         }
       } catch (error) {
         if (!active) return;
@@ -88,7 +94,7 @@
       } finally {
         if (active) {
           profileLoaded = true;
-      enforceCapabilityAccess(toRoutePath(page.url.pathname));
+          enforceAuthorityAccess(toRoutePath(page.url.pathname));
         }
       }
     })();
@@ -105,6 +111,7 @@
 
 <AppShell
   {profile}
+  {authority}
   {profileLoaded}
   {navSections}
   {connectionStatus}

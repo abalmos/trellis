@@ -1,14 +1,33 @@
-type Profile =
-  | {
-    active?: boolean;
-    capabilities?: readonly string[];
-    email?: string | null;
-    id?: string;
-    name?: string | null;
-    origin?: string;
-  }
-  | null
-  | undefined;
+import { apis } from "trellis-web-generated";
+
+type Connection = apis.auth.SessionsMeOutput["connection"];
+
+/** Participant-scoped authority retained from the live Trellis connection. */
+export type Authority = Pick<Connection, "platformPrivileges" | "grants">;
+
+/** Platform privilege that gates Trellis Auth administration. */
+export const PLATFORM_ADMIN = "trellis.auth::admin";
+
+const HEALTH_API = apis.health.API.identity;
+const EVENTS_API = apis.events.API.identity;
+const JOBS_API = apis.jobs.API.identity;
+
+/** One exact API-surface permission atom required by a route or action. */
+export type ExactPermission = {
+  api: string;
+  surface: string;
+  name: string;
+  action: string;
+};
+
+type Requirement = {
+  privilege?: string;
+  permission?: ExactPermission;
+};
+
+type DisplayProfile = {
+  name?: string | null;
+};
 
 export const routeTitles = {
   "/profile": "Account",
@@ -49,7 +68,7 @@ export type NavItem = {
   href: AppPathname;
   label: string;
   icon: string;
-  capabilities?: readonly string[];
+  requires?: readonly Requirement[];
 };
 
 export type NavSection = {
@@ -57,26 +76,7 @@ export type NavSection = {
   items: NavItem[];
 };
 
-const CAPABILITIES = {
-  authorityRead: "trellis.auth@v1::authorities_read",
-  capabilityRead: "trellis.auth@v1::capabilities_read",
-  devicesRead: "trellis.auth@v1::devices_read",
-  eventsRead: "trellis.events@v1::read",
-  healthRead: "trellis.health@v1::read",
-  jobsRead: "trellis.jobs@v1::read",
-  portalsRead: "trellis.auth@v1::portals_read",
-  servicesRead: "trellis.auth@v1::services_read",
-  sessionsRead: "trellis.auth@v1::sessions_read",
-  usersRead: "trellis.auth@v1::users_read",
-} as const;
-
-const overviewCapabilities = [
-  CAPABILITIES.usersRead,
-  CAPABILITIES.healthRead,
-  CAPABILITIES.sessionsRead,
-  CAPABILITIES.eventsRead,
-  CAPABILITIES.jobsRead,
-] as const;
+const ADMIN_ONLY: readonly Requirement[] = [{ privilege: PLATFORM_ADMIN }];
 
 const navSections: NavSection[] = [
   {
@@ -90,49 +90,76 @@ const navSections: NavSection[] = [
         href: "/admin",
         label: "Overview",
         icon: "users",
-        capabilities: overviewCapabilities,
+        requires: ADMIN_ONLY,
       },
       {
         href: "/admin/health-events",
         label: "Health Events",
         icon: "alert",
-        capabilities: [CAPABILITIES.healthRead],
+        requires: [
+          {
+            permission: {
+              api: HEALTH_API,
+              surface: "rpc",
+              name: "Query",
+              action: "call",
+            },
+          },
+        ],
       },
       {
         href: "/admin/sessions",
         label: "Sessions",
         icon: "activity",
-        capabilities: [CAPABILITIES.sessionsRead],
+        requires: ADMIN_ONLY,
       },
       {
         href: "/admin/events",
         label: "Events",
         icon: "activity",
-        capabilities: [CAPABILITIES.eventsRead],
+        requires: [
+          {
+            permission: {
+              api: EVENTS_API,
+              surface: "rpc",
+              name: "Query",
+              action: "call",
+            },
+          },
+        ],
       },
       {
         href: "/admin/jobs",
         label: "Jobs",
         icon: "clipboard",
-        capabilities: [CAPABILITIES.jobsRead],
+        requires: [
+          {
+            permission: {
+              api: JOBS_API,
+              surface: "rpc",
+              name: "Query",
+              action: "call",
+            },
+          },
+        ],
       },
       {
         href: "/admin/grants",
         label: "Grants",
         icon: "key",
-        capabilities: [CAPABILITIES.authorityRead],
+        requires: ADMIN_ONLY,
       },
       {
         href: "/admin/capability-groups",
         label: "Capability Groups",
         icon: "key",
-        capabilities: [CAPABILITIES.capabilityRead],
+        requires: ADMIN_ONLY,
       },
       {
         href: "/admin/portals",
         label: "Portals",
         icon: "database",
-        capabilities: [CAPABILITIES.portalsRead],
+        requires: ADMIN_ONLY,
       },
     ],
   },
@@ -143,33 +170,89 @@ const navSections: NavSection[] = [
         href: "/admin/services",
         label: "Services",
         icon: "server",
-        capabilities: [CAPABILITIES.servicesRead],
+        requires: ADMIN_ONLY,
       },
       {
         href: "/admin/devices",
         label: "Devices",
         icon: "phone",
-        capabilities: [CAPABILITIES.devicesRead],
+        requires: ADMIN_ONLY,
       },
       {
         href: "/admin/users",
         label: "Users",
         icon: "users",
-        capabilities: [CAPABILITIES.usersRead],
+        requires: ADMIN_ONLY,
       },
     ],
   },
 ];
 
-function hasCapabilities(
-  profile: Profile,
-  capabilities: readonly string[],
-): boolean {
-  const granted = new Set(profile?.capabilities ?? []);
-  return capabilities.every((capability) => granted.has(capability));
+type GrantTarget = {
+  kind?: unknown;
+  api?: unknown;
+  surface?: unknown;
+  name?: unknown;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-export function canAccessRoute(pathname: string, profile: Profile): boolean {
+function permissionTarget(
+  permission: Connection["grants"]["permissions"][number],
+): GrantTarget {
+  if (!(permission.target instanceof Uint8Array)) return {};
+  try {
+    const parsed: unknown = JSON.parse(
+      new TextDecoder().decode(permission.target),
+    );
+    if (!isRecord(parsed)) return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+/** True when the current exact GrantSet contains the required permission atom. */
+export function hasExactPermission(
+  authority: Authority,
+  required: ExactPermission,
+): boolean {
+  return authority.grants.permissions.some((permission) => {
+    if (permission.action !== required.action) return false;
+    const target = permissionTarget(permission);
+    return target.kind === "apiSurface" &&
+      target.api === required.api &&
+      target.surface === required.surface &&
+      target.name === required.name;
+  });
+}
+
+/** True when the connection carries the platform administration privilege. */
+export function hasPlatformAdmin(
+  authority: Pick<Authority, "platformPrivileges"> | null,
+): boolean {
+  return authority?.platformPrivileges.includes(PLATFORM_ADMIN) ?? false;
+}
+
+function meetsRequirements(
+  authority: Authority | null,
+  requirements: readonly Requirement[],
+): boolean {
+  return requirements.every((requirement) =>
+    (requirement.privilege === undefined ||
+      authority?.platformPrivileges.includes(requirement.privilege) === true) &&
+    (requirement.permission === undefined ||
+      (authority !== null &&
+        hasExactPermission(authority, requirement.permission)))
+  );
+}
+
+export function canAccessRoute(
+  pathname: string,
+  authority: Authority | null,
+): boolean {
   if (!pathname.startsWith("/admin")) return true;
   const item = navSections.flatMap((section) => section.items)
     .filter((candidate) =>
@@ -177,19 +260,21 @@ export function canAccessRoute(pathname: string, profile: Profile): boolean {
     )
     .sort((left, right) => right.href.length - left.href.length)[0];
   return item !== undefined &&
-    hasCapabilities(profile, item.capabilities ?? []);
+    meetsRequirements(authority, item.requires ?? []);
 }
 
-export function requiresCapabilityRoute(pathname: string): boolean {
+export function requiresAdministrativeRoute(pathname: string): boolean {
   return pathname === "/admin" || pathname.startsWith("/admin/");
 }
 
-export function getVisibleNavSections(profile: Profile): NavSection[] {
+export function getVisibleNavSections(
+  authority: Authority | null,
+): NavSection[] {
   return navSections
     .map((section) => ({
       ...section,
       items: section.items.filter((item) =>
-        hasCapabilities(profile, item.capabilities ?? [])
+        meetsRequirements(authority, item.requires ?? [])
       ),
     }))
     .filter((section) => section.items.length > 0);
@@ -203,23 +288,20 @@ export function getPageTitle(pathname: string): string {
   return hasRouteTitle(pathname) ? routeTitles[pathname] : "Trellis";
 }
 
-export function getRoleLabel(profile: Profile): string {
-  if (
-    profile?.capabilities?.some((capability) =>
-      capability.startsWith("trellis.") && capability.includes("@v")
-    )
-  ) return "Operator";
-  if (profile?.capabilities?.includes("service")) return "Service principal";
-  return "Member";
+export function getRoleLabel(
+  authority: Pick<Authority, "platformPrivileges"> | null,
+): string {
+  return hasPlatformAdmin(authority) ? "Operator" : "Member";
 }
 
-export function getInitials(profile: Profile): string {
+export function getInitials(
+  profile: DisplayProfile | null | undefined,
+): string {
   const name = profile?.name?.trim();
   if (!name) return "TR";
 
   const parts = name.split(/\s+/).filter(Boolean);
-  const initials = parts.slice(0, 2).map((part: string) =>
-    part[0]?.toUpperCase() ?? ""
-  ).join("");
+  const initials = parts.slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
   return initials || name.slice(0, 2).toUpperCase();
 }

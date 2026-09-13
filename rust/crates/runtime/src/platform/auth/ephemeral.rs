@@ -1372,4 +1372,4 @@ pub(crate) use nats::NatsAuthEphemeralRepository;
 // Keep the test module beside this flat root module; moving the production
 // module into a directory would churn its intentionally stable private paths.
 #[path = "ephemeral_tests.rs"]
-mod tests;
+pub(crate) mod tests;

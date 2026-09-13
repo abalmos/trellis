@@ -1242,16 +1242,24 @@ where
             session_public_key: flow.session_public_key.clone(),
             unsigned_request,
         })
-        .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+        .map_err(|error| {
+            tracing::warn!(%error, "bind proof input rejected");
+            HttpError::unauthorized("invalid_proof")
+        })?;
     verify_session_proof(
         &input,
-        &parse_session_proof(&request.proof)
-            .map_err(|_| HttpError::unauthorized("invalid_proof"))?,
+        &parse_session_proof(&request.proof).map_err(|error| {
+            tracing::warn!(%error, "bind proof envelope rejected");
+            HttpError::unauthorized("invalid_proof")
+        })?,
         &flow.session_public_key,
         now_ms()?,
         state.proof_policy,
     )
-    .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+    .map_err(|error| {
+        tracing::warn!(%error, "bind proof verification rejected");
+        HttpError::unauthorized("invalid_proof")
+    })?;
     let flow = complete_flow(&state, flow, now_ms()?).await?;
     Ok(Json(session_bundle(&state, &flow).await?))
 }

@@ -542,6 +542,18 @@ pub struct HttpConfig {
     pub rate_limit_window_ms: Option<u64>,
 }
 
+impl HttpConfig {
+    /// Returns true when `origin` is explicitly allow-listed as an insecure origin.
+    pub(crate) fn allows_insecure_origin(&self, origin: &str) -> bool {
+        let origin = origin.trim_end_matches('/');
+        self.allow_insecure_origins.as_ref().is_some_and(|origins| {
+            origins
+                .iter()
+                .any(|allowed| allowed.trim_end_matches('/') == origin)
+        })
+    }
+}
+
 /// A filesystem or reverse-proxy source for a Trellis web surface.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

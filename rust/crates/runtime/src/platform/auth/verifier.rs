@@ -349,14 +349,17 @@ pub(crate) async fn start_read_only(
         authorization.maximum_permissions,
     )
     .map_err(|error| crate::supervisor::RuntimeError::Platform(error.to_string()))?;
+    let trellis_origin = http
+        .public_origin
+        .clone()
+        .unwrap_or_else(|| format!("http://localhost:{}", config.http_port()));
+    let allow_insecure_origin = http.allows_insecure_origin(&trellis_origin);
     let cache = AuthorizationProviderCache::attach_runtime(
         client,
         &AuthorizationRegistryBinding::from_runtime_parts(authorization.context_bucket.clone()),
         RuntimeAuthorizationTrust {
-            trellis_origin: http
-                .public_origin
-                .clone()
-                .unwrap_or_else(|| format!("http://localhost:{}", config.http_port())),
+            trellis_origin,
+            allow_insecure_origin,
             issuer: None,
             policy,
         },

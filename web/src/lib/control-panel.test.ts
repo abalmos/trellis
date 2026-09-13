@@ -2,112 +2,142 @@ import { deepEqual, ok } from "node:assert/strict";
 import { apis } from "trellis-web-generated";
 
 import {
+  type Authority,
   canAccessRoute,
   getPageTitle,
+  getRoleLabel,
   getVisibleNavSections,
+  hasExactPermission,
+  PLATFORM_ADMIN,
 } from "./control-panel.ts";
 
 declare const Deno: {
   test(name: string, fn: () => void | Promise<void>): void;
 };
 
-Deno.test("control panel keeps admin navigation focused on active sections", () => {
-  const sections = getVisibleNavSections({
-    active: true,
-    capabilities: [
-      `${apis.auth.API.identity}::authorities_read`,
-      `${apis.auth.API.identity}::capabilities_read`,
-      `${apis.auth.API.identity}::devices_read`,
-      `${apis.auth.API.identity}::portals_read`,
-      `${apis.auth.API.identity}::services_read`,
-      `${apis.auth.API.identity}::sessions_read`,
-      `${apis.auth.API.identity}::users_read`,
-      `${apis.events.API.identity}::read`,
-      `${apis.health.API.identity}::read`,
-      `${apis.jobs.API.identity}::read`,
-    ],
-    email: "ada@example.com",
-    id: "user-1",
-    name: "Ada",
-    origin: "github",
-  });
-  const labels = sections.flatMap((section) =>
-    section.items.map((item) => item.label)
-  );
-  const hrefs = sections.flatMap((section) =>
-    section.items.map((item) => item.href)
-  );
-  const operateSection = sections.find((section) =>
-    section.title === "Operate"
-  );
-  const manageSection = sections.find((section) => section.title === "Manage");
+type PermissionAtom = Authority["grants"]["permissions"][number];
 
-  deepEqual(operateSection?.items.map((item) => item.label), [
-    "Overview",
-    "Health Events",
-    "Sessions",
-    "Events",
-    "Jobs",
-    "Grants",
-    "Capability Groups",
-    "Portals",
-  ]);
+const AUTH_API = apis.auth.API.identity;
+const HEALTH_API = apis.health.API.identity;
+const EVENTS_API = apis.events.API.identity;
+const JOBS_API = apis.jobs.API.identity;
 
-  deepEqual(manageSection?.items[0], {
-    href: "/admin/services",
-    label: "Services",
-    icon: "server",
-    capabilities: [`${apis.auth.API.identity}::services_read`],
-  });
-  deepEqual(manageSection?.items[1], {
-    href: "/admin/devices",
-    label: "Devices",
-    icon: "phone",
-    capabilities: [`${apis.auth.API.identity}::devices_read`],
-  });
-  deepEqual(manageSection?.items[2], {
-    href: "/admin/users",
-    label: "Users",
-    icon: "users",
-    capabilities: [`${apis.auth.API.identity}::users_read`],
-  });
-  ok(labels.includes("Jobs"));
-  ok(!labels.includes("API Catalog"));
-  ok(labels.includes("Account"));
-  ok(!labels.includes("Settings"));
-  ok(labels.includes("Grants"));
-  ok(!labels.includes("Deployments"));
-  ok(labels.includes("Devices"));
-  ok(!labels.includes("Authority"));
-  ok(hrefs.includes("/admin/services"));
-  ok(hrefs.includes("/admin/devices"));
-  ok(!hrefs.map(String).includes("/admin/authority"));
-  ok(!hrefs.map(String).includes("/admin/deployments"));
-  ok(!hrefs.map(String).includes("/admin/app-grants"));
-  ok(!hrefs.map(String).includes("/admin/services/instances"));
-  ok(!hrefs.map(String).includes("/admin/apis"));
-  ok(!hrefs.map(String).includes("/admin/devices/activations"));
-  ok(!hrefs.map(String).includes("/admin/devices/instances"));
-  ok(!hrefs.map(String).includes("/admin/devices/reviews"));
-  ok(hrefs.includes("/admin/portals"));
-});
-
-Deno.test("control panel exposes only routes backed by exact capabilities", () => {
-  const profile = {
-    active: true,
-    capabilities: [`${apis.jobs.API.identity}::read`],
-    email: null,
-    id: "operator-1",
-    name: "Job Reader",
-    origin: "local",
+function permit(
+  api: string,
+  name: string,
+  action: PermissionAtom["action"] = "call",
+): PermissionAtom {
+  return {
+    action,
+    target: new TextEncoder().encode(
+      JSON.stringify({ kind: "apiSurface", api, surface: "rpc", name }),
+    ),
   };
-  const labels = getVisibleNavSections(profile).flatMap((section) =>
+}
+
+function authority(
+  platformPrivileges: readonly string[],
+  permissions: readonly PermissionAtom[],
+): Authority {
+  return {
+    platformPrivileges: [...platformPrivileges],
+    grants: { format: "trellis.grant-set.v1", permissions: [...permissions] },
+  };
+}
+
+function labels(value: Authority | null): string[] {
+  return getVisibleNavSections(value).flatMap((section) =>
     section.items.map((item) => item.label)
   );
+}
 
-  deepEqual(labels, ["Account", "Jobs"]);
-  ok(canAccessRoute("/admin/jobs", profile));
-  ok(!canAccessRoute("/admin/events", profile));
+Deno.test(
+  "control panel exposes administrative navigation with admin privilege and exact grants",
+  () => {
+    const admin = authority(
+      [PLATFORM_ADMIN],
+      [
+        permit(HEALTH_API, "Query"),
+        permit(EVENTS_API, "Query"),
+        permit(JOBS_API, "Query"),
+      ],
+    );
+
+    deepEqual(labels(admin), [
+      "Account",
+      "Overview",
+      "Health Events",
+      "Sessions",
+      "Events",
+      "Jobs",
+      "Grants",
+      "Capability Groups",
+      "Portals",
+      "Services",
+      "Devices",
+      "Users",
+    ]);
+    deepEqual(getRoleLabel(admin), "Operator");
+    ok(canAccessRoute("/admin", admin));
+    ok(canAccessRoute("/admin/users", admin));
+    ok(canAccessRoute("/admin/health-events", admin));
+    ok(canAccessRoute("/admin/jobs", admin));
+  },
+);
+
+Deno.test(
+  "control panel hides Auth administration from exact grants without admin privilege",
+  () => {
+    const operator = authority(
+      [],
+      [
+        permit(AUTH_API, "Users.List"),
+        permit(HEALTH_API, "Query"),
+      ],
+    );
+
+    deepEqual(labels(operator), ["Account", "Health Events"]);
+    deepEqual(getRoleLabel(operator), "Member");
+    ok(!canAccessRoute("/admin", operator));
+    ok(!canAccessRoute("/admin/users", operator));
+    ok(!canAccessRoute("/admin/sessions", operator));
+    ok(canAccessRoute("/admin/health-events", operator));
+    ok(!canAccessRoute("/admin/jobs", operator));
+  },
+);
+
+Deno.test(
+  "control panel does not treat an admin as granted an exact action",
+  () => {
+    const admin = authority([PLATFORM_ADMIN], [permit(HEALTH_API, "Query")]);
+    const revoke = {
+      api: AUTH_API,
+      surface: "rpc",
+      name: "Sessions.Revoke",
+      action: "call",
+    };
+
+    ok(!hasExactPermission(admin, revoke));
+
+    const revoker = authority([PLATFORM_ADMIN], [
+      permit(AUTH_API, "Sessions.Revoke", "control"),
+    ]);
+    ok(!hasExactPermission(revoker, revoke));
+    ok(
+      hasExactPermission(revoker, { ...revoke, action: "control" }),
+    );
+  },
+);
+
+Deno.test("control panel keeps account navigation without admin privilege", () => {
+  const member = authority([], []);
+
+  deepEqual(getVisibleNavSections(member).map((section) => section.title), [
+    "Account",
+  ]);
+  deepEqual(getRoleLabel(member), "Member");
+  ok(canAccessRoute("/profile", member));
+  ok(!canAccessRoute("/admin", member));
 });
 
 Deno.test("control panel titles cover new admin routes", () => {
