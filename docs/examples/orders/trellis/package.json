@@ -9,9 +9,10 @@
       "types": "./index.d.ts"
     }
   },
-  "name": "orders-trellis",
+  "name": "acme-orders",
   "private": true,
+  "sideEffects": false,
   "trellisGenerated": true,
   "type": "module",
-  "version": "0.0.0"
+  "version": "1.0.0"
 }

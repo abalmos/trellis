@@ -32,9 +32,9 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authConnectionsList({ limit: 100 }).take();
+      const response = await trellis.connectionsList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
-      connections = response.entries ?? [];
+      connections = response.items ?? [];
       const requestedUserNkey = page.url.searchParams.get("userNkey");
       selectedUserNkey = requestedUserNkey && connections.some((connection) => connection.connectionId === requestedUserNkey) ? requestedUserNkey : (connections[0]?.connectionId ?? "");
     } catch (e) {
@@ -50,11 +50,11 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authConnectionsKick({
+      const response = await trellis.connectionsKick({
         connectionId: selectedConnection.connectionId,
         idempotencyKey: ulid(),
         reason: null,
-      } satisfies apis.auth.AuthConnectionsKickInput).take();
+      } satisfies apis.auth.ConnectionsKickInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Disconnected ${summary.title}.`, "Kicked");
       await load();

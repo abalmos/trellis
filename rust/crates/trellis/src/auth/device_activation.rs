@@ -196,13 +196,13 @@ pub fn derive_device_confirmation_code(
 }
 
 /// Submit one fresh proof-bound device enrollment request.
-pub async fn check_device_activation<C>(
+pub async fn check_device_activation<C: crate::generated::ParticipantDescriptor>(
     options: &DeviceActivationOptions<'_, C>,
 ) -> Result<DeviceActivationStatus, DeviceActivationError> {
     check_device_activation_with_attempt(options, &DeviceActivationAttempt::new()?).await
 }
 
-async fn check_device_activation_with_attempt<C>(
+async fn check_device_activation_with_attempt<C: crate::generated::ParticipantDescriptor>(
     options: &DeviceActivationOptions<'_, C>,
     attempt: &DeviceActivationAttempt,
 ) -> Result<DeviceActivationStatus, DeviceActivationError> {
@@ -272,7 +272,7 @@ fn activation_status<C>(
 }
 
 /// Poll current device activation with fresh request identities and proofs.
-pub async fn wait_for_device_activation<C>(
+pub async fn wait_for_device_activation<C: crate::generated::ParticipantDescriptor>(
     options: &DeviceActivationOptions<'_, C>,
     pending: &DeviceActivationPending,
     timeout: Duration,

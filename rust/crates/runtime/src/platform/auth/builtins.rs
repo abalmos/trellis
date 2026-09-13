@@ -10,6 +10,12 @@ pub(crate) const CONSOLE_PARTICIPANT_ID: &str =
     trellis_runtime_apis::participants::trellis_console::PARTICIPANT_ID;
 pub(crate) const PORTAL_PARTICIPANT_ID: &str =
     trellis_runtime_apis::participants::trellis_portal::PARTICIPANT_ID;
+pub(crate) const EVENTS_RUNTIME_PARTICIPANT_ID: &str =
+    trellis_runtime_apis::participants::trellis_events_runtime::PARTICIPANT_ID;
+pub(crate) const HEALTH_RUNTIME_PARTICIPANT_ID: &str =
+    trellis_runtime_apis::participants::trellis_health_runtime::PARTICIPANT_ID;
+pub(crate) const JOBS_RUNTIME_PARTICIPANT_ID: &str =
+    trellis_runtime_apis::participants::trellis_jobs_runtime::PARTICIPANT_ID;
 
 pub(crate) fn validate_binding_namespace(
     binding: &ParticipantBindingRecord,
@@ -21,7 +27,10 @@ pub(crate) fn validate_binding_namespace(
             AUTH_RUNTIME_PARTICIPANT_ID
             | CLI_PARTICIPANT_ID
             | CONSOLE_PARTICIPANT_ID
-            | PORTAL_PARTICIPANT_ID => {}
+            | PORTAL_PARTICIPANT_ID
+            | EVENTS_RUNTIME_PARTICIPANT_ID
+            | HEALTH_RUNTIME_PARTICIPANT_ID
+            | JOBS_RUNTIME_PARTICIPANT_ID => {}
             _ => {
                 return Err(AuthorizationStateError::InvalidRecord(format!(
                     "participant id '{}' uses the reserved 'trellis.' namespace",
@@ -94,6 +103,39 @@ pub(crate) fn auth_runtime_participant_binding(
 ) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
     builtin_participant_binding::<trellis_runtime_apis::participants::trellis_platform::Participant>(
         trellis_runtime_apis::participants::trellis_platform::PARTICIPANT_DIGEST,
+        resolved_at,
+    )
+}
+
+pub(crate) fn events_runtime_participant_binding(
+    resolved_at: i64,
+) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
+    builtin_participant_binding::<
+        trellis_runtime_apis::participants::trellis_events_runtime::Participant,
+    >(
+        trellis_runtime_apis::participants::trellis_events_runtime::PARTICIPANT_DIGEST,
+        resolved_at,
+    )
+}
+
+pub(crate) fn health_runtime_participant_binding(
+    resolved_at: i64,
+) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
+    builtin_participant_binding::<
+        trellis_runtime_apis::participants::trellis_health_runtime::Participant,
+    >(
+        trellis_runtime_apis::participants::trellis_health_runtime::PARTICIPANT_DIGEST,
+        resolved_at,
+    )
+}
+
+pub(crate) fn jobs_runtime_participant_binding(
+    resolved_at: i64,
+) -> Result<ParticipantBindingRecord, AuthorizationStateError> {
+    builtin_participant_binding::<
+        trellis_runtime_apis::participants::trellis_jobs_runtime::Participant,
+    >(
+        trellis_runtime_apis::participants::trellis_jobs_runtime::PARTICIPANT_DIGEST,
         resolved_at,
     )
 }
@@ -190,7 +232,7 @@ mod tests {
     ) {
         let evidence = super::super::evidence::PackageEvidenceInput::from_generated_descriptor(
             generated,
-            D::PATH,
+            participant_id,
         )
         .expect("generated evidence");
         let (source, _) = super::ParticipantBindingRecord::from_package_evidence(&evidence, 0)
@@ -217,22 +259,22 @@ mod tests {
 
         assert_matches_source(
             trellis_runtime_apis::participants::trellis_cli::Participant::package_evidence(),
-            super::CLI_PARTICIPANT_ID,
+            trellis_runtime_apis::participants::trellis_cli::Participant::PATH,
             super::cli_participant_binding(0).expect("CLI binding"),
         );
         assert_matches_source(
             trellis_runtime_apis::participants::trellis_platform::Participant::package_evidence(),
-            super::AUTH_RUNTIME_PARTICIPANT_ID,
+            trellis_runtime_apis::participants::trellis_platform::Participant::PATH,
             super::auth_runtime_participant_binding(0).expect("platform binding"),
         );
         assert_matches_source(
             trellis_runtime_apis::participants::trellis_console::Participant::package_evidence(),
-            super::CONSOLE_PARTICIPANT_ID,
+            trellis_runtime_apis::participants::trellis_console::Participant::PATH,
             super::console_participant_binding(0).expect("Console binding"),
         );
         assert_matches_source(
             trellis_runtime_apis::participants::trellis_portal::Participant::package_evidence(),
-            super::PORTAL_PARTICIPANT_ID,
+            trellis_runtime_apis::participants::trellis_portal::Participant::PATH,
             super::portal_participant_binding(0).expect("Portal binding"),
         );
     }

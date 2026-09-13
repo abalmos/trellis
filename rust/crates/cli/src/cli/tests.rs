@@ -264,6 +264,14 @@ fn parses_service_and_device_list_commands() {
 }
 
 #[test]
+fn rejects_removed_service_create_namespace() {
+    assert!(
+        Cli::try_parse_from(["trellis", "svc", "example", "create", "--namespace", "acme"])
+            .is_err()
+    );
+}
+
+#[test]
 fn service_and_device_help_shows_native_target_first_usage() {
     let svc_error = Cli::try_parse_from(["trellis", "svc", "--help"])
         .expect_err("svc help should render as a clap error");
@@ -304,6 +312,8 @@ fn parses_target_first_service_and_device_resource_tokens() {
         ".",
         "--participant",
         "acme.api@v1",
+        "--confirm-digest",
+        "digest_123",
     ]);
     match cli.command {
         TopLevelCommand::Svc(command) => {
@@ -312,6 +322,7 @@ fn parses_target_first_service_and_device_resource_tokens() {
                 SvcSubcommand::Resource(SvcResourceAction::Apply(args)) => {
                     assert_eq!(args.source, PathBuf::from("."));
                     assert_eq!(args.participant.as_deref(), Some("acme.api@v1"));
+                    assert_eq!(args.confirm_digest.as_deref(), Some("digest_123"));
                 }
                 other => panic!("unexpected svc command: {other:?}"),
             }
@@ -344,6 +355,41 @@ fn parses_target_first_service_and_device_resource_tokens() {
         }
         other => panic!("unexpected top-level command: {other:?}"),
     }
+}
+
+#[test]
+fn parses_resources_and_events_pagination_commands() {
+    assert!(matches!(
+        Cli::try_parse_from(["trellis", "resources", "list", "--all", "--limit", "25"])
+            .expect("resources list parses")
+            .command,
+        TopLevelCommand::Resources(ResourcesCommand::List(ResourceListArgs {
+            all: true,
+            limit: Some(25),
+            ..
+        }))
+    ));
+    assert!(matches!(
+        Cli::try_parse_from([
+            "trellis",
+            "events",
+            "dead-letters",
+            "query",
+            "--cursor",
+            "next"
+        ])
+        .expect("dead-letter query parses")
+        .command,
+        TopLevelCommand::Events(EventsCommand::DeadLetters(DeadLettersCommand::Query(
+            DeadLetterQueryArgs {
+                page: PageArgs {
+                    cursor: Some(_),
+                    ..
+                },
+                ..
+            }
+        )))
+    ));
 }
 
 #[test]

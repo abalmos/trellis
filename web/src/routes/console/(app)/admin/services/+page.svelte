@@ -14,10 +14,10 @@
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
-  type Deployment = apis.auth.AuthDeploymentsListOutput["entries"][number];
-  type ServiceInstance = apis.auth.AuthServiceInstancesListOutput["entries"][number];
+  type Deployment = apis.auth.DeploymentsListOutput["items"][number];
+  type ServiceInstance = apis.auth.ServiceInstancesListOutput["items"][number];
   type ContractRef = { contractId: string; digest: string };
-  type HealthParticipant = apis.health.HealthQueryOutput["entries"][number];
+  type HealthParticipant = apis.health.QueryOutput["items"][number];
   const trellis = getTrellis();
   const RPC_TIMEOUT_MS = 10_000;
 
@@ -90,13 +90,13 @@
     error = null;
     try {
       const [deploymentsRes, instancesRes] = await Promise.all([
-        trellis.authDeploymentsList({ kind: "service", limit: 100 }).take(),
-        trellis.authServiceInstancesList({ limit: 100 }).take(),
+        trellis.deploymentsList({ kind: "service", limit: 100 }).take(),
+        trellis.serviceInstancesList({ limit: 100 }).take(),
       ]);
       if (isErr(deploymentsRes)) { error = errorMessage(deploymentsRes); return; }
       if (isErr(instancesRes)) { error = errorMessage(instancesRes); return; }
-      deployments = (deploymentsRes.entries ?? []).filter((deployment): deployment is Deployment => deployment.kind === "service");
-      instances = instancesRes.entries ?? [];
+      deployments = (deploymentsRes.items ?? []).filter((deployment): deployment is Deployment => deployment.kind === "service");
+      instances = instancesRes.items ?? [];
     } catch (cause) {
       error = errorMessage(cause);
     } finally {
@@ -112,7 +112,7 @@
       subscriptionError = errorMessage(result);
       return;
     }
-    healthParticipants = result.entries;
+    healthParticipants = result.items;
     subscriptionError = null;
   }
 
@@ -132,8 +132,7 @@
           subscriptionError = errorMessage(result);
           return;
         }
-        for await (const event of result) {
-          if (event.type === "ready") continue;
+        for await (const _event of result) {
           if (refreshTimer !== undefined) clearTimeout(refreshTimer);
           refreshTimer = setTimeout(() => void loadHealth(), 250);
         }

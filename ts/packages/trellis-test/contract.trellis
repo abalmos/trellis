@@ -23,16 +23,25 @@ app cli {
     rpc Portals.LoginSettings.Update;
     rpc Portals.Put;
     rpc Portals.Routes.Put;
+    rpc ServiceInstances.Disable;
     rpc ServiceInstances.Provision;
     rpc Sessions.Revoke;
     rpc UserIdentities.List;
   }
-  use events { rpc Query; }
+  use events {
+    rpc Consumers.Inspect;
+    rpc Consumers.Query;
+    rpc DeadLetters.Dismiss;
+    rpc DeadLetters.Inspect;
+    rpc DeadLetters.Query;
+    rpc DeadLetters.Replay;
+    rpc Query;
+  }
   use health { rpc Query; }
   use jobs { rpc Query; }
   use state {
-    rpc Admin.Delete;
-    rpc Admin.Get;
-    rpc Admin.List;
+    rpc Delete;
+    rpc Resources.Inspect;
+    rpc Resources.Query;
   }
 }

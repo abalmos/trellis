@@ -46,7 +46,7 @@ pub(super) async fn dispatch(
                 iat,
                 request_id: &request_id,
                 reply: message.reply.as_deref(),
-                required_permission: &required_permission,
+                required_permissions: std::slice::from_ref(&required_permission),
             },
         )
         .await?;
@@ -61,5 +61,20 @@ pub(super) async fn dispatch(
         platform_privileges: verified.context.platform_privileges().to_vec(),
         context: verified.context,
     };
-    workflows::dispatch(processor, subject, &message.payload, validated).await
+    let action = subject.splitn(5, '.').nth(4).ok_or_else(|| {
+        AuthorizationStateError::InvalidRecord("request subject is not deployment-bound".to_owned())
+    })?;
+    let api_id = required_permission
+        .target()
+        .as_api_surface()
+        .map(|(api_id, _, _)| api_id)
+        .ok_or_else(|| {
+            AuthorizationStateError::InvalidRecord("RPC permission target missing".to_owned())
+        })?;
+    let subject = if api_id == trellis_runtime_apis::apis::trellis_auth_v1::API_ID {
+        format!("rpc.v1.auth.{action}")
+    } else {
+        format!("rpc.v1.core.{action}")
+    };
+    workflows::dispatch(processor, &subject, &message.payload, validated).await
 }

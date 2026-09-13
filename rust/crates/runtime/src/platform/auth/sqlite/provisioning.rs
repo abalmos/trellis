@@ -357,20 +357,27 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
                 if current.state != DeviceActivationReviewState::Approved
                     || delegation.principal_id != current.principal_id
                     || delegation.deployment_id != current.deployment_id
-                    || !delegation.required
                     || delegation.state != DeviceDelegationState::Active
                 {
                     return Err(AuthorizationStateError::InvalidRecord(
                         "activation claim delegation does not match approved review".to_owned(),
                     ));
                 }
+                if let Some(session) = &command.companion_session {
+                    super::sessions::insert_sql_session(&transaction, session)?;
+                }
                 transaction
                     .execute(
-                        "INSERT INTO auth_device_delegations (principal_id, deployment_id, required, state, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)
-                      ON CONFLICT(principal_id, deployment_id) DO UPDATE SET required = excluded.required, state = excluded.state, expires_at = excluded.expires_at",
+                        "INSERT INTO auth_device_delegations (principal_id, deployment_id, companion_participant_id, user_login_session_id, installation_public_key, device_grant_revision, child_grant_revision, required, state, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                      ON CONFLICT(principal_id, deployment_id) DO UPDATE SET companion_participant_id = excluded.companion_participant_id, user_login_session_id = excluded.user_login_session_id, installation_public_key = excluded.installation_public_key, device_grant_revision = excluded.device_grant_revision, child_grant_revision = excluded.child_grant_revision, required = excluded.required, state = excluded.state, expires_at = excluded.expires_at",
                         params![
                             delegation.principal_id,
                             delegation.deployment_id,
+                            delegation.companion_participant_id,
+                            delegation.user_login_session_id,
+                            delegation.installation_public_key,
+                            delegation.device_grant_revision,
+                            delegation.child_grant_revision,
                             delegation.required,
                             encode_enum(delegation.state)?,
                             delegation.expires_at
@@ -486,13 +493,21 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
                         "activation decision delegation does not match review".to_owned(),
                     ));
                 }
+                if let Some(session) = &command.companion_session {
+                    super::sessions::insert_sql_session(&transaction, session)?;
+                }
                 transaction
                     .execute(
-                        "INSERT INTO auth_device_delegations (principal_id, deployment_id, required, state, expires_at) VALUES (?1, ?2, ?3, ?4, ?5)
-                      ON CONFLICT(principal_id, deployment_id) DO UPDATE SET required = excluded.required, state = excluded.state, expires_at = excluded.expires_at",
+                        "INSERT INTO auth_device_delegations (principal_id, deployment_id, companion_participant_id, user_login_session_id, installation_public_key, device_grant_revision, child_grant_revision, required, state, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                      ON CONFLICT(principal_id, deployment_id) DO UPDATE SET companion_participant_id = excluded.companion_participant_id, user_login_session_id = excluded.user_login_session_id, installation_public_key = excluded.installation_public_key, device_grant_revision = excluded.device_grant_revision, child_grant_revision = excluded.child_grant_revision, required = excluded.required, state = excluded.state, expires_at = excluded.expires_at",
                         params![
                             delegation.principal_id,
                             delegation.deployment_id,
+                            delegation.companion_participant_id,
+                            delegation.user_login_session_id,
+                            delegation.installation_public_key,
+                            delegation.device_grant_revision,
+                            delegation.child_grant_revision,
                             delegation.required,
                             encode_enum(delegation.state)?,
                             delegation.expires_at
@@ -823,10 +838,7 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
             {
                 return Err(AuthorizationStateError::StorageConflict);
             }
-            let delegation_changed = current_delegation.required != command.delegation.required
-                || current_delegation.state != command.delegation.state
-                || current_delegation.expires_at != command.delegation.expires_at;
-            let authorization_changed = current.state != command.device.state || delegation_changed;
+            let device_changed = current.state != command.device.state;
             let changed = transaction
                 .execute(
                     "UPDATE auth_devices SET state = ?1, updated_at = ?2, version = ?3
@@ -846,9 +858,16 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
             }
             transaction
                 .execute(
-                    "UPDATE auth_device_delegations SET required = ?1, state = ?2, expires_at = ?3
-                      WHERE principal_id = ?4 AND deployment_id = ?5",
+                     "UPDATE auth_device_delegations SET companion_participant_id = ?1,
+                        user_login_session_id = ?2, installation_public_key = ?3,
+                        device_grant_revision = ?4, child_grant_revision = ?5, required = ?6,
+                        state = ?7, expires_at = ?8 WHERE principal_id = ?9 AND deployment_id = ?10",
                     params![
+                        command.delegation.companion_participant_id,
+                        command.delegation.user_login_session_id,
+                        command.delegation.installation_public_key,
+                        command.delegation.device_grant_revision,
+                        command.delegation.child_grant_revision,
                         command.delegation.required,
                         encode_enum(command.delegation.state)?,
                         command.delegation.expires_at,
@@ -857,16 +876,30 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
                     ],
                 )
                 .map_err(map_write_error)?;
-            if authorization_changed {
-                let reason = if delegation_changed {
-                    AuthorizationContextRevocationReason::DelegationChanged
-                } else {
-                    AuthorizationContextRevocationReason::DeviceChanged
-                };
+            if current_delegation.state == DeviceDelegationState::Active
+                && command.delegation.state == DeviceDelegationState::Revoked
+            {
+                if let Some(session_id) = &current_delegation.user_login_session_id {
+                    transaction
+                        .execute(
+                            "UPDATE auth_sessions SET state = 'revoked', revoked_at = ?1, version = version + 1
+                             WHERE session_id = ?2 AND state = 'active'",
+                            params![command.device.updated_at, session_id],
+                        )
+                        .map_err(map_write_error)?;
+                    revoke_sql_contexts(
+                        &transaction,
+                        &AuthorizationContextSelector::Login(session_id.clone()),
+                        AuthorizationContextRevocationReason::SessionRevoked,
+                        command.device.updated_at.div_euclid(1_000),
+                    )?;
+                }
+            }
+            if device_changed {
                 revoke_sql_contexts(
                     &transaction,
                     &AuthorizationContextSelector::Principal(command.device.principal_id.clone()),
-                    reason,
+                    AuthorizationContextRevocationReason::DeviceChanged,
                     command.device.updated_at.div_euclid(1_000),
                 )?;
             }

@@ -62,6 +62,7 @@ pub(crate) async fn refresh(
             identity,
             package_evidence,
             participant_path,
+            companion,
         } => {
             request["identityKeyId"] = json!(identity.key_id());
             request["sessionKey"] = json!(auth.session_key);
@@ -69,6 +70,30 @@ pub(crate) async fn refresh(
             request["packageEvidence"] = serde_json::to_value(package_evidence)?;
             request["participantPath"] = json!(participant_path);
             request["packageDigest"] = json!(package_evidence.root_digest());
+            if let Some(companion) = companion {
+                let companion_connection_id = ulid::Ulid::new().to_string();
+                let companion_request_id = ulid::Ulid::new().to_string();
+                let (_, companion_session_key) = crate::auth::generate_session_keypair();
+                let digest = trellis_protocol::digest_json(&json!({
+                    "format": "trellis.device.user-companion.v1",
+                    "origin": cache.http().origin(),
+                    "identityKeyId": identity.key_id(),
+                    "participantId": companion.participant_id,
+                    "connectionId": companion_connection_id,
+                    "requestId": companion_request_id,
+                    "issuedAt": issued_at,
+                    "sessionKey": companion_session_key,
+                }))
+                .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+                let digest = crate::client::proof::base64url_decode(&digest)?;
+                request["companion"] = json!({
+                    "connectionId": companion_connection_id,
+                    "requestId": companion_request_id,
+                    "issuedAt": issued_at,
+                    "sessionKey": companion_session_key,
+                    "proof": companion.installation.sign_bytes(&digest),
+                });
+            }
             let input = NativeBootstrapSessionProofInput {
                 origin: cache.http().origin(),
                 unsigned_request: request.clone(),
@@ -91,20 +116,24 @@ pub(crate) async fn refresh(
                 }
             }
         }
-        AuthorizationCredential::User { login_session_id } => {
+        AuthorizationCredential::User {
+            login_session_id,
+            installation,
+        } => {
             request["loginSessionId"] = json!(login_session_id);
             request["issuedAt"] = json!(issued_at);
+            request["sessionKey"] = json!(cache.session_key);
             request["currentContextDigest"] = json!(observed_digest);
             (
                 "/auth/context/refresh",
                 SessionProofInput::authorization_context_refresh(
                     AuthorizationContextRefreshSessionProofInput {
                         origin: cache.http().origin(),
-                        session_public_key: auth.session_key.clone(),
+                        session_public_key: installation.session_key.clone(),
                         unsigned_request: request.clone(),
                     },
                 ),
-                auth,
+                installation.as_ref(),
             )
         }
     };
@@ -126,6 +155,18 @@ pub(crate) async fn refresh(
         .as_object_mut()
         .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap runtime is not an object".into()))?
         .insert("transports".into(), response["transports"].clone());
+    let mut authorization = response
+        .get("authorization")
+        .filter(|value| !value.is_null())
+        .cloned();
+    if let (Some(object), Some(companion)) = (
+        authorization
+            .as_mut()
+            .and_then(serde_json::Value::as_object_mut),
+        response.get("companion").filter(|value| !value.is_null()),
+    ) {
+        object.insert("companion".to_owned(), companion.clone());
+    }
     cache.install(AuthorizationInstallation {
         context: serde_json::from_value(response["authorizationContext"].clone())?,
         routing: serde_json::from_value(response["routing"].clone())?,
@@ -134,10 +175,7 @@ pub(crate) async fn refresh(
         server_clock_offset_ms: server_now
             .checked_sub(midpoint)
             .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap time overflow".into()))?,
-        authorization: response
-            .get("authorization")
-            .filter(|value| !value.is_null())
-            .cloned(),
+        authorization,
     })?;
     Ok(previous.runtime.as_ref() != Some(&cache.runtime_binding()?))
 }
@@ -147,6 +185,9 @@ pub(crate) fn spawn_authorization_context_refresh_task(
     contexts: Arc<AuthorizationContextCache>,
     auth: Arc<SessionAuth>,
     nats: async_nats::Client,
+    applied_native_authorization: Arc<
+        tokio::sync::Mutex<super::super::connection::AppliedNativeAuthorization>,
+    >,
     timeout_ms: u64,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -165,44 +206,30 @@ pub(crate) fn spawn_authorization_context_refresh_task(
             if requested_digest.is_some_and(|digest| contexts.context_digest().ok() != digest) {
                 continue;
             }
-            let previous = match contexts.state_snapshot() {
-                Ok(state) => state,
-                Err(error) => {
-                    tracing::warn!(%error, "authorization context refresh stopped");
-                    return;
-                }
-            };
+            let mut applied = applied_native_authorization.lock().await;
             match refresh(&contexts, &auth).await {
                 Ok(_) => {
-                    let refreshed = match contexts.state_snapshot() {
-                        Ok(state) => state,
-                        Err(error) => {
-                            tracing::warn!(%error, "refreshed native runtime is invalid");
-                            continue;
-                        }
-                    };
-                    if let (Some(previous_runtime), Some(runtime)) =
-                        (previous.runtime.as_ref(), refreshed.runtime.as_ref())
-                    {
-                        let changed = previous
-                            .current
-                            .as_ref()
-                            .map(|current| &current.context_digest)
-                            != refreshed
-                                .current
-                                .as_ref()
-                                .map(|current| &current.context_digest);
-                        if let Err(error) = super::super::connection::apply_native_runtime_refresh(
+                    let refreshed =
+                        match super::super::connection::AppliedNativeAuthorization::from_cache(
+                            &contexts,
+                        ) {
+                            Ok(state) => state,
+                            Err(error) => {
+                                tracing::warn!(%error, "refreshed native runtime is invalid");
+                                continue;
+                            }
+                        };
+                    if let Err(error) =
+                        super::super::connection::apply_native_authorization_refresh(
                             &nats,
-                            previous_runtime,
-                            runtime,
-                            changed,
+                            &mut applied,
+                            refreshed,
                             timeout_ms,
                         )
                         .await
-                        {
-                            tracing::warn!(%error, "native connection refresh will retry");
-                        }
+                    {
+                        tracing::warn!(%error, "native connection refresh will retry");
+                        contexts.request_refresh();
                     }
                 }
                 Err(TrellisClientError::BootstrapHttp { status, code })
@@ -217,6 +244,7 @@ pub(crate) fn spawn_authorization_context_refresh_task(
                 }
                 Err(error) => {
                     tracing::warn!(%error, "authorization context refresh will retry");
+                    drop(applied);
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             }

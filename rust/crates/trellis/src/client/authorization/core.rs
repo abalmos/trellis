@@ -9,7 +9,7 @@ use trellis_protocol::{
 };
 
 /// Typed caller projection produced after a local authorization proof verifies.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct VerifiedCaller {
     /// Session public key presented with the request.
     pub session_key: String,
@@ -131,6 +131,8 @@ pub struct EventVerificationInput<'a> {
     pub context_digest: &'a str,
     /// Exact published subject.
     pub subject: &'a str,
+    /// Signed canonical event descriptor identity.
+    pub descriptor_identity: &'a str,
     /// Exact received payload bytes.
     pub payload: &'a [u8],
     /// Signed event identifier.
@@ -141,8 +143,6 @@ pub struct EventVerificationInput<'a> {
     pub proof: &'a str,
     /// Verification policy.
     pub policy: &'a AuthorizationVerificationPolicy,
-    /// Required exact permissions.
-    pub required_permissions: &'a [PermissionAtom],
     /// Context revocation time, when present.
     pub revoked_at: Option<i64>,
 }
@@ -198,12 +198,12 @@ impl AuthorizationVerificationCore {
             context,
             context_digest,
             subject,
+            descriptor_identity,
             payload,
             event_id,
             event_time,
             proof,
             policy,
-            required_permissions,
             revoked_at,
         } = input;
         self.check_context_binding(context, context_digest)?;
@@ -211,12 +211,12 @@ impl AuthorizationVerificationCore {
         let event = verify_authorization_event(AuthorizationEventVerificationInput {
             context,
             subject,
+            descriptor_identity,
             raw_payload: payload,
             event_id,
             event_time,
             proof: &proof,
             policy,
-            required_permissions,
             revoked_at,
         })?;
         Ok(VerifiedAuthorizationEvent { event })

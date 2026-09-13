@@ -121,6 +121,12 @@ impl AuthorizationContextService {
             signed,
             &current.participant,
             &current.resource_bindings,
+            &crate::platform::auth::current_api_bindings(
+                self.repository.as_ref(),
+                &current.participant,
+                signed.deployment_id.as_deref(),
+            )
+            .await?,
             &AuthorizationRegistryBinding::from_config(&self.config),
         )?;
         Ok(permissions)
@@ -381,6 +387,17 @@ impl AuthorizationContextService {
     ) -> Result<(AuthorizationContextBundle, IssuableAuthorizationState), AuthorizationStateError>
     {
         let now_millis = seconds_to_millis(now_seconds)?;
+        let snapshot = self
+            .repository
+            .load_issuance_snapshot(&request.connection)
+            .await?;
+        let initial = super::super::issuance::resolve_snapshot(snapshot, now_millis)?;
+        crate::platform::auth::resolve_api_bindings(
+            self.repository.as_ref(),
+            &initial.participant,
+            initial.deployment_id.as_deref(),
+        )
+        .await?;
         let snapshot = self
             .repository
             .load_issuance_snapshot(&request.connection)

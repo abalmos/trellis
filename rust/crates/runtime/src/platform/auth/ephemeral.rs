@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::sync::{Arc, Mutex};
@@ -9,6 +10,7 @@ use trellis_protocol::{digest_json, GrantSet};
 
 use super::domain::{
     require_digest, require_nonempty, require_positive, require_protocol_timestamp,
+    ApprovedCapability, ApprovedResource, AuthorizationResourceKind, ResourceCommitment,
 };
 use super::AuthorizationStateError;
 
@@ -43,64 +45,209 @@ pub(crate) enum AuthBrowserFlowState {
     Expired,
 }
 
-/// Server-owned authority and consent proposal bound to a browser flow.
+/// Capability displayed for one digest-bound consent decision.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct BrowserConsentProposal {
-    pub participant_id: String,
-    pub participant_digest: String,
-    pub participant_needs_digest: String,
-    pub consent_view: Value,
-    pub consent_view_digest: String,
-    pub proposal_digest: String,
-    pub required_grant_set: GrantSet,
-    pub optional_grant_bundles: BTreeMap<String, GrantSet>,
-    pub required_capabilities: Vec<String>,
-    pub optional_capability_definitions: BTreeMap<String, GrantSet>,
+pub(crate) struct ConsentCapability {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub consequence: String,
+    pub consent_digest: String,
+    pub required: bool,
+    pub eligible: bool,
+    pub already_approved: bool,
 }
 
-impl BrowserConsentProposal {
+/// Resource change classification displayed for consent.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ConsentResourceChange {
+    New,
+    Unchanged,
+    Reduced,
+    Expanded,
+    Incompatible,
+    Detached,
+}
+
+/// Resource commitment displayed for one digest-bound consent decision.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConsentResource {
+    pub kind: AuthorizationResourceKind,
+    pub name: String,
+    pub title: String,
+    pub description: String,
+    pub required: bool,
+    pub requested_commitment: ResourceCommitment,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual: Option<ConsentResourceActual>,
+    pub change: ConsentResourceChange,
+    pub eligible: bool,
+    pub already_approved: bool,
+}
+
+/// Materialized resource configuration, when a provider has reported it.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConsentResourceActual {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_object_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_total_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_value_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub representation_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ConsentResourceActualEntry {
+    pub kind: super::AuthorizationResourceKind,
+    pub name: String,
+    pub actual: ConsentResourceActual,
+}
+
+/// Separate nested user participant decision displayed with a device decision.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ConsentOwnerKind {
+    Agent,
+    App,
+    Device,
+    Service,
+}
+
+impl From<trellis_protocol::ParticipantKind> for ConsentOwnerKind {
+    fn from(value: trellis_protocol::ParticipantKind) -> Self {
+        match value {
+            trellis_protocol::ParticipantKind::Agent => Self::Agent,
+            trellis_protocol::ParticipantKind::App => Self::App,
+            trellis_protocol::ParticipantKind::Device => Self::Device,
+            trellis_protocol::ParticipantKind::Service => Self::Service,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConsentCompanion {
+    pub participant_id: String,
+    pub kind: ConsentOwnerKind,
+    pub required: bool,
+    pub capabilities: Vec<ConsentCapability>,
+    pub resources: Vec<ConsentResource>,
+}
+
+/// Complete server-owned decision projection bound to one browser flow.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConsentRequest {
+    pub participant_id: String,
+    pub package_digest: String,
+    pub installed_revision: u64,
+    pub expected_grant_revision: u64,
+    pub capabilities: Vec<ConsentCapability>,
+    pub resources: Vec<ConsentResource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub companion: Option<ConsentCompanion>,
+    pub decision_digest: String,
+}
+
+impl ConsentRequest {
     pub(crate) fn validate(&self) -> Result<(), AuthorizationStateError> {
         require_nonempty("consent participantId", &self.participant_id)?;
-        require_digest("consent participantDigest", &self.participant_digest)?;
-        require_digest(
-            "consent participantNeedsDigest",
-            &self.participant_needs_digest,
-        )?;
-        require_digest("consentViewDigest", &self.consent_view_digest)?;
-        require_digest("proposalDigest", &self.proposal_digest)?;
-        if digest_json(&self.consent_view)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
-            != self.consent_view_digest
-        {
-            return invalid("consentViewDigest does not match consentView");
+        require_digest("consent packageDigest", &self.package_digest)?;
+        require_positive("consent installedRevision", self.installed_revision)?;
+        if self.expected_grant_revision > super::MAX_PROTOCOL_INTEGER {
+            return invalid("expectedGrantRevision exceeds safe integer range");
         }
-        for bundle_id in self.optional_grant_bundles.keys() {
-            require_nonempty("optionalGrantBundles key", bundle_id)?;
+        for capability in &self.capabilities {
+            require_nonempty("consent capabilityId", &capability.id)?;
+            require_digest("consentDigest", &capability.consent_digest)?;
         }
-        for capability in &self.required_capabilities {
-            require_nonempty("consent capability", capability)?;
+        for resource in &self.resources {
+            require_nonempty("consent resource name", &resource.name)?;
+            resource.requested_commitment.validate()?;
         }
-        for capability_id in self.optional_capability_definitions.keys() {
-            require_nonempty("optional capability definition", capability_id)?;
+        if let Some(companion) = &self.companion {
+            require_nonempty("consent companion participantId", &companion.participant_id)?;
+            for capability in &companion.capabilities {
+                require_nonempty("consent companion capabilityId", &capability.id)?;
+                require_digest(
+                    "consent companion consentDigest",
+                    &capability.consent_digest,
+                )?;
+            }
+            for resource in &companion.resources {
+                require_nonempty("consent companion resource name", &resource.name)?;
+                resource.requested_commitment.validate()?;
+            }
         }
-        let machine_value = serde_json::json!({
-            "participantId": self.participant_id,
-            "participantDigest": self.participant_digest,
-            "participantNeedsDigest": self.participant_needs_digest,
-            "requiredGrantSet": self.required_grant_set,
-            "optionalGrantBundles": self.optional_grant_bundles,
-            "requiredCapabilities": self.required_capabilities,
-            "optionalCapabilityDefinitions": self.optional_capability_definitions,
-        });
-        if digest_json(&machine_value)
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
-            != self.proposal_digest
-        {
-            return invalid("proposalDigest does not match server-owned authority");
+        if self.computed_decision_digest()? != self.decision_digest {
+            return invalid("decisionDigest does not match visible consent decision");
         }
         Ok(())
     }
+
+    pub(crate) fn computed_decision_digest(&self) -> Result<String, AuthorizationStateError> {
+        let mut decision = serde_json::to_value(self)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        decision
+            .as_object_mut()
+            .expect("ConsentRequest serializes as an object")
+            .remove("decisionDigest");
+        digest_json(&decision)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
+    }
+}
+
+/// Browser decision kind for one digest-bound consent request.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum ConsentDecisionKind {
+    Approve,
+    Reject,
+}
+
+/// Exact approvals submitted with an approval decision.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConsentApproval {
+    pub mode: super::ApprovalMode,
+    pub installed_revision: u64,
+    pub expected_grant_revision: u64,
+    pub decision_digest: String,
+    pub approved_capabilities: Vec<ApprovedCapability>,
+    pub approved_resources: Vec<ApprovedResource>,
+    pub companion_approved: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_ceiling: Option<ConsentDelegationCeiling>,
+}
+
+/// Public portion of the server-owned delegation ceiling accepted on the wire.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConsentDelegationCeiling {
+    pub capabilities: Vec<ApprovedCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exact_restrictions: Option<GrantSet>,
+}
+
+/// Typed browser decision envelope; reject decisions carry no approval payload.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConsentDecision {
+    pub decision: ConsentDecisionKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<ConsentApproval>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// Complete ephemeral browser authentication flow record.
@@ -116,7 +263,7 @@ pub(crate) struct AuthBrowserFlow {
     pub participant_id: String,
     pub installed_revision: u64,
     pub target_grant_revision: u64,
-    pub consent: BrowserConsentProposal,
+    pub consent: ConsentRequest,
     pub session_public_key: String,
     pub portal_id: String,
     pub redirect_target: Option<String>,
@@ -223,7 +370,6 @@ impl AuthBrowserFlow {
             && self.request_digest == replacement.request_digest
             && self.participant_id == replacement.participant_id
             && self.installed_revision == replacement.installed_revision
-            && self.consent == replacement.consent
             && self.session_public_key == replacement.session_public_key
             && self.portal_id == replacement.portal_id
             && self.redirect_target == replacement.redirect_target
@@ -703,6 +849,9 @@ fn validate_browser_replacement(
 ) -> Result<(), AuthorizationStateError> {
     if current.version != expected_version
         || !current.preserves_transcript(replacement)
+        || current.consent != replacement.consent
+            && !(current.state == AuthBrowserFlowState::ChooseProvider
+                && replacement.state == AuthBrowserFlowState::Authenticated)
         || current.principal_id.is_some()
             && (current.principal_id != replacement.principal_id
                 || current.authenticated_provider_id != replacement.authenticated_provider_id

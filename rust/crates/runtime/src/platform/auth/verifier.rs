@@ -34,18 +34,25 @@ pub(crate) struct RuntimeAuthorizationRequestVerificationInput<'a> {
     pub(crate) iat: i64,
     pub(crate) request_id: &'a str,
     pub(crate) reply: Option<&'a str>,
-    pub(crate) required_permission: &'a PermissionAtom,
+    pub(crate) required_permissions: &'a [PermissionAtom],
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RuntimeAuthorizationEventVerificationInput<'a> {
     pub(crate) subject: &'a str,
+    pub(crate) descriptor_identity: &'a str,
     pub(crate) payload: &'a [u8],
     pub(crate) session_key: &'a str,
     pub(crate) proof: &'a str,
     pub(crate) authorization_context: &'a str,
     pub(crate) event_id: &'a str,
     pub(crate) event_time: &'a str,
+}
+
+pub(crate) struct VerifiedRuntimeEvent {
+    pub(crate) publisher: AuthorizationEventPublisher,
+    pub(crate) owner_contract_id: String,
+    pub(crate) owner_event_name: String,
 }
 
 fn provider_error(error: trellis_rs::client::TrellisClientError) -> AuthorizationStateError {
@@ -131,7 +138,7 @@ impl RuntimeAuthVerifier {
             iat,
             request_id,
             reply,
-            required_permission,
+            required_permissions,
         } = input;
         let now = now_seconds()?;
         if proof.is_empty() || authorization_context.is_empty() {
@@ -168,7 +175,7 @@ impl RuntimeAuthVerifier {
                 reply_subject: Some(reply),
                 proof,
                 policy: &policy,
-                required_permissions: std::slice::from_ref(required_permission),
+                required_permissions,
             })
             .map_err(|error| {
                 denied(format!(
@@ -199,11 +206,12 @@ impl RuntimeAuthVerifier {
     pub(crate) async fn verify_event(
         &self,
         input: RuntimeAuthorizationEventVerificationInput<'_>,
-    ) -> Result<AuthorizationEventPublisher, trellis_rs::service::EventVerificationFailure> {
+    ) -> Result<VerifiedRuntimeEvent, trellis_rs::service::EventVerificationFailure> {
         use trellis_rs::service::EventVerificationFailure;
 
         let RuntimeAuthorizationEventVerificationInput {
             subject,
+            descriptor_identity,
             payload,
             session_key,
             proof,
@@ -218,6 +226,7 @@ impl RuntimeAuthVerifier {
             || authorization_context.is_empty()
             || event_id.is_empty()
             || event_time.is_empty()
+            || descriptor_identity.is_empty()
         {
             return Err(EventVerificationFailure::Rejected(
                 "event proof headers are missing".into(),
@@ -248,6 +257,10 @@ impl RuntimeAuthVerifier {
                 "session key does not match authorization context".into(),
             ));
         }
+        let descriptor = trellis_protocol::decode_event_descriptor_identity(descriptor_identity)
+            .map_err(|error| EventVerificationFailure::Rejected(error.to_string()))?;
+        let owner_contract_id = descriptor.api_id().to_owned();
+        let owner_event_name = descriptor.event_name().to_owned();
         let mut policy = self
             .source
             .runtime_policy()
@@ -259,12 +272,12 @@ impl RuntimeAuthVerifier {
                 context: &context,
                 context_digest: authorization_context,
                 subject,
+                descriptor_identity,
                 payload,
                 event_id,
                 event_time,
                 proof,
                 policy: &policy,
-                required_permissions: &[],
                 revoked_at,
             })
             .map_err(|error| {
@@ -283,7 +296,11 @@ impl RuntimeAuthVerifier {
                 "event is not granted by the active authority".into(),
             ));
         }
-        Ok(publisher)
+        Ok(VerifiedRuntimeEvent {
+            publisher,
+            owner_contract_id,
+            owner_event_name,
+        })
     }
 
     fn require_healthy(&self) -> Result<(), AuthorizationStateError> {
@@ -426,21 +443,15 @@ impl RequestValidator for RuntimeAuthVerifier {
                     "authenticated request for '{subject}' has no request-id"
                 ))
             })?;
-            let required_permission = match context
-                .required_permission
-                .as_ref()
-                .ok_or_else(|| {
-                    ServerError::Nats(format!(
-                        "authenticated request for '{subject}' has no exact route permission"
-                    ))
-                })?
-                .permission_atom()
-            {
-                Ok(permission) => permission,
-                Err(error) => {
-                    tracing::debug!(subject, %error, "invalid generated route permission");
-                    return Ok(RequestValidation::denied());
-                }
+            let required_permission = match context.required_permission.as_ref() {
+                Some(permission) => match permission.permission_atom() {
+                    Ok(permission) => Some(permission),
+                    Err(error) => {
+                        tracing::debug!(subject, %error, "invalid generated route permission");
+                        return Ok(RequestValidation::denied());
+                    }
+                },
+                None => None,
             };
             let verified = match self
                 .verify_request(RuntimeAuthorizationRequestVerificationInput {
@@ -452,7 +463,7 @@ impl RequestValidator for RuntimeAuthVerifier {
                     iat,
                     request_id: &request_id,
                     reply: context.reply_to.as_deref(),
-                    required_permission: &required_permission,
+                    required_permissions: required_permission.as_slice(),
                 })
                 .await
             {
@@ -467,6 +478,24 @@ impl RequestValidator for RuntimeAuthVerifier {
                 caller: Some(verified.caller),
                 inbox_prefix: Some(verified.context.inbox_prefix().to_owned()),
             })
+        })
+    }
+
+    fn revalidate_current<'a>(
+        &'a self,
+        context: &'a RequestContext,
+    ) -> BoxFuture<'a, Result<bool, ServerError>> {
+        Box::pin(async move {
+            let Some(digest) = context.authorization_context.as_deref() else {
+                return Ok(false);
+            };
+            let Some(route) = context.required_permission.as_ref() else {
+                return Ok(false);
+            };
+            let Ok(permission) = route.permission_atom() else {
+                return Ok(false);
+            };
+            Ok(self.require_cached_permission(digest, &permission).is_ok())
         })
     }
 }
@@ -484,6 +513,13 @@ impl RequestValidator for DenyAllValidator {
     ) -> BoxFuture<'a, Result<RequestValidation, ServerError>> {
         Box::pin(async move { Ok(RequestValidation::denied()) })
     }
+
+    fn revalidate_current<'a>(
+        &'a self,
+        _context: &'a RequestContext,
+    ) -> BoxFuture<'a, Result<bool, ServerError>> {
+        Box::pin(async { Ok(false) })
+    }
 }
 
 fn now_seconds() -> Result<i64, AuthorizationStateError> {
@@ -497,4 +533,101 @@ fn now_seconds() -> Result<i64, AuthorizationStateError> {
 
 fn denied(message: impl Into<String>) -> AuthorizationStateError {
     AuthorizationStateError::InvalidRecord(message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::Engine as _;
+    use ed25519_dalek::SigningKey;
+    use serde_json::Map;
+    use sha2::{Digest as _, Sha256};
+    use trellis_protocol::{
+        sign_authorization_context, sign_authorization_event, verify_authorization_context,
+        AuthorizationContextPurpose, AuthorizationIssuerKey, AuthorizationIssuerState,
+        AuthorizationPrincipalKind, AuthorizationVerificationPolicy, GrantOwnerKind, GrantSet,
+        UnsignedAuthorizationContext, AUTHORIZATION_CONTEXT_FORMAT_V1,
+    };
+
+    use super::{AuthorizationVerificationCore, EventVerificationInput};
+
+    #[test]
+    fn verified_context_without_target_event_publish_authority_is_rejected() {
+        let issuer_key = SigningKey::from_bytes(&[2; 32]);
+        let session_key = SigningKey::from_bytes(&[3; 32]);
+        let issuer = AuthorizationIssuerKey {
+            key_id: base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(Sha256::digest(issuer_key.verifying_key().as_bytes())),
+            public_key: base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(issuer_key.verifying_key().as_bytes()),
+            state: AuthorizationIssuerState::Active,
+        };
+        let signed = sign_authorization_context(
+            UnsignedAuthorizationContext {
+                format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
+                issuer_key_id: issuer.key_id.clone(),
+                principal_id: "01JY0000000000000000000001".to_owned(),
+                principal_kind: AuthorizationPrincipalKind::User,
+                participant_id: "console".to_owned(),
+                owner_kind: GrantOwnerKind::User,
+                owner_id: "01JY0000000000000000000001".to_owned(),
+                grant_revision: 1,
+                identity_key_id: None,
+                login_session_id: Some("01JY0000000000000000000002".to_owned()),
+                connection_id: "01JY0000000000000000000003".to_owned(),
+                session_key: base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(session_key.verifying_key().as_bytes()),
+                deployment_id: None,
+                instance_id: None,
+                inbox_prefix: "_INBOX.test".to_owned(),
+                issued_at: 1_100,
+                not_before: 1_100,
+                expires_at: 1_300,
+                grants: GrantSet::new(vec![]),
+                platform_privileges: vec![],
+                extensions: Map::new(),
+                critical: vec![],
+            },
+            &issuer_key,
+        )
+        .expect("sign context");
+        let policy = AuthorizationVerificationPolicy::new(1_100, 30, 300, 16_384, 16)
+            .expect("verification policy");
+        let context = verify_authorization_context(
+            &issuer,
+            &signed,
+            &policy,
+            AuthorizationContextPurpose::Live,
+        )
+        .expect("verify context");
+        type Event = trellis_runtime_apis::apis::trellis_auth_v1::events::ConnectionsOpened;
+        let subject = <Event as trellis_rs::client::EventDescriptor>::SUBJECT;
+        let descriptor_identity =
+            <Event as trellis_rs::client::EventDescriptor>::descriptor_identity()
+                .expect("event descriptor identity");
+        let proof = sign_authorization_event(
+            context.context_digest(),
+            &descriptor_identity,
+            subject,
+            b"{}",
+            "01JY0000000000000000000004",
+            "1970-01-01T00:18:20Z",
+            &session_key,
+        )
+        .expect("sign event");
+
+        let result = AuthorizationVerificationCore::new().verify_event(EventVerificationInput {
+            context: &context,
+            context_digest: context.context_digest(),
+            subject,
+            descriptor_identity: &descriptor_identity,
+            payload: b"{}",
+            event_id: "01JY0000000000000000000004",
+            event_time: "1970-01-01T00:18:20Z",
+            proof: proof.as_str(),
+            policy: &policy,
+            revoked_at: None,
+        });
+
+        assert!(result.is_err());
+    }
 }

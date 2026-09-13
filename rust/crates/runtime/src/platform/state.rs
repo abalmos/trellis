@@ -1,40 +1,33 @@
 //! Platform-owned Trellis State RPC runtime.
-use std::collections::{BTreeMap, BTreeSet};
+
+use std::collections::BTreeMap;
 use std::time::Duration;
 
-use async_nats::jetstream::{self, consumer, kv};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine as _;
+use async_nats::jetstream::{self, kv, stream::LastRawMessageErrorKind};
 use bytes::Bytes;
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_protocol::{
-    AuthorizationPrincipalKind, GrantOwnerKind, ParticipantKind, ParticipantResourceKind,
-    PermissionAction, PermissionAtom, PermissionTarget, StateKind,
+    AuthorizationPrincipalKind, ParticipantKind, ParticipantResourceKind, PermissionAction,
+    PermissionAtom, PermissionTarget, PlatformPrivilege,
 };
-use trellis_rs::generated::RpcDescriptor;
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, DeclaredRpcError, RequestContext, Router,
     ServerError, ValidationIssue,
 };
 use trellis_runtime_apis::apis::trellis_state_v1::rpc::{
-    AdminDelete as StateAdminDeleteRpc, AdminGet as StateAdminGetRpc,
-    AdminList as StateAdminListRpc, Delete as StateDeleteRpc, Get as StateGetRpc,
-    List as StateListRpc, Put as StatePutRpc,
+    Delete as StateDeleteRpc, Get as StateGetRpc, Put as StatePutRpc,
+    ResourcesInspect as StateResourcesInspectRpc, ResourcesQuery as StateResourcesQueryRpc,
 };
-use trellis_runtime_apis::types::{
-    Bytes as WireBytes, StateAdminDeleteResponse, StateAdminGetResponse, StateAdminListResponse,
-    StateDeleteResponse, StateGetResponse, StateListResponse, StatePutResponse, Uint64,
-};
+use trellis_runtime_apis::types::{Bytes as WireBytes, StateDeleteResponse};
 
 use super::auth::context::AuthorizationContextRepository;
 use super::auth::verifier::RuntimeAuthVerifier;
 use super::auth::{
-    AccountRepository, AuthorityEvidenceRepository, ParticipantBindingRecord,
-    ParticipantBindingState, PrincipalKind, SqliteAuthorizationStore,
+    ParticipantBindingRecord, ParticipantBindingState, ResourceBindingState,
+    ResourceProviderIdentity, SqliteAuthorizationStore,
 };
 use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
@@ -43,14 +36,13 @@ const API_ID: &str = "trellis.state@v1";
 const BUCKET: &str = "trellis_state";
 const STREAM: &str = "KV_trellis_state";
 const SUBJECT_PREFIX: &str = "$KV.trellis_state.";
+pub(crate) const OWNERSHIP_MARKER: &str = "Trellis shared State storage";
 const SUBJECTS: &[&str] = &[
     StateGetRpc::SUBJECT,
     StatePutRpc::SUBJECT,
     StateDeleteRpc::SUBJECT,
-    StateListRpc::SUBJECT,
-    StateAdminGetRpc::SUBJECT,
-    StateAdminListRpc::SUBJECT,
-    StateAdminDeleteRpc::SUBJECT,
+    StateResourcesInspectRpc::SUBJECT,
+    StateResourcesQueryRpc::SUBJECT,
 ];
 
 #[derive(Clone)]
@@ -61,94 +53,23 @@ pub(crate) struct StateRuntime {
     jetstream: jetstream::Context,
 }
 
-#[derive(Clone, Copy)]
-enum Scope {
-    UserApp,
-    DeviceApp,
-}
-
-impl Scope {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::UserApp => "userApp",
-            Self::DeviceApp => "deviceApp",
-        }
-    }
-}
-
 #[derive(Clone)]
 struct Declaration {
-    scope: Scope,
-    owner_id: String,
-    contract_id: String,
-    contract_digest: String,
-    store: String,
-    kind: StateKind,
+    resource_id: String,
+    participant_id: String,
+    resource_name: String,
     schema: Value,
-    state_version: String,
-    accepted_versions: BTreeMap<String, Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Request {
-    store: String,
-    #[serde(default)]
-    key: Option<String>,
-    #[serde(default)]
-    prefix: Option<String>,
-    #[serde(default)]
-    offset: Option<u64>,
-    #[serde(default)]
-    limit: Option<u64>,
-    #[serde(default)]
-    value: Option<Value>,
-    #[serde(default)]
-    ttl_ms: Option<u64>,
-    #[serde(default, deserialize_with = "optional_nullable")]
-    expected_revision: Option<Option<String>>,
-}
-
-fn optional_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(deserializer).map(Some)
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AdminRequest {
-    scope: String,
-    contract_id: String,
-    contract_digest: String,
-    store: String,
-    #[serde(default)]
-    user_id: Option<String>,
-    #[serde(default)]
-    device_id: Option<String>,
-    #[serde(default)]
-    key: Option<String>,
-    #[serde(default)]
-    prefix: Option<String>,
-    #[serde(default)]
-    offset: Option<u64>,
-    #[serde(default)]
-    limit: Option<u64>,
-    #[serde(default)]
-    expected_revision: Option<String>,
+    representation_version: u32,
+    accepted_versions: BTreeMap<u32, Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StoredEnvelope {
-    value: Value,
-    state_version: String,
-    writer_contract_digest: String,
+    value: WireBytes,
+    representation_version: u32,
+    created_at: String,
     updated_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    expires_at: Option<String>,
 }
 
 struct PhysicalEntry {
@@ -165,6 +86,7 @@ impl StateRuntime {
         let jetstream = jetstream::new(nats);
         let config = kv::Config {
             bucket: BUCKET.to_owned(),
+            description: OWNERSHIP_MARKER.to_owned(),
             history: 1,
             max_age: Duration::ZERO,
             storage: jetstream::stream::StorageType::File,
@@ -217,272 +139,211 @@ impl StateRuntime {
 
     fn router(&self) -> Router {
         let mut router = Router::new();
+        router.set_provider_deployment_id("dep_trellis_auth_runtime");
         let state = self.clone();
         router.register_rpc::<StateGetRpc, _, _>(move |context, input| {
             let state = state.clone();
             async move {
-                let input = json!({
-                    "store": input.store.0,
-                    "key": input.key.map(|value| value.0),
-                });
-                json_bytes(state.get(context, input).await?).map(StateGetResponse)
+                let declaration = state
+                    .normal_declaration(&context, &input.resource_name.0)
+                    .await?;
+                state.require_resource(&context, &declaration, PermissionAction::Read)?;
+                let entry = state
+                    .authoritative_entry(&declaration)
+                    .await?
+                    .map(|entry| project_entry(&declaration, &entry))
+                    .transpose()?;
+                serde_json::from_value(json!({ "entry": entry })).map_err(ServerError::from)
             }
         });
         let state = self.clone();
         router.register_rpc::<StatePutRpc, _, _>(move |context, input| {
             let state = state.clone();
             async move {
-                let value = serde_json::from_slice::<Value>(&input.value.0)?;
-                let ttl_ms = input.ttl_ms.as_ref().map(|value| value.0 .0);
-                let mut input = serde_json::to_value(input)?;
-                input["value"] = value;
-                input["ttlMs"] = serde_json::to_value(ttl_ms)?;
-                json_bytes(state.put(context, input).await?).map(StatePutResponse)
+                let declaration = state
+                    .normal_declaration(&context, &input.resource_name.0)
+                    .await?;
+                state.require_resource(&context, &declaration, PermissionAction::Write)?;
+                let revision = input
+                    .revision
+                    .as_ref()
+                    .map(|value| parse_revision(&value.0))
+                    .transpose()?;
+                let mode = input.mode.as_str();
+                if (mode == "replace") != revision.is_some() {
+                    return Err(validation(
+                        "/revision",
+                        "replace requires revision; create and set forbid it",
+                    ));
+                }
+                if !matches!(mode, "create" | "set" | "replace") {
+                    return Err(validation("/mode", "mode is invalid"));
+                }
+                validate_representation(
+                    &declaration,
+                    input.representation_version.0,
+                    &input.value,
+                    false,
+                )?;
+                let current = if mode == "set" {
+                    None
+                } else {
+                    state.authoritative_entry(&declaration).await?
+                };
+                if (mode == "create" && current.is_some())
+                    || (mode == "replace"
+                        && current.as_ref().map(|entry| entry.revision) != revision)
+                {
+                    return Err(conflict(current.as_ref(), &declaration)?);
+                }
+                let now = timestamp(OffsetDateTime::now_utc())?;
+                let envelope = StoredEnvelope {
+                    value: input.value,
+                    representation_version: input.representation_version.0,
+                    created_at: current
+                        .as_ref()
+                        .map_or_else(|| now.clone(), |entry| entry.envelope.created_at.clone()),
+                    updated_at: now,
+                };
+                let key = &declaration.resource_id;
+                let result: Result<u64, ServerError> = match mode {
+                    "set" => state
+                        .store
+                        .put(key, encode(&envelope)?)
+                        .await
+                        .map_err(kv_error),
+                    "replace" => state
+                        .store
+                        .update(
+                            key,
+                            encode(&envelope)?,
+                            revision.ok_or_else(|| {
+                                validation("/revision", "replace requires revision")
+                            })?,
+                        )
+                        .await
+                        .map_err(kv_error),
+                    "create" => match current {
+                        Some(_) => return Err(conflict(current.as_ref(), &declaration)?),
+                        None => match state.authoritative_raw(key).await? {
+                            Some((false, tombstone_revision, _)) => state
+                                .store
+                                .update(key, encode(&envelope)?, tombstone_revision)
+                                .await
+                                .map_err(kv_error),
+                            Some((true, _, _)) => {
+                                let latest = state.authoritative_entry(&declaration).await?;
+                                return Err(conflict(latest.as_ref(), &declaration)?);
+                            }
+                            None => state
+                                .store
+                                .create(key, encode(&envelope)?)
+                                .await
+                                .map_err(kv_error),
+                        },
+                    },
+                    _ => return Err(validation("/mode", "mode is invalid")),
+                };
+                match result {
+                    Ok(revision) => serde_json::from_value(json!({
+                        "entry": public_entry(revision, &envelope)
+                    }))
+                    .map_err(ServerError::from),
+                    Err(error) if mode != "set" => {
+                        let current = state.authoritative_entry(&declaration).await?;
+                        if current.as_ref().map(|entry| entry.revision) != revision {
+                            Err(conflict(current.as_ref(), &declaration)?)
+                        } else {
+                            Err(error)
+                        }
+                    }
+                    Err(error) => Err(error),
+                }
             }
         });
         let state = self.clone();
         router.register_rpc::<StateDeleteRpc, _, _>(move |context, input| {
             let state = state.clone();
             async move {
-                let input = json!({
-                    "store": input.store.0,
-                    "key": input.key.map(|value| value.0),
-                    "expectedRevision": input.expected_revision.map(|value| value.0),
-                });
-                serde_json::from_value::<StateDeleteResponse>(state.delete(context, input).await?)
-                    .map_err(ServerError::from)
-            }
-        });
-        let state = self.clone();
-        router.register_rpc::<StateListRpc, _, _>(move |context, input| {
-            let state = state.clone();
-            async move {
-                let input = json!({
-                    "store": input.store.0,
-                    "prefix": input.prefix.map(|value| value.0),
-                    "offset": input.offset.map(|value| value.0),
-                    "limit": input.limit.0,
-                });
-                let (entries, count, offset, limit, next_offset) =
-                    list_output(state.list(context, input).await?)?;
-                Ok(StateListResponse {
-                    entries,
-                    count: Uint64(count),
-                    offset: Uint64(offset),
-                    limit: Uint64(limit),
-                    next_offset: next_offset.map(Uint64),
-                })
-            }
-        });
-        let state = self.clone();
-        router.register_rpc::<StateAdminGetRpc, _, _>(move |_context, input| {
-            let state = state.clone();
-            async move {
-                let input = serde_json::from_slice(&input.0 .0)?;
-                json_bytes(state.admin_get(input).await?).map(StateAdminGetResponse)
-            }
-        });
-        let state = self.clone();
-        router.register_rpc::<StateAdminListRpc, _, _>(move |_context, input| {
-            let state = state.clone();
-            async move {
-                let input = serde_json::from_slice(&input.0 .0)?;
-                let (entries, count, offset, limit, next_offset) =
-                    list_output(state.admin_list(input).await?)?;
-                Ok(StateAdminListResponse {
-                    entries,
-                    count: Uint64(count),
-                    offset: Uint64(offset),
-                    limit: Uint64(limit),
-                    next_offset: next_offset.map(Uint64),
-                })
-            }
-        });
-        let state = self.clone();
-        router.register_rpc::<StateAdminDeleteRpc, _, _>(move |_context, input| {
-            let state = state.clone();
-            async move {
-                let input = serde_json::from_slice(&input.0 .0)?;
-                serde_json::from_value::<StateAdminDeleteResponse>(state.admin_delete(input).await?)
-                    .map_err(ServerError::from)
-            }
-        });
-        router
-    }
-
-    async fn get(&self, context: RequestContext, value: Value) -> Result<Value, ServerError> {
-        let request: Request = serde_json::from_value(value)?;
-        let declaration = self.normal_declaration(&context, &request.store).await?;
-        self.require_resource(&context, &declaration, PermissionAction::Read)?;
-        self.validate_key(&declaration, request.key.as_deref(), false)?;
-        self.get_at(&declaration, request.key.as_deref()).await
-    }
-
-    async fn put(&self, context: RequestContext, value: Value) -> Result<Value, ServerError> {
-        let request: Request = serde_json::from_value(value)?;
-        let declaration = self.normal_declaration(&context, &request.store).await?;
-        self.require_resource(&context, &declaration, PermissionAction::Write)?;
-        self.validate_key(&declaration, request.key.as_deref(), false)?;
-        let value = request
-            .value
-            .ok_or_else(|| validation("/value", "value is required"))?;
-        validate_schema(&declaration.schema, &value, "/value", false)?;
-        let expected = request
-            .expected_revision
-            .map(|value| value.map(|value| parse_revision(&value)).transpose())
-            .transpose()?;
-        let now = OffsetDateTime::now_utc();
-        let envelope = StoredEnvelope {
-            value,
-            state_version: declaration.state_version.clone(),
-            writer_contract_digest: declaration.contract_digest.clone(),
-            updated_at: timestamp(now)?,
-            expires_at: request
-                .ttl_ms
-                .map(|ttl| {
-                    i64::try_from(ttl)
-                        .ok()
-                        .and_then(|ttl| now.checked_add(time::Duration::milliseconds(ttl)))
-                        .ok_or_else(|| validation("/ttlMs", "ttlMs exceeds the supported range"))
-                })
-                .transpose()?
-                .map(timestamp)
-                .transpose()?,
-        };
-        let key = physical_key(&declaration, request.key.as_deref())?;
-        let current = if expected.is_some() {
-            self.live_entry(&key).await?
-        } else {
-            None
-        };
-        match expected {
-            None => {
-                let revision = self
+                let declaration = state
+                    .normal_declaration(&context, &input.resource_name.0)
+                    .await?;
+                state.require_resource(&context, &declaration, PermissionAction::Delete)?;
+                let expected = input
+                    .revision
+                    .as_ref()
+                    .map(|value| parse_revision(&value.0))
+                    .transpose()?;
+                if expected.is_none() {
+                    let deleted = state.authoritative_entry(&declaration).await?.is_some();
+                    state
+                        .store
+                        .delete(&declaration.resource_id)
+                        .await
+                        .map_err(kv_error)?;
+                    return Ok(StateDeleteResponse { deleted });
+                }
+                let Some(current) = state.authoritative_entry(&declaration).await? else {
+                    return Err(conflict(None, &declaration)?);
+                };
+                if expected.is_some_and(|expected| expected != current.revision) {
+                    return Err(conflict(Some(&current), &declaration)?);
+                }
+                match state
                     .store
-                    .put(&key, encode(&envelope)?)
-                    .await
-                    .map_err(kv_error)?;
-                Ok(
-                    json!({"applied": true, "entry": public_entry(request.key.as_deref(), revision, &envelope)}),
-                )
-            }
-            Some(None) if current.is_some() => {
-                Ok(conflict(current, request.key.as_deref(), &declaration)?)
-            }
-            Some(None) => match self.store.create(&key, encode(&envelope)?).await {
-                Ok(revision) => Ok(
-                    json!({"applied": true, "entry": public_entry(request.key.as_deref(), revision, &envelope)}),
-                ),
-                Err(_error) => match self.live_entry(&key).await? {
-                    Some(entry) => Ok(conflict(Some(entry), request.key.as_deref(), &declaration)?),
-                    None => match self.store.create(&key, encode(&envelope)?).await {
-                        Ok(revision) => Ok(
-                            json!({"applied": true, "entry": public_entry(request.key.as_deref(), revision, &envelope)}),
-                        ),
-                        Err(error) => match self.live_entry(&key).await? {
-                            Some(entry) => {
-                                Ok(conflict(Some(entry), request.key.as_deref(), &declaration)?)
-                            }
-                            None => Err(kv_error(error)),
-                        },
-                    },
-                },
-            },
-            Some(Some(expected_revision)) => match current {
-                None => Ok(json!({"applied": false, "found": false})),
-                Some(ref entry) if entry.revision != expected_revision => Ok(conflict(
-                    Some(entry.clone_entry()),
-                    request.key.as_deref(),
-                    &declaration,
-                )?),
-                Some(_) => match self
-                    .store
-                    .update(&key, encode(&envelope)?, expected_revision)
+                    .delete_expect_revision(&declaration.resource_id, expected)
                     .await
                 {
-                    Ok(revision) => Ok(
-                        json!({"applied": true, "entry": public_entry(request.key.as_deref(), revision, &envelope)}),
-                    ),
+                    Ok(()) => Ok(StateDeleteResponse { deleted: true }),
                     Err(error) => {
-                        let current = self.live_entry(&key).await?;
-                        if update_failure_was_race(
-                            current.as_ref().map(|entry| entry.revision),
-                            expected_revision,
-                        ) {
-                            Ok(conflict(current, request.key.as_deref(), &declaration)?)
+                        let latest = state.authoritative_entry(&declaration).await?;
+                        if latest.as_ref().map(|entry| entry.revision) != Some(current.revision) {
+                            Err(conflict(latest.as_ref(), &declaration)?)
                         } else {
                             Err(kv_error(error))
                         }
                     }
-                },
-            },
-        }
-    }
-
-    async fn delete(&self, context: RequestContext, value: Value) -> Result<Value, ServerError> {
-        let request: Request = serde_json::from_value(value)?;
-        let declaration = self.normal_declaration(&context, &request.store).await?;
-        self.require_resource(&context, &declaration, PermissionAction::Delete)?;
-        self.validate_key(&declaration, request.key.as_deref(), false)?;
-        let expected = request
-            .expected_revision
-            .flatten()
-            .map(|value| parse_revision(&value))
-            .transpose()?;
-        self.delete_at(&declaration, request.key.as_deref(), expected)
-            .await
-    }
-
-    async fn list(&self, context: RequestContext, value: Value) -> Result<Value, ServerError> {
-        let request: Request = serde_json::from_value(value)?;
-        let declaration = self.normal_declaration(&context, &request.store).await?;
-        self.require_resource(&context, &declaration, PermissionAction::Read)?;
-        self.validate_key(&declaration, request.prefix.as_deref(), true)?;
-        self.list_at(
-            &declaration,
-            request.prefix.as_deref(),
-            request.offset.unwrap_or(0),
-            request.limit.unwrap_or(0),
-        )
-        .await
-    }
-
-    async fn admin_get(&self, value: Value) -> Result<Value, ServerError> {
-        let request: AdminRequest = serde_json::from_value(value)?;
-        let declaration = self.admin_declaration(&request).await?;
-        self.validate_key(&declaration, request.key.as_deref(), false)?;
-        self.get_at(&declaration, request.key.as_deref()).await
-    }
-
-    async fn admin_list(&self, value: Value) -> Result<Value, ServerError> {
-        let request: AdminRequest = serde_json::from_value(value)?;
-        let declaration = self.admin_declaration(&request).await?;
-        self.validate_key(&declaration, request.prefix.as_deref(), true)?;
-        self.list_at(
-            &declaration,
-            request.prefix.as_deref(),
-            request.offset.unwrap_or(0),
-            request.limit.unwrap_or(0),
-        )
-        .await
-    }
-
-    async fn admin_delete(&self, value: Value) -> Result<Value, ServerError> {
-        let request: AdminRequest = serde_json::from_value(value)?;
-        let declaration = self.admin_declaration(&request).await?;
-        self.validate_key(&declaration, request.key.as_deref(), false)?;
-        let expected = request
-            .expected_revision
-            .map(|value| parse_revision(&value))
-            .transpose()?;
-        self.admin_delete_at(&declaration, request.key.as_deref(), expected)
-            .await
+                }
+            }
+        });
+        let state = self.clone();
+        router.register_rpc::<StateResourcesInspectRpc, _, _>(move |context, input| {
+            let state = state.clone();
+            async move {
+                require_admin(&context)?;
+                let resource = state
+                    .repository
+                    .inspect_resource(input.resource_id.0)
+                    .await
+                    .map_err(unexpected)?;
+                serde_json::from_value(json!({ "resource": resource })).map_err(ServerError::from)
+            }
+        });
+        let state = self.clone();
+        router.register_rpc::<StateResourcesQueryRpc, _, _>(move |context, input| {
+            let state = state.clone();
+            async move {
+                require_admin(&context)?;
+                serde_json::from_value(
+                    state
+                        .repository
+                        .query_resources("state.Resources.Query", serde_json::to_value(input)?)
+                        .await
+                        .map_err(unexpected)?,
+                )
+                .map_err(ServerError::from)
+            }
+        });
+        router.rpc_handler_authorizes::<StateGetRpc>();
+        router.rpc_handler_authorizes::<StatePutRpc>();
+        router.rpc_handler_authorizes::<StateDeleteRpc>();
+        router
     }
 
     async fn normal_declaration(
         &self,
         context: &RequestContext,
-        store: &str,
+        resource_name: &str,
     ) -> Result<Declaration, ServerError> {
         let caller = context.caller.as_ref().ok_or_else(auth_denied)?;
         let retained = self
@@ -494,126 +355,66 @@ impl StateRuntime {
         let (_, binding) = self
             .repository
             .get_installed_participant_record(
-                retained.participant_id,
+                retained.participant_id.clone(),
                 Some(retained.installed_revision),
             )
             .await
             .map_err(unexpected)?
             .ok_or_else(auth_denied)?;
-        let scope = match (caller.principal_kind, binding.participant_kind) {
-            (AuthorizationPrincipalKind::User, ParticipantKind::App) => Scope::UserApp,
-            (AuthorizationPrincipalKind::Device, ParticipantKind::Device) => Scope::DeviceApp,
-            _ => return Err(auth_denied()),
-        };
         if binding.participant_id != caller.participant_id
             || binding.state != ParticipantBindingState::Resolved
+            || !matches!(
+                (caller.principal_kind, binding.participant_kind),
+                (
+                    AuthorizationPrincipalKind::User,
+                    ParticipantKind::App | ParticipantKind::Agent
+                ) | (AuthorizationPrincipalKind::Device, ParticipantKind::Device)
+            )
         {
             return Err(auth_denied());
         }
-        declaration_from_binding(
+        let resource = binding
+            .projection
+            .resources
+            .get(resource_name)
+            .filter(|resource| resource.kind == ParticipantResourceKind::State)
+            .ok_or_else(|| validation("/resourceName", "State resource is not declared"))?;
+        let representation = resource
+            .representation
+            .as_ref()
+            .ok_or_else(|| unexpected("State representation is missing"))?;
+        let schema = representation.schema.clone();
+        let representation_version = representation.version;
+        let accepted_versions = representation.accepts.clone();
+        let evidence = self
+            .repository
+            .get_resource_bindings(
+                retained.owner_kind,
+                retained.owner_id,
+                retained.participant_id,
+                retained.installed_revision,
+            )
+            .await
+            .map_err(unexpected)?
+            .into_iter()
+            .find(|evidence| {
+                evidence.resource_kind == "state"
+                    && evidence.local_name == resource_name
+                    && evidence.state == ResourceBindingState::Available
+                    && matches!(
+                        &evidence.provider_identity,
+                        ResourceProviderIdentity::State { bucket } if bucket == BUCKET
+                    )
+            })
+            .ok_or_else(auth_denied)?;
+        Ok(declaration_from_binding(
             binding,
-            scope,
-            caller.principal_id.clone(),
-            caller.participant_id.clone(),
-            store,
-        )
-    }
-
-    async fn admin_declaration(&self, request: &AdminRequest) -> Result<Declaration, ServerError> {
-        match request.scope.as_str() {
-            "userApp" => {
-                let user_id = request
-                    .user_id
-                    .as_deref()
-                    .ok_or_else(|| validation("/userId", "userId is required"))?;
-                let principal = self
-                    .repository
-                    .get_principal(user_id)
-                    .await
-                    .map_err(unexpected)?
-                    .ok_or_else(|| validation("/userId", "user target was not found"))?;
-                if principal.kind != PrincipalKind::User {
-                    return Err(validation("/userId", "target is not a user"));
-                }
-                let grant = self
-                    .repository
-                    .get_grant_binding(
-                        GrantOwnerKind::User,
-                        user_id.to_owned(),
-                        request.contract_id.clone(),
-                    )
-                    .await
-                    .map_err(unexpected)?
-                    .ok_or_else(|| {
-                        validation("/contractId", "user contract grant was not found")
-                    })?;
-                let (_, binding) = self
-                    .repository
-                    .get_installed_participant_record(
-                        grant.participant_id,
-                        Some(grant.installed_revision),
-                    )
-                    .await
-                    .map_err(unexpected)?
-                    .ok_or_else(|| {
-                        validation("/contractId", "user contract binding was not found")
-                    })?;
-                validate_admin_digest(
-                    declaration_from_binding(
-                        binding,
-                        Scope::UserApp,
-                        user_id.to_owned(),
-                        request.contract_id.clone(),
-                        &request.store,
-                    )?,
-                    &request.contract_digest,
-                )
-            }
-            "deviceApp" => {
-                let device_id = request
-                    .device_id
-                    .as_deref()
-                    .ok_or_else(|| validation("/deviceId", "deviceId is required"))?;
-                let mut matches = Vec::new();
-                for device in self.repository.list_devices().await.map_err(unexpected)? {
-                    if device.principal_id != device_id {
-                        continue;
-                    }
-                    let Some(grant) = self
-                        .repository
-                        .get_grant_binding(
-                            GrantOwnerKind::Deployment,
-                            device.deployment_id.clone(),
-                            request.contract_id.clone(),
-                        )
-                        .await
-                        .map_err(unexpected)?
-                    else {
-                        continue;
-                    };
-                    let Some((_, binding)) = self
-                        .repository
-                        .get_installed_participant_record(
-                            grant.participant_id,
-                            Some(grant.installed_revision),
-                        )
-                        .await
-                        .map_err(unexpected)?
-                    else {
-                        continue;
-                    };
-                    matches.push(declaration_from_binding(
-                        binding,
-                        Scope::DeviceApp,
-                        device_id.to_owned(),
-                        request.contract_id.clone(),
-                        &request.store,
-                    )?);
-                }
-                select_admin_declaration(matches, &request.contract_digest)
-            }
-            _ => Err(validation("/scope", "scope is invalid")),
-        }
+            evidence.binding_id,
+            resource_name,
+            schema,
+            representation_version,
+            accepted_versions,
+        ))
     }
 
     fn require_resource(
@@ -624,9 +425,9 @@ impl StateRuntime {
     ) -> Result<(), ServerError> {
         let caller = context.caller.as_ref().ok_or_else(auth_denied)?;
         let target = PermissionTarget::participant_resource(
-            caller.participant_id.clone(),
+            declaration.participant_id.clone(),
             ParticipantResourceKind::State,
-            declaration.store.clone(),
+            declaration.resource_name.clone(),
         )
         .map_err(unexpected)?;
         let atom = PermissionAtom::new(target, action).map_err(unexpected)?;
@@ -635,423 +436,174 @@ impl StateRuntime {
             .map_err(|_| auth_denied())
     }
 
-    fn validate_key(
+    async fn authoritative_entry(
         &self,
         declaration: &Declaration,
-        key: Option<&str>,
-        list: bool,
-    ) -> Result<(), ServerError> {
-        match declaration.kind {
-            StateKind::Value if list => Err(validation("/store", "value stores cannot be listed")),
-            StateKind::Value if key.is_some() => {
-                Err(validation("/key", "value stores do not use keys"))
-            }
-            StateKind::Map if !list && key.is_none() => {
-                Err(validation("/key", "map key is required"))
-            }
-            StateKind::Map => key.map_or(Ok(()), |path| {
-                validate_path(path, if list { "/prefix" } else { "/key" })
-            }),
-            StateKind::Value => Ok(()),
-        }
-    }
-
-    async fn get_at(
-        &self,
-        declaration: &Declaration,
-        logical_key: Option<&str>,
-    ) -> Result<Value, ServerError> {
-        let key = physical_key(declaration, logical_key)?;
-        let Some(entry) = self.live_entry(&key).await? else {
-            return Ok(json!({"found": false}));
-        };
-        project_entry(declaration, logical_key, &entry, true)
-    }
-
-    async fn delete_at(
-        &self,
-        declaration: &Declaration,
-        logical_key: Option<&str>,
-        expected: Option<u64>,
-    ) -> Result<Value, ServerError> {
-        let key = physical_key(declaration, logical_key)?;
-        let Some(entry) = self.live_entry(&key).await? else {
-            return Ok(json!({"deleted": false}));
-        };
-        if expected.is_some_and(|expected| expected != entry.revision) {
-            return Ok(json!({"deleted": false}));
-        }
-        match self
-            .store
-            .delete_expect_revision(&key, Some(entry.revision))
-            .await
-        {
-            Ok(()) => Ok(json!({"deleted": true})),
-            Err(error) => match self.live_entry(&key).await? {
-                Some(current) if current.revision == entry.revision => Err(unexpected(error)),
-                Some(_) | None => Ok(json!({"deleted": false})),
-            },
-        }
-    }
-
-    async fn admin_delete_at(
-        &self,
-        declaration: &Declaration,
-        logical_key: Option<&str>,
-        expected: Option<u64>,
-    ) -> Result<Value, ServerError> {
-        let key = physical_key(declaration, logical_key)?;
-        let Some(entry) = self.store.entry(&key).await.map_err(kv_error)? else {
-            return Ok(json!({"deleted": false}));
-        };
-        if entry.operation != kv::Operation::Put
-            || expected.is_some_and(|expected| expected != entry.revision)
-        {
-            return Ok(json!({"deleted": false}));
-        }
-        let expired = valid_entry_is_expired(&entry.value, declaration, OffsetDateTime::now_utc());
-        match self
-            .store
-            .delete_expect_revision(&key, Some(entry.revision))
-            .await
-        {
-            Ok(()) => Ok(json!({"deleted": !expired})),
-            Err(error) => {
-                let current = self
-                    .store
-                    .entry(&key)
-                    .await
-                    .map_err(kv_error)?
-                    .map(|entry| (entry.operation, entry.revision));
-                if delete_failure_was_race(current, entry.revision) {
-                    Ok(json!({"deleted": false}))
-                } else {
-                    Err(kv_error(error))
-                }
-            }
-        }
-    }
-
-    async fn list_at(
-        &self,
-        declaration: &Declaration,
-        prefix: Option<&str>,
-        offset: u64,
-        limit: u64,
-    ) -> Result<Value, ServerError> {
-        if declaration.kind != StateKind::Map {
-            return Err(validation("/store", "only map stores can be listed"));
-        }
-        let physical_prefix = map_prefix(declaration, prefix)?;
-        let keys = self.matching_keys(&physical_prefix).await?;
-        let mut entries = Vec::new();
-        for key in keys {
-            let Some(entry) = self.live_entry(&key).await? else {
-                continue;
-            };
-            let logical_key = decode_map_key(&physical_prefix_base(declaration)?, &key)?;
-            entries.push((
-                logical_key.clone(),
-                project_entry(declaration, Some(&logical_key), &entry, false)?,
-            ));
-        }
-        entries.sort_by(|left, right| left.0.cmp(&right.0));
-        let count = u64::try_from(entries.len()).map_err(unexpected)?;
-        let start = usize::try_from(offset)
-            .unwrap_or(usize::MAX)
-            .min(entries.len());
-        let take = usize::try_from(limit).unwrap_or(usize::MAX);
-        let page = entries
-            .into_iter()
-            .skip(start)
-            .take(take)
-            .map(|(_, value)| value)
-            .collect::<Vec<_>>();
-        let next = offset.saturating_add(u64::try_from(page.len()).map_err(unexpected)?);
-        let mut response =
-            json!({"entries": page, "count": count, "offset": offset, "limit": limit});
-        if limit > 0 && next < count {
-            response["nextOffset"] = json!(next);
-        }
-        Ok(response)
-    }
-
-    async fn live_entry(&self, key: &str) -> Result<Option<PhysicalEntry>, ServerError> {
-        let Some(entry) = self.store.entry(key).await.map_err(kv_error)? else {
+    ) -> Result<Option<PhysicalEntry>, ServerError> {
+        let Some((put, revision, payload)) =
+            self.authoritative_raw(&declaration.resource_id).await?
+        else {
             return Ok(None);
         };
-        if entry.operation != kv::Operation::Put {
+        if !put {
             return Ok(None);
         }
-        let envelope: StoredEnvelope = serde_json::from_slice(&entry.value).map_err(unexpected)?;
-        if !is_canonical_digest(&envelope.writer_contract_digest) {
-            return Err(unexpected("stored State writer contract digest is invalid"));
-        }
-        let expires_at = envelope
-            .expires_at
-            .as_deref()
-            .map(parse_timestamp)
-            .transpose()?;
+        let envelope: StoredEnvelope = serde_json::from_slice(&payload)
+            .map_err(|_| representation_error("CorruptRepresentation", declaration, 0))?;
+        validate_representation(
+            declaration,
+            envelope.representation_version,
+            &envelope.value,
+            true,
+        )?;
+        parse_timestamp(&envelope.created_at)?;
         parse_timestamp(&envelope.updated_at)?;
-        if expires_at.is_some_and(|expires_at| expires_at <= OffsetDateTime::now_utc()) {
-            let _ = self
-                .store
-                .delete_expect_revision(key, Some(entry.revision))
-                .await;
-            return Ok(None);
-        }
-        Ok(Some(PhysicalEntry {
-            revision: entry.revision,
-            envelope,
-        }))
+        Ok(Some(PhysicalEntry { revision, envelope }))
     }
 
-    async fn matching_keys(&self, prefix: &str) -> Result<Vec<String>, ServerError> {
-        let stream = self
-            .jetstream
-            .get_stream(STREAM)
-            .await
-            .map_err(unexpected)?;
-        let subject = format!("{SUBJECT_PREFIX}{prefix}>");
-        let mut consumer = stream
-            .create_consumer(consumer::push::OrderedConfig {
-                deliver_subject: self.jetstream.client().new_inbox(),
-                filter_subject: subject,
-                headers_only: true,
-                deliver_policy: consumer::DeliverPolicy::LastPerSubject,
-                ..Default::default()
-            })
-            .await
-            .map_err(unexpected)?;
-        let snapshot_count = consumer.info().await.map_err(unexpected)?.num_pending;
-        if snapshot_count == 0 {
-            return Ok(Vec::new());
-        }
-        let mut messages = consumer.messages().await.map_err(unexpected)?;
-        let mut keys = BTreeSet::new();
-        for _ in 0..snapshot_count {
-            let message = messages
-                .next()
-                .await
-                .ok_or_else(|| unexpected("State key enumeration ended early"))?
-                .map_err(unexpected)?;
-            if let Some(key) = message.subject.strip_prefix(SUBJECT_PREFIX) {
-                keys.insert(key.to_owned());
+    async fn authoritative_raw(
+        &self,
+        key: &str,
+    ) -> Result<Option<(bool, u64, Bytes)>, ServerError> {
+        let stream = self.jetstream.get_stream(STREAM).await.map_err(kv_error)?;
+        let subject = format!("{SUBJECT_PREFIX}{key}");
+        match stream.get_last_raw_message_by_subject(&subject).await {
+            Ok(message) => {
+                let put = match message
+                    .headers
+                    .get("KV-Operation")
+                    .map(|value| value.as_str())
+                {
+                    Some("DEL" | "PURGE") => false,
+                    Some("PUT") | None => true,
+                    Some(_) => return Err(unexpected("stored State operation is invalid")),
+                };
+                Ok(Some((put, message.sequence, message.payload)))
             }
-        }
-        Ok(keys.into_iter().collect())
-    }
-}
-
-impl PhysicalEntry {
-    fn clone_entry(&self) -> Self {
-        Self {
-            revision: self.revision,
-            envelope: StoredEnvelope {
-                value: self.envelope.value.clone(),
-                state_version: self.envelope.state_version.clone(),
-                writer_contract_digest: self.envelope.writer_contract_digest.clone(),
-                updated_at: self.envelope.updated_at.clone(),
-                expires_at: self.envelope.expires_at.clone(),
-            },
+            Err(error) if error.kind() == LastRawMessageErrorKind::NoMessageFound => Ok(None),
+            Err(error) => Err(kv_error(error)),
         }
     }
 }
 
 fn declaration_from_binding(
     binding: ParticipantBindingRecord,
-    scope: Scope,
-    owner_id: String,
-    contract_id: String,
-    store: &str,
-) -> Result<Declaration, ServerError> {
-    binding.resolve().map_err(unexpected)?;
-    let participant: Value = serde_json::from_str(&binding.participant_json).map_err(unexpected)?;
-    let definition = participant["state"]
-        .get(store)
-        .ok_or_else(|| validation("/store", "State store is not declared"))?;
-    let definition: trellis_protocol::StateDefinition =
-        serde_json::from_value(definition.clone()).map_err(unexpected)?;
-    let schemas = &participant["schemas"];
-    let schema = schemas
-        .get(definition.schema_name())
-        .cloned()
-        .ok_or_else(|| unexpected("current State schema is missing"))?;
-    let mut accepted_versions = BTreeMap::new();
-    for (version, schema_name) in definition.accepted_versions() {
-        accepted_versions.insert(
-            version.to_owned(),
-            schemas
-                .get(schema_name)
-                .cloned()
-                .ok_or_else(|| unexpected("accepted State schema is missing"))?,
-        );
-    }
-    Ok(Declaration {
-        scope,
-        owner_id,
-        contract_id,
-        contract_digest: binding.participant_digest,
-        store: store.to_owned(),
-        kind: definition.kind(),
+    resource_id: String,
+    resource_name: &str,
+    schema: Value,
+    representation_version: u32,
+    accepted_versions: BTreeMap<u32, Value>,
+) -> Declaration {
+    Declaration {
+        resource_id,
+        participant_id: binding.participant_id,
+        resource_name: resource_name.to_owned(),
         schema,
-        state_version: definition.state_version().to_owned(),
+        representation_version,
         accepted_versions,
-    })
+    }
 }
 
-fn validate_admin_digest(
-    declaration: Declaration,
-    expected: &str,
-) -> Result<Declaration, ServerError> {
-    if declaration.contract_digest == expected {
-        Ok(declaration)
+fn validate_representation(
+    declaration: &Declaration,
+    version: u32,
+    value: &WireBytes,
+    stored: bool,
+) -> Result<(), ServerError> {
+    if version == 0 {
+        return Err(if stored {
+            representation_error("CorruptRepresentation", declaration, version)
+        } else {
+            validation(
+                "/representationVersion",
+                "representationVersion must be positive",
+            )
+        });
+    }
+    let schema = if version == declaration.representation_version {
+        &declaration.schema
+    } else if let Some(schema) = declaration.accepted_versions.get(&version) {
+        schema
+    } else {
+        return Err(representation_error(
+            "UnsupportedRepresentation",
+            declaration,
+            version,
+        ));
+    };
+    let value: Value = serde_json::from_slice(&value.0).map_err(|_| {
+        if stored {
+            representation_error("CorruptRepresentation", declaration, version)
+        } else {
+            validation("/value", "value must be UTF-8 JSON")
+        }
+    })?;
+    let validator = jsonschema::validator_for(schema).map_err(unexpected)?;
+    if validator.is_valid(&value) {
+        Ok(())
+    } else if stored {
+        Err(representation_error(
+            "CorruptRepresentation",
+            declaration,
+            version,
+        ))
     } else {
         Err(validation(
-            "/contractDigest",
-            "contractDigest does not identify the current contract artifact",
+            "/value",
+            "value fails the declared State schema",
         ))
     }
 }
 
-fn same_declaration(left: &Declaration, right: &Declaration) -> bool {
-    left.contract_digest == right.contract_digest
-        && left.kind == right.kind
-        && left.schema == right.schema
-        && left.state_version == right.state_version
-        && left.accepted_versions == right.accepted_versions
+fn encode(envelope: &StoredEnvelope) -> Result<Bytes, ServerError> {
+    trellis_protocol::canonicalize_json(&serde_json::to_value(envelope)?)
+        .map(Bytes::from)
+        .map_err(unexpected)
 }
 
-fn select_admin_declaration(
-    matches: Vec<Declaration>,
-    expected_digest: &str,
-) -> Result<Declaration, ServerError> {
-    let mut matches = matches.into_iter();
-    let first = matches
-        .next()
-        .ok_or_else(|| validation("/contractId", "device contract authority was not found"))?;
-    if matches.any(|candidate| !same_declaration(&first, &candidate)) {
-        return Err(declared(
-            "UnexpectedError",
-            "device contract authority is incoherent",
-        ));
-    }
-    validate_admin_digest(first, expected_digest)
+fn public_entry(revision: u64, envelope: &StoredEnvelope) -> Value {
+    json!({
+        "value": envelope.value,
+        "representationVersion": envelope.representation_version,
+        "revision": revision.to_string(),
+        "createdAt": envelope.created_at,
+        "updatedAt": envelope.updated_at,
+    })
 }
 
-fn delete_failure_was_race(current: Option<(kv::Operation, u64)>, revision: u64) -> bool {
-    !matches!(current, Some((kv::Operation::Put, current)) if current == revision)
+fn project_entry(declaration: &Declaration, entry: &PhysicalEntry) -> Result<Value, ServerError> {
+    validate_representation(
+        declaration,
+        entry.envelope.representation_version,
+        &entry.envelope.value,
+        true,
+    )?;
+    Ok(public_entry(entry.revision, &entry.envelope))
 }
 
-fn update_failure_was_race(current_revision: Option<u64>, expected_revision: u64) -> bool {
-    current_revision != Some(expected_revision)
-}
-
-fn valid_entry_is_expired(value: &[u8], declaration: &Declaration, now: OffsetDateTime) -> bool {
-    let Ok(envelope) = serde_json::from_slice::<StoredEnvelope>(value) else {
-        return false;
-    };
-    if !is_canonical_digest(&envelope.writer_contract_digest)
-        || parse_timestamp(&envelope.updated_at).is_err()
-    {
-        return false;
-    }
-    let schema = if envelope.state_version == declaration.state_version {
-        &declaration.schema
-    } else if let Some(schema) = declaration.accepted_versions.get(&envelope.state_version) {
-        schema
-    } else {
-        return false;
-    };
-    if !jsonschema::validator_for(schema).is_ok_and(|validator| validator.is_valid(&envelope.value))
-    {
-        return false;
-    }
-    envelope
-        .expires_at
-        .as_deref()
-        .and_then(|value| parse_timestamp(value).ok())
-        .is_some_and(|expires_at| expires_at <= now)
-}
-
-fn is_canonical_digest(value: &str) -> bool {
-    URL_SAFE_NO_PAD
-        .decode(value)
-        .is_ok_and(|decoded| decoded.len() == 32 && URL_SAFE_NO_PAD.encode(decoded) == value)
-}
-
-fn physical_key(
+fn conflict(
+    current: Option<&PhysicalEntry>,
     declaration: &Declaration,
-    logical_key: Option<&str>,
-) -> Result<String, ServerError> {
-    let namespace = namespace_digest(declaration)?;
-    let store = URL_SAFE_NO_PAD.encode(declaration.store.as_bytes());
-    match declaration.kind {
-        StateKind::Value => Ok(format!("value.{namespace}.{store}")),
-        StateKind::Map => Ok(format!(
-            "map.{namespace}.{store}.{}",
-            encode_path(logical_key.expect("validated map key"))
-        )),
-    }
+) -> Result<ServerError, ServerError> {
+    let current = current
+        .map(|entry| project_entry(declaration, entry))
+        .transpose()?;
+    Ok(ServerError::DeclaredRpc(DeclaredRpcError::new(
+        "trellis.state@v1::Conflict",
+        "State revision conflict",
+        current.map(|value| ("current", value)),
+    )))
 }
 
-fn physical_prefix_base(declaration: &Declaration) -> Result<String, ServerError> {
-    Ok(format!(
-        "map.{}.{}.",
-        namespace_digest(declaration)?,
-        URL_SAFE_NO_PAD.encode(declaration.store.as_bytes())
+fn representation_error(error: &str, declaration: &Declaration, version: u32) -> ServerError {
+    ServerError::DeclaredRpc(DeclaredRpcError::new(
+        format!("trellis.state@v1::{error}"),
+        "stored State representation is unavailable",
+        [
+            ("resourceName", json!(declaration.resource_name)),
+            ("representationVersion", json!(version)),
+        ],
     ))
-}
-
-fn map_prefix(declaration: &Declaration, prefix: Option<&str>) -> Result<String, ServerError> {
-    let base = physical_prefix_base(declaration)?;
-    Ok(prefix.map_or(base.clone(), |prefix| {
-        format!("{base}{}.", encode_path(prefix))
-    }))
-}
-
-fn namespace_digest(declaration: &Declaration) -> Result<String, ServerError> {
-    trellis_protocol::digest_json(&json!({
-        "scope": declaration.scope.as_str(),
-        "ownerId": declaration.owner_id,
-        "contractId": declaration.contract_id,
-    }))
-    .map_err(unexpected)
-}
-
-fn encode_path(path: &str) -> String {
-    path.split('/')
-        .map(|segment| URL_SAFE_NO_PAD.encode(segment.as_bytes()))
-        .collect::<Vec<_>>()
-        .join(".")
-}
-
-fn decode_map_key(base: &str, physical: &str) -> Result<String, ServerError> {
-    let encoded = physical
-        .strip_prefix(base)
-        .ok_or_else(|| unexpected("State map key is outside its namespace"))?;
-    encoded
-        .split('.')
-        .map(|segment| {
-            URL_SAFE_NO_PAD
-                .decode(segment)
-                .map_err(unexpected)
-                .and_then(|bytes| String::from_utf8(bytes).map_err(unexpected))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|segments| segments.join("/"))
-}
-
-fn validate_path(path: &str, pointer: &str) -> Result<(), ServerError> {
-    if path.is_empty()
-        || path.starts_with('/')
-        || path.ends_with('/')
-        || path.split('/').any(str::is_empty)
-    {
-        Err(validation(pointer, "key must be a canonical slash path"))
-    } else {
-        Ok(())
-    }
 }
 
 fn parse_revision(value: &str) -> Result<u64, ServerError> {
@@ -1061,149 +613,29 @@ fn parse_revision(value: &str) -> Result<u64, ServerError> {
         || !value.bytes().all(|byte| byte.is_ascii_digit())
     {
         return Err(validation(
-            "/expectedRevision",
-            "expectedRevision must be a canonical positive integer",
+            "/revision",
+            "revision must be a canonical positive integer",
         ));
     }
-    value.parse().map_err(|_| {
-        validation(
-            "/expectedRevision",
-            "expectedRevision exceeds the supported range",
-        )
-    })
+    value
+        .parse()
+        .map_err(|_| validation("/revision", "revision exceeds the supported range"))
 }
 
 fn timestamp(value: OffsetDateTime) -> Result<String, ServerError> {
-    let milliseconds = value.unix_timestamp_nanos().div_euclid(1_000_000);
-    let seconds = milliseconds.div_euclid(1_000);
-    let millis = milliseconds.rem_euclid(1_000);
-    let value = OffsetDateTime::from_unix_timestamp(i64::try_from(seconds).map_err(unexpected)?)
-        .map_err(unexpected)?;
-    let base = value.format(&Rfc3339).map_err(unexpected)?;
-    let base = base
-        .strip_suffix('Z')
-        .ok_or_else(|| unexpected("UTC timestamp formatting failed"))?;
-    Ok(format!("{base}.{millis:03}Z"))
-}
-
-fn parse_timestamp(value: &str) -> Result<OffsetDateTime, ServerError> {
-    if value.len() != 24 || value.as_bytes().get(19) != Some(&b'.') || !value.ends_with('Z') {
-        return Err(unexpected("stored State timestamp is not canonical"));
-    }
-    OffsetDateTime::parse(value, &Rfc3339).map_err(unexpected)
-}
-
-fn encode(envelope: &StoredEnvelope) -> Result<Bytes, ServerError> {
-    let value = serde_json::to_value(envelope)?;
-    trellis_protocol::canonicalize_json(&value)
-        .map(Bytes::from)
+    value
+        .replace_nanosecond(value.nanosecond() / 1_000_000 * 1_000_000)
+        .map_err(unexpected)?
+        .format(&Rfc3339)
         .map_err(unexpected)
 }
 
-fn public_entry(key: Option<&str>, revision: u64, envelope: &StoredEnvelope) -> Value {
-    let mut entry = json!({
-        "value": envelope.value,
-        "revision": revision.to_string(),
-        "updatedAt": envelope.updated_at,
-    });
-    if let Some(key) = key {
-        entry["key"] = json!(key);
+fn parse_timestamp(value: &str) -> Result<OffsetDateTime, ServerError> {
+    let parsed = OffsetDateTime::parse(value, &Rfc3339).map_err(unexpected)?;
+    if parsed.format(&Rfc3339).map_err(unexpected)? != value {
+        return Err(unexpected("stored State timestamp is not canonical"));
     }
-    if let Some(expires_at) = envelope.expires_at.as_deref() {
-        entry["expiresAt"] = json!(expires_at);
-    }
-    entry
-}
-
-fn project_entry(
-    declaration: &Declaration,
-    key: Option<&str>,
-    entry: &PhysicalEntry,
-    found_wrapper: bool,
-) -> Result<Value, ServerError> {
-    let public = public_entry(key, entry.revision, &entry.envelope);
-    if entry.envelope.state_version == declaration.state_version {
-        validate_schema(&declaration.schema, &entry.envelope.value, "", true)?;
-        return Ok(if found_wrapper {
-            json!({"found": true, "entry": public})
-        } else {
-            public
-        });
-    }
-    let schema = declaration
-        .accepted_versions
-        .get(&entry.envelope.state_version)
-        .ok_or_else(|| unexpected("stored State version is not accepted"))?;
-    validate_schema(schema, &entry.envelope.value, "", true)?;
-    Ok(json!({
-        "migrationRequired": true,
-        "entry": public,
-        "stateVersion": entry.envelope.state_version,
-        "currentStateVersion": declaration.state_version,
-        "writerContractDigest": entry.envelope.writer_contract_digest,
-    }))
-}
-
-fn conflict(
-    entry: Option<PhysicalEntry>,
-    key: Option<&str>,
-    declaration: &Declaration,
-) -> Result<Value, ServerError> {
-    match entry {
-        Some(entry) => Ok(json!({
-            "applied": false,
-            "found": true,
-            "entry": project_entry(declaration, key, &entry, false)?,
-        })),
-        None => Ok(json!({"applied": false, "found": false})),
-    }
-}
-
-fn validate_schema(
-    schema: &Value,
-    value: &Value,
-    path: &str,
-    stored: bool,
-) -> Result<(), ServerError> {
-    let validator = jsonschema::validator_for(schema).map_err(unexpected)?;
-    if validator.is_valid(value) {
-        Ok(())
-    } else if stored {
-        Err(unexpected("stored State value fails its declared schema"))
-    } else {
-        Err(validation(path, "value fails the declared State schema"))
-    }
-}
-
-fn json_bytes(value: Value) -> Result<WireBytes, ServerError> {
-    serde_json::to_vec(&value)
-        .map(WireBytes)
-        .map_err(ServerError::from)
-}
-
-fn list_output(value: Value) -> Result<(Vec<WireBytes>, u64, u64, u64, Option<u64>), ServerError> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct ListOutput {
-        entries: Vec<Value>,
-        count: u64,
-        offset: u64,
-        limit: u64,
-        next_offset: Option<u64>,
-    }
-
-    let output: ListOutput = serde_json::from_value(value)?;
-    Ok((
-        output
-            .entries
-            .into_iter()
-            .map(json_bytes)
-            .collect::<Result<_, _>>()?,
-        output.count,
-        output.offset,
-        output.limit,
-        output.next_offset,
-    ))
+    Ok(parsed)
 }
 
 fn validation(path: &str, message: &str) -> ServerError {
@@ -1223,122 +655,167 @@ fn auth_denied() -> ServerError {
     ))
 }
 
-fn declared(error_type: &str, message: &str) -> ServerError {
-    ServerError::DeclaredRpc(DeclaredRpcError::new(
-        error_type,
-        message,
-        std::iter::empty::<(&str, Value)>(),
-    ))
+fn require_admin(context: &RequestContext) -> Result<(), ServerError> {
+    if context.caller.as_ref().is_some_and(|caller| {
+        caller
+            .platform_privileges
+            .contains(&PlatformPrivilege::Admin)
+    }) {
+        Ok(())
+    } else {
+        Err(auth_denied())
+    }
 }
 
 fn unexpected(error: impl std::fmt::Display) -> ServerError {
     tracing::error!(error = %error, "State runtime failure");
-    declared("UnexpectedError", "State is temporarily unavailable")
+    ServerError::DeclaredRpc(DeclaredRpcError::new(
+        "UnexpectedError",
+        "State is temporarily unavailable",
+        std::iter::empty::<(&str, Value)>(),
+    ))
 }
 
 fn kv_error(error: impl std::fmt::Display) -> ServerError {
-    let message = error.to_string();
-    if message.to_ascii_lowercase().contains("key")
-        && (message.to_ascii_lowercase().contains("invalid")
-            || message.to_ascii_lowercase().contains("maximum"))
-    {
-        validation("/key", "encoded key exceeds NATS KV key limits")
-    } else {
-        unexpected(message)
-    }
+    unexpected(error)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::process::{Child, Command, Stdio};
+
     use super::*;
 
-    fn test_declaration(digest: &str) -> Declaration {
-        Declaration {
-            scope: Scope::DeviceApp,
-            owner_id: "device-1".into(),
-            contract_id: "example.device@v1".into(),
-            contract_digest: digest.into(),
-            store: "preferences".into(),
-            kind: StateKind::Value,
-            schema: json!({"type": "string"}),
-            state_version: "v1".into(),
-            accepted_versions: BTreeMap::new(),
+    struct Server(Child);
+
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
         }
     }
 
     #[test]
-    fn state_key_revision_and_timestamp_codecs_are_canonical() {
-        assert!(validate_path("inspection/active/open", "/key").is_ok());
-        for invalid in ["", "/open", "open/", "open//draft"] {
-            assert!(
-                validate_path(invalid, "/key").is_err(),
-                "accepted {invalid:?}"
-            );
-        }
-        assert_eq!(parse_revision("42").expect("canonical revision"), 42);
-        for invalid in ["", "0", "01", "+1", "-1", "x"] {
-            assert!(parse_revision(invalid).is_err(), "accepted {invalid:?}");
-        }
-        let value = OffsetDateTime::from_unix_timestamp_nanos(1_754_741_696_789_123_456)
-            .expect("test timestamp");
-        let encoded = timestamp(value).expect("format timestamp");
-        assert_eq!(encoded, "2025-08-09T12:14:56.789Z");
+    fn revision_tokens_are_canonical_positive_u64_values() {
+        assert_eq!(parse_revision("1").expect("valid revision"), 1);
         assert_eq!(
-            parse_timestamp(&encoded)
-                .expect("parse timestamp")
-                .unix_timestamp_nanos(),
-            1_754_741_696_789_000_000
+            parse_revision(&u64::MAX.to_string()).expect("valid revision"),
+            u64::MAX
         );
-        let digest =
-            trellis_protocol::digest_json(&json!({"contract": "device"})).expect("contract digest");
-        assert!(is_canonical_digest(&digest));
-        assert!(!is_canonical_digest("not-a-contract-digest"));
+        for invalid in ["", "0", "01", "-1", "18446744073709551616"] {
+            assert!(parse_revision(invalid).is_err(), "accepted {invalid}");
+        }
     }
 
     #[test]
-    fn failed_delete_classifies_only_absent_or_changed_entries_as_races() {
-        assert!(delete_failure_was_race(None, 7));
-        assert!(delete_failure_was_race(Some((kv::Operation::Delete, 7)), 7));
-        assert!(delete_failure_was_race(Some((kv::Operation::Put, 8)), 7));
-        assert!(!delete_failure_was_race(Some((kv::Operation::Put, 7)), 7));
+    fn stored_envelope_keeps_bytes_and_positive_u32_version() {
+        let envelope = StoredEnvelope {
+            value: WireBytes(br#"{"enabled":true}"#.to_vec()),
+            representation_version: u32::MAX,
+            created_at: "2026-09-10T12:00:00Z".to_owned(),
+            updated_at: "2026-09-10T12:00:00Z".to_owned(),
+        };
+        let decoded: StoredEnvelope =
+            serde_json::from_slice(&encode(&envelope).expect("encode")).expect("decode");
+        assert_eq!(decoded.value.0, envelope.value.0);
+        assert_eq!(decoded.representation_version, u32::MAX);
     }
 
     #[test]
-    fn failed_update_classifies_only_absent_or_changed_entries_as_races() {
-        assert!(update_failure_was_race(None, 7));
-        assert!(update_failure_was_race(Some(8), 7));
-        assert!(!update_failure_was_race(Some(7), 7));
-    }
-
-    #[test]
-    fn device_admin_selection_establishes_coherence_before_digest_validation() {
-        assert!(select_admin_declaration(vec![test_declaration("digest-a")], "digest-a").is_ok());
-
-        let wrong = select_admin_declaration(vec![test_declaration("digest-a")], "digest-b")
-            .err()
-            .expect("wrong digest must fail");
-        assert!(format!("{wrong:?}").contains("/contractDigest"));
-
-        assert!(select_admin_declaration(
-            vec![test_declaration("digest-a"), test_declaration("digest-a")],
-            "digest-a",
-        )
-        .is_ok());
-
-        let incoherent = select_admin_declaration(
-            vec![test_declaration("digest-a"), test_declaration("digest-b")],
-            "digest-a",
-        )
-        .err()
-        .expect("conflicting candidates must fail");
-        assert!(format!("{incoherent:?}").contains("UnexpectedError"));
-    }
-
-    #[test]
-    fn compatible_participant_digest_changes_keep_state_namespace() {
+    fn state_timestamps_use_generated_canonical_spelling() {
+        let value = OffsetDateTime::parse("2026-09-10T12:00:00.120456Z", &Rfc3339).unwrap();
+        let rendered = timestamp(value).unwrap();
+        assert_eq!(rendered, "2026-09-10T12:00:00.12Z");
         assert_eq!(
-            namespace_digest(&test_declaration("digest-a")).expect("namespace"),
-            namespace_digest(&test_declaration("digest-b")).expect("namespace"),
+            parse_timestamp(&rendered).unwrap(),
+            value.replace_nanosecond(120_000_000).unwrap()
         );
+        assert!(parse_timestamp("2026-09-10T12:00:00.120Z").is_err());
+    }
+
+    #[tokio::test]
+    async fn nats_component_covers_state_write_modes_conflicts_tombstones_and_read() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let directory = tempfile::tempdir().unwrap();
+        let binary = trellis_local_nats::NatsServerBinary::resolve(
+            &trellis_local_nats::NatsBinarySource::DownloadPinned,
+            Some(&directory.path().join("cache")),
+        )
+        .unwrap();
+        let _server = Server(
+            Command::new(binary)
+                .args(["-a", "127.0.0.1", "-p", &port.to_string(), "-js"])
+                .arg("-sd")
+                .arg(directory.path().join("data"))
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let url = format!("nats://127.0.0.1:{port}");
+        let mut client = None;
+        for _ in 0..100 {
+            if let Ok(connected) = async_nats::connect(&url).await {
+                client = Some(connected);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let store = jetstream::new(client.expect("connect to local NATS"))
+            .create_key_value(kv::Config {
+                bucket: "state_test".to_owned(),
+                history: 1,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let value = |text: &str| {
+            encode(&StoredEnvelope {
+                value: WireBytes(text.as_bytes().to_vec()),
+                representation_version: 1,
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+                updated_at: "2026-01-01T00:00:00Z".to_owned(),
+            })
+            .unwrap()
+        };
+
+        let created = store.create("resource", value("create")).await.unwrap();
+        assert!(store.create("resource", value("conflict")).await.is_err());
+        assert_eq!(
+            store.entry("resource").await.unwrap().unwrap().revision,
+            created
+        );
+        assert_eq!(
+            store.entry("resource").await.unwrap().unwrap().revision,
+            created,
+            "reading must not write"
+        );
+        let set = store.put("resource", value("set")).await.unwrap();
+        assert!(store
+            .update("resource", value("stale"), created)
+            .await
+            .is_err());
+        let replaced = store
+            .update("resource", value("replace"), set)
+            .await
+            .unwrap();
+        store
+            .delete_expect_revision("resource", Some(replaced))
+            .await
+            .unwrap();
+        let tombstone = store.entry("resource").await.unwrap().unwrap();
+        assert_eq!(tombstone.operation, kv::Operation::Delete);
+        assert!(store.get("resource").await.unwrap().is_none());
+        let (first, second) = tokio::join!(
+            store.update("resource", value("first"), tombstone.revision),
+            store.update("resource", value("second"), tombstone.revision),
+        );
+        assert_ne!(first.is_ok(), second.is_ok());
+        assert!(store.entry("resource").await.unwrap().unwrap().revision > tombstone.revision);
+        store.delete("resource").await.unwrap();
+        assert!(store.get("resource").await.unwrap().is_none());
+        store.delete("missing").await.unwrap();
     }
 }

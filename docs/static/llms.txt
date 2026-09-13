@@ -33,40 +33,56 @@ installed release.
 
 ## Essential Workflow
 
-1. Author `contract.trellis` or direct-child `contracts/*.trellis` files.
-2. Set `format = 1`, a local package `name` when generating a language package,
-   and API dependencies in `trellis.toml`; run `trellis update` to resolve
-   changes and record `trellis.lock`.
+1. Author the `.trellis` files explicitly listed by `[sources]`.
+2. Set `[package]`, `[dependencies]`, and language outputs in `trellis.toml`;
+   run `trellis update` to resolve changes into `trellis.lock`.
 3. Run `trellis install` to reproduce locked dependencies and `trellis generate`
    after IDL edits. `trellis generate --watch` supports the edit loop.
 4. Depend on the one ordinary generated package for your language. Import its
-   `apis` and `participants` namespaces, not separate API or participant packages.
+   `apis` and `participants` namespaces, not separate API or participant
+   packages.
 5. Connect through that participant's supported runtime API. Use generated calls
    and resolved resource handles; do not reconstruct Trellis transport metadata.
 
-Commit authored IDL, `trellis.toml`, and `trellis.lock`. Commit generated packages
-when clones should build without the Trellis CLI or API cache; regenerate rather
-than hand-edit them. One detected language defaults to `trellis/` with optional
-`[generate].output`. Multiple detected languages require explicit
-`[generate.rust].output` and `[generate.typescript].output`. Detection uses root
-Cargo, npm, or Deno manifests; no marker means no language package. Package
-version is always `0.0.0`. TypeScript packages contain executable ESM JavaScript
+Commit authored IDL, `trellis.toml`, and `trellis.lock`. Commit generated
+packages when clones should build without the Trellis CLI or source-package
+cache; regenerate rather than hand-edit them. Configure `[generate.rust].output`
+and/or `[generate.typescript].output`. Detection uses root Cargo, npm, or Deno
+manifests; no marker means no language package. Package version equals the
+source package version. TypeScript packages contain executable ESM JavaScript
 and declarations; Rust packages are ordinary path-dependency crates. Both use
 published runtime dependencies matching the CLI. No project-local installation
-tree, runtime-path configuration, or consumer transpilation step is required. Use
-exact declared action names, not suffixes or invented qualifiers. Failed
+tree, runtime-path configuration, or consumer transpilation step is required.
+Use exact declared action names, not suffixes or invented qualifiers. Failed
 compilation, rendering, or formatting retains the last successful generated
 outputs; colliding participant output paths are errors.
 
-Trellis operations are caller-visible workflows; Trellis jobs are
-service-private execution. Declarations define what may be granted but grant
-nothing by themselves. An administrator installs the immutable participant
-revision and writes a participant-scoped `GrantBinding`; deployment apply
-provisions exact resource evidence. Services/devices bootstrap with identity
-and proof inputs only, while browsers bind a user login and then refresh.
-Authorization contexts, route JWTs, transports, grants, and issuer keys remain
-process-memory-only. Requests/events carry context digest, matching redundant
-`session-key`, and a message-specific proof.
+Trellis Operations are durable, restartable, at-least-once caller-visible
+workflows; controls remain bound to the creator principal and participant across
+reconnects, and terminal states are immutable. Jobs are service-private; keyed
+capacity waits do not consume attempts, and Jobs Summary is independent of Query
+pages. Capability approval is not an exact grant. Resource commitments are
+approvals; desired capacities are hints, while observed bindings are the usable
+limits. Trellis neither adopts nor destroys foreign-owned physical resources.
+Removal detaches access without deleting new-version data, allowing compatible
+approved reattachment. Store and file metadata listing uses opaque, query-bound
+keyset cursors with a default limit of 100 and maximum of 500. An administrator
+installs the immutable participant revision and writes a participant-scoped
+`GrantBinding`; deployment apply provisions exact resource evidence.
+Services/devices bootstrap with identity and proof inputs only, while browsers
+bind a user login and then refresh. A device companion is established only by
+activation-owned separate consent and cannot bootstrap as a standalone
+participant. Authorization contexts, route JWTs, transports, grants, and issuer
+keys remain process-memory-only. Requests/events carry context digest, matching
+redundant `session-key`, and a message-specific proof.
+
+Events use API-qualified subjects and base64url parameter tokens; their signed
+descriptor binds the exact API, dotted event name, and parameter count. Durable delivery acknowledges success only
+after the handler succeeds; final exhaustion is durably recorded in the
+per-Consumer DLQ before acknowledgement. Manual replay uses the same handler and
+a fresh delivery budget without rewinding the original Consumer, and successful
+replay is durably resolved before acknowledgement. Feed controls bind both the
+runtime `feedId` and the original caller identity.
 
 Consumer AGENTS templates are available under `templates/`. They describe the
 Trellis boundary; application policies belong in the consumer repository.

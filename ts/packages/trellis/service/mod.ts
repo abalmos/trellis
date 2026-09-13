@@ -64,7 +64,6 @@ export {
   type OutboxDispatchResult,
   type OutboxDispatchRuntime,
   type OutboxJobDispatchOutcome,
-  type OutboxKvEntry,
   type OutboxKvStore,
   type OutboxMessage,
   type OutboxMessageState,
@@ -83,18 +82,6 @@ export {
   type SqlOutboxTables,
   type SqlRow,
 } from "./outbox_inbox.ts";
-export {
-  createEventContext,
-  type EventContext,
-  type EventHandler,
-  type GroupedSubscription,
-  isGroupedSubscription,
-  type MultiEventSubscription,
-  type MultiSubscribeOpts,
-  type OrderingGroup,
-  type SingleSubscription,
-  type SubscribeOpts,
-} from "./runtime/subscription.ts";
 export {
   ActiveJob,
   decodeJobUpdateEnvelope,

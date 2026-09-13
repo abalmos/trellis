@@ -7,30 +7,30 @@ pub(super) async fn dispatch(
     caller: ValidatedRequest,
 ) -> Result<Value, AuthorizationStateError> {
     match subject {
-        "rpc.v1.Auth.Portals.List" => processor.portals_list(payload).await,
-        "rpc.v1.Auth.Portals.Get" => processor.portals_get(payload).await,
-        "rpc.v1.Auth.Portals.Put" => processor.portals_put(payload, &caller).await,
-        "rpc.v1.Auth.Portals.Remove" => processor.portals_remove(payload, &caller).await,
-        "rpc.v1.Auth.Portals.LoginSettings.Get" => processor.portal_settings_get(payload).await,
-        "rpc.v1.Auth.Portals.LoginSettings.Update" => {
+        "rpc.v1.auth.Portals.List" => processor.portals_list(payload).await,
+        "rpc.v1.auth.Portals.Get" => processor.portals_get(payload).await,
+        "rpc.v1.auth.Portals.Put" => processor.portals_put(payload, &caller).await,
+        "rpc.v1.auth.Portals.Remove" => processor.portals_remove(payload, &caller).await,
+        "rpc.v1.auth.Portals.LoginSettings.Get" => processor.portal_settings_get(payload).await,
+        "rpc.v1.auth.Portals.LoginSettings.Update" => {
             processor.portal_settings_update(payload, &caller).await
         }
-        "rpc.v1.Auth.Portals.Routes.Put" => processor.portal_route_put(payload, &caller).await,
-        "rpc.v1.Auth.Portals.Routes.Remove" => {
+        "rpc.v1.auth.Portals.Routes.Put" => processor.portal_route_put(payload, &caller).await,
+        "rpc.v1.auth.Portals.Routes.Remove" => {
             processor.portal_route_remove(payload, &caller).await
         }
-        "rpc.v1.Auth.Portals.GrantOverrides.List" => {
+        "rpc.v1.auth.Portals.GrantOverrides.List" => {
             processor.portal_grant_overrides_list(payload).await
         }
-        "rpc.v1.Auth.Portals.GrantOverrides.Put" => {
+        "rpc.v1.auth.Portals.GrantOverrides.Put" => {
             processor.portal_grant_overrides_put(payload, &caller).await
         }
-        "rpc.v1.Auth.Portals.GrantOverrides.Remove" => {
+        "rpc.v1.auth.Portals.GrantOverrides.Remove" => {
             processor
                 .portal_grant_overrides_remove(payload, &caller)
                 .await
         }
-        "rpc.v1.Auth.Capabilities.List" => processor.capabilities_list(payload).await,
+        "rpc.v1.auth.Capabilities.List" => processor.capabilities_list(payload).await,
         _ => unknown(subject),
     }
 }

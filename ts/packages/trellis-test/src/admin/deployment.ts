@@ -1,4 +1,5 @@
 import { createAuth } from "@qlever-llc/trellis";
+import { RemoteError } from "@qlever-llc/trellis/errors";
 import { ulid } from "ulid";
 
 import { generateSessionSeed } from "../control_plane_config.ts";
@@ -12,6 +13,7 @@ import type {
   AdminRpcInput,
   TrellisTestAdminRpcMethod,
 } from "./methods.ts";
+import { deploymentConsentRequest } from "./methods.ts";
 import { recordTrellisDuration } from "./metrics.ts";
 
 function participantPresentation(participant: TrellisTestParticipantLike) {
@@ -38,9 +40,49 @@ export type AdminDeploymentContext = {
   createdDeployments: Map<string, Promise<void>>;
   deploymentBindingRevisions: Map<string, bigint>;
   deploymentIds: Map<string, string>;
-  installedParticipants: Map<string, { digest: string; revision: bigint }>;
+  installedParticipants: Map<
+    string,
+    { digest: string; participantId: string; revision: bigint }
+  >;
   rpc: AdminDeploymentRpc;
 };
+
+/** @internal Applies a deployment, explicitly approving server-computed consent when required. */
+export async function applyWithServerConsent<T>(
+  rpc: (
+    input: AdminRpcInput<"authDeploymentsApply">,
+  ) => Promise<T>,
+  request: AdminRpcInput<"authDeploymentsApply">,
+): Promise<T> {
+  try {
+    return await rpc(request);
+  } catch (error) {
+    const consent = deploymentConsentRequest(error);
+    if (!consent) throw error;
+    return await rpc({
+      ...request,
+      idempotencyKey: ulid(),
+      approval: {
+        approvedCapabilities: consent.capabilities.filter((item) =>
+          item.eligible
+        )
+          .map((item) => ({ id: item.id, consentDigest: item.consentDigest })),
+        approvedResources: consent.resources.filter((item) => item.eligible)
+          .map((item) => ({
+            kind: item.kind,
+            name: item.name,
+            commitment: item.requestedCommitment,
+          })),
+        companionApproved: consent.companion !== undefined &&
+          consent.companion !== null,
+        decisionDigest: consent.decisionDigest,
+        expectedGrantRevision: consent.expectedGrantRevision,
+        installedRevision: consent.installedRevision,
+        mode: "capabilities",
+      },
+    });
+  }
+}
 
 function deploymentKey(kind: "service" | "device", deployment: string): string {
   return `${kind}:${deployment}`;
@@ -104,22 +146,45 @@ export async function applyParticipant(
   }
 
   const evidence = participantPresentation(args.contract);
-  const applied = await context.rpc(
-    "authDeploymentsApply",
-    {
-      deploymentId,
-      ...evidence,
-      expectedRevision: context.deploymentBindingRevisions.get(deploymentId) ??
-        0n,
-      idempotencyKey: ulid(),
-    },
-  );
+  let request: AdminRpcInput<"authDeploymentsApply"> = {
+    deploymentId,
+    ...evidence,
+    expectedRevision: context.deploymentBindingRevisions.get(deploymentId) ??
+      0n,
+    idempotencyKey: ulid(),
+    approval: undefined,
+  };
+  const applied = await (async () => {
+    for (;;) {
+      try {
+        return await applyWithServerConsent(
+          (input) => context.rpc("authDeploymentsApply", input),
+          request,
+        );
+      } catch (error) {
+        if (
+          !(error instanceof RemoteError) ||
+          !("code" in error.remoteError) ||
+          error.remoteError.code !== "revision_conflict" ||
+          request.expectedRevision >= 64n
+        ) {
+          throw error;
+        }
+        request = {
+          ...request,
+          expectedRevision: request.expectedRevision + 1n,
+          idempotencyKey: ulid(),
+        };
+      }
+    }
+  })();
   context.deploymentBindingRevisions.set(
     deploymentId,
     applied.binding.revision,
   );
   context.installedParticipants.set(evidence.participantPath, {
     digest: evidence.packageDigest,
+    participantId: applied.binding.participantId,
     revision: applied.binding.installedRevision,
   });
   recordTrellisDuration(
@@ -133,7 +198,7 @@ export async function applyParticipant(
     },
   );
   return {
-    participantId: evidence.participantPath,
+    participantId: applied.binding.participantId,
     installedRevision: applied.binding.installedRevision,
     deploymentId,
     binding: applied.binding,
@@ -146,11 +211,14 @@ export async function installParticipant(
   args: { contract: TrellisTestParticipantLike },
 ): Promise<TrellisTestParticipantApproval> {
   const evidence = participantPresentation(args.contract);
-  const participantId = evidence.participantPath;
+  const participantPath = evidence.participantPath;
   const digest = evidence.packageDigest;
-  const current = context.installedParticipants.get(participantId);
+  const current = context.installedParticipants.get(participantPath);
   if (current?.digest === digest) {
-    return { participantId, installedRevision: current.revision };
+    return {
+      participantId: current.participantId,
+      installedRevision: current.revision,
+    };
   }
   const installed = await context.rpc(
     "authParticipantsInstall",
@@ -161,8 +229,15 @@ export async function installParticipant(
     },
   );
   const revision = installed.participant.revision;
-  context.installedParticipants.set(participantId, { digest, revision });
-  return { participantId, installedRevision: revision };
+  context.installedParticipants.set(participantPath, {
+    digest,
+    participantId: installed.participant.participantId,
+    revision,
+  });
+  return {
+    participantId: installed.participant.participantId,
+    installedRevision: revision,
+  };
 }
 
 /** @internal Provisions a service instance key after installing its participant. */
@@ -170,7 +245,15 @@ export async function provisionServiceInstance(
   context: AdminDeploymentContext,
   args: { deployment?: string; contract: TrellisTestParticipantLike },
 ): Promise<TrellisTestServiceKey> {
-  const approved = await applyParticipant(context, args);
+  const deployment = args.deployment ?? context.defaultDeployment;
+  const evidence = participantPresentation(args.contract);
+  const deploymentId = context.deploymentIds.get(deployment);
+  const installed = context.installedParticipants.get(evidence.participantPath);
+  const approved =
+    deploymentId && installed?.digest === evidence.packageDigest &&
+      context.deploymentBindingRevisions.has(deploymentId)
+      ? { deploymentId, participantId: installed.participantId }
+      : await applyParticipant(context, args);
   if (!approved.deploymentId) {
     throw new Error("deployment apply returned no deployment ID");
   }

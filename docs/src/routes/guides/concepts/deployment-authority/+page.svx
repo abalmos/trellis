@@ -5,23 +5,24 @@ longer exists.
 
 ## Installed participant revisions
 
-`Auth.Participants.Install` stores an immutable canonical participant and its
-exact resolved APIs. Installing a participant defines what may be granted; it
+`Auth.Participants.Install` stores immutable verified source-package evidence and
+the exact participant lexical path. Installing a participant defines what may be granted; it
 does not grant anything by itself.
 
 ## Identity grants
 
 `Auth.Grants.Set` writes one binding for an identity and participant. The
-binding selects an installed revision, exact permission atoms, and finite
-platform privileges. Writes require `expectedRevision` and fail if an atom is
-not declared by the installed participant.
+binding selects an installed revision, approval mode, approved capability consent
+fingerprints, resource commitments, delegation ceiling, exact derived grants,
+and finite platform privileges. Writes require `expectedRevision`.
 
 Effective application authority is:
 
 ```text
-current GrantBinding
-  intersect installed participant actions
-  intersect current required/optional resource evidence
+selected participant actions
+  intersect approved current-consent capabilities
+  intersect delegation ceilings
+  intersect usable approved resource commitments
 ```
 
 NATS subjects, API packages, resource names, and client-provided artifacts never

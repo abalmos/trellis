@@ -1773,7 +1773,7 @@ dependencies = [
 
 [[package]]
 name = "runtime-trellis"
-version = "0.0.0"
+version = "0.12.0"
 dependencies = [
  "futures-util",
  "serde",
@@ -2519,9 +2519,7 @@ dependencies = [
  "base64",
  "ed25519-dalek",
  "jsonptr",
- "jsonschema",
  "nkeys",
- "semver",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -2565,6 +2563,7 @@ dependencies = [
 name = "trellis-runtime-acceptance"
 version = "0.0.0"
 dependencies = [
+ "futures-util",
  "runtime-trellis",
  "tokio",
  "tracing-subscriber",

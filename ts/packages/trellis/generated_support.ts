@@ -13,7 +13,7 @@ export type SerializableErrorData = {
   traceId?: string;
 } & Record<string, unknown>;
 
-type CodecValue<C> = C extends Codec<infer T> ? T : never;
+type CodecValue<C> = C extends { decode(value: unknown): infer T } ? T : never;
 type OpenEnum<T extends string> =
   | T
   | (string & { readonly __openEnum?: never });
@@ -283,10 +283,12 @@ type PackageEvidenceInput = Readonly<{
 
 type ParticipantDescriptorInput = Readonly<{
   kind: "service" | "device" | "app" | "agent";
+  id: string;
   identity: string;
   path: string;
   implements: readonly ApiDescriptorInput[];
   uses: readonly Readonly<Record<string, unknown>>[];
+  actionNames: Readonly<Record<string, string>>;
   resources: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   companion?: Readonly<{
     participant: ParticipantDescriptorInput;
@@ -437,6 +439,7 @@ export function participantDescriptor<
   if (
     !descriptor || typeof descriptor !== "object" ||
     !["service", "device", "app", "agent"].includes(descriptor.kind) ||
+    descriptor.id !== descriptor.identity ||
     typeof descriptor.identity !== "string" ||
     descriptor.identity.length === 0 ||
     typeof descriptor.path !== "string" || descriptor.path.length === 0 ||
@@ -445,6 +448,7 @@ export function participantDescriptor<
     descriptor.identity !==
       `${descriptor.packageEvidence.rootPackage}.${descriptor.path}` ||
     !Array.isArray(descriptor.implements) || !Array.isArray(descriptor.uses) ||
+    !isRecord(descriptor.actionNames) ||
     !isRecord(descriptor.resources)
   ) {
     fail("participant descriptor");
@@ -483,7 +487,16 @@ export function participantDescriptor<
     Object.freeze(resource);
   }
   if (descriptor.companion) {
-    if (!isRecord(descriptor.companion.participant)) {
+    if (
+      descriptor.kind !== "device" ||
+      !isRecord(descriptor.companion.participant) ||
+      !["required", "optional"].includes(descriptor.companion.availability) ||
+      !["app", "agent"].includes(descriptor.companion.participant.kind) ||
+      descriptor.companion.participant.identity.split(".").slice(0, -1).join(
+          ".",
+        ) !== descriptor.identity ||
+      descriptor.companion.participant.companion !== undefined
+    ) {
       fail("companion descriptor");
     }
     participantDescriptor(descriptor.companion.participant);

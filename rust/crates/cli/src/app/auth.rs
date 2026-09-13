@@ -229,14 +229,17 @@ async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
     let auth_client = AuthClient::from_generated(connected.clone());
     let users = auth_client
         .users_list(&auth_types::AuthUsersListRequest {
+            search: None,
             state: None,
-            cursor: None,
-            limit: Some(wire("100")?),
+            page: Some(trellis_runtime_apis::CursorQuery {
+                cursor: None,
+                limit: Some(100),
+            }),
         })
         .await
         .into_diagnostic()?;
     let user_values = users
-        .entries
+        .items
         .iter()
         .map(serde_json::to_value)
         .collect::<Result<Vec<_>, _>>()
@@ -246,11 +249,13 @@ async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
             principal_id: None,
             participant_id: None,
             state: None,
-            cursor: None,
-            limit: Some(wire("100")?),
+            page: Some(trellis_runtime_apis::CursorQuery {
+                cursor: None,
+                limit: Some(100),
+            }),
         })
         .await
-        .map(|response| response.entries)
+        .map(|response| response.items)
         .unwrap_or_default();
     let session_values = sessions
         .iter()
@@ -260,7 +265,7 @@ async fn users_list_command(format: OutputFormat) -> miette::Result<()> {
 
     if output::is_json(format) {
         output::print_json(&json!({
-            "users": users.entries,
+            "users": users.items,
             "lastAuthByUser": last_auth_by_user,
         }))?;
         return Ok(());
@@ -558,8 +563,10 @@ async fn identity_grants_list_command(
     };
     let response = AuthClient::from_generated(connected.clone())
         .grants_list(&auth_types::AuthGrantsListRequest {
-            cursor: None,
-            limit: Some(wire("100")?),
+            page: Some(trellis_runtime_apis::CursorQuery {
+                cursor: None,
+                limit: Some(100),
+            }),
             owner_id: Some(wire(&owner_id)?),
             owner_kind: Some(auth_types::AuthGrantsListRequestOwnerKind::User),
             participant_id: args.participant.as_ref().map(wire).transpose()?,
@@ -571,9 +578,9 @@ async fn identity_grants_list_command(
         output::print_json(&serde_json::to_value(response).into_diagnostic()?)?;
     } else {
         output::print_info(&format!("user={owner_id}"));
-        output::print_info(&format!("matched grants={}", response.entries.len()));
+        output::print_info(&format!("matched grants={}", response.items.len()));
         let rows = response
-            .entries
+            .items
             .iter()
             .map(|entry| {
                 vec![
@@ -736,8 +743,13 @@ async fn participants_install_command(
     format: OutputFormat,
     args: &ParticipantsInstallArgs,
 ) -> miette::Result<()> {
-    let participant =
-        super::deploy::compile_participant_input(&args.source, args.participant.as_deref(), None)?;
+    let participant = super::deploy::compile_participant_input(
+        &args.source,
+        args.participant.as_deref(),
+        None,
+        &[],
+        &[],
+    )?;
     let (_state, connected) = connect_authenticated_cli_client().await?;
     let auth = AuthClient::from_generated(connected.clone());
     let expected_revision = match args.expected_revision {

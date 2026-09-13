@@ -9,10 +9,12 @@ use trellis_protocol::{
 
 use super::super::context::AuthorizationContextRepository;
 use super::super::ephemeral::AuthEphemeralRepository;
-use super::super::{IssuanceConnection, IssuanceCredential};
+use super::super::{
+    AuthorityEvidenceRepository, GrantRepository, IssuanceConnection, IssuanceCredential,
+};
 use super::{
-    bootstrap, now_ms, proof_request_digest, AuthHttpState, ContextRepository, HttpError,
-    ProvisioningRepository, SessionRepository,
+    bootstrap, now_ms, proof_request_digest, AuthHttpState, ContextRepository,
+    DeploymentRepository, HttpError, ProvisioningRepository, SessionRepository,
 };
 
 pub(super) async fn issuer_key<R, E>(
@@ -36,6 +38,7 @@ where
 pub(super) struct ContextRefreshRequest {
     login_session_id: String,
     connection_id: String,
+    session_key: String,
     current_context_digest: RequiredNullableString,
     request_id: String,
     #[serde(rename = "issuedAt")]
@@ -52,7 +55,10 @@ pub(super) async fn refresh_context<R, E>(
     Json(raw): Json<Value>,
 ) -> Result<Json<bootstrap::BootstrapResponse>, HttpError>
 where
-    R: ContextRepository
+    R: AuthorityEvidenceRepository
+        + ContextRepository
+        + DeploymentRepository
+        + GrantRepository
         + ProvisioningRepository
         + SessionRepository
         + AuthorizationContextRepository
@@ -108,7 +114,7 @@ where
             .ok_or_else(|| HttpError::unauthorized("context_not_found"))?;
         if current.login_session_id.as_deref() != Some(request.login_session_id.as_str())
             || current.connection_id != request.connection_id
-            || current.session_public_key != session.session_public_key
+            || current.session_public_key != request.session_key
         {
             return Err(HttpError::unauthorized("context_owner_mismatch"));
         }
@@ -120,7 +126,7 @@ where
             IssuanceConnection {
                 credential: IssuanceCredential::Login(request.login_session_id),
                 connection_id: request.connection_id,
-                session_public_key: session.session_public_key,
+                session_public_key: request.session_key,
             },
             request.request_id,
             proof_request_digest(&raw)

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use crate::client::proof::base64url_encode;
-use crate::client::verify_event_proof;
+use crate::client::{verify_event_proof, VerifyEventProofInput};
 use crate::client::{SessionAuth, TrellisClientError};
 use trellis_protocol::{
     build_authorization_event_proof_input, build_authorization_request_proof_input,
@@ -45,6 +45,7 @@ struct RequestProofFixture {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EventProofFixture {
+    descriptor_identity: String,
     subject: String,
     payload: String,
     event_id: String,
@@ -162,6 +163,7 @@ fn event_proof_matches_language_neutral_conformance_vector() {
     let proof: AuthorizationEventProof = auth
         .create_event_proof(
             &chain.context_digest,
+            &defaults.event.descriptor_identity,
             &defaults.event.subject,
             payload,
             &defaults.event.event_id,
@@ -174,6 +176,7 @@ fn event_proof_matches_language_neutral_conformance_vector() {
     let context_digest: [u8; 32] = context_digest.try_into().unwrap();
     let input = build_authorization_event_proof_input(
         &context_digest,
+        &defaults.event.descriptor_identity,
         &defaults.event.subject,
         payload,
         &defaults.event.event_id,
@@ -182,24 +185,26 @@ fn event_proof_matches_language_neutral_conformance_vector() {
     .unwrap();
     assert_eq!(bytes_to_hex(input.as_bytes()), chain.event_proof_input_hex);
     assert_eq!(base64url_encode(input.digest()), chain.event_proof_digest);
-    assert!(verify_event_proof(
-        &auth.session_key,
-        &chain.context_digest,
-        &defaults.event.subject,
+    assert!(verify_event_proof(VerifyEventProofInput {
+        public_session_key: &auth.session_key,
+        context_digest: &chain.context_digest,
+        descriptor_identity: &defaults.event.descriptor_identity,
+        subject: &defaults.event.subject,
         payload,
-        &defaults.event.event_id,
-        &defaults.event.event_time,
-        proof.as_str(),
-    )
+        event_id: &defaults.event.event_id,
+        event_time: &defaults.event.event_time,
+        proof_base64url: proof.as_str(),
+    })
     .expect("event proof verifies"));
-    assert!(!verify_event_proof(
-        &auth.session_key,
-        &chain.context_digest,
-        &defaults.event.subject,
+    assert!(!verify_event_proof(VerifyEventProofInput {
+        public_session_key: &auth.session_key,
+        context_digest: &chain.context_digest,
+        descriptor_identity: &defaults.event.descriptor_identity,
+        subject: &defaults.event.subject,
         payload,
-        "evt_other",
-        &defaults.event.event_time,
-        proof.as_str(),
-    )
+        event_id: "evt_other",
+        event_time: &defaults.event.event_time,
+        proof_base64url: proof.as_str(),
+    })
     .expect("changed event id rejects"));
 }

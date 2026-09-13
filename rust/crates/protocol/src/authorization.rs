@@ -31,7 +31,7 @@
 //!     AuthorizationIssuerState, AuthorizationPrincipalKind, GrantOwnerKind,
 //!     AuthorizationEventVerificationInput, AuthorizationRequestVerificationInput,
 //!     AuthorizationVerificationPolicy, GrantSet, PermissionAction, PermissionAtom,
-//!     PermissionTarget, UnsignedAuthorizationContext,
+//!     PermissionTarget, UnsignedAuthorizationContext, encode_event_descriptor_identity,
 //!     AUTHORIZATION_CONTEXT_FORMAT_V1,
 //! };
 //! use sha2::{Digest as _, Sha256};
@@ -55,6 +55,14 @@
 //!     )?,
 //!     PermissionAction::Call,
 //! )?;
+//! let event_permission = PermissionAtom::new(
+//!     PermissionTarget::api_surface(
+//!         "documents@v1",
+//!         ApiSurfaceKind::Event,
+//!         "Documents.Changed",
+//!     )?,
+//!     PermissionAction::Publish,
+//! )?;
 //! let context = sign_authorization_context(
 //!     UnsignedAuthorizationContext {
 //!         format: AUTHORIZATION_CONTEXT_FORMAT_V1.into(),
@@ -75,7 +83,7 @@
 //!         issued_at: 1_100,
 //!         not_before: 1_100,
 //!         expires_at: 1_300,
-//!         grants: GrantSet::new(vec![permission.clone()]),
+//!         grants: GrantSet::new(vec![event_permission, permission.clone()]),
 //!         platform_privileges: vec![],
 //!         extensions: Map::new(),
 //!         critical: vec![],
@@ -108,22 +116,22 @@
 //! assert_eq!(request.context().principal_id(), "01JY0000000000000000000002");
 //! let event_proof = sign_authorization_event(
 //!     context.context_digest(),
-//!     "events.v1.Documents.Changed.doc-1",
+//!     &encode_event_descriptor_identity("documents@v1", "Documents.Changed", 1)?,
+//!     "events.v1.ZG9jdW1lbnRzQHYx.Documents.Changed.doc-1",
 //!     br#"{"id":"doc-1"}"#,
 //!     "evt_example",
 //!     "1970-01-01T00:19:10Z",
 //!     &session_key,
 //! )?;
-//! let event_permissions = [permission];
 //! let event = verify_authorization_event(AuthorizationEventVerificationInput {
 //!     context: &context,
-//!     subject: "events.v1.Documents.Changed.doc-1",
+//!     descriptor_identity: &encode_event_descriptor_identity("documents@v1", "Documents.Changed", 1)?,
+//!     subject: "events.v1.ZG9jdW1lbnRzQHYx.Documents.Changed.doc-1",
 //!     raw_payload: br#"{"id":"doc-1"}"#,
 //!     event_id: "evt_example",
 //!     event_time: "1970-01-01T00:19:10Z",
 //!     proof: &event_proof,
 //!     policy: &policy,
-//!     required_permissions: &event_permissions,
 //!     revoked_at: None,
 //! })?;
 //! assert_eq!(event.publisher().participant_id, "documents-web");
@@ -138,8 +146,8 @@ use serde_json::{Map, Value};
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    canonicalize_json, AuthorizationErrorCode, GrantOwnerKind, GrantSet, PermissionAtom,
-    PlatformPrivilege, ProtocolError,
+    canonicalize_json, ApiSurfaceKind, AuthorizationErrorCode, GrantOwnerKind, GrantSet,
+    PermissionAction, PermissionAtom, PermissionTarget, PlatformPrivilege, ProtocolError,
 };
 
 /// Issuer-signed authorization-context wire format and signature domain.
@@ -1427,6 +1435,8 @@ pub struct AuthorizationEventVerificationInput<'a> {
     pub context: &'a VerifiedAuthorizationContext,
     /// Exact published NATS subject covered by the proof.
     pub subject: &'a str,
+    /// Canonical generated descriptor identity covered by the proof.
+    pub descriptor_identity: &'a str,
     /// Exact received payload bytes covered by the proof.
     pub raw_payload: &'a [u8],
     /// Signed event identifier.
@@ -1437,8 +1447,6 @@ pub struct AuthorizationEventVerificationInput<'a> {
     pub proof: &'a AuthorizationEventProof,
     /// Verification policy and protocol limits.
     pub policy: &'a AuthorizationVerificationPolicy,
-    /// Exact permissions required for the event.
-    pub required_permissions: &'a [PermissionAtom],
     /// Context revocation time when revocation evidence exists.
     pub revoked_at: Option<i64>,
 }
@@ -1562,6 +1570,7 @@ fn canonical_event_time_seconds(event_time: &str, path: &[&str]) -> Result<i64, 
 /// 32-bit length-prefix range.
 pub fn build_authorization_event_proof_input(
     context_digest: &[u8; 32],
+    descriptor_identity: &str,
     subject: &str,
     raw_payload: &[u8],
     event_id: &str,
@@ -1572,6 +1581,7 @@ pub fn build_authorization_event_proof_input(
     for component in [
         AUTHORIZATION_EVENT_PROOF_DOMAIN_V1.as_bytes(),
         context_digest,
+        descriptor_identity.as_bytes(),
         subject.as_bytes(),
         payload_hash.as_slice(),
         event_id.as_bytes(),
@@ -1591,6 +1601,7 @@ pub fn build_authorization_event_proof_input(
 /// non-canonical event time, or oversized proof component.
 pub fn sign_authorization_event(
     context_digest: &str,
+    descriptor_identity: &str,
     subject: &str,
     raw_payload: &[u8],
     event_id: &str,
@@ -1614,6 +1625,7 @@ pub fn sign_authorization_event(
     )?;
     let input = build_authorization_event_proof_input(
         &context_digest,
+        descriptor_identity,
         subject,
         raw_payload,
         event_id,
@@ -1642,17 +1654,20 @@ pub fn verify_authorization_event(
     let AuthorizationEventVerificationInput {
         context,
         subject,
+        descriptor_identity,
         raw_payload,
         event_id,
         event_time,
         proof,
         policy,
-        required_permissions,
         revoked_at,
     } = input;
     validate_policy(policy)?;
     validate_text(event_id, &["event-id"])?;
     validate_text(subject, &["subject"])?;
+    validate_text(descriptor_identity, &["descriptor-identity"])?;
+    let descriptor = crate::decode_event_descriptor_identity(descriptor_identity)?;
+    crate::validate_event_descriptor_subject(&descriptor, subject)?;
     if event_id.len() > MAXIMUM_EVENT_ID_BYTES {
         return Err(authorization_error(
             AuthorizationErrorCode::InvalidFormat,
@@ -1688,7 +1703,15 @@ pub fn verify_authorization_event(
             "event authorization context is revoked",
         ));
     }
-    if !context.allows_all(required_permissions) {
+    let required_permission = PermissionAtom::new(
+        PermissionTarget::api_surface(
+            descriptor.api_id(),
+            ApiSurfaceKind::Event,
+            descriptor.event_name(),
+        )?,
+        PermissionAction::Publish,
+    )?;
+    if !context.allows_all(std::slice::from_ref(&required_permission)) {
         return Err(authorization_error(
             AuthorizationErrorCode::PermissionDenied,
             ["grantSet", "permissions"],
@@ -1702,6 +1725,7 @@ pub fn verify_authorization_event(
     )?;
     let input = build_authorization_event_proof_input(
         &context_digest,
+        descriptor_identity,
         subject,
         raw_payload,
         event_id,
@@ -1745,7 +1769,9 @@ pub fn verify_authorization_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ApiSurfaceKind, PermissionAction, PermissionTarget};
+    use crate::{
+        encode_event_descriptor_identity, ApiSurfaceKind, PermissionAction, PermissionTarget,
+    };
     use serde_json::json;
 
     fn permission() -> PermissionAtom {
@@ -1764,6 +1790,16 @@ mod tests {
         SignedAuthorizationContext,
         SigningKey,
     ) {
+        issued_with_event(None)
+    }
+
+    fn issued_with_event(
+        event_name: Option<&str>,
+    ) -> (
+        AuthorizationIssuerKey,
+        SignedAuthorizationContext,
+        SigningKey,
+    ) {
         let issuer_key = SigningKey::from_bytes(&[2; 32]);
         let session_key = SigningKey::from_bytes(&[3; 32]);
         let issuer = AuthorizationIssuerKey {
@@ -1771,6 +1807,21 @@ mod tests {
             public_key: encode_base64url(issuer_key.verifying_key().as_bytes()),
             state: AuthorizationIssuerState::Active,
         };
+        let mut permissions = vec![permission()];
+        if let Some(event_name) = event_name {
+            permissions.push(
+                PermissionAtom::new(
+                    PermissionTarget::api_surface(
+                        "documents@v1",
+                        ApiSurfaceKind::Event,
+                        event_name,
+                    )
+                    .unwrap(),
+                    PermissionAction::Publish,
+                )
+                .unwrap(),
+            );
+        }
         let context = sign_authorization_context(
             UnsignedAuthorizationContext {
                 format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
@@ -1791,7 +1842,7 @@ mod tests {
                 issued_at: 1_100,
                 not_before: 1_100,
                 expires_at: 1_300,
-                grants: GrantSet::new(vec![permission()]),
+                grants: GrantSet::new(permissions),
                 platform_privileges: vec![PlatformPrivilege::Admin],
                 extensions: Map::new(),
                 critical: vec![],
@@ -1870,7 +1921,7 @@ mod tests {
 
     #[test]
     fn retired_keys_preserve_history_but_never_live_authority() {
-        let (mut issuer, context, session_key) = issued();
+        let (mut issuer, context, session_key) = issued_with_event(Some("Documents.Changed"));
         let current = policy(1_400);
         assert!(verify_authorization_context(
             &issuer,
@@ -1894,25 +1945,27 @@ mod tests {
             AuthorizationContextPurpose::Live
         )
         .is_err());
+        let descriptor_identity =
+            encode_event_descriptor_identity("documents@v1", "Documents.Changed", 0).unwrap();
         let proof = sign_authorization_event(
             historical.context_digest(),
-            "events.v1.Documents.Changed",
+            &descriptor_identity,
+            "events.v1.ZG9jdW1lbnRzQHYx.Documents.Changed",
             b"event",
             "01JY0000000000000000000005",
             "1970-01-01T00:19:10Z",
             &session_key,
         )
         .unwrap();
-        let permissions = [permission()];
         let event = AuthorizationEventVerificationInput {
             context: &historical,
-            subject: "events.v1.Documents.Changed",
+            subject: "events.v1.ZG9jdW1lbnRzQHYx.Documents.Changed",
+            descriptor_identity: &descriptor_identity,
             raw_payload: b"event",
             event_id: "01JY0000000000000000000005",
             event_time: "1970-01-01T00:19:10Z",
             proof: &proof,
             policy: &current,
-            required_permissions: &permissions,
             revoked_at: None,
         };
         verify_authorization_event(event).unwrap();
@@ -1933,6 +1986,7 @@ mod tests {
             &session_key,
         )
         .unwrap();
+        let permissions = [permission()];
         assert!(matches!(
             verify_authorization_request(AuthorizationRequestVerificationInput {
                 context: &historical,
@@ -1958,6 +2012,61 @@ mod tests {
             AuthorizationContextPurpose::HistoricalEvent
         )
         .is_err());
+    }
+
+    #[test]
+    fn overlapping_dotted_event_names_require_the_exact_granted_descriptor() {
+        let subject = "events.v1.ZG9jdW1lbnRzQHYx.Connections.Opened";
+        let cases = [
+            ("Connections", 1, "Connections.Opened", 0),
+            ("Connections.Opened", 0, "Connections", 1),
+        ];
+
+        for (granted_name, granted_params, denied_name, denied_params) in cases {
+            let (issuer, context, session_key) = issued_with_event(Some(granted_name));
+            let context = verify_authorization_context(
+                &issuer,
+                &context,
+                &policy(1_150),
+                AuthorizationContextPurpose::Live,
+            )
+            .unwrap();
+
+            for (event_name, parameter_count, accepted) in [
+                (granted_name, granted_params, true),
+                (denied_name, denied_params, false),
+            ] {
+                let descriptor_identity =
+                    encode_event_descriptor_identity("documents@v1", event_name, parameter_count)
+                        .unwrap();
+                let proof = sign_authorization_event(
+                    context.context_digest(),
+                    &descriptor_identity,
+                    subject,
+                    b"event",
+                    "01JY0000000000000000000005",
+                    "1970-01-01T00:19:10Z",
+                    &session_key,
+                )
+                .unwrap();
+                let result = verify_authorization_event(AuthorizationEventVerificationInput {
+                    context: &context,
+                    subject,
+                    descriptor_identity: &descriptor_identity,
+                    raw_payload: b"event",
+                    event_id: "01JY0000000000000000000005",
+                    event_time: "1970-01-01T00:19:10Z",
+                    proof: &proof,
+                    policy: &policy(1_150),
+                    revoked_at: None,
+                });
+                assert_eq!(
+                    result.is_ok(),
+                    accepted,
+                    "event identity {event_name}: {result:?}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -11,13 +11,19 @@ import {
   type Result as ResultType,
 } from "@qlever-llc/result";
 import { StoreError } from "./errors/index.ts";
-import type { PageResponse } from "./participant.ts";
+import {
+  decodePaginationCursor,
+  encodePaginationCursor,
+  paginationQueryDigest,
+} from "./auth/protocol_wasm.ts";
 import { TypedStoreEntry } from "./store_entry.ts";
 export { TypedStoreEntry } from "./store_entry.ts";
 
 const INTERNAL_CONTENT_TYPE_METADATA_KEY = "__trellis_content_type";
 const DEFAULT_STORE_WAIT_POLL_INTERVAL_MS = 250;
 const MAX_STORE_LIST_LIMIT = 500;
+const DEFAULT_STORE_LIST_LIMIT = 100;
+const STORE_LIST_CURSOR_ENDPOINT = "trellis.store.list";
 
 export type StoreBody =
   | Uint8Array
@@ -35,6 +41,7 @@ export type StoreOpenOptions = {
   maxObjectBytes?: number;
   maxTotalBytes?: number;
   bindOnly?: boolean;
+  isCurrent?: () => boolean;
 };
 
 export type StorePutOptions = {
@@ -45,8 +52,14 @@ export type StorePutOptions = {
 /** Explicit bounded query for listing object metadata in a typed store. */
 export type StoreListOptions = {
   prefix?: string;
-  offset?: number;
-  limit: number;
+  cursor?: string;
+  limit?: number;
+};
+
+/** One key-sorted page of object metadata and its opaque continuation. */
+export type StoreListPage = {
+  entries: StoreInfo[];
+  nextCursor?: string;
 };
 
 export type StoreInfo = {
@@ -94,13 +107,19 @@ function storeInfoFromObjectInfo(info: ObjectInfo): StoreInfo {
   };
 }
 
-function streamFromBytes(data: Uint8Array): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(data);
-      controller.close();
-    },
-  });
+function compareStoreKeys(left: string, right: string): number {
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  for (
+    let index = 0;
+    index < Math.min(leftBytes.length, rightBytes.length);
+    index++
+  ) {
+    if (leftBytes[index] !== rightBytes[index]) {
+      return leftBytes[index] - rightBytes[index];
+    }
+  }
+  return leftBytes.length - rightBytes.length;
 }
 
 function streamFromAsyncIterable(
@@ -123,40 +142,41 @@ function streamFromAsyncIterable(
 }
 
 function validateStoreListOptions(
-  opts: StoreListOptions,
+  opts: StoreListOptions = {},
 ): ResultType<Required<StoreListOptions>, StoreError> {
-  if (!Number.isInteger(opts.limit) || opts.limit < 0) {
+  const limit = opts.limit ?? DEFAULT_STORE_LIST_LIMIT;
+  if (!Number.isInteger(limit) || limit <= 0) {
     return Result.err(
       new StoreError({
         operation: "list",
-        context: { reason: "invalid_limit", limit: opts.limit },
+        context: { reason: "invalid_limit", limit },
       }),
     );
   }
-  if (opts.limit > MAX_STORE_LIST_LIMIT) {
+  if (limit > MAX_STORE_LIST_LIMIT) {
     return Result.err(
       new StoreError({
         operation: "list",
         context: {
           reason: "limit_exceeded",
-          limit: opts.limit,
+          limit,
           maxLimit: MAX_STORE_LIST_LIMIT,
         },
       }),
     );
   }
 
-  const offset = opts.offset ?? 0;
-  if (!Number.isInteger(offset) || offset < 0) {
+  const cursor = opts.cursor ?? "";
+  if (opts.cursor !== undefined && cursor.length === 0) {
     return Result.err(
       new StoreError({
         operation: "list",
-        context: { reason: "invalid_offset", offset },
+        context: { reason: "invalid_cursor" },
       }),
     );
   }
 
-  return Result.ok({ prefix: opts.prefix ?? "", offset, limit: opts.limit });
+  return Result.ok({ prefix: opts.prefix ?? "", cursor, limit });
 }
 
 function enforceMaxObjectBytes(
@@ -299,6 +319,23 @@ async function unwrapObjectInfo(
   }
 }
 
+type ExistingStoreStatus = {
+  ttl: number;
+};
+
+/** Verifies that an existing physical store matches its effective binding. */
+export async function ensureExistingStoreOptions(
+  store: { status(): Promise<ExistingStoreStatus> },
+  name: string,
+  options: StoreOpenOptions,
+): Promise<void> {
+  const status = await store.status();
+  const actualTtlMs = status.ttl > 0 ? Math.floor(status.ttl / 1_000_000) : 0;
+  if (actualTtlMs !== (options.ttlMs ?? 0)) {
+    throw new Error(`Store '${name}' TTL does not match its binding`);
+  }
+}
+
 export class TypedStore {
   readonly #store: ObjectStore;
   readonly #options:
@@ -337,6 +374,7 @@ export class TypedStore {
               ? { max_bytes: options.maxTotalBytes }
               : {}),
           });
+        await ensureExistingStoreOptions(store, name, options);
         return Result.ok(new TypedStore(store, options));
       } catch (cause) {
         return Result.err(
@@ -351,19 +389,7 @@ export class TypedStore {
     body: StoreBody,
     options?: StorePutOptions,
   ): AsyncResult<void, StoreError> {
-    return AsyncResult.from((async () => {
-      const existing = await unwrapObjectInfo(this.#store, key);
-      if (existing.isOk()) {
-        return Result.err(
-          new StoreError({
-            operation: "create",
-            context: { key, reason: "already_exists" },
-          }),
-        );
-      }
-
-      return await this.#putInternal("create", key, body, options);
-    })());
+    return AsyncResult.from(this.#putInternal("create", key, body, options, 0));
   }
 
   put(
@@ -376,6 +402,7 @@ export class TypedStore {
 
   get(key: string): AsyncResult<TypedStoreEntry, StoreError> {
     return AsyncResult.from((async () => {
+      if (!this.#isCurrent()) return this.#stale("get", key);
       const info = await unwrapObjectInfo(this.#store, key);
       return info.map((objectInfo) =>
         new TypedStoreEntry(this.#store, storeInfoFromObjectInfo(objectInfo))
@@ -436,6 +463,7 @@ export class TypedStore {
 
   delete(key: string): AsyncResult<void, StoreError> {
     return AsyncResult.from((async () => {
+      if (!this.#isCurrent()) return this.#stale("delete", key);
       try {
         await this.#store.delete(key);
         return Result.ok(undefined);
@@ -448,31 +476,50 @@ export class TypedStore {
   }
 
   list(
-    opts: StoreListOptions,
-  ): AsyncResult<PageResponse<StoreInfo>, StoreError> {
+    opts: StoreListOptions = {},
+  ): AsyncResult<StoreListPage, StoreError> {
     return AsyncResult.from((async () => {
+      if (!this.#isCurrent()) return this.#stale("list");
       const query = validateStoreListOptions(opts);
       if (query.isErr()) return Result.err(query.error);
 
-      const { prefix, offset, limit } = query.unwrapOrElse(() => {
+      const { prefix, cursor, limit } = query.unwrapOrElse(() => {
         throw new Error("unreachable");
       });
       try {
+        const queryDigest = await paginationQueryDigest(
+          STORE_LIST_CURSOR_ENDPOINT,
+          { prefix },
+        );
+        let after = "";
+        if (cursor) {
+          const decoded = await decodePaginationCursor<unknown>(
+            cursor,
+            queryDigest,
+          );
+          if (typeof decoded !== "string") {
+            throw new Error("invalid pagination cursor");
+          }
+          after = decoded;
+        }
         const objects = await this.#store.list();
         const filtered = objects
           .filter((info) => !info.deleted && info.name.startsWith(prefix))
           .map(storeInfoFromObjectInfo)
-          .sort((left, right) => left.key.localeCompare(right.key));
-        const entries = filtered.slice(offset, offset + limit);
+          .sort((left, right) => compareStoreKeys(left.key, right.key))
+          .filter((info) => compareStoreKeys(info.key, after) > 0);
+        const entries = filtered.slice(0, limit);
 
         return Result.ok({
           entries,
-          count: filtered.length,
-          offset,
-          limit,
-          nextOffset: limit <= 0 || offset + limit >= filtered.length
-            ? undefined
-            : offset + limit,
+          ...(filtered.length > limit
+            ? {
+              nextCursor: await encodePaginationCursor(
+                queryDigest,
+                entries.at(-1)?.key,
+              ),
+            }
+            : {}),
         });
       } catch (cause) {
         return Result.err(
@@ -484,6 +531,7 @@ export class TypedStore {
 
   status(): AsyncResult<StoreStatus, StoreError> {
     return AsyncResult.from((async () => {
+      if (!this.#isCurrent()) return this.#stale("status");
       try {
         const status = await this.#store.status();
         return Result.ok(
@@ -500,8 +548,10 @@ export class TypedStore {
     key: string,
     body: StoreBody,
     options?: StorePutOptions,
+    previousRevision?: number,
   ): Promise<ResultType<void, StoreError>> {
     try {
+      if (!this.#isCurrent()) return this.#stale(operation, key);
       const metadata = metadataWithContentType(options);
       if (body instanceof Uint8Array) {
         if (
@@ -521,10 +571,11 @@ export class TypedStore {
           );
         }
 
-        await this.#store.putBlob({
-          name: key,
-          ...(metadata ? { metadata } : {}),
-        }, body);
+        await this.#store.putBlob(
+          { name: key, ...(metadata ? { metadata } : {}) },
+          body,
+          previousRevision === undefined ? undefined : { previousRevision },
+        );
         return Result.ok(undefined);
       }
 
@@ -536,11 +587,29 @@ export class TypedStore {
       await this.#store.put(
         { name: key, ...(metadata ? { metadata } : {}) },
         limitedStream,
+        previousRevision === undefined ? undefined : { previousRevision },
       );
       return Result.ok(undefined);
     } catch (cause) {
-      return Result.err(new StoreError({ operation, cause, context: { key } }));
+      return Result.err(
+        cause instanceof StoreError
+          ? cause
+          : new StoreError({ operation, cause, context: { key } }),
+      );
     }
+  }
+
+  #isCurrent(): boolean {
+    return this.#options.isCurrent?.() ?? true;
+  }
+
+  #stale(operation: string, key?: string): ResultType<never, StoreError> {
+    return Result.err(
+      new StoreError({
+        operation,
+        context: { ...(key ? { key } : {}), reason: "stale_binding" },
+      }),
+    );
   }
 }
 
@@ -553,17 +622,17 @@ function storeStatusFromObjectStoreStatus(
   return {
     size: status.size,
     sealed: status.sealed,
-    ttlMs: status.ttl > 0 ? Math.floor(status.ttl / 1_000_000) : options.ttlMs,
+    ttlMs: status.ttl > 0 ? Math.floor(status.ttl / 1_000_000) : 0,
     ...(options.maxObjectBytes !== undefined
       ? { maxObjectBytes: options.maxObjectBytes }
       : {}),
-    ...(options.maxTotalBytes !== undefined
-      ? { maxTotalBytes: options.maxTotalBytes }
+    ...(status.streamInfo.config.max_bytes > 0
+      ? { maxTotalBytes: status.streamInfo.config.max_bytes }
       : {}),
   };
 }
 
-export async function bytesFromStoreStream(
+export function bytesFromStoreStream(
   stream: ReadableStream<Uint8Array>,
 ): Promise<Uint8Array> {
   return bytesFromStream(stream);

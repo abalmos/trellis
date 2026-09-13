@@ -117,6 +117,8 @@ pub struct DecideActivationReviewInput {
     pub reason: Option<String>,
     /// Optional approved delegation.
     pub delegation: Option<DeviceDelegationRecord>,
+    /// Separate user session installed for the companion.
+    pub companion_session: Option<SessionRecord>,
     /// Whether this decision satisfies every requirement for device readiness.
     pub activate_device: bool,
     /// Decision time in Unix milliseconds.
@@ -140,6 +142,8 @@ pub struct ClaimActivationReviewInput {
     pub now: i64,
     /// Active delegation created when claiming an already approved review.
     pub delegation: Option<DeviceDelegationRecord>,
+    /// Separate user session installed for the companion.
+    pub companion_session: Option<SessionRecord>,
     /// Durable operation result.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.
@@ -485,6 +489,7 @@ where
                 activated_by_user_principal_id: input.activated_by_user_principal_id,
                 now: input.now,
                 delegation: input.delegation,
+                companion_session: input.companion_session,
                 idempotency: input.idempotency,
                 actions: input.actions,
             })
@@ -519,6 +524,7 @@ where
             decided_by: input.decided_by.clone(),
             reason: input.reason.clone(),
             delegation: input.delegation.clone(),
+            companion_session: input.companion_session.clone(),
             activate_device: input.activate_device,
             idempotency: input.idempotency.clone(),
             actions: input.actions.clone(),
@@ -538,6 +544,7 @@ where
                 decided_by: input.decided_by,
                 reason: input.reason,
                 delegation: input.delegation,
+                companion_session: input.companion_session,
                 activate_device: input.activate_device,
                 idempotency: input.idempotency,
                 actions: input.actions,

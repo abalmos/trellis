@@ -1,108 +1,61 @@
-# Choose a Trellis communication surface
+# Communication
 
-Trellis RPCs, operations, events, and feeds use NATS with contract-derived
-authorization. This describes Trellis surfaces, not a prohibition on other
-application networking such as calling an external HTTP API. Generated SDKs
-derive subjects and signed envelopes; callers use the typed methods rather than
-constructing raw NATS subjects.
+Trellis participants communicate over NATS through native contract surfaces:
+RPC for unary request/reply, Operations for durable caller-visible workflows,
+Events for facts, Feeds for live streams, Consumers for durable event handling,
+and Jobs for private queued execution.
 
-| Surface   | Use it when                                                  | What the caller receives                                 |
-| --------- | ------------------------------------------------------------ | -------------------------------------------------------- |
-| RPC       | One bounded request needs one answer.                        | A typed response or error.                               |
-| Operation | The caller starts work whose progress and completion matter. | An operation reference, progress, and a terminal result. |
-| Event     | A service announces a fact to authorized subscribers.        | Typed event deliveries, not a request result.            |
-| Feed      | A caller needs a filtered, authorized live view.             | A cancellable stream of typed frames.                    |
+<span id="rpcs-requestreply"></span>
 
-## RPCs (request/reply)
+## RPCs: request/reply
 
-An RPC waits for one result within a timeout. For the tutorial's `Orders.Create`
-declaration, a generated caller uses `client.ordersCreate({ customerId })` and
-the service registers `service.handleOrdersCreate(...)`. Expected failures use
-the declared error model and `Result` rather than a fabricated success payload.
+RPC is typed unary request/reply with expected generated Result-style failures.
 
-A timeout means the caller did not receive a result; it does not prove that the
-provider did nothing. Application mutations that must be safe to retry need an
-application-owned idempotency policy. Trellis does not choose that policy or
-your database schema.
+<span id="operations-async-workflows"></span>
 
-## Operations (async workflows)
+## Operations: async workflows
 
-Operations are caller-visible work with typed progress and a terminal result.
-The caller starts an operation and can use its returned handle to watch or wait
-for completion. Durable operation state allows observation to resume after a
-disconnect. Operation IDs and references are not authorization grants.
+Operations persist acceptance and resume execution at least once after owner
+loss.
 
-Starting, observing, cancelling, and sending named signals are distinct actions.
-Declare the appropriate selections in the participant and obtain authority for
-them. See [TypeScript operations](/guides/using-operations-ts) and
-[Rust operations](/guides/using-operations-rust) for builders and lifecycle
-APIs.
+<span id="events-jetstream-pubsub"></span>
 
-Jobs are different: they are service-private execution, such as retries or
-background processing behind an operation. Callers observe the operation, not a
-private job queue.
+## Events
 
-## Events (JetStream pub/sub)
+Events are typed facts. Ephemeral listeners are live-only; Consumers are durable.
 
-Events announce facts. A publish result does not mean that every subscriber
-finished handling the event. Live listeners receive new events; a declared
-durable event consumer gives a service a replay/redelivery cursor. Durable
-processing can deliver an event more than once, so side effects need to tolerate
-duplicates or use an inbox transaction to suppress them.
+<span id="feeds-authorized-live-views"></span>
 
-A participant's `subscribe event` selection authorizes the event surface; it
-does not create a durable consumer. Declare the consumer separately in IDL when
-you need durable processing. If a SQL mutation and an outgoing event must commit
-atomically, enqueue the event with that mutation in a SQL outbox transaction.
-Neither the inbox nor the outbox chooses the rest of the application's storage
-design.
+## Feeds
 
-Events are event-type authorized. A general event subscription does not enforce
-per-object rules such as "only updates for devices this user owns". Use a feed
-whose provider evaluates those rules when the audience needs caller-specific
-access.
+Feeds are typed live streams owned by the accepting provider executor.
 
-## Feeds (authorized live views)
+<span id="cross-api-dependencies"></span>
 
-A feed takes typed caller input and streams frames until completion or
-cancellation. The provider checks the authenticated caller and application
-filter; a feed grant alone does not establish ownership of every requested
-object. The generated caller supplies an abort signal, and the provider releases
-its upstream resources when that signal is cancelled.
+## Participant selection and cross-API dependencies
 
-The provider may read application events, a database, or another data source.
-The feed is the caller-visible authorization boundary, not durable event replay.
-For a current value plus changes with durable revisions, consider
-[state](/guides/using-state-ts).
+Providers declare `implements Api;`. Callers import the API and select exact
+interactions in `use Api { ... }`. Declarations and capability approvals do not
+themselves grant authority; Trellis derives exact selected grants and route
+subjects from verified package evidence and current bindings.
 
-## Cross-API dependencies
+RPC/Operation/Feed routes bind the API to a provider deployment. Event subjects
+remain API-qualified facts. Applications never derive subjects, queue groups,
+proofs, or raw transport permissions.
 
-The project resolves API dependencies before code generation. A participant
-selects the actions it needs from those APIs:
+Operations are persisted before acceptance and resume at least once after owner
+loss. Feeds are live and cancellation routes to the accepting executor. Consumer
+concurrency is local per process; retries and scoped Events DLQ/replay are
+runtime-owned. Jobs remain service-private.
 
-```trellis
-participant "acme.orders-caller" app {
-  use required orders "acme.orders@v1" {
-    call rpc "Orders.Create";
-  }
-}
-```
-
-Use `use optional` when the participant can be authorized without the selected
-actions. The referenced API still needs to resolve at compilation; optional
-authority is not an optional package download or an availability guarantee.
-Regenerate after changing selections and review the resulting authority needs.
-
-Generated methods describe possible calls, not current permission. A caller
-still needs accepted authority for an action. Service bootstrap can wait while
-required authority or dependency evidence is unresolved; inspect the reported
-blocker instead of repeatedly changing application code.
+<span id="surface-availability"></span>
 
 ## Surface availability
 
-Authorization and availability are separate. A caller can be authorized while no
-provider is connected. The advisory `Trellis.Surface.Status` RPC can distinguish
-an unknown API/surface, unauthorized access, and an available or unavailable
-provider. Select it through the Trellis Core API and use its generated request
-model from [/api](/api). Its response does not grant authority or guarantee that
-a subsequent request will succeed.
+Authority determines whether an action may be attempted; compatible provider
+definition and current liveness determine whether it is presently available.
+
+Every request/event carries a message-specific proof tied to its actual subject
+and signed authorization context. Providers enforce the exact action and
+resource scope. Direct event publication is not atomic with an application SQL
+transaction; use the outbox integration when that commit boundary matters.

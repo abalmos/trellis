@@ -1,5 +1,7 @@
 <script lang="ts">
   import { ulid } from "ulid";
+  import { TransferGrantSchema } from "@qlever-llc/trellis";
+  import { Value } from "typebox/value";
   import { onDestroy, onMount } from "svelte";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
@@ -28,7 +30,7 @@
   const evidenceType = "field-photo";
   const evidenceTypeLabel = "Field photo";
   const evidencePageSize = 3;
-  const listPage = { limit: 50, offset: 0 };
+  const listPage = { page: { limit: 50 } };
 
   type CloseoutRoute = "/closeout" | `/closeout?${string}`;
 
@@ -194,7 +196,8 @@
     try {
       const list = await trellis.evidenceList({ ...listPage, prefix: "evidence/" }).orThrow();
       if (!mounted || requestId !== galleryRequestId) return;
-      gallery = list.entries
+      gallery = list.items
+        .map((item) => ({ ...item, size: Number(item.size) }))
         .slice()
         .sort((left: EvidenceRecord, right: EvidenceRecord) => Date.parse(right.uploadedAt) - Date.parse(left.uploadedAt));
       evidencePage = 0;
@@ -224,16 +227,9 @@
 
     try {
       const download = await trellis.evidenceDownload({ key }).orThrow();
-      const metadata = Object.fromEntries(
-        Object.entries(download.transfer.info.metadata).map(([name, value]) => {
-          if (typeof value !== "string") throw new Error(`Invalid transfer metadata '${name}'.`);
-          return [name, value];
-        }),
-      );
-      const bytes = await trellis.transfer({
-        ...download.transfer,
-        info: { ...download.transfer.info, metadata },
-      }).bytes().orThrow();
+      const transfer = Value.Parse(TransferGrantSchema, download.transfer);
+      if (transfer.direction !== "receive") throw new Error("Evidence download returned a send transfer grant.");
+      const bytes = await trellis.transfer(transfer).bytes().orThrow();
       if (!mounted || downloadRunIds.get(key) !== runId) return;
       const latest = gallery.find((item) => item.key === key);
       const contentType = latest?.contentType ?? "application/octet-stream";

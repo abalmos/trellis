@@ -44,6 +44,24 @@ export type OutboxMessage = {
   outcome?: unknown;
 };
 
+/** Raised when an outbox ID is reused for different immutable content. */
+export class OutboxDuplicateIdentityError extends Error {
+  constructor(readonly id: string) {
+    super(
+      `Outbox message '${id}' already exists with different immutable content`,
+    );
+    this.name = "OutboxDuplicateIdentityError";
+  }
+}
+
+/** Raised when storage reports a duplicate but the winning row cannot be read. */
+export class OutboxStorageConflictError extends Error {
+  constructor(readonly id: string) {
+    super(`Outbox message '${id}' conflicted but no stored row was found`);
+    this.name = "OutboxStorageConflictError";
+  }
+}
+
 export type OutboxDispatchResult = {
   dispatched: number;
   failed: number;
@@ -152,20 +170,10 @@ export type SqlOutboxMigrationOptions = {
   readonly tables?: Partial<SqlOutboxTables>;
 };
 
-type KvAsyncResult<T> = Pick<AsyncResult<T, BaseError>, "take">;
-
-export type OutboxKvEntry = {
-  readonly key: string;
-  readonly revision: number;
-  readonly value: KvOutboxRecord;
-  put(value: KvOutboxRecord, vcc?: boolean): KvAsyncResult<void>;
-};
-
-export type OutboxKvStore = {
-  create(key: string, value: KvOutboxRecord): KvAsyncResult<void>;
-  get(key: string): KvAsyncResult<OutboxKvEntry>;
-  keys(filter?: string | string[]): KvAsyncResult<AsyncIterable<string>>;
-};
+export type OutboxKvStore = Pick<
+  TypedKV<KvOutboxRecord>,
+  "create" | "getEntry" | "replace" | "keys"
+>;
 
 /** Default Trellis helper-table names for SQL outbox and inbox storage. */
 export const defaultSqlOutboxTables: SqlOutboxTables = Object.freeze({
@@ -315,7 +323,10 @@ export class MemoryOutboxRepository implements OutboxRepository {
     const now = new Date().toISOString();
     const id = record.id;
     const existing = this.#messages.get(id);
-    if (existing) return existing;
+    if (existing) {
+      assertOutboxIdentity(existing, record);
+      return { ...existing, headers: { ...existing.headers } };
+    }
     const message: OutboxMessage = {
       id,
       kind: record.kind,
@@ -447,10 +458,10 @@ export class SqlOutboxRepository implements OutboxRepository {
     const conflict = this.dialect === "postgres"
       ? "ON CONFLICT (id) DO NOTHING"
       : "ON CONFLICT(id) DO NOTHING";
-    await this.executor.execute(
+    const inserted = await this.executor.query(
       `INSERT INTO ${this.tables.outbox} (id, kind, name, subject, payload, headers, state, attempts, created_at, updated_at, next_attempt_at, last_error, outcome) VALUES (${
         placeholders(this.dialect, 13)
-      }) ${conflict}`,
+      }) ${conflict} RETURNING *`,
       [
         message.id,
         message.kind,
@@ -467,7 +478,11 @@ export class SqlOutboxRepository implements OutboxRepository {
         null,
       ],
     );
-    return message;
+    if (inserted[0]) return rowToOutboxMessage(inserted[0]);
+    const existing = await this.get(record.id);
+    if (!existing) throw new OutboxStorageConflictError(record.id);
+    assertOutboxIdentity(existing, record);
+    return existing;
   }
 
   async get(id: string): Promise<OutboxMessage | undefined> {
@@ -635,17 +650,25 @@ export class NatsKvOutboxRepository implements OutboxRepository {
     if (!isErr(stored)) return kvRecordToOutboxMessage(record);
     if (!hasKvReason(stored.error, "exists")) throw stored.error;
 
-    const existing = await this.kv.get(record.id).take();
+    const existing = await this.kv.getEntry(record.id).take();
     if (isErr(existing)) throw existing.error;
-    return kvRecordToOutboxMessage(existing.value);
+    if (!existing) {
+      throw new Error("outbox record missing after create conflict");
+    }
+    if (existing.value === undefined) {
+      throw new Error("outbox record is deleted");
+    }
+    const message = kvRecordToOutboxMessage(existing.value);
+    assertOutboxIdentity(message, rec);
+    return message;
   }
 
   async get(id: string): Promise<OutboxMessage | undefined> {
-    const loaded = await this.kv.get(id).take();
+    const loaded = await this.kv.getEntry(id).take();
     if (isErr(loaded)) {
-      if (hasKvReason(loaded.error, "not found")) return undefined;
       throw loaded.error;
     }
+    if (!loaded || loaded.value === undefined) return undefined;
     return kvRecordToOutboxMessage(loaded.value);
   }
 
@@ -657,14 +680,13 @@ export class NatsKvOutboxRepository implements OutboxRepository {
     const claimed: OutboxMessage[] = [];
     for await (const key of keys) {
       if (claimed.length >= limit) break;
-      const loaded = await this.kv.get(key).take();
+      const loaded = await this.kv.getEntry(key).take();
       if (isErr(loaded)) {
-        if (hasKvReason(loaded.error, "not found")) continue;
         throw loaded.error;
       }
-
-      const entry = loaded;
-      const record = entry.value;
+      if (!loaded) continue;
+      const record = loaded.value;
+      if (record === undefined) continue;
       if (record.state === "dispatched") {
         continue;
       }
@@ -679,7 +701,7 @@ export class NatsKvOutboxRepository implements OutboxRepository {
         updatedAt: dueAt,
         nextAttemptAt: new Date(now.getTime() + outboxClaimMs).toISOString(),
       };
-      const stored = await entry.put(next, true).take();
+      const stored = await this.kv.replace(key, loaded.revision, next).take();
       if (isErr(stored)) {
         if (hasKvReason(stored.error, "revision mismatch")) continue;
         throw stored.error;
@@ -694,11 +716,11 @@ export class NatsKvOutboxRepository implements OutboxRepository {
     now: Date,
     outcome?: unknown,
   ): Promise<boolean> {
-    const loaded = await this.kv.get(claim.id).take();
+    const loaded = await this.kv.getEntry(claim.id).take();
     if (isErr(loaded)) {
-      if (hasKvReason(loaded.error, "not found")) return false;
       throw loaded.error;
     }
+    if (!loaded || loaded.value === undefined) return false;
     if (
       loaded.value.state !== "claimed" ||
       loaded.value.attempts !== claim.attempts
@@ -706,14 +728,14 @@ export class NatsKvOutboxRepository implements OutboxRepository {
     const outcomeStr = outcome !== undefined
       ? JSON.stringify(outcome)
       : undefined;
-    const stored = await loaded.put({
+    const stored = await this.kv.replace(claim.id, loaded.revision, {
       ...loaded.value,
       state: "dispatched",
       updatedAt: now.toISOString(),
       nextAttemptAt: undefined,
       lastError: undefined,
       outcome: outcomeStr ?? loaded.value.outcome,
-    }, true).take();
+    }).take();
     if (isErr(stored)) {
       if (hasKvReason(stored.error, "revision mismatch")) return false;
       throw stored.error;
@@ -725,22 +747,22 @@ export class NatsKvOutboxRepository implements OutboxRepository {
     claim: OutboxMessage,
     failure: { error: string; nextAttemptAt: Date; now: Date },
   ): Promise<boolean> {
-    const loaded = await this.kv.get(claim.id).take();
+    const loaded = await this.kv.getEntry(claim.id).take();
     if (isErr(loaded)) {
-      if (hasKvReason(loaded.error, "not found")) return false;
       throw loaded.error;
     }
+    if (!loaded || loaded.value === undefined) return false;
     const record = loaded.value;
     if (record.state !== "claimed" || record.attempts !== claim.attempts) {
       return false;
     }
-    const stored = await loaded.put({
+    const stored = await this.kv.replace(claim.id, loaded.revision, {
       ...record,
       state: "failed",
       updatedAt: failure.now.toISOString(),
       nextAttemptAt: failure.nextAttemptAt.toISOString(),
       lastError: failure.error,
-    }, true).take();
+    }).take();
     if (isErr(stored)) {
       if (hasKvReason(stored.error, "revision mismatch")) return false;
       throw stored.error;
@@ -751,7 +773,7 @@ export class NatsKvOutboxRepository implements OutboxRepository {
 
 /** Durable NATS KV inbox repository for event-id duplicate suppression. */
 export class NatsKvInboxRepository implements InboxRepository {
-  constructor(readonly kv: TypedKV<typeof KvInboxRecordSchema>) {}
+  constructor(readonly kv: TypedKV<KvInboxRecord>) {}
 
   async record(messageId: string, now: Date = new Date()): Promise<boolean> {
     // Durable NATS KV dedupe is useful for event handlers without SQL state, but
@@ -1010,8 +1032,14 @@ export function outboxMessageToPreparedEvent(
   }
   const payload = JSON.parse(message.payload) as Record<string, unknown>;
   const header = eventHeaderFromMessage(message.headers);
+  const descriptorIdentity = message.headers["Trellis-Event-Descriptor"] ??
+    message.headers["trellis-event-descriptor"];
+  if (!descriptorIdentity) {
+    throw new Error("Outbox event descriptor identity is required");
+  }
   return Object.freeze({
     event: message.name,
+    descriptorIdentity,
     subject: message.subject,
     header: Object.freeze(header),
     payload: Object.freeze(payload),
@@ -1034,6 +1062,7 @@ export function preparedTrellisEventToOutboxRecord(
       ...event.headers,
       "Nats-Msg-Id": event.header.id,
       "Trellis-Event-Time": event.header.time,
+      "Trellis-Event-Descriptor": event.descriptorIdentity,
     },
   };
 }
@@ -1047,6 +1076,24 @@ function eventHeaderFromMessage(
     id: typeof id === "string" ? id : "",
     time: typeof time === "string" ? time : new Date(0).toISOString(),
   };
+}
+
+function assertOutboxIdentity(
+  existing: OutboxMessage,
+  candidate: PreparedOutboxRecord,
+): void {
+  if (
+    existing.kind !== candidate.kind || existing.name !== candidate.name ||
+    existing.subject !== candidate.subject ||
+    existing.payload !== candidate.payload ||
+    Object.keys(existing.headers).length !==
+      Object.keys(candidate.headers).length ||
+    Object.entries(existing.headers).some(([key, value]) =>
+      candidate.headers[key] !== value
+    )
+  ) {
+    throw new OutboxDuplicateIdentityError(candidate.id);
+  }
 }
 
 function rowToOutboxMessage(row: SqlRow): OutboxMessage {
@@ -1102,7 +1149,15 @@ function placeholders(dialect: SqlDialect, count: number): string {
 }
 
 function hasKvReason(error: BaseError, reason: string): boolean {
-  return error.toSerializable().context?.["reason"] === reason;
+  if (error.toSerializable().context?.["reason"] === reason) return true;
+  if (reason !== "revision mismatch") return false;
+  const message = error.cause instanceof Error
+    ? error.cause.message.toLowerCase()
+    : "";
+  return message.includes("wrong last sequence") ||
+    message.includes("wrong last revision") ||
+    message.includes("revision mismatch") ||
+    message.includes("sequence mismatch");
 }
 
 function parseHeaders(value: unknown): Record<string, string> {

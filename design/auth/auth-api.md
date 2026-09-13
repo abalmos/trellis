@@ -40,8 +40,8 @@ and expiries are epoch milliseconds.
 Native bootstrap and context refresh return one shape:
 
 - `assignment`: server-owned deployment and instance identifiers;
-- `runtime`: exact participant revision, resolved API artifacts, effective
-  grant, resource evidence, signed context, route JWT, inbox, and expiries; and
+- `runtime`: exact package/participant evidence, effective grant, resource
+  evidence, signed context, route JWT, inbox, and expiries; and
 - `transports`: exact Core NATS and WebSocket endpoints/options.
 
 Bind returns only the minimal login projection. Browser clients commit that
@@ -54,9 +54,9 @@ result under their generation fence, then call context refresh.
 - `Auth.Participants.Get`
 - `Auth.Participants.Install`
 
-Installation accepts canonical artifact inputs, resolves exact APIs, rejects
-reserved Trellis namespaces except canonical built-ins, and creates an immutable
-participant revision.
+Installation accepts verified source-package evidence and exact participant
+lexical path, resolves semantics, rejects reserved Trellis namespaces except
+built-ins, and creates an immutable participant revision.
 
 ### Grants
 
@@ -116,7 +116,7 @@ Participant installation precedes the corresponding grant-change event.
 Superseded contexts are durably revoked before connection kicks are attempted.
 
 Auth's own event publisher uses the ordinary event authorization path and a
-durably prepared body/proof tuple. Event Log retains the context digest rather
+durably prepared body/proof tuple. The Events journal retains the context digest rather
 than copying authorization state.
 
 ## Non-Goals

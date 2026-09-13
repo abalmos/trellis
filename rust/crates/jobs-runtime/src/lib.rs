@@ -9,10 +9,14 @@ mod advisory;
 mod janitor;
 mod projector;
 mod query;
+mod resolver;
 mod router;
 pub mod storage;
 mod watch;
 pub mod worker_presence;
+
+#[cfg(test)]
+mod test_nats;
 
 pub use advisory::{
     map_dead_event_from_advisory_job, start_advisory_loop, AdvisoryHandle, MappedDeadEvent,
@@ -24,6 +28,9 @@ pub use janitor::{
 };
 pub use projector::{start_jobs_projector, JobsProjectorHandle};
 pub use query::{jobs_admin_resources, JobsAdminResources, JobsQuery, JobsQueryError};
+pub use resolver::{
+    JobKeySnapshot, JobResourceBinding, JobResourceResolver, SqliteJobResourceResolver,
+};
 pub use router::build_router_with_query;
 pub use storage::{ListJobsFilter, SqliteJobsStore, SqliteJobsStoreError};
 pub use watch::register_jobs_watch_feed;

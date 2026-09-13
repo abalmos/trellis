@@ -20,14 +20,14 @@
   import Panel from "$lib/components/Panel.svelte";
   import { getAuthenticatedUser, getConnection, getTrellis } from "$lib/trellis";
 
-  type IdentityRecord = apis.auth.AuthUserIdentitiesListOutput["entries"][number];
+  type IdentityRecord = apis.auth.UserIdentitiesListOutput["items"][number];
   const trellis = getTrellis();
   const connection = getConnection();
   const notifications = getNotifications();
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let user = $state<apis.auth.AuthSessionsMeOutput["user"] | null>(null);
+  let user = $state<apis.auth.SessionsMeOutput["user"] | null>(null);
   let participantKind = $state<ParticipantKind | null>(null);
   let platformPrivileges = $state<string[]>([]);
   let identities = $state<IdentityRecord[]>([]);
@@ -95,7 +95,7 @@
     linkPending = true;
     linkError = null;
     try {
-      const response = await trellis.authUsersIdentityLinkCreate({
+      const response = await trellis.usersIdentityLinkCreate({
         allowedProviders: [],
         idempotencyKey: ulid(),
         returnTarget: currentReturnTarget(),
@@ -128,7 +128,7 @@
         return;
       }
 
-      const response = await trellis.authUsersPasswordChange({
+      const response = await trellis.usersPasswordChange({
         currentPassword,
         idempotencyKey: ulid(),
         newPassword,
@@ -157,19 +157,24 @@
     try {
       const me = await getAuthenticatedUser(trellis);
       user = me.user ?? null;
-      participantKind = me.connection.participantKind;
+      const kind = me.connection.participantKind;
+      if (kind === "app") participantKind = "app";
+      else if (kind === "agent") participantKind = "agent";
+      else if (kind === "device") participantKind = "device";
+      else if (kind === "service") participantKind = "service";
+      else participantKind = null;
       platformPrivileges = me.connection.platformPrivileges;
       if (!me.user) {
         identities = [];
         return;
       }
 
-      const identitiesResponse = await trellis.authUserIdentitiesList({ limit: 100 }).take();
+      const identitiesResponse = await trellis.userIdentitiesList({ limit: 100 }).take();
       if (isErr(identitiesResponse)) {
         error = errorMessage(identitiesResponse);
         return;
       }
-      identities = identitiesResponse.entries ?? [];
+      identities = identitiesResponse.items ?? [];
     } catch (e) {
       error = errorMessage(e);
     } finally {

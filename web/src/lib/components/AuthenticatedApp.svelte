@@ -29,7 +29,7 @@
   let authFailure = $state<string | null>(null);
   const connectionStatus = $derived<ConnectionStatus["phase"]>(connection.status.phase);
   let navSections = $state<NavSection[]>(getVisibleNavSections(null));
-  let profile = $state<apis.auth.AuthSessionsMeOutput["user"] | null>(null);
+  let profile = $state<apis.auth.SessionsMeOutput["user"] | null>(null);
   let profileLoaded = $state(false);
 
   function toRoutePath(pathname: string): string {

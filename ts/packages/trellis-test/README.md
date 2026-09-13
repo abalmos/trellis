@@ -12,7 +12,7 @@ evidence by hand.
 
 ```ts
 import { TrellisTestRuntime } from "@qlever-llc/trellis-test";
-import { TrellisService } from "@qlever-llc/trellis/service/deno";
+import { TrellisService } from "@qlever-llc/trellis/service";
 import { participants } from "test-trellis";
 
 await using runtime = await TrellisTestRuntime.start({

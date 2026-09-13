@@ -20,6 +20,8 @@ use trellis_rs::generated::Client;
 mod auth;
 mod bootstrap;
 mod deploy;
+mod events;
+mod resources;
 mod runtime;
 mod self_cmd;
 
@@ -53,6 +55,8 @@ pub async fn run() -> miette::Result<()> {
         TopLevelCommand::Portals(command) => auth::portals(format, command).await?,
         TopLevelCommand::Svc(command) => deploy::run_svc(format, command).await?,
         TopLevelCommand::Dev(command) => deploy::run_dev(format, command).await?,
+        TopLevelCommand::Resources(command) => resources::run(format, command).await?,
+        TopLevelCommand::Events(command) => events::run(command).await?,
         TopLevelCommand::Init(command) => bootstrap::init(format, command).await?,
         TopLevelCommand::Keys(command) => match command.command {
             KeysSubcommand::New(args) => runtime::keygen_command(format, &args)?,
@@ -214,8 +218,7 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
     use trellis_rs::auth::{save_admin_session, AdminSessionState, TrellisAuthError};
-    use trellis_rs::client::RpcErrorPayload;
-    use trellis_rs::generated::TrellisClientError;
+    use trellis_rs::client::{RpcErrorPayload, TrellisClientError};
 
     fn config_env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -236,6 +239,7 @@ mod tests {
 
     fn test_admin_session_state() -> AdminSessionState {
         AdminSessionState {
+            participant_id: "trellis-app.cli@v1".to_string(),
             login_session_id: ulid::Ulid::new().to_string(),
             trellis_url: "http://localhost:3000".to_string(),
             session_seed: "seed".to_string(),

@@ -25,17 +25,17 @@ pub(crate) enum OwnerGroup {
     Platform,
     Jobs,
     Health,
-    Eventlog,
+    Events,
 }
 
 impl OwnerGroup {
     pub(crate) fn for_mode(mode: RuntimeMode) -> &'static [Self] {
         match mode {
-            RuntimeMode::All => &[Self::Platform, Self::Jobs, Self::Health, Self::Eventlog],
+            RuntimeMode::All => &[Self::Platform, Self::Jobs, Self::Health, Self::Events],
             RuntimeMode::Platform => &[Self::Platform],
             RuntimeMode::Jobs => &[Self::Jobs],
             RuntimeMode::Health => &[Self::Health],
-            RuntimeMode::Eventlog => &[Self::Eventlog],
+            RuntimeMode::Events => &[Self::Events],
         }
     }
 
@@ -44,7 +44,7 @@ impl OwnerGroup {
             Self::Platform => "platform.owner",
             Self::Jobs => "jobs.owner",
             Self::Health => "health.owner",
-            Self::Eventlog => "eventlog.owner",
+            Self::Events => "events.owner",
         }
     }
 
@@ -53,7 +53,7 @@ impl OwnerGroup {
             Self::Platform => SubsystemName::Platform,
             Self::Jobs => SubsystemName::Jobs,
             Self::Health => SubsystemName::Health,
-            Self::Eventlog => SubsystemName::Eventlog,
+            Self::Events => SubsystemName::Events,
         }
     }
 }
@@ -416,13 +416,13 @@ mod tests {
                 OwnerGroup::Platform,
                 OwnerGroup::Jobs,
                 OwnerGroup::Health,
-                OwnerGroup::Eventlog,
+                OwnerGroup::Events,
             ]
         );
         assert_eq!(OwnerGroup::Platform.key(), "platform.owner");
         assert_eq!(OwnerGroup::Jobs.key(), "jobs.owner");
         assert_eq!(OwnerGroup::Health.key(), "health.owner");
-        assert_eq!(OwnerGroup::Eventlog.key(), "eventlog.owner");
+        assert_eq!(OwnerGroup::Events.key(), "events.owner");
     }
 
     #[test]

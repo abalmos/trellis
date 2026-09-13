@@ -271,8 +271,86 @@ pub(super) async fn exercise_accounts(
             actions: Vec::new(),
         })
         .await?;
+    for index in 0..52 {
+        let principal = PrincipalRecord {
+            principal_id: format!("usr_noise_{index:03}"),
+            ..user.clone()
+        };
+        let profile = UserProfileRecord {
+            principal_id: principal.principal_id.clone(),
+            display_name: Some("Equal sort key".to_owned()),
+            ..managed_profile.clone()
+        };
+        store
+            .create_user_account(AccountCreation {
+                principal,
+                profile,
+                credential: None,
+                identity: None,
+                idempotency: proof(120 + index as u8, "account.create-noise"),
+                actions: Vec::new(),
+            })
+            .await?;
+    }
+    let mut matched_accounts = Vec::new();
+    for index in 0..3 {
+        let principal = PrincipalRecord {
+            principal_id: format!("usr_target_{index}"),
+            ..user.clone()
+        };
+        let profile = UserProfileRecord {
+            principal_id: principal.principal_id.clone(),
+            display_name: Some(format!("Needle Account {index}")),
+            ..managed_profile.clone()
+        };
+        store
+            .create_user_account(AccountCreation {
+                principal: principal.clone(),
+                profile: profile.clone(),
+                credential: None,
+                identity: None,
+                idempotency: proof(180 + index as u8, "account.create-match"),
+                actions: Vec::new(),
+            })
+            .await?;
+        matched_accounts.push((principal, profile));
+    }
     assert_eq!(
-        store.list_user_accounts(None, 2).await?,
+        store
+            .list_user_accounts(None, Some("active"), Some("needle"), 3)
+            .await?,
+        matched_accounts
+    );
+    let first_equal_page = store
+        .list_user_accounts(None, None, Some("equal sort key"), 10)
+        .await?;
+    assert_eq!(
+        first_equal_page
+            .iter()
+            .map(|account| account.0.principal_id.clone())
+            .collect::<Vec<_>>(),
+        (0..10)
+            .map(|index| format!("usr_noise_{index:03}"))
+            .collect::<Vec<_>>()
+    );
+    let first_equal_cursor = (
+        first_equal_page[9].0.created_at,
+        first_equal_page[9].0.principal_id.clone(),
+    );
+    let second_equal_page = store
+        .list_user_accounts(Some(&first_equal_cursor), None, Some("equal sort key"), 10)
+        .await?;
+    assert_eq!(
+        second_equal_page
+            .iter()
+            .map(|account| account.0.principal_id.clone())
+            .collect::<Vec<_>>(),
+        (10..20)
+            .map(|index| format!("usr_noise_{index:03}"))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        store.list_user_accounts(None, None, None, 2).await?,
         vec![
             (managed_user.clone(), managed_profile.clone()),
             (managed_user_b.clone(), managed_profile_b.clone()),
@@ -280,7 +358,12 @@ pub(super) async fn exercise_accounts(
     );
     assert_eq!(
         store
-            .list_user_accounts(Some(&managed_user.principal_id), 2)
+            .list_user_accounts(
+                Some(&(managed_user.created_at, managed_user.principal_id.clone())),
+                None,
+                None,
+                2,
+            )
             .await?,
         vec![
             (managed_user_b, managed_profile_b),
@@ -297,6 +380,16 @@ pub(super) async fn exercise_accounts(
                 participant_id: mutation_actor.participant_id.clone(),
                 installed_revision: 1,
                 grants: GrantSet::new(Vec::new()),
+                approval_mode: super::super::super::ApprovalMode::Exact,
+                approved_capabilities: Vec::new(),
+                approved_resources: Vec::new(),
+                delegation_ceiling: super::super::super::DelegationCeiling {
+                    capabilities: Vec::new(),
+                    exact_restrictions: Some(GrantSet::new(Vec::new())),
+                    platform_privileges: vec![PlatformPrivilege::Admin],
+                },
+                approval_decision_digest: "A".repeat(43),
+                companion_approved: false,
                 platform_privileges: vec![PlatformPrivilege::Admin],
                 state: GrantBindingState::Active,
                 expires_at: None,

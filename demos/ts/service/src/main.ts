@@ -16,7 +16,7 @@ async function main(): Promise<void> {
 
   const service = await TrellisService.connect({
     trellisUrl,
-    participant: participants.demoService.participant,
+    participant: participants.Service.participant,
     name: "field-ops-demo-service",
     seed,
   }).orThrow();

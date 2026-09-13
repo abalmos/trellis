@@ -1,4 +1,4 @@
-import type { BaseError, Result } from "@qlever-llc/result";
+import type { AsyncResult, BaseError, Result } from "@qlever-llc/result";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
   type GeneratedParticipant,
@@ -8,7 +8,19 @@ import {
   lowerCamelSurfaceName,
   pascalSurfaceName,
 } from "./participant_runtime/surface_names.ts";
-import type { PreparedTrellisEvent } from "./session.ts";
+import type { PascalActionName } from "./participant_runtime/surface_names.ts";
+import type { EventListenerContext, PreparedTrellisEvent } from "./session.ts";
+import type { InferSchemaType, RuntimeApi } from "./participant_runtime/api.ts";
+import type {
+  ParticipantJobsMetadata,
+  ParticipantKvMetadata,
+} from "./participant_runtime/metadata.ts";
+import type {
+  FeedHandler,
+  GeneratedServiceParticipant,
+  OperationHandler,
+  RpcHandler,
+} from "./service/runtime/service.ts";
 
 export const PROVIDER_CALLER = Symbol("trellis.provider.caller");
 
@@ -38,14 +50,86 @@ type ProviderResources<TService> = TService extends {
 } ? { readonly kv: TKv; readonly store: TStore; readonly jobs: TJobs }
   : {};
 
+type ServiceContract<TContract extends GeneratedParticipant> = Extract<
+  TContract,
+  GeneratedServiceParticipant<
+    RuntimeApi,
+    RuntimeApi | undefined,
+    ParticipantJobsMetadata,
+    ParticipantKvMetadata
+  >
+>;
+type OwnedApi<TContract extends GeneratedParticipant> = TContract extends {
+  readonly __runtimeTypes?: { readonly ownedApi: infer TApi };
+} ? Extract<TApi, RuntimeApi>
+  : never;
+type ProviderRegistrations<TContract extends GeneratedParticipant> =
+  & {
+    readonly [
+      K in
+        & keyof OwnedApi<TContract>["rpc"]
+        & string as `handle${PascalActionName<K>}`
+    ]: (handler: RpcHandler<ServiceContract<TContract>, K>) => unknown;
+  }
+  & {
+    readonly [
+      K in
+        & keyof OwnedApi<TContract>["operations"]
+        & string as `handle${PascalActionName<K>}`
+    ]: (handler: OperationHandler<ServiceContract<TContract>, K>) => unknown;
+  }
+  & {
+    readonly [
+      K in
+        & keyof NonNullable<OwnedApi<TContract>["feeds"]>
+        & string as `handle${PascalActionName<K>}`
+    ]: (handler: FeedHandler<ServiceContract<TContract>, K>) => unknown;
+  }
+  & {
+    readonly [
+      K in
+        & keyof OwnedApi<TContract>["events"]
+        & string as `on${PascalActionName<K>}`
+    ]: (
+      handler: (args: {
+        event: InferSchemaType<OwnedApi<TContract>["events"][K]["event"]>;
+        context: EventListenerContext;
+        client: ProviderCallerSurface<TContract>;
+      }) => unknown | Promise<unknown>,
+      subjectData?: Record<string, unknown>,
+      options?: unknown,
+    ) => AsyncResult<void, BaseError>;
+  }
+  & {
+    readonly [
+      K in
+        & keyof OwnedApi<TContract>["events"]
+        & string as `publish${PascalActionName<K>}`
+    ]: (
+      event: InferSchemaType<OwnedApi<TContract>["events"][K]["event"]>,
+    ) => AsyncResult<void, BaseError>;
+  };
+
+type ProviderOwnedPublish<TContract extends GeneratedParticipant> = {
+  readonly [
+    K in
+      & keyof OwnedApi<TContract>["events"]
+      & string as `publish${PascalActionName<K>}`
+  ]: (
+    event: InferSchemaType<OwnedApi<TContract>["events"][K]["event"]>,
+  ) => AsyncResult<void, BaseError>;
+};
+
 type ProviderCallerSurface<TContract extends GeneratedParticipant> = Omit<
   CallerRuntime<TContract>,
   | "connection"
+  | "kv"
   | "state"
+  | "store"
   | "wait"
   | Extract<
     keyof CallerRuntime<TContract>,
-    `on${string}`
+    `on${string}` | `publish${string}`
   >
 >;
 
@@ -55,6 +139,7 @@ export type ProviderHandlerClient<
   TService,
 > =
   & ProviderCallerSurface<TContract>
+  & ProviderOwnedPublish<TContract>
   & ProviderResources<TService>
   & (ProviderBase<TService> extends infer TBase
     ? TBase extends { connection: unknown; name: unknown }
@@ -70,12 +155,7 @@ export type ProviderRuntime<
   & ProviderBase<TService>
   & ProviderResources<TService>
   & ProviderCallerSurface<TContract>
-  & Readonly<
-    Record<
-      `handle${string}` | `on${string}` | `publish${string}`,
-      (...args: unknown[]) => unknown
-    >
-  >;
+  & ProviderRegistrations<TContract>;
 
 type ProviderService = {
   readonly kv: unknown;

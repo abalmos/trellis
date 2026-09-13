@@ -18,12 +18,7 @@ fn connection_kick_response_rejects_system_errors() {
 }
 
 fn browser_flow() -> AuthBrowserFlow {
-    let consent_view = serde_json::json!({ "title": "Authorize app" });
-    let required_grant_set = GrantSet::new(Vec::new());
-    let optional_grant_bundles = BTreeMap::new();
-    let required_capabilities = Vec::<String>::new();
-    let optional_capability_definitions = BTreeMap::new();
-    AuthBrowserFlow {
+    let mut flow = AuthBrowserFlow {
         format: BROWSER_FLOW_FORMAT.to_owned(),
         flow_id: "flow-1".to_owned(),
         kind: AuthBrowserFlowKind::UserAuth,
@@ -33,26 +28,15 @@ fn browser_flow() -> AuthBrowserFlow {
         participant_id: "app-1".to_owned(),
         installed_revision: 1,
         target_grant_revision: 0,
-        consent: BrowserConsentProposal {
+        consent: ConsentRequest {
             participant_id: "app-1".to_owned(),
-            participant_digest: DIGEST.to_owned(),
-            participant_needs_digest: DIGEST.to_owned(),
-            consent_view_digest: trellis_protocol::digest_json(&consent_view).unwrap(),
-            proposal_digest: trellis_protocol::digest_json(&serde_json::json!({
-                "participantId": "app-1",
-                "participantDigest": DIGEST,
-                "participantNeedsDigest": DIGEST,
-                "requiredGrantSet": required_grant_set,
-                "optionalGrantBundles": optional_grant_bundles,
-                "requiredCapabilities": required_capabilities,
-                "optionalCapabilityDefinitions": optional_capability_definitions,
-            }))
-            .unwrap(),
-            consent_view,
-            required_grant_set,
-            optional_grant_bundles,
-            required_capabilities,
-            optional_capability_definitions,
+            package_digest: DIGEST.to_owned(),
+            installed_revision: 1,
+            expected_grant_revision: 0,
+            capabilities: Vec::new(),
+            resources: Vec::new(),
+            companion: None,
+            decision_digest: DIGEST.to_owned(),
         },
         session_public_key: "session-key".to_owned(),
         portal_id: "builtin".to_owned(),
@@ -68,7 +52,9 @@ fn browser_flow() -> AuthBrowserFlow {
         created_at: 100,
         expires_at: 1_000,
         version: 1,
-    }
+    };
+    flow.consent.decision_digest = flow.consent.computed_decision_digest().unwrap();
+    flow
 }
 
 fn oauth_state() -> AuthOAuthState {
@@ -122,6 +108,11 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
     directly_approved.authenticated_provider_id = Some("local".to_owned());
     directly_approved.portal_binding_digest = Some(DIGEST.to_owned());
     directly_approved.target_grant_revision = 7;
+    directly_approved.consent.expected_grant_revision = 7;
+    directly_approved.consent.decision_digest = directly_approved
+        .consent
+        .computed_decision_digest()
+        .unwrap();
     directly_approved.version = 2;
     repository
         .replace_browser_flow(1, directly_approved.clone())
@@ -167,30 +158,11 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
             .await,
         Err(AuthorizationStateError::StorageConflict)
     );
-    for changed_consent in [
-        {
-            let mut consent = approval_required.consent.clone();
-            consent.consent_view = serde_json::json!({ "title": "Changed" });
-            consent
-        },
-        {
-            let mut consent = approval_required.consent.clone();
-            consent.consent_view_digest = DIGEST.replace('A', "B");
-            consent
-        },
-        {
-            let mut consent = approval_required.consent.clone();
-            consent.proposal_digest = DIGEST.replace('A', "C");
-            consent
-        },
-        {
-            let mut consent = approval_required.consent.clone();
-            consent
-                .optional_capability_definitions
-                .insert("extra".to_owned(), GrantSet::new(Vec::new()));
-            consent
-        },
-    ] {
+    for changed_consent in [{
+        let mut consent = approval_required.consent.clone();
+        consent.decision_digest = DIGEST.replace('A', "B");
+        consent
+    }] {
         let mut changed = approval_required.clone();
         changed.consent = changed_consent;
         changed.version = 4;

@@ -6,8 +6,6 @@
  * with stdout/stderr captured to log files under the workdir, and tracks the
  * child in a pid file so crashed test runs can be cleaned up later.
  */
-import { jetstreamManager } from "@nats-io/jetstream";
-import type { StreamConfig } from "@nats-io/jetstream";
 import type { NatsConnection } from "@nats-io/nats-core";
 import { connect, credsAuthenticator } from "@nats-io/transport-node";
 import { join } from "@std/path";
@@ -38,7 +36,6 @@ import {
   waitForStatus,
 } from "./trellis_process.ts";
 
-const TRELLIS_STREAM = "trellis";
 const NATS_PID_FILE_PREFIX = "nats-";
 const DEFAULT_STARTUP_MS = 30_000;
 const SHUTDOWN_GRACE_MS = 10_000;
@@ -205,56 +202,6 @@ async function stopNatsChild(args: {
   await Promise.allSettled(args.readers);
 }
 
-async function ensureStream(
-  nc: NatsConnection,
-  config: Pick<StreamConfig, "name"> & Partial<StreamConfig>,
-): Promise<void> {
-  const jsm = await jetstreamManager(nc);
-  try {
-    await jsm.streams.info(config.name);
-    await jsm.streams.update(config.name, config);
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("stream not found")) {
-      await jsm.streams.add(config);
-      return;
-    }
-    throw error;
-  }
-}
-
-async function ensureSharedStreams(nc: NatsConnection): Promise<void> {
-  await ensureStream(nc, { name: TRELLIS_STREAM, subjects: ["events.>"] });
-  await ensureStream(nc, {
-    name: "JOBS",
-    subjects: ["trellis.jobs.>"],
-    retention: "limits",
-    allow_direct: true,
-  });
-  await ensureStream(nc, {
-    name: "JOBS_WORK",
-    subjects: ["trellis.work.>"],
-    retention: "workqueue",
-    sources: [{
-      name: "JOBS",
-      subject_transforms: [
-        {
-          src: "trellis.jobs.*.*.*.created",
-          dest: "trellis.work.$1.$2",
-        },
-        {
-          src: "trellis.jobs.*.*.*.retried",
-          dest: "trellis.work.$1.$2",
-        },
-      ],
-    }],
-  });
-  await ensureStream(nc, {
-    name: "JOBS_ADVISORIES",
-    subjects: ["$JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.JOBS_WORK.>"],
-    retention: "limits",
-  });
-}
-
 /** Manages an isolated local NATS/JetStream server for Trellis tests. */
 export class NatsTestContainer implements AsyncDisposable {
   readonly natsUrl: string;
@@ -419,7 +366,6 @@ export class NatsTestContainer implements AsyncDisposable {
             ),
           ),
         });
-        await ensureSharedStreams(nc);
         return new NatsTestContainer({
           natsUrl,
           websocketUrl,

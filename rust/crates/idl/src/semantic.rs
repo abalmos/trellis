@@ -696,15 +696,6 @@ pub struct RetryPolicy {
     pub backoff_ms: Vec<u64>,
 }
 
-/// Historic wire representation.
-#[derive(Clone, Debug, PartialEq)]
-pub struct HistoricRepresentation {
-    /// Positive historical representation version.
-    pub version: u32,
-    /// Historical schema decoded before application migration.
-    pub ty: TypeRef,
-}
-
 /// Queue key policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KeyConcurrencyPolicy {
@@ -723,6 +714,15 @@ pub struct KeyConcurrency {
     pub path: Vec<String>,
     /// Concurrency policy for equal extracted keys.
     pub policy: KeyConcurrencyPolicy,
+}
+
+/// Historic wire representation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HistoricRepresentation {
+    /// Positive historical representation version.
+    pub version: u32,
+    /// Historical schema decoded before application migration.
+    pub ty: TypeRef,
 }
 
 /// Consumer replay starting position.
@@ -794,10 +794,6 @@ pub enum ResourceDefinition {
         result: Option<TypeRef>,
         /// Optional progress/update schema.
         update: Option<TypeRef>,
-        /// Optional execution deadline in milliseconds.
-        deadline_ms: Option<u64>,
-        /// Optional authored retry override.
-        retry: Option<RetryPolicy>,
         /// Optional typed key concurrency policy.
         key_concurrency: Option<KeyConcurrency>,
     },

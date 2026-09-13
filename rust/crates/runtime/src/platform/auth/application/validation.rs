@@ -101,16 +101,20 @@ pub(crate) fn validate_new_user_account(
 }
 
 pub(crate) fn validate_account_list(
-    cursor: Option<&str>,
+    cursor: Option<&(i64, String)>,
     limit: usize,
 ) -> Result<(), super::super::AuthorizationStateError> {
     if let Some(cursor) = cursor {
-        require_nonempty("cursor", cursor)?;
+        if cursor.1.is_empty() {
+            return Err(super::super::AuthorizationStateError::InvalidRecord(
+                "user account list cursor is invalid".to_owned(),
+            ));
+        }
     }
     // RPC pagination reads one extra row to determine whether a next page exists.
-    if limit > 101 {
+    if limit > 201 {
         return Err(super::super::AuthorizationStateError::InvalidRecord(
-            "user account list limit exceeds internal maximum 101".to_owned(),
+            "user account list limit exceeds internal maximum 201".to_owned(),
         ));
     }
     Ok(())
@@ -273,7 +277,9 @@ pub(crate) fn validate_activation_decision_changes(
     match command.state {
         DeviceActivationReviewState::Approved => {}
         DeviceActivationReviewState::Rejected
-            if command.delegation.is_none() && !command.activate_device =>
+            if command.delegation.is_none()
+                && command.companion_session.is_none()
+                && !command.activate_device =>
         {
             return Ok(());
         }
@@ -285,6 +291,9 @@ pub(crate) fn validate_activation_decision_changes(
     }
     if let Some(delegation) = &command.delegation {
         validate_device_delegation(delegation)?;
+    }
+    if let Some(session) = &command.companion_session {
+        super::super::authority::validate_session(session)?;
     }
     Ok(())
 }
@@ -424,7 +433,7 @@ pub(crate) fn validate_idempotency_and_actions(
 mod tests {
     #[test]
     fn account_list_allows_one_row_of_pagination_lookahead() {
-        assert!(super::validate_account_list(None, 101).is_ok());
-        assert!(super::validate_account_list(None, 102).is_err());
+        assert!(super::validate_account_list(None, 201).is_ok());
+        assert!(super::validate_account_list(None, 202).is_err());
     }
 }

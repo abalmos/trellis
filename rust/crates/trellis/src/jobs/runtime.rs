@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::time::Duration;
 
-use async_nats::jetstream::consumer::FromConsumer;
 use async_nats::jetstream::{self, consumer};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -70,36 +69,6 @@ impl JobsRuntime {
         })))
     }
 
-    /// Mark shape-matched legacy Jobs watch durables for bounded expiry.
-    pub async fn expire_obsolete_watch_consumers(
-        &self,
-        stream_name: &str,
-    ) -> Result<usize, String> {
-        let stream = jetstream::new(self.nats.clone())
-            .get_stream(stream_name)
-            .await
-            .map_err(|error| error.to_string())?;
-        let mut consumers = stream.consumers();
-        let mut configs = Vec::new();
-        while let Some(info) = consumers.next().await {
-            let info = info.map_err(|error| error.to_string())?;
-            if obsolete_jobs_watch_consumer(&info.name, &info.config) {
-                let mut config = consumer::pull::Config::try_from_consumer_config(info.config)
-                    .map_err(|error| error.to_string())?;
-                config.inactive_threshold = Duration::from_secs(5 * 60);
-                config.metadata.extend(jobs_watch_metadata());
-                configs.push(config);
-            }
-        }
-        for config in configs.iter().cloned() {
-            stream
-                .update_consumer(config)
-                .await
-                .map_err(|error| error.to_string())?;
-        }
-        Ok(configs.len())
-    }
-
     /// Publish one encoded job lifecycle event to its subject.
     pub async fn publish_event(&self, subject: String, event: &JobEvent) -> Result<(), String> {
         let payload = serde_json::to_vec(event).map_err(|error| error.to_string())?;
@@ -120,9 +89,12 @@ impl JobsRuntime {
         if let Some(tracestate) = headers.tracestate.as_deref() {
             nats_headers.insert("tracestate", tracestate);
         }
-        self.nats
+        jetstream::new(self.nats.clone())
             .publish_with_headers(subject, nats_headers, payload.into())
             .await
+            .map_err(|error| error.to_string())?
+            .await
+            .map(|_| ())
             .map_err(|error| error.to_string())
     }
 
@@ -298,27 +270,6 @@ fn jobs_watch_metadata() -> HashMap<String, String> {
     ])
 }
 
-fn obsolete_jobs_watch_consumer(name: &str, config: &consumer::Config) -> bool {
-    let Some((seed, counter)) = name
-        .strip_prefix("jobs-watch-")
-        .and_then(|suffix| suffix.rsplit_once('-'))
-    else {
-        return false;
-    };
-    let watch_filter = config.filter_subject == "trellis.jobs.>"
-        || (config.filter_subject.starts_with("trellis.jobs.*.*.")
-            && config.filter_subject.ends_with(".>"));
-    !seed.is_empty()
-        && seed.len() <= 48
-        && seed
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-')
-        && counter.len() <= 20
-        && counter.chars().all(|character| character.is_ascii_digit())
-        && watch_filter
-        && config.durable_name.as_deref() == Some(name)
-}
-
 /// Stream of Jobs runtime messages.
 pub type JobsRuntimeMessageStream =
     Pin<Box<dyn Stream<Item = Result<JobsRuntimeMessage, String>> + Send>>;
@@ -346,5 +297,21 @@ impl JobsRuntimeMessage {
     /// Acknowledge successful message handling.
     pub async fn ack(&self) -> Result<(), String> {
         self.inner.ack().await.map_err(|error| error.to_string())
+    }
+
+    /// Acknowledge message handling with an explicit JetStream disposition.
+    pub async fn ack_with(&self, kind: jetstream::AckKind) -> Result<(), String> {
+        self.inner
+            .ack_with(kind)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    /// Return the source stream sequence carried by this delivery.
+    pub fn stream_sequence(&self) -> Result<u64, String> {
+        self.inner
+            .info()
+            .map(|info| info.stream_sequence)
+            .map_err(|error| error.to_string())
     }
 }

@@ -1,144 +1,18 @@
-This guide adds a caller-visible async operation to the Rust `orders-service`.
-Use operations when callers need an accepted operation id, durable progress,
-observation, cancellation, signals, or transfer helpers. Use
-[Jobs: Rust](/guides/using-jobs-rust) for service-private execution.
+# Use operations from Rust
 
-## 1. Declare the operation
+Use Operations for caller-visible durable workflows and Jobs for private
+service execution. Author the Operation and top-level types in native IDL. A
+caller selects the Operation once, including its lifecycle and signals.
 
-Declare input, progress, output, error, optional update, and optional signal
-schemas in the owner contract. Select caller capabilities explicitly:
+Generated facades expose typed start, get/watch/wait, signal, and cancel methods.
+Production services use Trellis's deployment-scoped durable Operation store;
+they do not choose a Store mapping or use an in-memory runtime.
 
-```json
-{
-  "operations": {
-    "Orders.Process": {
-      "version": "v1",
-      "input": { "schema": "ProcessOrderInput" },
-      "progress": { "schema": "ProcessOrderProgress" },
-      "output": { "schema": "ProcessOrderOutput" },
-      "errors": [{ "type": "OrderRejected", "schema": "OrderRejectedError" }],
-      "capabilities": {
-        "call": ["orders:process"],
-        "observe": ["orders:read"],
-        "cancel": ["orders:process"]
-      }
-    }
-  }
-}
-```
+Acceptance is persisted before reply. The same invocation identity/input returns
+the same record; different input conflicts. Progress, signals, cancellation, and
+terminal results are durable; typed updates are live-only.
 
-`call` starts the operation, `observe` gates get/wait/watch, `cancel` gates
-cancellation, and `control` gates named post-start signals. If `observe` is
-absent it defaults to `call`; an explicit empty list permits any authenticated
-caller to observe.
-
-Run `cargo xtask install` after changing the contract.
-
-## 2. Implement a provider
-
-Implement the generated operation descriptor with
-`trellis_rs::service::ServiceOperationProvider`. The provider owns four paths:
-
-- `start` accepts typed input and returns an accepted operation
-- `get` returns the current typed snapshot
-- `wait` waits for and returns a terminal snapshot
-- `cancel` cooperatively cancels and returns the resulting snapshot
-
-An `InMemoryOperationRuntime` is appropriate only when losing operation state on
-process restart is acceptable. Durable services should persist operation state
-in their domain store while preserving the same provider contract.
-
-Register the provider through the generated owned surface:
-
-```rust
-let operations = InMemoryOperationRuntime::new("orders-service")
-    .operation::<orders_sdk::operations::OrdersProcessOperation>();
-
-let provider = OrdersProcessProvider::new(operations, jobs);
-
-service
-    .handle()
-    .operation()
-    .orders()
-    .process(provider);
-```
-
-Used remote operations never appear under `handle()`.
-
-## 3. Drive lifecycle state
-
-The provider's start path accepts an id, marks the operation running, and may
-publish initial durable progress before handing work to a service-owned task or
-job:
-
-```rust
-let operation_id = format!("orders-process-{}", input.order_id);
-let accepted = operations.accept(operation_id.clone()).await?;
-let control = operations.control(operation_id).await?;
-
-control.started().await?;
-control
-    .progress(orders_sdk::ProcessOrderProgress {
-        step: "queued".into(),
-        message: "Fulfillment started".into(),
-    })
-    .await?;
-
-Ok(accepted)
-```
-
-Every accepted operation must eventually complete, fail with a declared typed
-error, or cancel. Use `OperationControl::attach(...)` when a service-owned future
-is responsible for reaching terminal state. If a job owns completion, put the
-operation id in its payload and recover the operation control by id in the
-worker.
-
-## 4. Call the operation
-
-Callers use the participant alias facade, not an owner SDK connection:
-
-```rust
-let operation = connected
-    .client()
-    .orders()
-    .orders_process()
-    .start(&orders_sdk::ProcessOrderInput {
-        order_id: "ord_123".into(),
-    })
-    .await?;
-
-let terminal = operation.wait().await?;
-println!("{:?}", terminal.output);
-```
-
-Use `watch()` for durable progress and terminal frames. Match declared operation
-errors directly through the generated typed error enum.
-
-## 5. Live updates
-
-An operation may declare one optional update schema. Updates are typed,
-at-most-once, and live-only: they are not persisted, replayed, exposed in Event
-Log/admin, or delivered to late subscribers.
-
-Subscribe before starting when early updates matter. Prefer cumulative payloads
-and treat durable progress plus terminal output as authoritative.
-
-## 6. Cancellation and signals
-
-Call `operation.cancel().await?` for cooperative cancellation. Providers should
-check cancellation at safe boundaries and persist the terminal cancelled
-snapshot.
-
-Named signals are generated only when declared by the operation. Signal input is
-schema-validated on both caller and provider boundaries, and the provider
-consumes one ordered typed signal stream.
-
-## 7. Transfers
-
-When an operation declares upload or download transfer behavior, use the transfer
-methods exposed by its typed operation reference. Provider methods receive
-`RequestContext` with authenticated caller and service session identity. Capture
-`service.generated_handle()` at registration when the provider needs resolved
-stores or other bound runtime resources.
-
-Do not build transfer subjects, read bindings, or access raw NATS.
+Execution is restartable and at least once. Executor leases fence writes, and a
+replica may resume after owner loss. Arbitrary business side effects are not
+exactly once. Interrupted uploads restart from byte zero; committed staged bytes
+survive executor replacement.

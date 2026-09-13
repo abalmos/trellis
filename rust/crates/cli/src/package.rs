@@ -340,7 +340,6 @@ async fn resolve_lock(root: &Path, manifest: &ProjectManifest) -> Result<Project
     let mut stack = BTreeSet::new();
     let resolution = resolve_package(
         root,
-        root,
         manifest,
         LockedSource::Path { path: ".".into() },
         &mut stack,
@@ -354,7 +353,6 @@ async fn resolve_lock(root: &Path, manifest: &ProjectManifest) -> Result<Project
 }
 
 fn resolve_package<'a>(
-    root: &'a Path,
     package_root: &'a Path,
     manifest: &'a ProjectManifest,
     source: LockedSource,
@@ -439,7 +437,7 @@ fn resolve_package<'a>(
                         .collect(),
                 }
             } else {
-                resolve_package(root, &child_root, &child_manifest, child_source, stack).await?
+                resolve_package(&child_root, &child_manifest, child_source, stack).await?
             };
             direct.push(LockedDependency {
                 name: dependency.package.clone(),
@@ -962,7 +960,7 @@ mod tests {
         fs::write(
             root.join("main.trellis"),
             format!(
-                "model Value {{ {field}: string; }}\napi Ping@v1 {{ title \"Ping\"; description \"Test\"; rpc Get {{ input Value; output Value; }} capabilities {{ public {{ allows {{ rpc Get; }} }} }} }}\n"
+                "model Value {{ {field}: string; }}\napi ping@v1 {{ title \"Ping\"; description \"Test\"; rpc Get {{ input Value; output Value; }} capabilities {{ public {{ allows {{ rpc Get; }} }} }} }}\n"
             ),
         )
         .unwrap();

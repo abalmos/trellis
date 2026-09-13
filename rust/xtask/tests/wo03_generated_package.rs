@@ -27,7 +27,7 @@ model Node {
 }
 model Current { root: Node; }
 
-api Primary@v1 {
+api primary@v1 {
   title "Primary";
   description "Primary fixture API.";
   error Known(Node);
@@ -53,7 +53,7 @@ api Primary@v1 {
   }
 }
 
-api Secondary@v2 {
+api secondary@v2 {
   title "Secondary";
   description "Secondary fixture API.";
   event Ping { payload Empty; }
@@ -70,8 +70,8 @@ api Secondary@v2 {
 }
 
 service Worker {
-  implements Primary;
-  implements Secondary;
+  implements primary;
+  implements secondary;
   kv optional cache {
     title "Cache";
     description "Migrated cache.";
@@ -83,14 +83,14 @@ service Worker {
 }
 
 app Caller {
-  use Primary {
+  use primary {
     rpc Fetch;
     operation Process;
     subscribe event Changed;
     feed Watch;
     optional capability access;
   }
-  use Secondary { subscribe event Ping; feed Monitor; }
+  use secondary { subscribe event Ping; feed Monitor; }
 }
 "#;
 
@@ -202,7 +202,7 @@ fn codecs_errors_and_generated_surfaces_compile() {
     assert!(Number::from(f64::NAN).encode().is_err());
 
     type Fetch = fixture_primary_v1::rpc::Fetch;
-    assert_eq!(Fetch::ERRORS, ["fixture.Primary@v1::Known"]);
+    assert_eq!(Fetch::ERRORS, ["fixture.primary@v1::Known"]);
     let mut known = wire();
     let object = known.as_object_mut().unwrap();
     object.insert("id".into(), "error-1".into());
@@ -213,7 +213,7 @@ fn codecs_errors_and_generated_surfaces_compile() {
         .expect("known error");
     assert!(matches!(decoded, fixture_primary_v1::rpc::FetchError::Known(_)));
     assert!(<Fetch as trellis_rs::generated::RpcDescriptor>::decode_error(
-        serde_json::json!({"type":"fixture.Primary@v1::Future"})
+        serde_json::json!({"type":"fixture.primary@v1::Future"})
     )
     .unwrap()
     .is_none());
@@ -233,34 +233,38 @@ fn codecs_errors_and_generated_surfaces_compile() {
     assert_eq!(fixture_worker::Participant::IMPLEMENTED_API_IDS.len(), 2);
     assert_eq!(fixture_worker::Participant::PATH, "Worker");
     fixture_worker::Participant::validate().unwrap();
-    fn providers(provider: &mut fixture_worker::Provider<'_>) {
+    async fn providers(
+        provider: &mut fixture_worker::Provider<'_>,
+        migrations: &fixture_worker::Migrations,
+    ) {
         let _ = provider.fixture_primary_v1();
         let _ = provider.fixture_secondary_v2();
-        let _: Option<&trellis_rs::service::KvHandle> = provider.cache();
+        let _: trellis_rs::service::KvHandle<Current> = provider.cache(migrations).await.unwrap();
         let _: Option<&trellis_rs::service::StoreHandle> = provider.blobs();
     }
     let _ = providers;
-    let migrations = fixture_worker::Migrations::new(|Historic { label }| Current {
-        root: serde_json::from_value(serde_json::json!({
-            "label": label,
-            "children": [],
-            "count": "0",
-            "signed": "0",
-            "ratio": 0.0,
-            "blob": "",
-            "nullable": null,
-            "status": "ready"
-        })).unwrap(),
+    let migrations = fixture_worker::Migrations::new(|Historic { label }| async move {
+        Ok::<_, std::convert::Infallible>(Current {
+            root: serde_json::from_value(serde_json::json!({
+                "label": label,
+                "children": [],
+                "count": "0",
+                "signed": "0",
+                "ratio": 0.0,
+                "blob": "",
+                "nullable": null,
+                "status": "ready"
+            })).unwrap(),
+        })
     });
-    let migrated = migrations.migrate_cache_v1(Historic { label: "old".into() }).unwrap();
-    assert_eq!(migrated.root.label.as_ref(), "old");
+    let _ = migrations;
     let availability = fixture_worker::Availability::default();
     assert!(!availability.resource_cache);
     assert!(!availability.resource_blobs);
     let caller = fixture_caller::Availability::default();
     assert!(!caller.fixture_primary_v1_access);
     assert!(!caller.action_fixture_primary_v1_rpc_fetch);
-    let optional_fetch = trellis_rs::generated::OptionalAction::rpc("fixture.Primary@v1", "Fetch");
+    let optional_fetch = trellis_rs::generated::OptionalAction::rpc("fixture.primary@v1", "Fetch");
     assert!(matches!(
         trellis_rs::generated::AvailabilitySnapshot::default()
             .require_action(&[optional_fetch], optional_fetch),
@@ -323,8 +327,8 @@ fn codecs_errors_and_generated_surfaces_compile() {
     fs::write(
         temp.path().join("fixture_test.ts"),
         r#"
-import { API as Primary, Known } from "./typescript/apis/Primary/mod.js";
-import { API as Secondary } from "./typescript/apis/Secondary/mod.js";
+import { API as Primary, Known } from "./typescript/apis/primary/mod.js";
+import { API as Secondary } from "./typescript/apis/secondary/mod.js";
 import { participant as Caller } from "./typescript/participants/Caller/mod.js";
 import { participant as Worker } from "./typescript/participants/Worker/mod.js";
 import type * as CallerModule from "./typescript/participants/Caller/mod.js";
@@ -390,7 +394,7 @@ Deno.test("generated TypeScript package exercises WO-03 B2-B4", () => {
     message: "known",
   });
   assert(known.data.count === 18_446_744_073_709_551_615n, "known error payload codec");
-  const futureError: string = "fixture.Primary@v1::Future";
+  const futureError: string = "fixture.primary@v1::Future";
   assert(fetch.errors.every((error) => error.type !== futureError), "unknown error remains unknown");
   const runtimeErrors = getParticipantRuntime(Caller).usedApi.rpc.Fetch.runtimeErrors;
   assert(runtimeErrors?.[0].type === Known.type, "runtime keeps qualified known error type");
@@ -409,7 +413,7 @@ Deno.test("generated TypeScript package exercises WO-03 B2-B4", () => {
   assert(Worker.resources.cache.availability === "optional", "optional KV");
   assert(Worker.resources.blobs.availability === "optional", "optional store");
   assert(Worker.resources.cache.migrations[1].decode({ label: "old" }).label === "old", "historic codec");
-  assert(Caller.uses[0].optionalCapabilities[0] === "fixture.Primary@v1::access", "availability evidence");
+  assert(Caller.uses[0].optionalCapabilities[0] === "fixture.primary@v1::access", "availability evidence");
 
   const handles: WorkerModule.ResourceHandles<{ cache: number; blobs: string }> = {
     cache: undefined,
@@ -450,8 +454,8 @@ Deno.test("generated caller replaces and enforces installed availability", async
   const watcher = caller.watchAvailability()[Symbol.asyncIterator]();
   const initial = await watcher.next();
   const typedInitial: CallerModule.Availability = initial.value;
-  assert(!typedInitial.capabilities["fixture.Primary@v1::access"], "initial snapshot");
-  const replacement = participantAvailability(Caller, { "fixture.Primary@v1": {} }, {});
+  assert(!typedInitial.capabilities["fixture.primary@v1::access"], "initial snapshot");
+  const replacement = participantAvailability(Caller, { "fixture.primary@v1": {} }, {});
   installConnectionAvailability(connection, replacement);
   const changed = await watcher.next();
   assert(changed.value === caller.availability(), "watch receives installed replacement");

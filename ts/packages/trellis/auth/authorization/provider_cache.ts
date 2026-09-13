@@ -100,23 +100,6 @@ type PendingContextEntry = {
   promise: Promise<ProviderContextEntry>;
 };
 
-const integrationTestContexts = new WeakMap<
-  AuthorizationProviderCache,
-  Map<string, ProviderContextEntry>
->();
-
-/** @internal Returns resolved contexts for live integration assertions. */
-export function integrationTestResolvedContexts(
-  cache: AuthorizationProviderCache,
-): Array<{ contextDigest: string; context: Record<string, unknown> }> {
-  return [...(integrationTestContexts.get(cache)?.values() ?? [])].map(
-    ({ contextDigest, context }) => ({
-      contextDigest,
-      context: structuredClone(context),
-    }),
-  );
-}
-
 /** Connected provider-side authorization verifier. */
 export class AuthorizationProviderCache {
   readonly #registry: AuthorizationRegistryReader;
@@ -143,7 +126,6 @@ export class AuthorizationProviderCache {
     this.#cache = cache;
     this.#now = options.now ?? cache.correctedNowSeconds.bind(cache);
     this.#ownIssuer = structuredClone(cache.bundle().issuer);
-    integrationTestContexts.set(this, this.#contexts);
   }
 
   /** Attach to the bootstrap-selected NATS authorization registry. */
@@ -331,12 +313,12 @@ export class AuthorizationProviderCache {
         );
         const result = await verifyAuthorizationEventWasm({
           contextHandle: state.handle,
+          descriptorIdentity: event.descriptorIdentity,
           subject: event.subject,
           payload: event.payload,
           eventId: event.eventId,
           eventTime: event.eventTime,
           proof: event.proof,
-          requiredPermissions: event.requiredPermissions,
           policy: this.#policy(this.#now()),
           revokedAt: entry.revokedAt ?? null,
         });

@@ -1,10 +1,16 @@
-import { AsyncResult, type BaseError, err, ok } from "@qlever-llc/result";
+import {
+  AsyncResult,
+  type BaseError,
+  err,
+  ok,
+  type Result,
+} from "@qlever-llc/result";
 import type { Codec } from "./generated.ts";
 import type { TrellisConnection } from "./connection.ts";
+import type { TypedKV } from "./kv.ts";
 import type { OperationInvoker } from "./operations.ts";
+import type { TypedStore } from "./store.ts";
 import {
-  type GeneratedActionDescriptor,
-  type GeneratedActionSelection,
   type GeneratedParticipant,
   getParticipantRuntime,
 } from "./participant_runtime/participant.ts";
@@ -19,12 +25,29 @@ import type {
   StateFacade,
   Trellis,
 } from "./session.ts";
-import type { ConnectedActionName } from "./participant_runtime/surface_names.ts";
+import type {
+  ConnectedActionName,
+  PascalActionName,
+} from "./participant_runtime/surface_names.ts";
+import { cursorItems, cursorPages } from "./pagination.ts";
 
-type CodecValue<T> = T extends Codec<infer TValue> ? TValue : never;
+type CodecValue<T> = T extends { decode(value: unknown): infer TValue } ? TValue
+  : never;
+type GeneratedCodec = Readonly<{ decode(value: unknown): unknown }>;
+type SelectedActionShape = {
+  kind: "rpc" | "operation" | "event" | "feed";
+  descriptorName: string;
+  direction: unknown;
+  input?: unknown;
+  output?: unknown;
+  event?: unknown;
+  payload?: unknown;
+};
 type DescriptorName<T> = T extends `${string}:${infer TName}` ? TName : never;
-type SelectedDescriptor<TSelection> = TSelection extends
-  GeneratedActionSelection
+type SelectedDescriptor<TSelection> = TSelection extends {
+  api: { actions: Readonly<Record<string, unknown>> };
+  actions: readonly { descriptorName: string; direction: unknown }[];
+}
   ? TSelection["actions"][number] extends infer TSelected
     ? TSelected extends { descriptorName: infer TName extends string }
       ? TName extends keyof TSelection["api"]["actions"]
@@ -38,37 +61,70 @@ type SelectedDescriptor<TSelection> = TSelection extends
   : never
   : never;
 type SelectedAction<TContract extends GeneratedParticipant> =
-  SelectedDescriptor<TContract["uses"][number]>;
+  TContract["uses"][number] extends infer TSelection ? TSelection extends {
+      api: { identity: string; actions: Readonly<Record<string, unknown>> };
+      actions: readonly { descriptorName: string; direction: unknown }[];
+    }
+      ? SelectedDescriptor<TSelection> extends infer TAction
+        ? TAction extends SelectedActionShape ? TAction & {
+            generatedName: TContract["actionNames"][
+              `${TSelection["api"]["identity"]}:${TAction["descriptorName"]}`
+            ];
+          }
+        : never
+      : never
+    : never
+    : never;
 
-type ActionMethod<
-  TAction extends GeneratedActionDescriptor & {
-    direction: unknown;
-  },
-> = TAction["kind"] extends "rpc"
-  ? TAction["input"] extends Codec<unknown>
-    ? TAction["output"] extends Codec<unknown> ? (
+type ActionMethod<TAction extends SelectedActionShape> = TAction["kind"] extends
+  "rpc"
+  ? TAction["input"] extends GeneratedCodec
+    ? TAction["output"] extends GeneratedCodec ? TAction extends {
+        pagination: "cursor";
+      } ? CodecValue<TAction["output"]> extends {
+          items: readonly (infer TItem)[];
+          page: { nextCursor?: string };
+        } ?
+            & ((
+              input: CodecValue<TAction["input"]>,
+              opts?: RequestOpts,
+            ) => AsyncResult<CodecValue<TAction["output"]>, BaseError>)
+            & {
+              pages(
+                input?: Omit<CodecValue<TAction["input"]>, "page">,
+                opts?: RequestOpts,
+              ): AsyncIterable<
+                Result<CodecValue<TAction["output"]>, BaseError>
+              >;
+              items(
+                input?: Omit<CodecValue<TAction["input"]>, "page">,
+                opts?: RequestOpts,
+              ): AsyncIterable<Result<TItem, BaseError>>;
+            }
+        : never
+      : (
         input: CodecValue<TAction["input"]>,
         opts?: RequestOpts,
       ) => AsyncResult<CodecValue<TAction["output"]>, BaseError>
     : never
   : never
   : TAction["kind"] extends "operation"
-    ? TAction["input"] extends Codec<unknown> ?
+    ? TAction["input"] extends GeneratedCodec ?
         & ((input: CodecValue<TAction["input"]>) => ReturnType<
           OperationInvoker<never>["input"]
         >)
         & { resume: OperationInvoker<never>["resume"] }
     : never
   : TAction["kind"] extends "feed"
-    ? TAction["input"] extends Codec<unknown>
-      ? TAction["event"] extends Codec<unknown> ? (
+    ? TAction["input"] extends GeneratedCodec
+      ? TAction["event"] extends GeneratedCodec ? (
           input: CodecValue<TAction["input"]>,
           opts?: FeedSubscribeOpts,
         ) => AsyncResult<AsyncIterable<CodecValue<TAction["event"]>>, BaseError>
       : never
     : never
   : TAction["kind"] extends "event"
-    ? TAction["payload"] extends Codec<unknown>
+    ? TAction["payload"] extends GeneratedCodec
       ? TAction["direction"] extends "publish" ?
           & ((
             event: CodecValue<TAction["payload"]>,
@@ -89,9 +145,13 @@ type ActionMethod<
   : never;
 
 type ActionRecord<TAction> = TAction extends
-  GeneratedActionDescriptor & { direction: unknown } ? {
+  SelectedActionShape & { generatedName: string } ? {
     readonly [
-      K in ConnectedActionName<DescriptorName<TAction["descriptorName"]>>
+      K in TAction["kind"] extends "event"
+        ? TAction["direction"] extends "publish"
+          ? `publish${PascalActionName<TAction["generatedName"]>}`
+        : `on${PascalActionName<TAction["generatedName"]>}`
+        : ConnectedActionName<TAction["generatedName"]>
     ]: ActionMethod<TAction>;
   }
   : never;
@@ -99,6 +159,23 @@ type UnionToIntersection<T> =
   (T extends unknown ? (value: T) => void : never) extends
     (value: infer TIntersection) => void ? TIntersection
     : never;
+
+type KvFacadeFor<TContract extends GeneratedParticipant> = {
+  readonly [
+    Name in keyof TContract["resources"] as TContract["resources"][Name] extends
+      { kind: "kv" } ? Name : never
+  ]: TContract["resources"][Name] extends {
+    codec: infer TCodec;
+  } ? TypedKV<CodecValue<TCodec>>
+    : never;
+};
+
+type StoreFacadeFor<TContract extends GeneratedParticipant> = {
+  readonly [
+    Name in keyof TContract["resources"] as TContract["resources"][Name] extends
+      { kind: "store" } ? Name : never
+  ]: TypedStore;
+};
 
 /** Minimum participant contract accepted by the public caller connector. */
 export type CallerParticipant = GeneratedParticipant;
@@ -111,6 +188,8 @@ export type CallerRuntime<TContract extends GeneratedParticipant> =
     availability(): ParticipantAvailability<TContract>;
     watchAvailability(): AsyncIterable<ParticipantAvailability<TContract>>;
     readonly state: StateFacade<RuntimeStateStoresForContract<TContract>>;
+    readonly kv: KvFacadeFor<TContract>;
+    readonly store: StoreFacadeFor<TContract>;
     publishPrepared(event: PreparedTrellisEvent): AsyncResult<void, BaseError>;
     transfer: Trellis["transfer"];
     wait(): AsyncResult<void, BaseError>;
@@ -134,6 +213,7 @@ type ParticipantAvailability<TContract extends GeneratedParticipant> = Readonly<
 export function createCallerRuntime<TContract extends GeneratedParticipant>(
   session: object,
   contract: TContract,
+  resources: { kv?: object; store?: object } = {},
 ): CallerRuntime<TContract> {
   const runtime = session as Trellis;
   const caller: Record<string, unknown> = {
@@ -141,6 +221,8 @@ export function createCallerRuntime<TContract extends GeneratedParticipant>(
     availability: () => runtime.connection.availability(),
     watchAvailability: () => runtime.connection.watchAvailability(),
     state: runtime.state,
+    kv: resources.kv ?? {},
+    store: resources.store ?? {},
     publishPrepared: runtime.publishPrepared.bind(runtime),
     transfer: runtime.transfer.bind(runtime),
     wait: runtime.wait.bind(runtime),
@@ -158,12 +240,35 @@ export function createCallerRuntime<TContract extends GeneratedParticipant>(
     };
     switch (action.descriptor.kind) {
       case "rpc":
-        caller[action.connectedName] = (input: unknown, opts?: RequestOpts) => {
-          const error = unavailable();
-          return error
-            ? AsyncResult.from(Promise.resolve(err(error)))
-            : runtime.request(action.name, input, opts);
-        };
+        {
+          const request:
+            & ((
+              input: unknown,
+              opts?: RequestOpts,
+            ) => AsyncResult<unknown, BaseError>)
+            & {
+              pages?: (
+                input?: unknown,
+                opts?: RequestOpts,
+              ) => AsyncIterable<unknown>;
+              items?: (
+                input?: unknown,
+                opts?: RequestOpts,
+              ) => AsyncIterable<unknown>;
+            } = (input: unknown, opts?: RequestOpts) => {
+              const error = unavailable();
+              return error
+                ? AsyncResult.from(Promise.resolve(err(error)))
+                : runtime.request(action.name, input, opts);
+            };
+          if (action.descriptor.pagination === "cursor") {
+            request.pages = (input?: unknown, opts?: RequestOpts) =>
+              cursorPages(request, input, opts);
+            request.items = (input?: unknown, opts?: RequestOpts) =>
+              cursorItems(request, input, opts);
+          }
+          caller[action.connectedName] = request;
+        }
         break;
       case "operation":
         {

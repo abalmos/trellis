@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use trellis_jobs_runtime::{
     jobs_admin_resources, start_advisory_loop, start_janitor_loop, start_jobs_projector,
-    start_worker_presence_projector, AdvisoryHandle, JanitorHandle, JobsAdminResources,
-    JobsProjectorHandle, JobsQuery, SqliteJobsStore, WorkerPresenceProjectorHandle,
+    start_worker_presence_projector, AdvisoryHandle, JanitorHandle, JobResourceResolver,
+    JobsAdminResources, JobsProjectorHandle, JobsQuery, SqliteJobResourceResolver, SqliteJobsStore,
+    WorkerPresenceProjectorHandle,
 };
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, RequestValidator, ServerError,
@@ -45,11 +46,13 @@ impl RuntimeLoops {
         jobs_runtime: trellis_rs::jobs::JobsRuntime,
         resources: &JobsAdminResources,
         store: SqliteJobsStore,
+        resolver: Arc<dyn JobResourceResolver>,
     ) -> Result<Self, RuntimeError> {
         let advisory = start_advisory_loop(
             jobs_runtime.clone(),
             store.clone(),
             resources.jobs_advisories_stream.clone(),
+            resolver,
         )
         .await
         .map_err(runtime_error)?;
@@ -147,17 +150,16 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .map_err(|error| RuntimeError::Nats(format!("failed to open Jobs SQLite: {error}")))?;
     let jobs_runtime = trellis_rs::jobs::JobsRuntime::from_nats(context.trellis_nats.clone());
     let resources = jobs_admin_resources();
-    match jobs_runtime
-        .expire_obsolete_watch_consumers(&resources.jobs_stream)
-        .await
-    {
-        Ok(count) if count > 0 => {
-            tracing::info!(count, "scheduled obsolete Jobs.Watch consumers for expiry");
-        }
-        Ok(_) => {}
-        Err(error) => tracing::warn!(%error, "failed to expire obsolete Jobs.Watch consumers"),
-    }
-    let query = JobsQuery::with_store(jobs_runtime.clone(), store.clone());
+    let StorageBackend::Sqlite(platform_storage) = context
+        .config
+        .platform_storage_backend()
+        .map_err(RuntimeError::Config)?;
+    let resolver: Arc<dyn JobResourceResolver> = Arc::new(SqliteJobResourceResolver::new(
+        platform_storage.path.clone(),
+        context.trellis_nats.clone(),
+        resources.jobs_stream.clone(),
+    ));
+    let query = JobsQuery::with_store(jobs_runtime.clone(), store.clone(), Arc::clone(&resolver));
     let mut router = trellis_jobs_runtime::build_router_with_query(query);
     trellis_jobs_runtime::register_jobs_watch_feed(
         &mut router,
@@ -168,7 +170,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         Arc::new(context.platform_verifier.get().cloned().ok_or_else(|| {
             RuntimeError::Platform("local authorization verifier is not ready".to_owned())
         })?);
-    let loops = RuntimeLoops::start(jobs_runtime, &resources, store).await?;
+    let loops = RuntimeLoops::start(jobs_runtime, &resources, store, resolver).await?;
     let nats = context.trellis_nats.clone();
     let join = tokio::spawn(async move {
         let _owner = owner;

@@ -13,7 +13,7 @@
     siteName: string;
     assetName: string;
     checklistName: string;
-    priority: "high" | "medium" | "low";
+    priority: string;
   };
   type SiteSummary = {
     siteId?: string;
@@ -52,7 +52,7 @@
 
   type InspectionRoute = "/inspection" | `/inspection?${string}`;
   type EvidenceRoute = "/evidence" | `/evidence?${string}`;
-  const listPage = { limit: 50, offset: 0 };
+  const listPage = { page: { limit: 50 } };
 
   let loadingAssignments = $state(true);
   let loadingSites = $state(true);
@@ -134,9 +134,9 @@
       ]);
       if (!mounted || requestId !== loadRequestId) return;
 
-      assignments = assignmentResponse.entries;
-      sites = siteResponse.entries;
-      const siteIdToLoad = preferredSiteId ?? selectedSiteId ?? assignmentResponse.entries[0]?.siteId ?? siteResponse.entries[0]?.siteId;
+      assignments = assignmentResponse.items;
+      sites = siteResponse.items;
+      const siteIdToLoad = preferredSiteId ?? selectedSiteId ?? assignmentResponse.items[0]?.siteId ?? siteResponse.items[0]?.siteId;
 
       if (siteIdToLoad) {
         if (selectedSiteId !== siteIdToLoad) resetRefreshTrace();

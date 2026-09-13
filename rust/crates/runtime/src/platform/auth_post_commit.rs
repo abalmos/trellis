@@ -7,6 +7,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use trellis_rs::client::SessionAuth;
 
+use super::auth::resources::{DestroyResourcePayload, ReconcileResourcePayload};
 use super::auth::{
     validate_connection_kick_response, AuthConnectionPresence, AuthEphemeralRepository,
     AuthorityEvidenceRepository, AuthorizationContextService, AuthorizationStateError,
@@ -56,6 +57,7 @@ impl AuthEventPublisher {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EventDelivery {
     subject: String,
+    descriptor_identity: String,
     event_time: String,
     context_digest: String,
     session_key: String,
@@ -125,25 +127,25 @@ impl AuthPostCommitRuntime {
         now: i64,
     ) -> Result<(), AuthorizationStateError> {
         let claimed_until = now.saturating_add(CLAIM_DURATION_MS);
-        let Some(action) = self
+        let Some(claim) = self
             .repository
             .claim_post_commit_action(&action.action_id, now, claimed_until)
             .await?
         else {
             return Ok(());
         };
-        match self.dispatch(&action).await {
+        match self.dispatch(&claim.action, &claim.token).await {
             Ok(()) => {
                 self.repository
-                    .acknowledge_post_commit_action(&action.action_id, claimed_until)
+                    .acknowledge_post_commit_action(&claim.action.action_id, &claim.token)
                     .await
             }
             Err(error) => {
-                let delay = retry_delay_ms(action.attempts);
+                let delay = retry_delay_ms(claim.action.attempts);
                 self.repository
                     .fail_post_commit_action(
-                        &action.action_id,
-                        claimed_until,
+                        &claim.action.action_id,
+                        &claim.token,
                         now.saturating_add(delay),
                         error.to_string(),
                     )
@@ -156,15 +158,44 @@ impl AuthPostCommitRuntime {
     async fn dispatch(
         &self,
         action: &PostCommitActionRecord,
+        claim_token: &str,
     ) -> Result<(), AuthorizationStateError> {
         match action.kind {
-            PostCommitActionKind::Event => self.publish_event(action).await,
-            PostCommitActionKind::Kick => self.kick(&action.payload).await,
+            PostCommitActionKind::Event => self.publish_event(action, claim_token).await,
+            PostCommitActionKind::Kick => self.kick(action).await,
             PostCommitActionKind::ContextPublish => {
                 self.dispatch_context(&action.payload, false).await
             }
             PostCommitActionKind::ContextRevoke => {
                 self.dispatch_context(&action.payload, true).await
+            }
+            PostCommitActionKind::ResourceReconcile => {
+                if action.payload.get("bindingRevision").is_some() {
+                    let payload =
+                        serde_json::from_value::<ReconcileResourcePayload>(action.payload.clone())
+                            .map_err(|error| {
+                                AuthorizationStateError::InvalidRecord(error.to_string())
+                            })?;
+                    super::auth::resources::reconcile_resource(
+                        &self.auth_client,
+                        &self.repository,
+                        payload,
+                        now_millis()?,
+                    )
+                    .await
+                } else {
+                    let payload =
+                        serde_json::from_value::<DestroyResourcePayload>(action.payload.clone())
+                            .map_err(|error| {
+                                AuthorizationStateError::InvalidRecord(error.to_string())
+                            })?;
+                    super::auth::resources::destroy_resource(
+                        &self.auth_client,
+                        &self.repository,
+                        payload,
+                    )
+                    .await
+                }
             }
         }
     }
@@ -206,6 +237,7 @@ impl AuthPostCommitRuntime {
     async fn publish_event(
         &self,
         action: &PostCommitActionRecord,
+        claim_token: &str,
     ) -> Result<(), AuthorizationStateError> {
         let payload = &action.payload;
         let event_type = payload
@@ -220,8 +252,43 @@ impl AuthPostCommitRuntime {
         let event_subject = payload
             .get("eventSubject")
             .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
             .map(str::to_owned)
-            .unwrap_or_else(|| format!("events.v1.{event_type}"));
+            .ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord(
+                    "post-commit eventSubject is required".to_owned(),
+                )
+            })?;
+        let event_name = event_type.strip_prefix("Auth.").ok_or_else(|| {
+            AuthorizationStateError::InvalidRecord("post-commit eventType is invalid".to_owned())
+        })?;
+        let event_base = trellis_protocol::derive_event_subject("trellis.auth@v1", event_name)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let suffix = event_subject.strip_prefix(&event_base).ok_or_else(|| {
+            AuthorizationStateError::InvalidRecord(
+                "post-commit eventSubject does not match eventType".to_owned(),
+            )
+        })?;
+        let parameter_count = if suffix.is_empty() {
+            0
+        } else {
+            suffix
+                .strip_prefix('.')
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    AuthorizationStateError::InvalidRecord(
+                        "post-commit eventSubject has an invalid parameter suffix".to_owned(),
+                    )
+                })?
+                .split('.')
+                .count()
+        };
+        let descriptor_identity = trellis_protocol::encode_event_descriptor_identity(
+            "trellis.auth@v1",
+            event_name,
+            parameter_count,
+        )
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let mut payload = payload.clone();
         let payload = payload.as_object_mut().ok_or_else(|| {
             AuthorizationStateError::InvalidRecord(
@@ -237,7 +304,15 @@ impl AuthPostCommitRuntime {
             .ok_or_else(|| {
                 AuthorizationStateError::InvalidRecord("post-commit eventId is required".to_owned())
             })?;
-        if payload.get("occurredAt").and_then(Value::as_i64).is_none() {
+        if payload
+            .get("occurredAt")
+            .and_then(|value| {
+                value
+                    .as_i64()
+                    .or_else(|| value.as_str()?.parse::<i64>().ok())
+            })
+            .is_none()
+        {
             return Err(AuthorizationStateError::InvalidRecord(
                 "post-commit occurredAt is required".to_owned(),
             ));
@@ -296,6 +371,7 @@ impl AuthPostCommitRuntime {
         }
         let candidate = EventDelivery {
             subject: event_subject.clone(),
+            descriptor_identity: descriptor_identity.clone(),
             event_time: event_time.clone(),
             context_digest: publisher.context_digest.clone(),
             session_key: publisher.session.session_key.clone(),
@@ -303,6 +379,7 @@ impl AuthPostCommitRuntime {
                 .session
                 .create_event_proof(
                     &publisher.context_digest,
+                    &descriptor_identity,
                     &event_subject,
                     &payload,
                     &event_id,
@@ -316,10 +393,7 @@ impl AuthPostCommitRuntime {
             self.repository
                 .prepare_post_commit_event_delivery(
                     &action.action_id,
-                    action
-                        .claimed_until
-                        .ok_or(AuthorizationStateError::StorageConflict)?,
-                    action.attempts,
+                    claim_token,
                     serde_json::to_value(candidate)
                         .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?,
                 )
@@ -329,9 +403,16 @@ impl AuthPostCommitRuntime {
         if delivery.subject != event_subject {
             return Err(AuthorizationStateError::StorageConflict);
         }
+        if delivery.descriptor_identity != descriptor_identity {
+            return Err(AuthorizationStateError::StorageConflict);
+        }
         let mut headers = async_nats::HeaderMap::new();
         headers.insert("Nats-Msg-Id", event_id);
         headers.insert("Trellis-Event-Time", delivery.event_time.as_str());
+        headers.insert(
+            "Trellis-Event-Descriptor",
+            delivery.descriptor_identity.as_str(),
+        );
         headers.insert("authorization-context", delivery.context_digest.as_str());
         headers.insert("session-key", delivery.session_key.as_str());
         headers.insert("proof", delivery.proof.as_str());
@@ -344,9 +425,12 @@ impl AuthPostCommitRuntime {
         Ok(())
     }
 
-    async fn kick(&self, payload: &Value) -> Result<(), AuthorizationStateError> {
-        let connections = if let Some(session_id) = payload.get("sessionId").and_then(Value::as_str)
-        {
+    async fn kick(&self, action: &PostCommitActionRecord) -> Result<(), AuthorizationStateError> {
+        let payload = &action.payload;
+        let connections = if let Some(connections) = payload.get("connections") {
+            serde_json::from_value::<Vec<super::auth::AuthConnectionPresence>>(connections.clone())
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
+        } else if let Some(session_id) = payload.get("sessionId").and_then(Value::as_str) {
             self.ephemeral
                 .list_connection_presence(Some(session_id))
                 .await?
@@ -402,6 +486,19 @@ impl AuthPostCommitRuntime {
             ));
         };
         for connection in connections {
+            let mut event = super::auth::connection_event_action::<
+                trellis_runtime_apis::apis::trellis_auth_v1::events::ConnectionsKicked,
+            >(
+                &connection,
+                "Auth.Connections.Kicked",
+                "kicked",
+                payload.get("reason").and_then(Value::as_str),
+                now_millis()?,
+            )?;
+            event.predecessor_action_id = Some(action.action_id.clone());
+            self.repository
+                .enqueue_post_commit_actions(vec![event])
+                .await?;
             self.kick_connection(&connection).await?;
         }
         Ok(())
@@ -449,11 +546,30 @@ fn now_millis() -> Result<i64, AuthorizationStateError> {
 #[cfg(test)]
 mod tests {
     use super::retry_delay_ms;
+    use crate::platform::auth::resources::{DestroyResourcePayload, ReconcileResourcePayload};
 
     #[test]
     fn post_commit_retry_is_bounded() {
         assert_eq!(retry_delay_ms(0), 1_000);
         assert_eq!(retry_delay_ms(6), 64_000);
         assert_eq!(retry_delay_ms(u32::MAX), 64_000);
+    }
+
+    #[test]
+    fn resource_post_commit_payloads_select_one_lifecycle_operation() {
+        let reconcile = serde_json::json!({
+            "resourceId": "A".repeat(43),
+            "bindingRevision": 2,
+            "catalogRevision": 3,
+        });
+        assert!(reconcile.get("bindingRevision").is_some());
+        serde_json::from_value::<ReconcileResourcePayload>(reconcile).unwrap();
+
+        let destroy = serde_json::json!({
+            "resourceId": "A".repeat(43),
+            "catalogRevision": 4,
+        });
+        assert!(destroy.get("bindingRevision").is_none());
+        serde_json::from_value::<DestroyResourcePayload>(destroy).unwrap();
     }
 }

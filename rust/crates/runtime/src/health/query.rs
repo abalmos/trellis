@@ -2,7 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::params;
 use serde::{de::DeserializeOwned, Serialize};
+use trellis_protocol::{
+    decode_pagination_cursor, encode_pagination_cursor, pagination_query_digest,
+};
 use trellis_runtime_apis::__types::trellis::HealthHeartbeatSamplechecksItem as HealthHeartbeatSampleChecksItem;
+use trellis_runtime_apis::__types::{CursorPageInfo, CursorQuery};
 use trellis_runtime_apis::types::{
     HealthInspectRequest, HealthInspectResponse,
     HealthInspectResponsehistoryItem as HealthInspectResponseHistoryItem,
@@ -17,7 +21,7 @@ use trellis_runtime_apis::types::{
     HealthMetricsResponseseriesItembucketsItemchecksItem as HealthMetricsResponseSeriesItemBucketsItemChecksItem,
     HealthMetricsResponsesummary as HealthMetricsResponseSummary, HealthQueryRequest,
     HealthQueryResponse, HealthQueryResponseentriesItem as HealthQueryResponseEntriesItem,
-    HealthQueryResponseprojection as HealthQueryResponseProjection, Int64, Number, Uint64,
+    HealthSummaryRequest, HealthSummaryResponse, Number, Uint64,
 };
 
 use super::store::{rfc3339, HealthStore, HealthStoreError};
@@ -172,26 +176,72 @@ impl HealthStore {
                 .cmp(right.participant_kind.as_str())
                 .then_with(|| left.contract_id.cmp(&right.contract_id))
         });
-        let count = i64::try_from(entries.len()).unwrap_or(i64::MAX);
+        let query_digest = query_digest(request)?;
+        let after = request
+            .page
+            .as_ref()
+            .and_then(|page| page.cursor.as_deref())
+            .map(|cursor| decode_cursor(cursor, &query_digest))
+            .transpose()?;
+        if let Some(after) = after {
+            entries.retain(|entry| {
+                (entry.participant_kind.as_str(), entry.contract_id.as_str())
+                    > (after.0.as_str(), after.1.as_str())
+            });
+        }
         let limit = request
-            .limit
-            .map(|value| value.0 .0)
-            .unwrap_or(100)
-            .clamp(1, 200);
-        let offset = request.offset.map(|value| value.0).unwrap_or(0);
-        let entries = entries
-            .into_iter()
-            .skip(usize::try_from(offset).unwrap_or(usize::MAX))
-            .take(usize::try_from(limit).unwrap_or(200))
-            .collect();
-        let projection = projection_meta(&connection)?;
+            .page
+            .as_ref()
+            .and_then(|page| page.limit)
+            .unwrap_or(50);
+        if limit == 0 || limit > 200 {
+            return Err(HealthStoreError::InvalidPagination);
+        }
+        let has_more = entries.len() > limit as usize;
+        entries.truncate(limit as usize);
+        let next_cursor = has_more
+            .then(|| entries.last())
+            .flatten()
+            .map(|entry| encode_cursor(&query_digest, entry))
+            .transpose()?;
         Ok(HealthQueryResponse {
-            entries,
-            count: Uint64(count.try_into().unwrap_or_default()),
-            limit: Int64(limit).into(),
-            offset: Uint64(offset),
+            items: entries,
+            page: CursorPageInfo { next_cursor },
+        })
+    }
+
+    pub(crate) fn summary(
+        &self,
+        request: &HealthSummaryRequest,
+        now_ns: i64,
+    ) -> Result<HealthSummaryResponse, HealthStoreError> {
+        let mut query_request: HealthQueryRequest =
+            serde_json::from_value(serde_json::to_value(request)?)?;
+        let mut count = 0usize;
+        loop {
+            query_request.page = Some(CursorQuery {
+                cursor: query_request.page.and_then(|page| page.cursor),
+                limit: Some(200),
+            });
+            let page = self.query(&query_request, now_ns)?;
+            count += page.items.len();
+            let Some(cursor) = page.page.next_cursor else {
+                break;
+            };
+            query_request.page = Some(CursorQuery {
+                cursor: Some(cursor),
+                limit: Some(200),
+            });
+        }
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| HealthStoreError::Poisoned)?;
+        let projection = projection_meta(&connection)?;
+        Ok(HealthSummaryResponse {
             as_of: rfc3339(now_ns)?,
-            projection: HealthQueryResponseProjection {
+            count: Uint64(count.try_into().unwrap_or(u64::MAX)),
+            projection: trellis_runtime_apis::types::HealthQueryResponseprojection {
                 last_stream_sequence: Uint64(
                     projection
                         .last_stream_sequence
@@ -327,7 +377,7 @@ impl HealthStore {
                                 )
                             })?;
                     Ok(HealthInspectResponseHistoryItem {
-                        interval_id: wire_from_sql(row.get(0)?)?,
+                        interval_id: wire_from_sql(row.get::<_, i64>(0)?.to_string())?,
                         instance_id: row.get(1)?,
                         started_at: rfc3339(row.get(2)?).map_err(to_from_sql_error)?,
                         ended_at: row
@@ -676,6 +726,42 @@ fn matches_filter<T: AsRef<str>>(filter: Option<&Vec<T>>, value: &str) -> bool {
     filter.is_none_or(|filter| {
         filter.is_empty() || filter.iter().any(|candidate| candidate.as_ref() == value)
     })
+}
+
+fn query_digest(request: &HealthQueryRequest) -> Result<String, HealthStoreError> {
+    let value = serde_json::json!({
+        "endpoint": "health.Query",
+        "participantKinds": request.participant_kinds,
+        "contractIds": request.contract_ids,
+        "deploymentIds": request.deployment_ids,
+        "statuses": request.statuses,
+        "search": request.search,
+        "order": ["participantKind", "participantId"],
+    });
+    pagination_query_digest("health.Query", &value).map_err(|_| HealthStoreError::InvalidPagination)
+}
+
+fn decode_cursor(cursor: &str, query_digest: &str) -> Result<(String, String), HealthStoreError> {
+    let after: (String, String) = decode_pagination_cursor(cursor, query_digest)
+        .map_err(|_| HealthStoreError::InvalidPagination)?;
+    if after.0.is_empty() || after.1.is_empty() {
+        return Err(HealthStoreError::InvalidPagination);
+    }
+    Ok(after)
+}
+
+fn encode_cursor(
+    query_digest: &str,
+    entry: &HealthQueryResponseEntriesItem,
+) -> Result<String, HealthStoreError> {
+    encode_pagination_cursor(
+        query_digest,
+        &(
+            entry.participant_kind.as_str().to_owned(),
+            entry.contract_id.clone(),
+        ),
+    )
+    .map_err(|_| HealthStoreError::InvalidPagination)
 }
 
 fn wire<T: DeserializeOwned, S: Serialize>(value: S) -> Result<T, HealthStoreError> {

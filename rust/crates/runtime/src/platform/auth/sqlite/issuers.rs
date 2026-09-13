@@ -1,8 +1,10 @@
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 use trellis_protocol::{AuthorizationIssuerKey, AuthorizationIssuerState};
+use trellis_runtime_apis::apis::trellis_auth_v1::events::IssuersRevoked;
 
 use super::super::{
+    auth_event_subject,
     context::{
         revoke_sql_contexts, AuthorizationContextRevocationReason, AuthorizationContextSelector,
     },
@@ -124,13 +126,14 @@ impl SqliteAuthorizationStore {
                     AuthorizationContextRevocationReason::IssuerRevoked, idempotency.created_at.div_euclid(1_000),
                 )?;
                 let mut payload = json!({
-                    "eventType": "Auth.Issuers.Revoked", "eventSubject": format!("events.v1.Auth.Issuers.Revoked.{key_id}"),
+                    "eventType": "Auth.Issuers.Revoked",
                     "eventId": ulid::Ulid::new().to_string(), "occurredAt": idempotency.created_at,
                     "keyId": key_id, "revokedBy": revoked_by,
                 });
                 if let Some(reason) = reason {
                     payload["reason"] = json!(reason);
                 }
+                payload["eventSubject"] = json!(auth_event_subject::<IssuersRevoked>(&payload)?);
                 actions.push(PostCommitActionRecord {
                     action_id: trellis_protocol::digest_json(&json!({"event": "Auth.Issuers.Revoked", "keyId": key_id}))
                         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,

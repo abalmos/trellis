@@ -85,9 +85,11 @@ function formatIssues(
     .join("; ");
 }
 
-export function formatDate(value: string | number | null | undefined): string {
+export function formatDate(
+  value: string | number | bigint | null | undefined,
+): string {
   if (!value) return "-";
-  const date = new Date(value);
+  const date = new Date(typeof value === "bigint" ? Number(value) : value);
   if (Number.isNaN(date.getTime())) return String(value);
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -98,6 +100,15 @@ export function formatDate(value: string | number | null | undefined): string {
 export function formatList(values: string[] | null | undefined): string {
   if (!values || values.length === 0) return "-";
   return values.join(", ");
+}
+
+/** Converts generated numeric values for bounded visual calculations only. */
+export function boundedNumber(value: number | bigint): number {
+  if (typeof value === "number") return value;
+  const maximum = BigInt(Number.MAX_SAFE_INTEGER);
+  if (value > maximum) return Number.MAX_SAFE_INTEGER;
+  if (value < -maximum) return -Number.MAX_SAFE_INTEGER;
+  return Number(value);
 }
 
 export function compactDuration(ms: number): string {

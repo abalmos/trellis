@@ -8,6 +8,7 @@ import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
 import { dirname, join } from "@std/path";
 
 import { TrellisTestAdminAutomation } from "./admin_client.ts";
+import type { AdminRpc, AdminRpcInput } from "./admin/methods.ts";
 import {
   removeStaleMarkedDirectories,
   writeTrellisTestOwnerMarker,
@@ -155,6 +156,12 @@ export class TrellisTestRuntime implements AsyncDisposable {
     provisionInstanceOnly(
       args: { deployment?: string },
     ): Promise<{ seed: string; sessionKey: string }>;
+    disableInstance(
+      input:
+        import("../trellis/index.js").apis.auth.ServiceInstancesDisableInput,
+    ): Promise<
+      import("../trellis/index.js").apis.auth.ServiceInstancesDisableOutput
+    >;
   };
   readonly devices: {
     provision(
@@ -164,17 +171,26 @@ export class TrellisTestRuntime implements AsyncDisposable {
     >;
   };
   readonly state: {
-    adminGet(
-      input: import("../trellis/index.js").apis.state.AdminGetInput,
-    ): Promise<import("../trellis/index.js").apis.state.AdminGetOutput>;
-    adminList(
-      input: import("../trellis/index.js").apis.state.AdminListInput,
-    ): Promise<import("../trellis/index.js").apis.state.AdminListOutput>;
-    adminDelete(
-      input: import("../trellis/index.js").apis.state.AdminDeleteInput,
-    ): Promise<
-      import("../trellis/index.js").apis.state.AdminDeleteOutput
-    >;
+    resourcesInspect(
+      input: import("../trellis/index.js").apis.state.ResourcesInspectInput,
+    ): Promise<import("../trellis/index.js").apis.state.ResourcesInspectOutput>;
+    resourcesQuery(
+      input: import("../trellis/index.js").apis.state.ResourcesQueryInput,
+    ): Promise<import("../trellis/index.js").apis.state.ResourcesQueryOutput>;
+  };
+  readonly events: {
+    consumersQuery(
+      input: AdminRpcInput<"eventsConsumersQuery">,
+    ): Promise<AdminRpc["eventsConsumersQuery"]["output"]>;
+    deadLettersQuery(
+      input: AdminRpcInput<"eventsDeadLettersQuery">,
+    ): Promise<AdminRpc["eventsDeadLettersQuery"]["output"]>;
+    deadLettersInspect(
+      input: AdminRpcInput<"eventsDeadLettersInspect">,
+    ): Promise<AdminRpc["eventsDeadLettersInspect"]["output"]>;
+    deadLettersReplay(
+      input: AdminRpcInput<"eventsDeadLettersReplay">,
+    ): Promise<AdminRpc["eventsDeadLettersReplay"]["output"]>;
   };
   #controlPlane: TrellisProcessHandle | undefined;
   #nats: NatsTestContainer;
@@ -245,14 +261,21 @@ export class TrellisTestRuntime implements AsyncDisposable {
         this.#admin.provisionServiceInstanceOnly({
           deployment: deployment ?? this.#deployment,
         }),
+      disableInstance: (input) => this.#admin.disableServiceInstance(input),
     };
     this.devices = {
       provision: (input) => this.#admin.provisionDevice(input),
     };
     this.state = {
-      adminGet: (input) => this.#admin.stateAdminGet(input),
-      adminList: (input) => this.#admin.stateAdminList(input),
-      adminDelete: (input) => this.#admin.stateAdminDelete(input),
+      resourcesInspect: (input) => this.#admin.stateResourcesInspect(input),
+      resourcesQuery: (input) => this.#admin.stateResourcesQuery(input),
+    };
+    this.events = {
+      consumersQuery: (input) => this.#admin.eventsConsumersQuery(input),
+      deadLettersQuery: (input) => this.#admin.eventsDeadLettersQuery(input),
+      deadLettersInspect: (input) =>
+        this.#admin.eventsDeadLettersInspect(input),
+      deadLettersReplay: (input) => this.#admin.eventsDeadLettersReplay(input),
     };
   }
 
@@ -429,13 +452,39 @@ export class TrellisTestRuntime implements AsyncDisposable {
     const startedAt = performance.now();
     const key = await this.registerClient(args);
     const auth = this.clientAuth(key);
-    const client = await TrellisClient.connect({
-      ...args,
-      trellisUrl: this.trellisUrl,
-      participant: args.contract,
-      auth: auth.auth,
-      onAuthRequired: auth.onAuthRequired,
-    }).orThrow();
+    let client: TrellisTestConnectedClient<TContract> | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        client = await TrellisClient.connect({
+          ...args,
+          trellisUrl: this.trellisUrl,
+          participant: args.contract,
+          auth: auth.auth,
+          onAuthRequired: auth.onAuthRequired,
+        }).orThrow() as TrellisTestConnectedClient<TContract>;
+        break;
+      } catch (error) {
+        let cause = error;
+        while (
+          typeof cause === "object" && cause !== null && "cause" in cause &&
+          cause.cause !== undefined
+        ) cause = cause.cause;
+        if (
+          attempt === 2 || typeof cause !== "object" || cause === null ||
+          !("status" in cause) || cause.status !== 409 ||
+          !("code" in cause) ||
+          ![
+            "authority_changed",
+            "consent_decision_stale",
+            "consent_view_changed",
+          ]
+            .includes(String(cause.code))
+        ) {
+          throw error;
+        }
+      }
+    }
+    if (!client) throw new Error("Client authentication did not complete");
     this.#clients.add(client);
     recordTrellisDuration(
       "trellis.connect.duration",

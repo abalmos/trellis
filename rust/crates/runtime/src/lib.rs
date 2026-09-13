@@ -19,8 +19,8 @@ pub mod server;
 pub mod shutdown;
 
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
-/// Built-in Event Log subsystem.
-pub mod eventlog;
+/// Built-in Events subsystem.
+pub mod events;
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 /// Health subsystem scaffold.
 pub mod health;

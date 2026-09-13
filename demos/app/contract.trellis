@@ -1,49 +1,12 @@
-api "demo.app@v1" {
-    version "1.0.0";
-    display_name "Field Ops Console";
-    description "Browser console for the consolidated Field Ops demo.";
-    docs {
-        summary "Field operations browser console.";
-        markdown "Declares the browser app's Field Ops service usage and workspace context state.";
-    }
+import { fieldops } from service;
 
-    model InspectionContextState {
-        siteId: string;
-        note: string;
-        updatedBy: string;
-        updatedAt: string;
-    }
+model InspectionContextState { siteId: string; note: string; updatedBy: string; updatedAt: string; }
 
-    export InspectionContextState;
-}
-
-participant "demo.app@v1" app {
-    implements "demo.app@v1";
-
-    use required fieldOps "demo.service@v1" {
-        call rpc "Assignments.List";
-        call rpc "Sites.List";
-        call rpc "Sites.Get";
-        call rpc "Evidence.List";
-        call rpc "Evidence.Download";
-        call rpc "Evidence.Delete";
-        call rpc "Reports.List";
-        invoke operation "Sites.Refresh";
-        observe operation "Sites.Refresh";
-        invoke operation "Reports.Generate";
-        observe operation "Reports.Generate";
-        cancel operation "Reports.Generate";
-        invoke operation "Evidence.Upload";
-        observe operation "Evidence.Upload";
-        subscribe feed "Audit.Feed";
-    }
-
-    state workspaceContext map {
-        schema InspectionContextState;
-        state_version "inspection-context.v1";
-        docs {
-            summary "Workspace context state.";
-            markdown "Stores per-workspace inspection context used by the browser console.";
-        }
-    }
+app App {
+  use fieldops {
+    rpc Assignments.List; rpc Sites.List; rpc Sites.Get; rpc Evidence.List; rpc Evidence.Download;
+    rpc Evidence.Delete; rpc Reports.List; operation Sites.Refresh; operation Reports.Generate;
+    operation Evidence.Upload; feed Audit.Feed;
+  }
+  state workspaceContext { title "Workspace context"; description "Current inspection workspace context."; schema InspectionContextState; version 1; }
 }

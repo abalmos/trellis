@@ -5288,6 +5288,7 @@ dependencies = [
  "comfy-table",
  "docker_credential",
  "ed25519-dalek",
+ "futures-util",
  "json5",
  "miette",
  "notify-debouncer-mini",
@@ -5329,6 +5330,7 @@ version = "0.12.0"
 dependencies = [
  "prettyplease",
  "semver",
+ "serde_json",
  "syn",
  "tempfile",
  "thiserror 2.0.18",
@@ -5352,18 +5354,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "trellis-eventlog-runtime"
+name = "trellis-events-runtime"
 version = "0.12.0"
 dependencies = [
  "async-nats",
+ "base64 0.22.1",
+ "bytes",
  "futures-util",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
  "thiserror 2.0.18",
  "time",
  "tokio",
  "tracing",
+ "trellis-protocol",
  "trellis-rs",
  "trellis-runtime-apis",
 ]
@@ -5393,10 +5400,12 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "time",
  "tokio",
  "tracing",
+ "trellis-protocol",
  "trellis-rs",
  "trellis-runtime-apis",
 ]
@@ -5450,6 +5459,7 @@ dependencies = [
 name = "trellis-protocol-wasm"
 version = "0.12.0"
 dependencies = [
+ "getrandom 0.3.4",
  "serde",
  "serde_json",
  "trellis-protocol",
@@ -5482,6 +5492,7 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+ "trellis-bootstrap",
  "trellis-local-nats",
  "trellis-protocol",
  "trellis-test",
@@ -5527,7 +5538,7 @@ dependencies = [
  "tower_governor",
  "tracing",
  "tracing-subscriber",
- "trellis-eventlog-runtime",
+ "trellis-events-runtime",
  "trellis-idl",
  "trellis-jobs-runtime",
  "trellis-local-nats",

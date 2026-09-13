@@ -32,8 +32,7 @@ async function listPidFiles(natsDir: string): Promise<string[]> {
 }
 
 Deno.test({
-  name:
-    "NatsTestContainer.start spawns a local nats-server with shared streams",
+  name: "NatsTestContainer.start spawns a clean local nats-server",
   fn: async () => {
     const workdir = await Deno.makeTempDir({ prefix: "trellis-nats-smoke-" });
     const natsDir = join(workdir, "nats");
@@ -52,8 +51,7 @@ Deno.test({
         assertEquals((await listPidFiles(natsDir)).length, 1);
 
         const jsm = await jetstreamManager(nats.nc);
-        await jsm.streams.info("trellis");
-        await jsm.streams.info("JOBS");
+        assertEquals(await jsm.streams.list().next(), []);
 
         const natsPort = Number(nats.natsUrl.split(":").at(-1));
         const websocketPort = Number(nats.websocketUrl.split(":").at(-1));

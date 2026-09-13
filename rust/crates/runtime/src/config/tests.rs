@@ -57,9 +57,9 @@ path = "./data/jobs.sqlite"
 kind = "sqlite"
 path = "./data/health.sqlite"
 
-[eventlog.storage]
+[events.storage]
 kind = "sqlite"
-path = "./data/eventlog.sqlite"
+path = "./data/events.sqlite"
 
 [leases]
 replicas = 1
@@ -208,7 +208,7 @@ path = {:?}
 kind = "sqlite"
 path = "./individual-health.sqlite"
 
-[eventlog.storage]
+[events.storage]
 kind = "sqlite"
 "#,
             absolute_jobs.display().to_string()
@@ -248,9 +248,9 @@ kind = "sqlite"
         })
     );
     assert_eq!(
-        config.eventlog_storage_backend().expect("eventlog"),
+        config.events_storage_backend().expect("events"),
         StorageBackend::Sqlite(SqliteStorageConfig {
-            path: paths.data.join("eventlog.sqlite"),
+            path: paths.data.join("events.sqlite"),
             journal_mode: None,
             busy_timeout_ms: None,
             single_writer: None,
@@ -403,12 +403,12 @@ history_retention_days = 30
 kind = "sqlite"
 path = "./data/health.sqlite"
 
-[eventlog]
+[events]
 retention_days = 7
 
-[eventlog.storage]
+[events.storage]
 kind = "sqlite"
-path = "./data/eventlog.sqlite"
+path = "./data/events.sqlite"
 
 [leases]
 bucket = "trellis_runtime_leases"
@@ -468,9 +468,9 @@ nats_jwt = 3600000
     );
     assert_eq!(
         config
-            .eventlog
+            .events
             .as_ref()
-            .and_then(|eventlog| eventlog.retention_days),
+            .and_then(|events| events.retention_days),
         Some(7)
     );
     assert_eq!(
@@ -782,9 +782,9 @@ auth_creds_path = "./nats/auth-runtime.creds"
 trellis_creds_path = "./nats/trellis-runtime.creds"
 system_creds_path = "./nats/system-runtime.creds"
 
-[eventlog.storage]
+[events.storage]
 kind = "postgres"
-url = "postgres://trellis-eventlog@localhost/trellis_eventlog"
+url = "postgres://trellis-events@localhost/trellis_events"
 
 [leases]
 replicas = 1
@@ -793,9 +793,9 @@ replicas = 1
     .expect("parse config");
 
     assert!(matches!(
-        config.validate_for_mode(RuntimeMode::Eventlog),
+        config.validate_for_mode(RuntimeMode::Events),
         Err(ConfigError::UnsupportedStorageBackend {
-            section: "eventlog.storage",
+            section: "events.storage",
             backend: "postgres"
         })
     ));

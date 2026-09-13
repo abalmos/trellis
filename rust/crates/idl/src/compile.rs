@@ -23,6 +23,12 @@ use trellis_protocol::{
 /// Dependency graphs supplied by acquisition tooling, keyed by manifest alias.
 pub type SuppliedDependencies = BTreeMap<String, PackageGraph>;
 
+type ResolvedDependencies = (
+    BTreeMap<PackageId, SemanticPackage>,
+    BTreeMap<PackageId, ResolvedDependency>,
+    DependencyLookup,
+);
+
 pub(crate) fn compile(
     manifest: &PackageManifest,
     sources: Vec<SourceUnit>,
@@ -157,7 +163,7 @@ pub(crate) fn compile(
         dependencies: &packages,
         dependency_aliases: &dependency_aliases,
     };
-    for (_name, (source, declaration)) in &declarations.participants {
+    for (source, declaration) in declarations.participants.values() {
         let Declaration::Participant(raw) = &declaration.value else {
             unreachable!()
         };
@@ -273,11 +279,7 @@ type DependencyLookup = BTreeMap<String, (PackageId, PackageGraph)>;
 fn dependencies(
     manifest: &PackageManifest,
     supplied: SuppliedDependencies,
-) -> miette::Result<(
-    BTreeMap<PackageId, SemanticPackage>,
-    BTreeMap<PackageId, ResolvedDependency>,
-    DependencyLookup,
-)> {
+) -> miette::Result<ResolvedDependencies> {
     if supplied.keys().collect::<BTreeSet<_>>() != manifest.dependencies.keys().collect() {
         return Err(miette!(
             "supplied dependencies must exactly match manifest dependency aliases"
@@ -396,7 +398,6 @@ fn validate_preludes(
                 value.digest.as_str(),
             )
         })
-        .map(|(id, version, digest)| (id, version, digest))
         .collect::<BTreeSet<_>>();
     let expected_refs = expected
         .iter()
@@ -782,6 +783,7 @@ fn resolve_api(
         ));
     }
     let identity = ApiId::new(format!("{}.{}@v{}", scope.package, raw.name, raw.major));
+    trellis_protocol::validate_api_id(identity.as_str()).into_diagnostic()?;
     let version = raw
         .version
         .as_ref()
@@ -890,7 +892,7 @@ fn resolve_api(
             }
         }
     }
-    let subjects = derive_api_subjects(&raw.name, raw.major, &actions)?;
+    let subjects = derive_api_subjects(&identity, &raw.name, raw.major, &actions)?;
     Ok(ApiDefinition {
         identity,
         name: raw.name.clone(),
@@ -908,10 +910,12 @@ fn resolve_api(
 }
 
 fn derive_api_subjects(
+    api_id: &ApiId,
     api_name: &str,
     major: u32,
     actions: &BTreeMap<ActionId, ActionDefinition>,
 ) -> miette::Result<trellis_protocol::DerivedApiSubjects> {
+    let api_id = api_id.as_str();
     let version = format!("v{major}");
     let mut result = trellis_protocol::DerivedApiSubjects {
         rpc: BTreeMap::new(),
@@ -944,10 +948,7 @@ fn derive_api_subjects(
                 );
             }
             ActionDefinition::Event { parameters, .. } => {
-                let base = protocol(trellis_protocol::derive_event_subject(
-                    &version,
-                    &logical_name,
-                ))?;
+                let base = protocol(trellis_protocol::derive_event_subject(api_id, &id.name))?;
                 let mut template = base.clone();
                 for path in parameters {
                     template.push_str(".{/");
@@ -960,8 +961,8 @@ fn derive_api_subjects(
                         base,
                         template,
                         wildcard: protocol(trellis_protocol::derive_event_wildcard_subject(
-                            &version,
-                            &logical_name,
+                            api_id,
+                            &id.name,
                             parameters.len(),
                         ))?,
                     },
@@ -1329,6 +1330,38 @@ fn resolve_participant(
             return Err(miette!("duplicate resource '{}'", resource.name));
         }
     }
+    if resources
+        .values()
+        .any(|resource| matches!(resource, ResourceDefinition::State { .. }))
+    {
+        let state_api_id = ApiId::new("trellis.state@v1");
+        if let Some(state_api) = scope
+            .dependencies
+            .get(&PackageId::new("trellis"))
+            .and_then(|package| package.apis.get(&state_api_id))
+        {
+            let selected =
+                uses.entry(state_api_id.clone())
+                    .or_insert_with(|| InteractionSelection {
+                        api: state_api_id,
+                        actions: BTreeSet::new(),
+                        optional_capabilities: BTreeSet::new(),
+                    });
+            for name in ["Get", "Put", "Delete"] {
+                let action = ActionId {
+                    kind: ActionKind::Rpc,
+                    name: name.to_owned(),
+                };
+                if !state_api.actions.contains_key(&action) {
+                    return Err(miette!("Trellis State API is missing RPC '{name}'"));
+                }
+                selected.actions.insert(ActionSelection {
+                    action,
+                    direction: InteractionDirection::Call,
+                });
+            }
+        }
+    }
     let mut companions = Vec::new();
     let companion = if let Some(child) = &raw.companion {
         if kind != ParticipantKind::Device {
@@ -1467,8 +1500,6 @@ fn resolve_resource(
                     "payload",
                     "result",
                     "update",
-                    "deadline",
-                    "retry",
                     "key_concurrency",
                 ],
             )?;
@@ -1495,12 +1526,6 @@ fn resolve_resource(
                 payload: type_ref("payload")?,
                 result: optional_type("result")?,
                 update: optional_type("update")?,
-                deadline_ms: raw
-                    .members
-                    .get("deadline")
-                    .map(|_| duration_or(raw, "deadline", 0))
-                    .transpose()?,
-                retry: retry(raw)?,
                 key_concurrency,
             }
         }
@@ -2013,9 +2038,8 @@ fn mark_recursive_model_fields(package: &mut SemanticPackage) {
     let mut edges = package
         .types
         .iter()
-        .filter_map(|(id, definition)| {
-            matches!(definition, TypeDefinition::Model(_)).then(|| (id.clone(), BTreeSet::new()))
-        })
+        .filter(|(_, definition)| matches!(definition, TypeDefinition::Model(_)))
+        .map(|(id, _)| (id.clone(), BTreeSet::new()))
         .collect::<BTreeMap<_, _>>();
     for (model, definition) in &package.types {
         let TypeDefinition::Model(model_fields) = definition else {
@@ -2228,8 +2252,6 @@ fn resource_needs_json(
             payload,
             result,
             update,
-            deadline_ms,
-            retry: retry_value,
             key_concurrency,
             ..
         } => serde_json::json!({
@@ -2238,8 +2260,6 @@ fn resource_needs_json(
             "payload": schema(payload)?,
             "result": result.as_ref().map(schema).transpose()?,
             "update": update.as_ref().map(schema).transpose()?,
-            "deadlineMs": deadline_ms,
-            "retry": retry(retry_value),
             "keyConcurrency": key_concurrency.as_ref().map(|value| serde_json::json!({
                 "path": value.path,
                 "policy": match value.policy {
@@ -2358,7 +2378,11 @@ fn resource_permission_atoms(
         ),
         ResourceDefinition::Consumer { .. } => (
             ParticipantResourceKind::EventConsumer,
-            &[PermissionAction::Consume],
+            &[
+                PermissionAction::Read,
+                PermissionAction::Consume,
+                PermissionAction::Control,
+            ],
         ),
     };
     actions

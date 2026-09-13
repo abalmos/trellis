@@ -1,5 +1,12 @@
 import { Pointer } from "typebox/value";
 
+import { base64urlEncode, utf8 } from "./auth/utils.ts";
+
+/** Encodes one canonical event parameter value as a NATS subject token. */
+export function encodeEventSubjectParameterToken(value: string): string {
+  return base64urlEncode(utf8(value));
+}
+
 /**
  * Compute the subject template from the message itself
  */
@@ -29,7 +36,9 @@ export function template(
       );
     }
 
-    return escapeNats(`${Object.is(token, -0) ? 0 : token}`);
+    return encodeEventSubjectParameterToken(
+      `${Object.is(token, -0) ? 0 : token}`,
+    );
   });
 }
 

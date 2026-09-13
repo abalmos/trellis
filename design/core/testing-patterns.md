@@ -54,7 +54,7 @@ Rust-only runtime behavior remains in ordinary Rust integration tests.
 ### Case-Owned Runtime
 
 Each live test starts and stops its own real NATS and `trellis-server` processes
-and owns its temporary SQLite state. Built-in Jobs and Event Log run inside that
+and owns its temporary SQLite state. Built-in Jobs and Events run inside that
 server. Tests use generated participants from a small native-IDL fixture; they
 do not construct substitute API descriptors. Prebuilt server and CLI paths may
 be supplied through environment variables. There is no shared-runner registry,

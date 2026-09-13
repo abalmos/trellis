@@ -98,6 +98,8 @@ export type ParticipantsGetInput = Types0.AuthParticipantsGetRequest;
 export type ParticipantsGetOutput = Types0.AuthParticipantsGetResponse;
 export type ParticipantsInstallInput = Types0.AuthParticipantsInstallRequest;
 export type ParticipantsInstallOutput = Types0.AuthParticipantsInstallResponse;
+export type ParticipantsListInput = Types0.AuthParticipantsListRequest;
+export type ParticipantsListOutput = Types0.AuthParticipantsListResponse;
 export type PortalsGetInput = Types0.AuthPortalsGetRequest;
 export type PortalsGetOutput = Types0.AuthPortalsGetResponse;
 export type PortalsGrantOverridesListInput = Types0.AuthPortalsGrantOverridesListRequest;
@@ -161,6 +163,7 @@ export type UsersUpdateOutput = Types0.AuthUsersUpdateResponse;
 export type DeviceUserAuthoritiesResolveInput = Types0.AuthDeviceUserAuthoritiesResolveRequest;
 export type DeviceUserAuthoritiesResolveOutput = Types0.AuthDeviceUserAuthoritiesResolveResponse;
 export type DeviceUserAuthoritiesResolveProgress = Types0.AuthDeviceUserAuthoritiesResolveProgress;
+export type DeviceUserAuthoritiesResolveUpdate = Types0.AuthDeviceUserAuthoritiesResolveProgress;
 export type ConnectionsClosedEvent = Types0.AuthConnectionsClosedEvent;
 export type ConnectionsKickedEvent = Types0.AuthConnectionsKickedEvent;
 export type ConnectionsOpenedEvent = Types0.AuthConnectionsOpenedEvent;
@@ -181,7 +184,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthCapabilitiesListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:CapabilityGroups.Delete": {
 			readonly kind: "rpc";
@@ -208,7 +211,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthCapabilityGroupsListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:CapabilityGroups.Put": {
 			readonly kind: "rpc";
@@ -235,7 +238,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthConnectionsListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:Deployments.Apply": {
 			readonly kind: "rpc";
@@ -289,7 +292,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthDeploymentsListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:Deployments.Remove": {
 			readonly kind: "rpc";
@@ -307,7 +310,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthDeviceUserAuthoritiesListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:DeviceUserAuthorities.Reviews.Decide": {
 			readonly kind: "rpc";
@@ -325,7 +328,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthDeviceUserAuthoritiesReviewsListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:DeviceUserAuthorities.Revoke": {
 			readonly kind: "rpc";
@@ -361,7 +364,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthDevicesListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:Devices.Provision": {
 			readonly kind: "rpc";
@@ -397,7 +400,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthGrantsListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:Grants.Revoke": {
 			readonly kind: "rpc";
@@ -444,6 +447,15 @@ declare const __api: {
 			readonly download: false;
 			readonly pagination: undefined;
 		};
+		readonly "rpc:Participants.List": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:Participants.List";
+			readonly input: typeof Types0.AuthParticipantsListRequestCodec;
+			readonly output: typeof Types0.AuthParticipantsListResponseCodec;
+			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: "cursor";
+		};
 		readonly "rpc:Portals.Get": {
 			readonly kind: "rpc";
 			readonly descriptorName: "rpc:Portals.Get";
@@ -460,7 +472,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthPortalsGrantOverridesListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:Portals.GrantOverrides.Put": {
 			readonly kind: "rpc";
@@ -487,7 +499,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthPortalsListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:Portals.LoginSettings.Get": {
 			readonly kind: "rpc";
@@ -568,7 +580,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthServiceInstancesListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:ServiceInstances.Provision": {
 			readonly kind: "rpc";
@@ -595,7 +607,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthSessionsListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:Sessions.Logout": {
 			readonly kind: "rpc";
@@ -631,7 +643,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthUserIdentitiesListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:UserIdentities.Unlink": {
 			readonly kind: "rpc";
@@ -676,7 +688,7 @@ declare const __api: {
 			readonly output: typeof Types0.AuthUsersListResponseCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:Users.Password.Change": {
 			readonly kind: "rpc";
@@ -720,6 +732,7 @@ declare const __api: {
 			readonly input: typeof Types0.AuthDeviceUserAuthoritiesResolveRequestCodec;
 			readonly output: typeof Types0.AuthDeviceUserAuthoritiesResolveResponseCodec;
 			readonly progress: typeof Types0.AuthDeviceUserAuthoritiesResolveProgressCodec;
+			readonly update: typeof Types0.AuthDeviceUserAuthoritiesResolveProgressCodec;
 			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
 			readonly signals: {};
 			readonly upload: false;
@@ -788,5 +801,5 @@ declare const __api: {
 	readonly packageEvidence: unknown;
 };
 export declare const API: typeof __api;
-export declare const API_DIGEST: "yq6ATxM5WBjmIJQDSkL5OeZ2L6E8y0hbSvY_ElbZA2U";
+export declare const API_DIGEST: "sNLVgGp5fF1O6yg5mO9eYhfKtOqfQAWaTkZieEdvkGY";
 export {};

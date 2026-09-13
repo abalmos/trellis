@@ -1,6 +1,6 @@
 # Development loop
 
-1. Edit `contract.trellis` or `contracts/*.trellis`.
+1. Edit a `.trellis` file explicitly listed by `[sources]`.
 2. Run `trellis update` only when dependency declarations change.
 3. Run `trellis generate`, or `trellis generate --watch` during development.
 4. Compile the generated language surface and application code.

@@ -14,7 +14,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Instance = apis.auth.AuthDevicesListOutput["entries"][number];
+  type Instance = apis.auth.DevicesListOutput["items"][number];
 
   const trellis = getTrellis();
   const notifications = getNotifications();
@@ -33,9 +33,9 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDevicesList({ limit: 100 }).take();
+      const response = await trellis.devicesList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
-      const loadedInstances = response.entries ?? [];
+      const loadedInstances = response.items ?? [];
       const loadedDisableableInstances = loadedInstances.filter((instance) => instance.state !== "disabled");
       instances = loadedInstances;
       if (selectedInstanceId && !loadedDisableableInstances.some((instance) => instance.instanceId === selectedInstanceId)) {
@@ -56,12 +56,12 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authDevicesDisable({
+      const response = await trellis.devicesDisable({
         expectedVersion: selectedInstance.version,
         idempotencyKey: ulid(),
         instanceId: selectedInstance.instanceId,
         reason: null,
-      } satisfies apis.auth.AuthDevicesDisableInput,
+      } satisfies apis.auth.DevicesDisableInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device instance ${selectedInstance.instanceId} disabled.`, "Disabled");

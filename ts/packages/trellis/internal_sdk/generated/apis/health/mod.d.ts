@@ -42,6 +42,8 @@ export type MetricsInput = Types0.HealthMetricsRequest;
 export type MetricsOutput = Types0.HealthMetricsResponse;
 export type QueryInput = Types0.HealthQueryRequest;
 export type QueryOutput = Types0.HealthQueryResponse;
+export type SummaryInput = Types0.HealthSummaryRequest;
+export type SummaryOutput = Types0.HealthSummaryResponse;
 export type StatusChangedEvent = Types0.HealthStatusChangedEvent;
 export type WatchInput = Types0.HealthWatchRequest;
 export type WatchEvent = Types0.HealthWatchFrame;
@@ -73,6 +75,15 @@ declare const __api: {
 			readonly output: typeof Types0.HealthQueryResponseCodec;
 			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
+			readonly pagination: "cursor";
+		};
+		readonly "rpc:Summary": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:Summary";
+			readonly input: typeof Types0.HealthSummaryRequestCodec;
+			readonly output: typeof Types0.HealthSummaryResponseCodec;
+			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
+			readonly download: false;
 			readonly pagination: undefined;
 		};
 		readonly "event:StatusChanged": {
@@ -91,5 +102,5 @@ declare const __api: {
 	readonly packageEvidence: unknown;
 };
 export declare const API: typeof __api;
-export declare const API_DIGEST: "JU0A9xciAKdsoOrnsOES61Q99KyP31_NuVNNbf29sF8";
+export declare const API_DIGEST: "850itezlC9qjm-ndTCwrmkEQBCkVmnLqSguqNkYVgaA";
 export {};

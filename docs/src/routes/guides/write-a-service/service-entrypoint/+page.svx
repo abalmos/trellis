@@ -30,7 +30,7 @@ database here. Trellis does not choose either.
 Replace `main.ts` with:
 
 ```ts
-import { TrellisService } from "@qlever-llc/trellis/service/deno";
+import { TrellisService } from "@qlever-llc/trellis/service";
 import { participants } from "orders-trellis";
 import { createOrder } from "./service.ts";
 
@@ -73,8 +73,8 @@ registers the provider. `wait()` supervises the running service; `stop()` closes
 its resources. Authorization contexts and route credentials remain in process
 memory and are refreshed on reconnect.
 
-For Node, use `/service/node` and the application's Node configuration and
-signal handling. For Rust, use the generated facade described in
+The shared `/service` entrypoint supports Node-compatible native runtimes,
+including Deno. For Rust, use the generated facade described in
 [the Rust guide](/guides/libraries/rust), not this TypeScript options object.
 
 ## Provision and run

@@ -13,22 +13,27 @@
   import Term from "$lib/components/Term.svelte";
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
+  import { nextCursorPage, previousCursorPage } from "$lib/cursor_history.ts";
 
-  type Participant = apis.health.HealthQueryOutput["entries"][number];
+  type Participant = apis.health.QueryOutput["items"][number];
 
   const trellis = getTrellis();
   const RPC_TIMEOUT_MS = 10_000;
 
-  let snapshot = $state.raw<apis.health.HealthQueryOutput | null>(null);
-  let inspection = $state.raw<apis.health.HealthInspectOutput | null>(null);
-  let healthMetrics = $state.raw<apis.health.HealthMetricsOutput | null>(null);
+  let snapshot = $state.raw<apis.health.QueryOutput | null>(null);
+  let summary = $state.raw<apis.health.SummaryOutput | null>(null);
+  let inspection = $state.raw<apis.health.InspectOutput | null>(null);
+  let healthMetrics = $state.raw<apis.health.MetricsOutput | null>(null);
   let loading = $state(true);
   let detailLoading = $state(false);
   let error = $state<string | null>(null);
   let watchError = $state<string | null>(null);
   let selectedKey = $state<string | null>(null);
+  let cursor = $state<string | undefined>();
+  let cursorBackStack = $state<string[]>([]);
+  let nextCursor = $state<string | undefined>();
 
-  const participants = $derived(snapshot?.entries ?? []);
+  const participants = $derived(snapshot?.items ?? []);
   const selectedParticipant = $derived(
     participants.find((participant) => participantKey(participant) === selectedKey) ??
       participants[0] ?? null,
@@ -41,15 +46,15 @@
   const instanceCount = $derived(
     participants.reduce(
       (count, participant) =>
-        count + participant.onlineInstances + participant.offlineInstances,
+        count + Number(participant.onlineInstances + participant.offlineInstances),
       0,
     ),
   );
   const metrics = $derived([
-    { label: "Participants", value: snapshot?.count ?? 0, detail: "Service and device groups" },
+    { label: "Participants", value: summary?.count.toString() ?? "0", detail: "Service and device groups" },
     { label: "Instances", value: instanceCount, detail: "Retained runtime identities" },
     { label: "Offline", value: offlineCount, detail: "Past heartbeat deadline" },
-    { label: "Revision", value: snapshot?.projection.revision ?? 0, detail: "Committed projection state" },
+    { label: "Revision", value: summary?.projection.revision.toString() ?? "0", detail: "Committed projection state" },
   ]);
 
   function participantKey(participant: Participant): string {
@@ -58,6 +63,11 @@
 
   function formatKind(kind: string): string {
     return kind === "device" ? "Device" : "Service";
+  }
+
+  function healthStatus(status: string): "healthy" | "degraded" | "unhealthy" | "offline" {
+    if (status === "healthy" || status === "degraded" || status === "unhealthy") return status;
+    return "offline";
   }
 
   function formatRelativeTime(value: string, reference = Date.now()): string {
@@ -79,14 +89,31 @@
   }
 
   async function loadParticipants(): Promise<void> {
-    const result = await trellis.healthQuery({ limit: 200, offset: 0 },
-      { timeout: RPC_TIMEOUT_MS },
-    ).take();
+    const [result, summaryResult] = await Promise.all([
+      trellis.healthQuery({ page: { cursor, limit: 200 } }, { timeout: RPC_TIMEOUT_MS }).take(),
+      trellis.healthSummary({}, { timeout: RPC_TIMEOUT_MS }).take(),
+    ]);
     if (isErr(result)) throw result;
+    if (isErr(summaryResult)) throw summaryResult;
     snapshot = result;
-    if (!selectedKey && result.entries[0]) {
-      selectedKey = participantKey(result.entries[0]);
+    nextCursor = result.page.nextCursor;
+    summary = summaryResult;
+    if (!selectedKey && result.items[0]) {
+      selectedKey = participantKey(result.items[0]);
     }
+  }
+
+  function goPrevious() {
+    ({ cursor, back: cursorBackStack } = previousCursorPage({ cursor, back: cursorBackStack }));
+    selectedKey = null;
+    void refresh();
+  }
+
+  function goNext() {
+    if (!nextCursor) return;
+    ({ cursor, back: cursorBackStack } = nextCursorPage({ cursor, back: cursorBackStack }, nextCursor));
+    selectedKey = null;
+    void refresh();
   }
 
   async function loadDetail(participant: Participant | null): Promise<void> {
@@ -103,7 +130,7 @@
         trellis.healthInspect({
             participantKind: participant.participantKind,
             contractId: participant.contractId,
-            historyLimit: 100,
+            historyLimit: 100n,
           },
           { timeout: RPC_TIMEOUT_MS },
         ).take(),
@@ -112,7 +139,7 @@
             contractId: participant.contractId,
             start: start.toISOString(),
             end: end.toISOString(),
-            stepMs: 60 * 60 * 1000,
+            stepMs: 60n * 60n * 1000n,
           },
           { timeout: RPC_TIMEOUT_MS },
         ).take(),
@@ -162,8 +189,7 @@
           watchError = errorMessage(result);
           return;
         }
-        for await (const event of result) {
-          if (event.type === "ready") continue;
+        for await (const _event of result) {
           if (refreshTimer !== undefined) clearTimeout(refreshTimer);
           refreshTimer = setTimeout(() => {
             void refresh().catch((cause) => {
@@ -193,7 +219,7 @@
 
   {#if error}<Notice variant="error">{error}</Notice>{/if}
   {#if watchError}<Notice variant="warning">Live refresh unavailable: {watchError}</Notice>{/if}
-  {#if snapshot?.projection.gapDetected}
+  {#if summary?.projection.gapDetected}
     <Notice variant="warning">Projection history contains a transport retention gap. Current participant state may be incomplete.</Notice>
   {/if}
 
@@ -204,7 +230,7 @@
       <Panel title="Participants" eyebrow="Primary" class="min-w-0">
         {#snippet actions()}
           <span class="text-xs text-base-content/50">
-            As of {snapshot ? formatDate(snapshot.asOf) : "-"}
+             As of {summary ? formatDate(summary.asOf) : "-"}
           </span>
         {/snippet}
         {#if participants.length === 0}
@@ -237,7 +263,7 @@
                     </button>
                     <div class="trellis-identifier text-base-content/50">{participant.contractId}</div>
                   </td>
-                  <td><StatusBadge label={participant.effectiveStatus} status={participant.effectiveStatus} /></td>
+                   <td><StatusBadge label={participant.effectiveStatus} status={healthStatus(participant.effectiveStatus)} /></td>
                   <td>
                     <div class="flex flex-wrap gap-1">
                       <span class="badge badge-success badge-outline badge-sm">{participant.onlineInstances} online</span>
@@ -256,6 +282,13 @@
               {/each}
             </tbody>
           </DataTable>
+          {#if cursorBackStack.length > 0 || nextCursor}
+            <nav class="flex items-center justify-end gap-3 text-sm text-base-content/70" aria-label="Participant pages">
+              <button class="btn btn-outline btn-xs" onclick={goPrevious} disabled={cursorBackStack.length === 0}>Previous</button>
+              <span>Page {cursorBackStack.length + 1}</span>
+              <button class="btn btn-outline btn-xs" onclick={goNext} disabled={!nextCursor}>Next</button>
+            </nav>
+          {/if}
         {/if}
       </Panel>
 
@@ -270,7 +303,7 @@
                   <h2 class="truncate text-sm font-medium">{inspection.participant.participantName}</h2>
                   <div class="trellis-identifier truncate text-base-content/50">{inspection.participant.contractId}</div>
                 </div>
-                <StatusBadge label={inspection.participant.effectiveStatus} status={inspection.participant.effectiveStatus} />
+                 <StatusBadge label={inspection.participant.effectiveStatus} status={healthStatus(inspection.participant.effectiveStatus)} />
               </div>
               <dl class="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
                 <dt class="text-base-content/60">24h availability</dt>
@@ -330,7 +363,7 @@
                     <tbody>
                       {#each inspection.history as interval (interval.intervalId)}
                         <tr>
-                          <td><StatusBadge label={interval.effectiveStatus} status={interval.effectiveStatus} /></td>
+                           <td><StatusBadge label={interval.effectiveStatus} status={healthStatus(interval.effectiveStatus)} /></td>
                           <td>{formatDate(interval.startedAt)}</td>
                           <td>{interval.endedAt ? formatDate(interval.endedAt) : "Current"}</td>
                           <td class="text-base-content/70">{interval.reason}</td>

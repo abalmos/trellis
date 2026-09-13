@@ -16,12 +16,12 @@ const OUTBOX_STATUS_PUBLISHED: &str = "published";
 const OUTBOX_CLAIM_SECONDS: i64 = 30;
 pub(crate) const EVENT_ID_HEADER: &str = "Nats-Msg-Id";
 pub(crate) const EVENT_TIME_HEADER: &str = "Trellis-Event-Time";
+pub(crate) const EVENT_DESCRIPTOR_HEADER: &str = "Trellis-Event-Descriptor";
 
 /// A Trellis event prepared for durable storage or later publishing.
 ///
 /// The prepared form stores the event subject, encoded body payload, transport
-/// headers, and event metadata separately. Contract identity and digest are not
-/// duplicated into this transport record.
+/// headers, exact descriptor identity, and event metadata separately.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreparedTrellisEvent {
     subject: String,
@@ -29,6 +29,7 @@ pub struct PreparedTrellisEvent {
     headers: HeaderMap,
     event_id: String,
     event_time: String,
+    descriptor_identity: String,
 }
 
 impl PreparedTrellisEvent {
@@ -40,13 +41,21 @@ impl PreparedTrellisEvent {
     ///
     /// The event id and event time are generated as metadata and are not written
     /// into the payload bytes.
-    pub fn new(subject: impl Into<String>, payload: Bytes) -> Self {
+    pub fn new(
+        subject: impl Into<String>,
+        payload: Bytes,
+        descriptor_identity: impl Into<String>,
+    ) -> Self {
+        let descriptor_identity = descriptor_identity.into();
+        let mut headers = HeaderMap::new();
+        headers.insert(EVENT_DESCRIPTOR_HEADER, descriptor_identity.as_str());
         Self {
             subject: subject.into(),
             payload,
-            headers: HeaderMap::new(),
+            headers,
             event_id: Ulid::new().to_string(),
             event_time: now_rfc3339(),
+            descriptor_identity,
         }
     }
 
@@ -57,12 +66,17 @@ impl PreparedTrellisEvent {
         event_id: String,
         event_time: String,
     ) -> Self {
+        let descriptor_identity = headers
+            .get(EVENT_DESCRIPTOR_HEADER)
+            .map(|value| value.as_str().to_owned())
+            .unwrap_or_default();
         Self {
             subject,
             payload,
             headers,
             event_id,
             event_time,
+            descriptor_identity,
         }
     }
 
@@ -93,6 +107,8 @@ impl PreparedTrellisEvent {
     /// override the prepared event metadata.
     pub fn with_headers(mut self, headers: HeaderMap) -> Self {
         self.headers = headers;
+        self.headers
+            .insert(EVENT_DESCRIPTOR_HEADER, self.descriptor_identity.as_str());
         self
     }
 
@@ -106,11 +122,17 @@ impl PreparedTrellisEvent {
         &self.event_time
     }
 
+    /// Return the canonical generated descriptor identity for this event.
+    pub fn descriptor_identity(&self) -> &str {
+        &self.descriptor_identity
+    }
+
     /// Return the NATS headers required to publish this prepared event.
     pub fn publish_headers(&self) -> HeaderMap {
         let mut headers = self.headers.clone();
         headers.insert(EVENT_ID_HEADER, self.event_id.as_str());
         headers.insert(EVENT_TIME_HEADER, self.event_time.as_str());
+        headers.insert(EVENT_DESCRIPTOR_HEADER, self.descriptor_identity.as_str());
         headers
     }
 }
@@ -132,12 +154,14 @@ where
     Ok(PreparedTrellisEvent::new(
         subject,
         Bytes::from(serde_json::to_vec(&value)?),
+        D::descriptor_identity()?,
     ))
 }
 
 /// Prepare one generic JSON-serializable event for a concrete subject.
 pub fn prepare_event_value<T>(
     subject: &str,
+    descriptor_identity: &str,
     event: &T,
 ) -> Result<PreparedTrellisEvent, serde_json::Error>
 where
@@ -146,6 +170,7 @@ where
     Ok(PreparedTrellisEvent::new(
         subject,
         Bytes::from(serde_json::to_vec(event)?),
+        descriptor_identity,
     ))
 }
 
@@ -725,7 +750,11 @@ mod tests {
         SqliteOutboxStore::new(&first)
             .enqueue(
                 "event",
-                &PreparedTrellisEvent::new("events.v1.Created", Bytes::from_static(&[1, 2, 3])),
+                &PreparedTrellisEvent::new(
+                    "events.v1.Created",
+                    Bytes::from_static(&[1, 2, 3]),
+                    "test-event-descriptor",
+                ),
             )
             .await
             .unwrap();

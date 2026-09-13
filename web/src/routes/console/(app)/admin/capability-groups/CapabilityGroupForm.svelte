@@ -14,7 +14,7 @@
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
-  type CapabilityView = apis.auth.AuthCapabilitiesListOutput["entries"][number] & {
+  type CapabilityView = apis.auth.CapabilitiesListOutput["items"][number] & {
     key: string;
     source: "platform" | "contract" | "deployment";
     deploymentId: string | null;
@@ -23,7 +23,7 @@
     contractDisplayName: string | null;
     direction: "creates" | "given" | null;
   };
-  type CapabilityGroupView = apis.auth.AuthCapabilityGroupsListOutput["entries"][number];
+  type CapabilityGroupView = apis.auth.CapabilityGroupsListOutput["items"][number];
   type CapabilityDeploymentSection = {
     key: string;
     title: string;
@@ -169,14 +169,14 @@
     saved = null;
     try {
       const groupsResponse = await withLoadTimeout(
-        trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
+        trellis.capabilityGroupsList({ limit: 500, offset: 0 }).take(),
         "Capability groups",
       );
       if (isErr(groupsResponse)) {
         error = errorMessage(groupsResponse);
         return;
       }
-      groups = groupsResponse.entries ?? [];
+      groups = groupsResponse.items ?? [];
 
       if (editingExisting) {
         if (!targetGroupKey) {
@@ -203,14 +203,14 @@
     capabilitiesLoading = true;
     try {
       const capabilitiesResponse = await withLoadTimeout(
-        trellis.authCapabilitiesList({ limit: 100 }).take(),
+        trellis.capabilitiesList({ limit: 100 }).take(),
         "Capabilities",
       );
       if (isErr(capabilitiesResponse)) {
         error = errorMessage(capabilitiesResponse);
         return;
       }
-      capabilities = (capabilitiesResponse.entries ?? []).map((capability) => ({
+      capabilities = (capabilitiesResponse.items ?? []).map((capability) => ({
         ...capability,
         key: capability.capability,
         source: capability.sourceApi ? "contract" as const : "platform" as const,
@@ -251,8 +251,8 @@
         includedGroups: uniqueSorted(selectedIncludedGroups.filter((key) => key !== groupKey)),
         expectedVersion: selectedGroup?.version ?? null,
         idempotencyKey: ulid(),
-      } satisfies apis.auth.AuthCapabilityGroupsPutInput;
-      const response = await trellis.authCapabilityGroupsPut(input).take();
+      } satisfies apis.auth.CapabilityGroupsPutInput;
+      const response = await trellis.capabilityGroupsPut(input).take();
       if (isErr(response)) {
         error = errorMessage(response);
         return;

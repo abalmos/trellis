@@ -1,4 +1,9 @@
-import { assert, assertEquals, assertRejects } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertNotEquals,
+  assertRejects,
+} from "@std/assert";
 import { AsyncResult } from "@qlever-llc/result";
 import type {
   OperationEvent,
@@ -21,12 +26,37 @@ import {
   createDeviceActivationClient,
   deriveDeviceConfirmationCode,
   deriveDeviceIdentity,
+  deriveDeviceUserCompanion,
   type DeviceActivationTransport,
   encodeDeviceActivationPayload,
   parseDeviceActivationPayload,
   verifyDeviceConfirmationCode,
   waitForDeviceActivation,
 } from "./device_activation.ts";
+
+Deno.test("device companion derivation binds canonical origin and exact child", async () => {
+  const companion = await deriveDeviceUserCompanion(
+    new Uint8Array(32).fill(7),
+    "https://example.com/path",
+    "acme.Sensor.Companion",
+  );
+  assertEquals(
+    companion.installationSeedBase64url,
+    "vIo7nClzQFE0Ir1R7AQz3aqO4NJ5uU2-wXJLaqcyVss",
+  );
+  assertEquals(
+    companion.installationPublicKey,
+    "vGf_UmbZSDEhpK6sxpO1esqkNwuof8fwvxvaNG20xZw",
+  );
+  assertNotEquals(
+    companion.installationPublicKey,
+    (await deriveDeviceUserCompanion(
+      new Uint8Array(32).fill(7),
+      "https://other.example.com",
+      "acme.Sensor.Companion",
+    )).installationPublicKey,
+  );
+});
 const PARTICIPANT_DIGEST = "A".repeat(43);
 
 function unsupportedActivationOperationControl() {

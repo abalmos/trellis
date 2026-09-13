@@ -19,6 +19,7 @@ export type ProofParams = {
 
 export type EventProofParams = {
   contextDigest: string;
+  descriptorIdentity: string;
   subject: string;
   payloadHash: Uint8Array;
   eventId: string;
@@ -94,6 +95,7 @@ export function buildProofInput(
  */
 export function buildEventProofInput(
   contextDigest: string,
+  descriptorIdentity: string,
   subject: string,
   payloadHash: Uint8Array,
   eventId: string,
@@ -106,6 +108,7 @@ export function buildEventProofInput(
   return buildLengthPrefixed([
     EVENT_PROOF_DOMAIN,
     contextDigestBytes,
+    utf8(descriptorIdentity),
     utf8(subject),
     payloadHash,
     utf8(eventId),
@@ -140,6 +143,7 @@ export async function createEventProof(
 ): Promise<string> {
   const input = buildEventProofInput(
     params.contextDigest,
+    params.descriptorIdentity,
     params.subject,
     params.payloadHash,
     params.eventId,
@@ -189,6 +193,7 @@ export async function verifyEventProof(
   const result = await AsyncResult.try(async () => {
     const input = buildEventProofInput(
       params.contextDigest,
+      params.descriptorIdentity,
       params.subject,
       params.payloadHash,
       params.eventId,

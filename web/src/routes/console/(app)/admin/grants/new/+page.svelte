@@ -17,10 +17,10 @@
   import { hasDuplicateRoleMapping } from "$lib/portal-grants";
   import { getTrellis } from "$lib/trellis";
 
-  type Capability = apis.auth.AuthCapabilitiesListOutput["entries"][number];
-  type Group = apis.auth.AuthCapabilityGroupsListOutput["entries"][number];
-  type Portal = apis.auth.AuthPortalsListOutput["entries"][number];
-  type Policy = apis.auth.AuthPortalsGrantOverridesListOutput["entries"][number];
+  type Capability = apis.auth.CapabilitiesListOutput["items"][number];
+  type Group = apis.auth.CapabilityGroupsListOutput["items"][number];
+  type Portal = apis.auth.PortalsListOutput["items"][number];
+  type Policy = apis.auth.PortalsGrantOverridesListOutput["items"][number];
   type RoleDraft = {
     id: string;
     providerId: string;
@@ -69,7 +69,7 @@
       providerIds = [];
       return;
     }
-    const response = await trellis.authPortalsGet({ portalId }).take();
+    const response = await trellis.portalsGet({ portalId }).take();
     if (isErr(response)) throw new Error(errorMessage(response));
     providerIds = response.portal.loginSettings.providers ?? [];
   }
@@ -111,21 +111,21 @@
   async function load(): Promise<void> {
     try {
       const [portalResponse, capabilityResponse, groupResponse, policyResponse] = await Promise.all([
-        trellis.authPortalsList({ limit: 100 }).take(),
-        trellis.authCapabilitiesList({ limit: 100 }).take(),
-        trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
-        trellis.authPortalsGrantOverridesList({ limit: 500, offset: 0 }).take(),
+        trellis.portalsList({ limit: 100 }).take(),
+        trellis.capabilitiesList({ limit: 100 }).take(),
+        trellis.capabilityGroupsList({ limit: 500, offset: 0 }).take(),
+        trellis.portalsGrantOverridesList({ limit: 500, offset: 0 }).take(),
       ]);
       if (isErr(portalResponse)) throw new Error(errorMessage(portalResponse));
       if (isErr(capabilityResponse)) throw new Error(errorMessage(capabilityResponse));
       if (isErr(groupResponse)) throw new Error(errorMessage(groupResponse));
       if (isErr(policyResponse)) throw new Error(errorMessage(policyResponse));
-      portals = portalResponse.entries;
-      capabilities = capabilityResponse.entries;
-      groups = groupResponse.entries;
+      portals = portalResponse.items;
+      capabilities = capabilityResponse.items;
+      groups = groupResponse.items;
       const targetPortal = page.url.searchParams.get("portalId");
       const targetParticipant = page.url.searchParams.get("participantId");
-      const policy = policyResponse.entries.find((item) => item.portalId === targetPortal && item.participantId === targetParticipant);
+      const policy = policyResponse.items.find((item) => item.portalId === targetPortal && item.participantId === targetParticipant);
       if (policy) applyPolicy(policy);
       else portalId = portals.find((portal) => !portal.disabled)?.portalId ?? "";
       await loadProviders();
@@ -157,8 +157,8 @@
         portalId, participantId: participantId.trim(), directCapabilities: directCapabilities.toSorted(),
         capabilityGroupKeys: capabilityGroupKeys.toSorted(), roleMappings: mappings,
         expectedVersion: existing?.version ?? null, idempotencyKey: ulid(),
-      } satisfies apis.auth.AuthPortalsGrantOverridesPutInput;
-      const response = await trellis.authPortalsGrantOverridesPut(input).take();
+      } satisfies apis.auth.PortalsGrantOverridesPutInput;
+      const response = await trellis.portalsGrantOverridesPut(input).take();
       if (isErr(response)) throw new Error(errorMessage(response));
       await goto(resolve("/admin/grants"));
     } catch (cause) {

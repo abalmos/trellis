@@ -32,6 +32,9 @@ export class AuthorizationContextCache {
     nowUnixSeconds = this.correctedNowSeconds(),
     shouldInstall: () => boolean = () => true,
     runtime?: AuthorizationRuntimeBinding,
+    installAdditional: (
+      verified: VerifiedAuthorizationContext,
+    ) => void | (() => void) | Promise<void | (() => void)> = () => {},
   ): Promise<VerifiedAuthorizationContext> {
     const operation = ++this.#operation;
     const verificationPolicy = authorizationContextVerificationPolicy(
@@ -60,10 +63,20 @@ export class AuthorizationContextCache {
     if (!shouldInstall() || operation !== this.#operation) {
       throw new Error("authorization context installation stopped");
     }
-    this.#bundle = structuredClone(bundle);
+    const nextBundle = structuredClone(bundle);
+    const installedRuntime = nextRuntime
+      ? structuredClone(nextRuntime)
+      : undefined;
+    const nextRouting = structuredClone(routing);
+    const commitAdditional = await installAdditional(verified);
+    if (!shouldInstall() || operation !== this.#operation) {
+      throw new Error("authorization context installation stopped");
+    }
+    commitAdditional?.();
+    this.#bundle = nextBundle;
     this.#verified = verified;
-    this.#runtime = nextRuntime ? structuredClone(nextRuntime) : undefined;
-    this.#routing = structuredClone(routing);
+    this.#runtime = installedRuntime;
+    this.#routing = nextRouting;
     return verified;
   }
 

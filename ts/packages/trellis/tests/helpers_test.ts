@@ -1,5 +1,10 @@
 import { assertEquals, assertThrows } from "@std/assert";
-import { decodeSubject, escapeNats, template } from "../helpers.ts";
+import {
+  decodeSubject,
+  encodeEventSubjectParameterToken,
+  escapeNats,
+  template,
+} from "../helpers.ts";
 
 Deno.test("Helpers", async (t) => {
   await t.step("Subject Token Escaping", async (t) => {
@@ -68,9 +73,35 @@ Deno.test("Helpers", async (t) => {
   });
 
   await t.step("Subject templates preserve canonical scalar values", () => {
+    for (
+      const [input, expected] of [
+        ["", ""],
+        ["$SYS", "JFNZUw"],
+        ["a.b", "YS5i"],
+        ["a b", "YSBi"],
+        ["*", "Kg"],
+        [">", "Pg"],
+        ["~", "fg"],
+        ["😀", "8J-YgA"],
+      ]
+    ) {
+      assertEquals(encodeEventSubjectParameterToken(input), expected);
+    }
     assertEquals(
       template("events.v1.Test.{/id}.{/attempt}", { id: "a.b", attempt: 0 }),
-      "events.v1.Test.a~2E~b.0",
+      "events.v1.Test.YS5i.MA",
+    );
+    assertEquals(
+      template("events.v1.Test.{/id}", { id: "😀" }),
+      "events.v1.Test.8J-YgA",
+    );
+    assertEquals(
+      template(
+        "events.v1.Test.{/tenant}.{/id}",
+        {},
+        { allowWildcards: true },
+      ),
+      "events.v1.Test.*.*",
     );
     assertThrows(
       () =>

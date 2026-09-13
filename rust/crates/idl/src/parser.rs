@@ -492,9 +492,7 @@ impl<'a> Parser<'a> {
                 "version" | "history" | "concurrency" => {
                     ResourceValue::Integer(self.integer_statement()?)
                 }
-                "ttl" | "deadline" => {
-                    ResourceValue::Duration(self.duration_statement(member == "ttl")?)
-                }
+                "ttl" => ResourceValue::Duration(self.duration_statement(true)?),
                 "desired_max_value" | "desired_max_object" | "desired_max_total" => {
                     ResourceValue::Capacity(self.capacity_statement()?)
                 }
@@ -564,15 +562,15 @@ impl<'a> Parser<'a> {
     fn key_concurrency(&mut self) -> miette::Result<ResourceValue> {
         self.token(TokenKind::LBrace)?;
         self.word("path")?;
-        let path = self.path()?;
-        self.token(TokenKind::Semi)?;
+        let path = self
+            .name_statement()?
+            .split('.')
+            .map(str::to_owned)
+            .collect();
         self.word("policy")?;
         let policy = self.name_statement()?;
         self.token(TokenKind::RBrace)?;
-        Ok(ResourceValue::KeyConcurrency {
-            path: path.split('.').map(str::to_owned).collect(),
-            policy,
-        })
+        Ok(ResourceValue::KeyConcurrency { path, policy })
     }
 
     fn selection_block(&mut self, opened: bool) -> miette::Result<Vec<Selection>> {

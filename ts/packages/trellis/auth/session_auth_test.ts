@@ -105,9 +105,11 @@ Deno.test("event proof uses event id and event time domain", async () => {
   const payloadHash = await sha256(utf8(JSON.stringify({ value: "one" })));
   const eventId = "evt_123";
   const eventTime = "2026-04-26T00:00:00.000Z";
+  const descriptorIdentity = "v1.dGhpbmdAdjE.VGhpbmcuQ2hhbmdlZA.1";
   const digest = await sha256(
     buildEventProofInput(
       contextDigest,
+      descriptorIdentity,
       "events.v1.Thing.Changed.one",
       payloadHash,
       eventId,
@@ -121,6 +123,7 @@ Deno.test("event proof uses event id and event time domain", async () => {
       auth.sessionKey,
       {
         contextDigest,
+        descriptorIdentity,
         subject: "events.v1.Thing.Changed.one",
         payloadHash,
         eventId,
@@ -134,6 +137,7 @@ Deno.test("event proof uses event id and event time domain", async () => {
       auth.sessionKey,
       {
         contextDigest,
+        descriptorIdentity,
         subject: "events.v1.Thing.Changed.one",
         payloadHash,
         eventId: "evt_other",

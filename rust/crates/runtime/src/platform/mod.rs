@@ -89,6 +89,39 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         .put_participant_binding(auth_participant.clone())
         .await
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    for (deployment_id, display_name, participant) in [
+        (
+            "dep_trellis_events_runtime",
+            "Trellis Events Runtime",
+            auth::events_runtime_participant_binding(now)
+                .map_err(|error| RuntimeError::Platform(error.to_string()))?,
+        ),
+        (
+            "dep_trellis_health_runtime",
+            "Trellis Health Runtime",
+            auth::health_runtime_participant_binding(now)
+                .map_err(|error| RuntimeError::Platform(error.to_string()))?,
+        ),
+        (
+            "dep_trellis_jobs_runtime",
+            "Trellis Jobs Runtime",
+            auth::jobs_runtime_participant_binding(now)
+                .map_err(|error| RuntimeError::Platform(error.to_string()))?,
+        ),
+    ] {
+        auth_store
+            .put_participant_binding(participant.clone())
+            .await
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+        ensure_builtin_provider_deployment(
+            &auth_store,
+            deployment_id,
+            display_name,
+            &participant,
+            now,
+        )
+        .await?;
+    }
     ensure_builtin_portal(&auth_store, now).await?;
     let nats = context
         .config
@@ -138,7 +171,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     let system_nats = connect_nats(&nats.servers, &nats.system_creds_path).await?;
     let rpc_nats = context.trellis_nats.clone();
     let post_commit_nats = context.trellis_nats.clone();
-    let rpc_system_nats = system_nats.clone();
+    let http_nats = post_commit_nats.clone();
     let post_commit_system_nats = system_nats.clone();
     let auth_service = AuthService::new(auth_store.clone(), AuthServiceConfig::default())
         .map_err(|error| RuntimeError::Platform(error.to_string()))?;
@@ -152,6 +185,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         auth_nats,
         system_nats,
         ephemeral.clone(),
+        auth_store.clone(),
         authorization_contexts.clone(),
         CalloutKeys::from_files(
             &callout.issuer_signing_seed_file,
@@ -215,12 +249,14 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         auth_operation_session,
         auth_service.clone(),
         verifier.clone(),
-    );
+    )
+    .await?;
     let mut auth_rpc_routes = Router::new();
+    auth_rpc_routes.set_provider_deployment_id("dep_trellis_auth_runtime");
     trellis_runtime_apis::apis::trellis_auth_v1::register_rpc_metadata(&mut auth_rpc_routes);
+    trellis_runtime_apis::apis::trellis_core_v1::register_rpc_metadata(&mut auth_rpc_routes);
     let auth_rpc = AuthRpcRuntime::start(AuthRpcProcessor {
         client: rpc_nats,
-        system_client: rpc_system_nats,
         service: auth_service.clone(),
         ephemeral: ephemeral.clone(),
         public_origin: public_origin.clone(),
@@ -271,6 +307,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             }
         };
     let router = match auth::auth_http_router(auth::AuthHttpOptions {
+        nats: http_nats,
         service: auth_service,
         ephemeral,
         issuer,
@@ -431,6 +468,81 @@ async fn ensure_first_admin(
     Ok(())
 }
 
+async fn ensure_builtin_provider_deployment(
+    repository: &SqliteAuthorizationStore,
+    deployment_id: &str,
+    display_name: &str,
+    participant: &ParticipantBindingRecord,
+    now: i64,
+) -> Result<(), RuntimeError> {
+    if repository
+        .get_deployment_profile(deployment_id)
+        .await
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?
+        .is_none()
+    {
+        let principal = PrincipalRecord {
+            principal_id: deployment_id.to_owned(),
+            kind: PrincipalKind::Service,
+            state: PrincipalState::Active,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+            disabled_at: None,
+            revoked_at: None,
+        };
+        auth::validate_principal(&principal)
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+        let request_digest = trellis_protocol::digest_json(&serde_json::json!({
+            "deploymentId": deployment_id,
+            "participantId": participant.participant_id,
+        }))
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+        repository
+            .create_deployment_profile(DeploymentProfileCreation {
+                principal,
+                profile: DeploymentProfileRecord {
+                    deployment_id: deployment_id.to_owned(),
+                    kind: PrincipalKind::Service,
+                    display_name: display_name.to_owned(),
+                    participant_id: Some(participant.participant_id.clone()),
+                    portal_id: None,
+                    review_mode: None,
+                    requires_device_delegation: false,
+                    expires_at: None,
+                    state: DeploymentProfileState::Active,
+                    created_at: now,
+                    updated_at: now,
+                    version: 1,
+                },
+                idempotency: IdempotencyResultRecord {
+                    scope_key: request_digest.clone(),
+                    purpose: "builtin.provider.start".to_owned(),
+                    signer_id: "system:startup".to_owned(),
+                    request_id: deployment_id.to_owned(),
+                    request_digest,
+                    result: serde_json::json!({ "deploymentId": deployment_id }),
+                    created_at: now,
+                    expires_at: auth::MAX_PROTOCOL_INTEGER as i64,
+                },
+                actions: Vec::new(),
+            })
+            .await
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    }
+    repository
+        .put_deployment_evidence(DeploymentRecord {
+            deployment_id: deployment_id.to_owned(),
+            participant_id: participant.participant_id.clone(),
+            participant_kind: participant.participant_kind,
+            active: true,
+            expires_at: None,
+        })
+        .await
+        .map_err(|error| RuntimeError::Platform(error.to_string()))?;
+    Ok(())
+}
+
 async fn ensure_auth_event_session(
     service: &AuthService<SqliteAuthorizationStore>,
     participant: &ParticipantBindingRecord,
@@ -520,6 +632,48 @@ async fn ensure_auth_event_session(
         .ok_or_else(|| {
             RuntimeError::Platform("installed Auth participant revision is missing".to_owned())
         })?;
+    let resources = [
+        (
+            "browserFlows",
+            "trellis_auth_browser_flows",
+            86_400_000,
+            65_536,
+        ),
+        ("oauthStates", "trellis_auth_oauth_states", 900_000, 16_384),
+        ("connections", "trellis_auth_connections", 120_000, 16_384),
+    ]
+    .into_iter()
+    .map(
+        |(local_name, bucket, ttl_ms, max_value_bytes)| ResourceBindingEvidence {
+            resource_kind: "kv".to_owned(),
+            local_name: local_name.to_owned(),
+            binding_id: format!("binding:{DEPLOYMENT_ID}:kv:{local_name}"),
+            owner_participant_id: participant.participant_id.clone(),
+            provider_identity: ResourceProviderIdentity::Kv {
+                bucket: bucket.to_owned(),
+            },
+            actual: Some(auth::resources::ResourceActual::Kv {
+                history: 1,
+                ttl_ms,
+                max_value_bytes: Some(max_value_bytes),
+            }),
+            state: ResourceBindingState::Available,
+            materialized_at: now,
+            error: None,
+        },
+    )
+    .collect::<Vec<_>>();
+    service
+        .repository()
+        .replace_resource_bindings(
+            auth::GrantOwnerKind::Deployment,
+            DEPLOYMENT_ID.to_owned(),
+            participant.participant_id.clone(),
+            installed_revision,
+            resources.clone(),
+        )
+        .await
+        .map_err(|error| RuntimeError::Platform(format!("bind Auth resources: {error}")))?;
     let current = service
         .repository()
         .get_grant_binding(
@@ -548,7 +702,18 @@ async fn ensure_auth_event_session(
                     owner_id: DEPLOYMENT_ID.to_owned(),
                     participant_id: participant.participant_id.clone(),
                     installed_revision,
-                    grants,
+                    grants: grants.clone(),
+                    approval_mode: auth::ApprovalMode::Exact,
+                    approved_capabilities: Vec::new(),
+                    approved_resources: auth::policy::participant_resource_commitments(participant)
+                        .map_err(|error| RuntimeError::Platform(error.to_string()))?,
+                    delegation_ceiling: auth::DelegationCeiling {
+                        capabilities: Vec::new(),
+                        exact_restrictions: Some(grants),
+                        platform_privileges: Vec::new(),
+                    },
+                    approval_decision_digest: digest.clone(),
+                    companion_approved: false,
                     platform_privileges: Vec::new(),
                     expected_revision,
                     expected_current_installed_revision: None,
@@ -570,25 +735,6 @@ async fn ensure_auth_event_session(
             .await
             .map_err(|error| RuntimeError::Platform(format!("bind Auth deployment: {error}")))?;
     }
-    let resources = [
-        ("browserFlows", "trellis_auth_browser_flows"),
-        ("oauthStates", "trellis_auth_oauth_states"),
-        ("connections", "trellis_auth_connections"),
-    ]
-    .into_iter()
-    .map(|(local_name, bucket)| ResourceBindingEvidence {
-        resource_kind: "kv".to_owned(),
-        local_name: local_name.to_owned(),
-        binding_id: format!("binding:{DEPLOYMENT_ID}:kv:{local_name}"),
-        owner_participant_id: participant.participant_id.clone(),
-        provider_identity: ResourceProviderIdentity::Kv {
-            bucket: bucket.to_owned(),
-        },
-        state: ResourceBindingState::Available,
-        materialized_at: now,
-        error: None,
-    })
-    .collect::<Vec<_>>();
     service
         .repository()
         .replace_resource_bindings(
@@ -600,7 +746,6 @@ async fn ensure_auth_event_session(
         )
         .await
         .map_err(|error| RuntimeError::Platform(format!("bind Auth resources: {error}")))?;
-
     let mut seed = [0_u8; 32];
     getrandom::fill(&mut seed).map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let seed = URL_SAFE_NO_PAD.encode(seed);
@@ -827,5 +972,48 @@ ws_nats_servers = ["ws://advertised.example:8080"]
             .expect("load deployment")
             .expect("deployment profile");
         assert_eq!(profile.state, DeploymentProfileState::Active);
+    }
+
+    #[tokio::test]
+    async fn fresh_builtin_provider_deployments_are_active_and_bound() {
+        let store = SqliteAuthorizationStore::open_in_memory().expect("open store");
+        for (deployment_id, display_name, participant) in [
+            (
+                "dep_trellis_events_runtime",
+                "Trellis Events Runtime",
+                auth::events_runtime_participant_binding(1).expect("events participant"),
+            ),
+            (
+                "dep_trellis_health_runtime",
+                "Trellis Health Runtime",
+                auth::health_runtime_participant_binding(1).expect("health participant"),
+            ),
+            (
+                "dep_trellis_jobs_runtime",
+                "Trellis Jobs Runtime",
+                auth::jobs_runtime_participant_binding(1).expect("jobs participant"),
+            ),
+        ] {
+            store
+                .put_participant_binding(participant.clone())
+                .await
+                .expect("install participant");
+            ensure_builtin_provider_deployment(
+                &store,
+                deployment_id,
+                display_name,
+                &participant,
+                1,
+            )
+            .await
+            .expect("install provider deployment");
+            let profile = store
+                .get_deployment_profile(deployment_id)
+                .await
+                .expect("load deployment")
+                .expect("deployment profile");
+            assert_eq!(profile.participant_id, Some(participant.participant_id));
+            assert_eq!(profile.state, DeploymentProfileState::Active);
+        }
     }
 }

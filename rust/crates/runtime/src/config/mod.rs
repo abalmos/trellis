@@ -50,7 +50,7 @@ pub struct RuntimeConfig {
     pub health: Option<SubsystemConfig>,
     /// Event log subsystem configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub eventlog: Option<SubsystemConfig>,
+    pub events: Option<SubsystemConfig>,
 }
 
 impl RuntimeConfig {
@@ -123,14 +123,14 @@ impl RuntimeConfig {
                 SubsystemName::Health => {
                     self.validate_subsystem(SubsystemName::Health, self.health.as_ref())?
                 }
-                SubsystemName::Eventlog => {
-                    self.validate_subsystem(SubsystemName::Eventlog, self.eventlog.as_ref())?
+                SubsystemName::Events => {
+                    self.validate_subsystem(SubsystemName::Events, self.events.as_ref())?
                 }
             }
         }
         if matches!(
             mode,
-            RuntimeMode::All | RuntimeMode::Platform | RuntimeMode::Jobs | RuntimeMode::Eventlog
+            RuntimeMode::All | RuntimeMode::Platform | RuntimeMode::Jobs | RuntimeMode::Events
         ) {
             self.resolve_authorization()?;
         }
@@ -189,7 +189,7 @@ impl RuntimeConfig {
             ("platform", self.platform.as_ref()),
             ("jobs", self.jobs.as_ref()),
             ("health", self.health.as_ref()),
-            ("eventlog", self.eventlog.as_ref()),
+            ("events", self.events.as_ref()),
         ];
         for (index, (left_name, left)) in subsystems.iter().enumerate() {
             let Some(left_path) = left
@@ -248,9 +248,9 @@ impl RuntimeConfig {
         self.subsystem_storage_backend(SubsystemName::Health, self.health.as_ref())
     }
 
-    /// Resolves validated storage for the eventlog subsystem.
-    pub fn eventlog_storage_backend(&self) -> Result<StorageBackend, ConfigError> {
-        self.subsystem_storage_backend(SubsystemName::Eventlog, self.eventlog.as_ref())
+    /// Resolves validated storage for the Events subsystem.
+    pub fn events_storage_backend(&self) -> Result<StorageBackend, ConfigError> {
+        self.subsystem_storage_backend(SubsystemName::Events, self.events.as_ref())
     }
 
     /// Resolves runtime NATS connection settings into required, non-optional values.
@@ -407,7 +407,7 @@ impl RuntimeConfig {
             self.health
                 .as_mut()
                 .and_then(|subsystem| subsystem.storage.as_mut()),
-            self.eventlog
+            self.events
                 .as_mut()
                 .and_then(|subsystem| subsystem.storage.as_mut()),
         ]
@@ -463,7 +463,7 @@ impl RuntimeConfig {
             ("platform", self.platform.as_mut()),
             ("jobs", self.jobs.as_mut()),
             ("health", self.health.as_mut()),
-            ("eventlog", self.eventlog.as_mut()),
+            ("events", self.events.as_mut()),
         ] {
             let Some(storage) = subsystem.and_then(|subsystem| subsystem.storage.as_mut()) else {
                 continue;
@@ -946,7 +946,7 @@ pub struct SubsystemConfig {
     /// Health transport maximum retained bytes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport_max_bytes: Option<u64>,
-    /// Eventlog retention in days.
+    /// Events retention in days.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retention_days: Option<u32>,
     /// Platform TTL settings in milliseconds.
@@ -1178,7 +1178,7 @@ fn storage_section_name(subsystem: SubsystemName) -> &'static str {
         SubsystemName::Platform => "platform.storage",
         SubsystemName::Jobs => "jobs.storage",
         SubsystemName::Health => "health.storage",
-        SubsystemName::Eventlog => "eventlog.storage",
+        SubsystemName::Events => "events.storage",
     }
 }
 

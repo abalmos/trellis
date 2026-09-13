@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolve } from "$lib/console_paths";
+  import { afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { onMount } from "svelte";
   import { type apis } from "trellis-web-generated";
@@ -8,7 +9,6 @@
   import BulkResult from "$lib/components/BulkResult.svelte";
   import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";
   import DataTable from "$lib/components/DataTable.svelte";
-  import JobsHealthMatrix from "$lib/components/JobsHealthMatrix.svelte";
   import JobsScopedCharts from "$lib/components/JobsScopedCharts.svelte";
   import LoadingState from "$lib/components/LoadingState.svelte";
   import MetricsLedger from "$lib/components/MetricsLedger.svelte";
@@ -17,16 +17,17 @@
   import Panel from "$lib/components/Panel.svelte";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
   import Term from "$lib/components/Term.svelte";
-  import { compactDuration, errorMessage } from "$lib/format";
+  import { boundedNumber, compactDuration, errorMessage } from "$lib/format";
   import { loadJobsMetrics } from "$lib/jobs_metrics.ts";
   import { cancelJob, loadJobsPageData } from "$lib/jobs_page.ts";
   import { bulkExpectedCount, bulkTargetDetails, runBulk, toggleAll, toggleId } from "$lib/bulk.ts";
   import { getTrellis } from "$lib/trellis";
+  import { nextCursorPage, previousCursorPage, resetCursorHistory } from "$lib/cursor_history.ts";
 
-  type Job = apis.jobs.JobsQueryOutput["entries"][number];
+  type Job = apis.jobs.QueryOutput["items"][number];
   type JobState = Job["state"];
-  type ServiceInfo = apis.jobs.JobsListServicesOutput["entries"][number];
-  type MetricsWindow = apis.jobs.JobsMetricsInput["window"];
+  type ServiceInfo = apis.jobs.ListServicesOutput["items"][number];
+  type MetricsWindow = apis.jobs.MetricsInput["window"];
   type Focus = "running-risk" | "running" | "action" | "completed" | "failed" | "dead" | "backlog";
   type JobPathname = `/admin/jobs/${string}` & {};
 
@@ -48,20 +49,28 @@
   let unavailableMessage = $state<string | null>(null);
   let services = $state.raw<ServiceInfo[]>([]);
   let jobs = $state.raw<Job[]>([]);
-  let jobCount = $state(0);
-  let metrics = $state.raw<apis.jobs.JobsMetricsOutput | null>(null);
+  let groups = $state.raw<apis.jobs.SummaryOutput["groups"]>([]);
+  let stats = $state.raw<apis.jobs.SummaryOutput["stats"]>({ byState: {}, total: 0n });
+  let jobCount = $state(0n);
+  let cursor = $state<string | undefined>();
+  let cursorBackStack = $state<string[]>([]);
+  let nextCursor = $state<string | undefined>();
+  let metrics = $state.raw<apis.jobs.MetricsOutput | null>(null);
   let metricsWindow = $state<MetricsWindow>("1h");
   let selectedJobType = $state<string | null>(null);
   let focus = $state<Focus>(asFocus(page.url.searchParams.get("focus")) ?? "running-risk");
   let handledFocusParam = page.url.searchParams.get("focus");
 
-  $effect(() => {
+  afterNavigate(() => {
     const value = page.url.searchParams.get("focus");
     if (value === handledFocusParam) return;
     handledFocusParam = value;
-    const next = asFocus(value);
+    const next = value === "running-risk" || value === "running" || value === "action" || value === "completed" || value === "failed" || value === "dead" || value === "backlog" ? value : null;
     if (next && next !== focus) {
       focus = next;
+      ({ cursor, back: cursorBackStack } = resetCursorHistory());
+      nextCursor = undefined;
+      selectedJobs.clear();
       void loadJobs(false);
     }
   });
@@ -78,42 +87,28 @@
   const windowLabel = $derived(windows.find((option) => option.value === metricsWindow)?.title ?? metricsWindow);
   const focusedJobs = $derived.by(() =>
     focus === "running-risk"
-      ? [...jobs].sort((left, right) => riskPriority(left) - riskPriority(right) || (right.runtimeMs ?? 0) - (left.runtimeMs ?? 0))
+      ? [...jobs].sort((left, right) => riskPriority(left) - riskPriority(right) || boundedNumber((right.runtimeMs ?? 0n) - (left.runtimeMs ?? 0n)))
       : jobs,
   );
   const cancellableJobs = $derived(focusedJobs.filter((job) => job.state === "active" || job.state === "pending" || job.state === "retry"));
   const selectableJobIds = $derived(cancellableJobs.map((job) => job.id));
   const overview = $derived.by(() => {
-    const byState: Record<string, number> = {};
-    let backlog = 0;
-    let running = 0;
-    let slow = 0;
-    for (const group of metrics?.summary ?? []) {
-      backlog += group.queued ?? 0;
-      running += group.running ?? 0;
-      slow += group.slow ?? 0;
-      for (const [state, count] of Object.entries(group.byState)) {
-        if (typeof count === "number") byState[state] = (byState[state] ?? 0) + count;
-      }
-    }
-    const processed = metrics?.buckets.reduce(
-      (total, bucket) => total + bucket.groups.reduce((sum, group) => sum + group.completed, 0),
-      0,
-    ) ?? 0;
-    const failed = byState.failed ?? 0;
-    const dead = byState.dead ?? 0;
-    const retrying = byState.retry ?? 0;
-    const stale = byState.stale ?? 0;
+    const failed = boundedNumber(stats.failed ?? stats.byState.failed ?? 0n);
+    const dead = boundedNumber(stats.dead ?? stats.byState.dead ?? 0n);
+    const retrying = boundedNumber(stats.byState.retry ?? 0n);
+    const stale = boundedNumber(stats.byState.stale ?? 0n);
+    const processed = boundedNumber(stats.byState.completed ?? 0n);
+    const total = boundedNumber(stats.total);
     return {
       action: failed + dead + retrying + stale,
-      backlog,
+      backlog: boundedNumber(stats.queued ?? 0n),
       dead,
       failed,
-      failureRate: processed > 0 ? ((failed + dead) / processed) * 100 : 0,
+      failureRate: total > 0 ? ((failed + dead) / total) * 100 : 0,
       processed,
       retrying,
-      running,
-      slow,
+      running: boundedNumber(stats.running ?? 0n),
+      slow: boundedNumber(stats.slow ?? 0n),
       stale,
     };
   });
@@ -123,7 +118,7 @@
     return null;
   }
 
-  function resolveMetricsStep(window: MetricsWindow): apis.jobs.JobsMetricsInput["step"] {
+  function resolveMetricsStep(window: MetricsWindow): apis.jobs.MetricsInput["step"] {
     if (window === "15m" || window === "1h") return "1m";
     if (window === "6h") return "5m";
     if (window === "24h") return "15m";
@@ -134,7 +129,7 @@
     bulkBusy = true;
     bulkResult = null;
     const outcome = await runBulk(targets, async (job) => {
-      await cancelJob({ action: (input) => trellis.jobsCancel(input) }, job.id);
+      await cancelJob({ action: (input) => trellis.cancel(input) }, job.id);
     });
     failedJobs = outcome.failed.map((failure) => failure.target);
     for (const job of targets) selectedJobs.delete(job.id);
@@ -193,9 +188,10 @@
     return "Pending and retrying work, oldest first";
   }
 
-  function buildQuery(): apis.jobs.JobsQueryInput {
+  function buildQuery(): apis.jobs.QueryInput {
     return {
-      limit: 40,
+      page: { cursor, limit: 40 },
+      groupBy: "type",
       state: focusStates(focus),
       type: selectedJobType ?? undefined,
       sort: {
@@ -212,19 +208,25 @@
     unavailableMessage = null;
     try {
       const data = await loadJobsPageData({
-        listServices: (input) => trellis.jobsListServices(input, { timeout: rpcTimeout }),
+        listServices: (input) => trellis.listServices(input, { timeout: rpcTimeout }),
         queryJobs: (input) => trellis.jobsQuery(input, { timeout: rpcTimeout }),
+        summarizeJobs: (input) => trellis.jobsSummary(input, { timeout: rpcTimeout }),
       }, buildQuery());
       if (sequence !== jobsSequence) return;
       unavailableMessage = data.available ? null : data.message ?? "Jobs admin runtime is unavailable.";
       services = data.services;
       jobs = data.jobs;
+      groups = data.groups;
+      stats = data.stats;
       jobCount = data.count;
+      nextCursor = data.nextCursor;
     } catch (cause) {
       if (sequence !== jobsSequence) return;
       error = errorMessage(cause);
       jobs = [];
-      jobCount = 0;
+      groups = [];
+      stats = { byState: {}, total: 0n };
+      jobCount = 0n;
       services = [];
     } finally {
       if (sequence === jobsSequence) loading = false;
@@ -247,10 +249,6 @@
         return;
       }
       metrics = payload.metrics ?? null;
-      if (selectedJobType && metrics && !metrics.summary.some((group) => group.key === selectedJobType)) {
-        selectedJobType = null;
-        void loadJobs(false);
-      }
     } catch (cause) {
       if (sequence !== metricsSequence) return;
       metrics = null;
@@ -269,12 +267,31 @@
 
   function selectFocus(value: Focus) {
     focus = value;
+    resetPages();
     void loadJobs(false);
   }
 
   function selectJobType(value: string | null) {
     selectedJobType = value;
+    resetPages();
     void loadJobs(false);
+  }
+
+  function resetPages() {
+    ({ cursor, back: cursorBackStack } = resetCursorHistory());
+    nextCursor = undefined;
+    selectedJobs.clear();
+  }
+
+  function goPrevious() {
+    ({ cursor, back: cursorBackStack } = previousCursorPage({ cursor, back: cursorBackStack }));
+    void loadJobs();
+  }
+
+  function goNext() {
+    if (!nextCursor) return;
+    ({ cursor, back: cursorBackStack } = nextCursorPage({ cursor, back: cursorBackStack }, nextCursor));
+    void loadJobs();
   }
 
   function selectWindow(value: MetricsWindow) {
@@ -307,14 +324,14 @@
 
   function jobDuration(job: Job): string {
     const value = job.state === "pending" || job.state === "retry" ? job.queueAgeMs : job.runtimeMs;
-    return compactDuration(value ?? 0);
+    return compactDuration(boundedNumber(value ?? 0n));
   }
 
   function jobProgress(job: Job): number {
     const current = job.progress?.current;
     const total = job.progress?.total;
-    if (current === undefined || total === undefined || total <= 0) return 0;
-    return Math.min(100, Math.max(0, (current / total) * 100));
+    if (current === undefined || total === undefined || total <= 0n) return 0;
+    return Math.min(100, Math.max(0, boundedNumber(current) / boundedNumber(total) * 100));
   }
 
   function jobStateVariant(job: Job): "healthy" | "degraded" | "unhealthy" | "offline" {
@@ -328,8 +345,8 @@
   const ledgerItems = $derived([
     { id: "action", label: "Action needed", value: overview.action, detail: `${overview.failed} failed · ${overview.dead} dead · ${overview.retrying} retrying`, tone: "error" as const, active: focus === "action", attention: true },
     { id: "running", label: "Running", value: overview.running, detail: `${overview.slow} slow · ${workerCount} workers`, tone: "success" as const, active: focus === "running" || focus === "running-risk" },
-    { id: "completed", label: "Processed", value: overview.processed.toLocaleString(), detail: `completed · ${windowLabel.toLowerCase()}`, tone: "success" as const, active: focus === "completed" },
-    { id: "failed", label: "Failed", value: overview.failed, detail: `${overview.failureRate.toFixed(2)}% of completed`, tone: "error" as const, active: focus === "failed" },
+    { id: "completed", label: "Processed", value: overview.processed.toLocaleString(), detail: "completed retained jobs", tone: "success" as const, active: focus === "completed" },
+    { id: "failed", label: "Failed", value: overview.failed, detail: `${overview.failureRate.toFixed(2)}% matching`, tone: "error" as const, active: focus === "failed" },
     { id: "dead", label: "Dead", value: overview.dead, detail: "requires replay or dismissal", tone: "error" as const, active: focus === "dead" },
     { id: "backlog", label: "Backlog", value: overview.backlog, detail: "pending + retrying", tone: "warning" as const, active: focus === "backlog" },
   ]);
@@ -380,18 +397,35 @@
     <Notice variant="info" role="status">{metricsError}</Notice>
   {/if}
 
-  {#if metricsLoading && !metrics}
-    <LoadingState label="Loading job health" />
-  {:else if metrics}
+  {#if !loading && !unavailableMessage}
     <MetricsLedger ariaLabel="Jobs status summary" items={ledgerItems} onSelect={handleLedgerSelect} />
 
     <div class="jobs-overview">
       <Panel eyebrow="Secondary" title="Job-type health">
-        {#snippet actions()}<span class="text-sm text-base-content/70">{metrics?.summary.length ?? 0} types reporting</span>{/snippet}
-        <p class="text-sm text-base-content/70">Pressure and latency by execution contract. Select a type to scope live work.</p>
-        <JobsHealthMatrix summary={metrics.summary} buckets={metrics.buckets} selectedKey={selectedJobType} onSelect={selectJobType} />
+        {#snippet actions()}<span class="text-sm text-base-content/70">{groups.length} matching types</span>{/snippet}
+        <p class="text-sm text-base-content/70">Complete retained totals by execution contract. Select a type to scope live work.</p>
+        <DataTable>
+          <thead><tr><th>Job type</th><th>Matching</th><th>Backlog</th><th>Failure rate</th><th>Oldest</th></tr></thead>
+          <tbody>
+            {#each groups as group (group.key)}
+              <tr class:row-selected={selectedJobType === group.key}>
+                <td><button type="button" class="link link-hover trellis-identifier" onclick={() => selectJobType(selectedJobType === group.key ? null : group.key)}>{group.label}</button></td>
+                <td class="tabular-nums">{group.count.toLocaleString()}</td>
+                <td class="tabular-nums">{(group.depth ?? 0n).toLocaleString()}</td>
+                <td class="tabular-nums">{group.failureRate === undefined ? "—" : `${(group.failureRate * 100).toFixed(1)}%`}</td>
+                <td>{group.oldestCreatedAt ? compactDuration(Date.now() - new Date(group.oldestCreatedAt).getTime()) : "—"}</td>
+              </tr>
+            {:else}
+              <tr><td colspan="5">No job types match this operational view.</td></tr>
+            {/each}
+          </tbody>
+        </DataTable>
       </Panel>
-      <JobsScopedCharts buckets={metrics.buckets} selectedKey={selectedJobType} {windowLabel} />
+      {#if metricsLoading && !metrics}
+        <LoadingState label="Loading job trends" />
+      {:else if metrics}
+        <JobsScopedCharts buckets={metrics.buckets} selectedKey={selectedJobType} {windowLabel} />
+      {/if}
     </div>
   {/if}
 
@@ -481,6 +515,13 @@
             {/each}
           </tbody>
         </DataTable>
+        {#if cursorBackStack.length > 0 || nextCursor}
+          <nav class="flex items-center justify-end gap-3 text-sm text-base-content/70" aria-label="Jobs pages">
+            <button class="btn btn-outline btn-xs" onclick={goPrevious} disabled={cursorBackStack.length === 0}>Previous</button>
+            <span>Page {cursorBackStack.length + 1}</span>
+            <button class="btn btn-outline btn-xs" onclick={goNext} disabled={!nextCursor}>Next</button>
+          </nav>
+        {/if}
       {/if}
     </Panel>
   {/if}
@@ -514,6 +555,10 @@
 
   .jobs-overview > * {
     min-width: 0;
+  }
+
+  .row-selected {
+    background: color-mix(in oklab, var(--color-primary) 10%, var(--color-base-100));
   }
 
   .jobs-progress {

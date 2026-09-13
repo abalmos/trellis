@@ -4,8 +4,7 @@ Internal runtime implementation for TypeScript Trellis services.
 
 - `@qlever-llc/trellis/service` — shared service core, types, and service
   helpers
-- `@qlever-llc/trellis/service/node` — Node service adapter
-- `@qlever-llc/trellis/service/deno` — Deno service adapter
+- `@qlever-llc/trellis/service` — shared Node-compatible native service runtime
 
 Use the runtime-specific subpath when connecting a service.
 

@@ -3,6 +3,7 @@ import {
   createPortalBinding,
   fetchPortalFlowState,
   type PortalBinding,
+  submitPortalApproval,
 } from "@qlever-llc/trellis/auth/browser";
 
 import { ADMIN_USERNAME } from "./methods.ts";
@@ -80,24 +81,14 @@ export async function approveLocalFlowIfNeeded(args: {
   }
   if (state.status === "approval_required") {
     const approvalStartedAt = performance.now();
-    await postJson(
-      `${args.trellisUrl}/auth/flow/${
-        encodeURIComponent(args.flowId)
-      }/approval`,
-      {
-        approved: true,
-        consentViewDigest: state.consentViewDigest,
-        selectedOptionalBundles: [],
-      },
-      { "trellis-portal-binding": args.binding.secret },
-    );
-    const approved = await fetchPortalFlowState(
+    const approved = await submitPortalApproval(
       {
         authUrl: args.trellisUrl,
         portalOrigin: new URL(args.trellisUrl).origin,
       },
       args.flowId,
       args.binding,
+      "approved",
     );
     recordTrellisDuration(
       "trellis.auth.flow.duration",

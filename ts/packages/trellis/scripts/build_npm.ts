@@ -1,3 +1,5 @@
+import { copy } from "@std/fs";
+
 import { buildTypeScriptPackage } from "../../../tools/package_build/build_typescript_package.ts";
 import config from "../deno.json" with { type: "json" };
 
@@ -47,6 +49,8 @@ await buildTypeScriptPackage({
     ulid: "^3.0.2",
   },
 }, config.version);
+
+await copy("internal_sdk/generated", "npm/internal_sdk/generated");
 
 await Deno.mkdir("npm/auth/protocol_wasm", { recursive: true });
 for (

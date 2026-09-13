@@ -27,7 +27,7 @@ struct Args {
     /// Issue a one-time password-reset URL for the sole active administrator.
     #[arg(long)]
     reset_admin: bool,
-    /// Runtime mode to run: all, platform, jobs, health, or eventlog.
+    /// Runtime mode to run: all, platform, jobs, health, or events.
     #[arg(default_value = "all")]
     mode: RuntimeMode,
 }
@@ -40,7 +40,7 @@ enum OperationArgs {
 
 #[derive(Debug, clap::Args)]
 struct CheckArgs {
-    /// Runtime mode to validate: all, platform, jobs, health, or eventlog.
+    /// Runtime mode to validate: all, platform, jobs, health, or events.
     #[arg(default_value = "all")]
     mode: RuntimeMode,
 }

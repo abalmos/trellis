@@ -1,19 +1,24 @@
 use serde_json::{json, Value};
+use trellis_protocol::{GrantSet, PermissionTarget, PlatformPrivilege};
 use trellis_runtime_apis::types::{
-    AuthDeploymentsApplyRequest, AuthGrantsGetRequest, AuthGrantsGetRequestOwnerKind,
+    AuthDeploymentsApplyRequest, AuthGrantSet, AuthGrantsGetRequest, AuthGrantsGetRequestOwnerKind,
     AuthGrantsListRequest, AuthGrantsListRequestOwnerId, AuthGrantsListRequestOwnerKind,
     AuthGrantsRevokeRequest, AuthGrantsRevokeRequestOwnerKind, AuthGrantsSetRequest,
     AuthGrantsSetRequestOwnerKind, AuthIssuersRevokeRequest, AuthParticipantsGetRequest,
-    AuthParticipantsInstallRequest,
+    AuthParticipantsInstallRequest, AuthParticipantsListRequest,
 };
 
 use super::super::{
     mutation_actor, now_millis, require_admin, rpc_idempotency, AuthRpcProcessor, ValidatedRequest,
 };
-use crate::platform::auth::domain::GrantBindingReplacement;
+use crate::platform::auth::domain::{
+    ApprovedCapability, ApprovedResource, GrantBindingReplacement, ResourceCommitment,
+};
 use crate::platform::auth::evidence::PackageEvidenceInput;
 use crate::platform::auth::{
-    AuthorizationStateError, GrantBindingState, GrantOwnerKind, ParticipantBindingRecord,
+    participant_resource_commitments, ApprovalMode, AuthorizationResourceKind,
+    AuthorizationStateError, DelegationCeiling, GrantBindingState, GrantOwnerKind,
+    ParticipantBindingRecord,
 };
 
 pub(super) async fn dispatch(
@@ -27,7 +32,7 @@ pub(super) async fn dispatch(
     let repository = processor.service.repository();
     let now = now_millis()?;
     match subject {
-        "rpc.v1.Auth.Issuers.Revoke" => {
+        "rpc.v1.auth.Issuers.Revoke" => {
             require_admin(&caller)?;
             let request: AuthIssuersRevokeRequest = serde_json::from_value(input.clone())
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -48,7 +53,7 @@ pub(super) async fn dispatch(
                 )
                 .await
         }
-        "rpc.v1.Auth.Grants.Get" => {
+        "rpc.v1.auth.Grants.Get" => {
             let request: AuthGrantsGetRequest = serde_json::from_value(input)
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
             let owner_kind = match request.owner_kind {
@@ -68,7 +73,7 @@ pub(super) async fn dispatch(
                 .await?;
             Ok(json!({"binding": binding}))
         }
-        "rpc.v1.Auth.Grants.List" => {
+        "rpc.v1.auth.Grants.List" => {
             let mut request: AuthGrantsListRequest = serde_json::from_value(input)
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
             if !caller
@@ -93,7 +98,7 @@ pub(super) async fn dispatch(
             }
             repository.list_grant_bindings(request).await
         }
-        "rpc.v1.Auth.Participants.Get" => {
+        "rpc.v1.auth.Participants.Get" => {
             let request: AuthParticipantsGetRequest = serde_json::from_value(input)
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
             let revision = request
@@ -105,7 +110,12 @@ pub(super) async fn dispatch(
                 .get_installed_participant(request.participant_id.0, revision)
                 .await
         }
-        "rpc.v1.Auth.Participants.Install" => {
+        "rpc.v1.auth.Participants.List" => {
+            let request: AuthParticipantsListRequest = serde_json::from_value(input)
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+            repository.list_installed_participants(request).await
+        }
+        "rpc.v1.auth.Participants.Install" => {
             require_admin(&caller)?;
             let request: AuthParticipantsInstallRequest = serde_json::from_value(input.clone())
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -132,12 +142,11 @@ pub(super) async fn dispatch(
                     root_package,
                     evidence_json,
                     request.platform_trust.unwrap_or(false),
-                    expected,
-                    idempotency,
+                    (expected, idempotency),
                 )
                 .await
         }
-        "rpc.v1.Auth.Deployments.Apply" => {
+        "rpc.v1.auth.Deployments.Apply" => {
             require_admin(&caller)?;
             let request: AuthDeploymentsApplyRequest = serde_json::from_value(input.clone())
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -157,13 +166,105 @@ pub(super) async fn dispatch(
             let root_package = evidence.package_evidence.root_package.clone();
             let (binding, evidence_json) =
                 ParticipantBindingRecord::from_package_evidence(&evidence, now)?;
-            let resources = crate::platform::auth::resources::provision_deployment_resources(
-                &processor.client,
-                &binding,
-                &request.deployment_id.0,
-                now,
-            )
-            .await?;
+            let approval = request.approval;
+            let approved_resources = approval
+                .as_ref()
+                .into_iter()
+                .flat_map(|approval| approval.approved_resources.iter().cloned())
+                .map(|resource| {
+                    let kind = match resource.kind {
+                        trellis_runtime_apis::types::ResourceKind::Consumer => {
+                            AuthorizationResourceKind::Consumer
+                        }
+                        trellis_runtime_apis::types::ResourceKind::Job => {
+                            AuthorizationResourceKind::Job
+                        }
+                        trellis_runtime_apis::types::ResourceKind::Kv => {
+                            AuthorizationResourceKind::Kv
+                        }
+                        trellis_runtime_apis::types::ResourceKind::State => {
+                            AuthorizationResourceKind::State
+                        }
+                        trellis_runtime_apis::types::ResourceKind::Store => {
+                            AuthorizationResourceKind::Store
+                        }
+                        trellis_runtime_apis::types::ResourceKind::Unknown(value) => {
+                            return Err(AuthorizationStateError::InvalidRecord(format!(
+                                "unknown approved resource kind {value}"
+                            )));
+                        }
+                    };
+                    Ok(ApprovedResource {
+                        kind,
+                        name: resource.name,
+                        commitment: ResourceCommitment {
+                            desired_max_object_bytes: resource
+                                .commitment
+                                .desired_max_object_bytes
+                                .map(|value| value.0 .0),
+                            desired_max_total_bytes: resource
+                                .commitment
+                                .desired_max_total_bytes
+                                .map(|value| value.0 .0),
+                            desired_max_value_bytes: resource
+                                .commitment
+                                .desired_max_value_bytes
+                                .map(|value| value.0 .0),
+                            history: resource.commitment.history.map(|value| value.0 .0),
+                            ttl_ms: resource.commitment.ttl_ms.map(|value| value.0),
+                        },
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let approved_capabilities = approval
+                .as_ref()
+                .into_iter()
+                .flat_map(|approval| approval.approved_capabilities.iter().cloned())
+                .map(|capability| ApprovedCapability {
+                    id: capability.id,
+                    consent_digest: capability.consent_digest,
+                })
+                .collect();
+            let mode = match approval.as_ref().map(|approval| &approval.mode) {
+                Some(trellis_runtime_apis::types::ApprovalMode::Capabilities) => {
+                    ApprovalMode::Capabilities
+                }
+                Some(trellis_runtime_apis::types::ApprovalMode::Exact) => ApprovalMode::Exact,
+                Some(trellis_runtime_apis::types::ApprovalMode::Unknown(value)) => {
+                    return Err(AuthorizationStateError::InvalidRecord(format!(
+                        "unknown approval mode {value}"
+                    )));
+                }
+                None => ApprovalMode::Capabilities,
+            };
+            let delegation_ceiling = approval
+                .as_ref()
+                .and_then(|approval| approval.delegation_ceiling.clone())
+                .map(|ceiling| {
+                    let exact_restrictions = ceiling
+                        .exact_restrictions
+                        .map(|grants| {
+                            serde_json::from_value(serde_json::to_value(grants).map_err(
+                                |error| AuthorizationStateError::InvalidRecord(error.to_string()),
+                            )?)
+                            .map_err(|error| {
+                                AuthorizationStateError::InvalidRecord(error.to_string())
+                            })
+                        })
+                        .transpose()?;
+                    Ok(crate::platform::auth::ephemeral::ConsentDelegationCeiling {
+                        capabilities: ceiling
+                            .capabilities
+                            .into_iter()
+                            .map(|capability| ApprovedCapability {
+                                id: capability.id,
+                                consent_digest: capability.consent_digest,
+                            })
+                            .collect(),
+                        exact_restrictions,
+                    })
+                })
+                .transpose()?;
             repository
                 .apply_deployment(
                     mutation_actor(&caller),
@@ -172,20 +273,24 @@ pub(super) async fn dispatch(
                         binding,
                         root_package,
                         evidence_json,
-                        request
-                            .optional_capabilities
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|capability| capability.0)
-                            .collect(),
-                        resources,
+                        approval.map(|approval| {
+                            crate::platform::auth::ephemeral::ConsentApproval {
+                                mode,
+                                installed_revision: approval.installed_revision.0,
+                                expected_grant_revision: approval.expected_grant_revision.0,
+                                decision_digest: approval.decision_digest,
+                                approved_capabilities,
+                                approved_resources,
+                                companion_approved: approval.companion_approved,
+                                delegation_ceiling,
+                            }
+                        }),
                     ),
-                    expected,
-                    idempotency,
+                    (expected, idempotency),
                 )
                 .await
         }
-        "rpc.v1.Auth.Grants.Set" => {
+        "rpc.v1.auth.Grants.Set" => {
             require_admin(&caller)?;
             let request: AuthGrantsSetRequest = serde_json::from_value(input.clone())
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
@@ -206,29 +311,56 @@ pub(super) async fn dispatch(
                 &input,
                 now,
             )?;
-            let grants = serde_json::from_value(input["grants"].clone())
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-            let platform_privileges =
+            let grants = grant_set_from_generated(request.grants)?;
+            let platform_privileges: Vec<PlatformPrivilege> =
                 serde_json::from_value(input["platformPrivileges"].clone())
                     .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
             let installed_revision = u64::try_from(request.installed_revision.0 .0)
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-            let expires_at = input
-                .get("expiresAt")
-                .filter(|value| !value.is_null())
-                .and_then(Value::as_str)
-                .map(str::parse::<i64>)
-                .transpose()
-                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+            let participant_id = request.participant_id.0;
+            let (_, participant) = repository
+                .get_installed_participant_record(participant_id.clone(), Some(installed_revision))
+                .await?
+                .ok_or(AuthorizationStateError::ParticipantMissing)?;
+            let approved_resources = participant_resource_commitments(&participant)?
+                .into_iter()
+                .filter(|approved| {
+                    grants.permissions().iter().any(|permission| {
+                        matches!(permission.target().clone(), PermissionTarget::ParticipantResource { participant, resource, name }
+                            if participant == participant_id
+                                && AuthorizationResourceKind::from(resource) == approved.kind
+                                && name == approved.name)
+                    })
+                })
+                .collect();
+            let delegation_ceiling = DelegationCeiling {
+                capabilities: Vec::new(),
+                exact_restrictions: Some(grants.clone()),
+                platform_privileges: platform_privileges.clone(),
+            };
+            let expires_at = match request.expires_at {
+                trellis_runtime_apis::__types::Nullable::Null => None,
+                trellis_runtime_apis::__types::Nullable::Value(value) => {
+                    Some(i64::try_from(value.0 .0).map_err(|error| {
+                        AuthorizationStateError::InvalidRecord(error.to_string())
+                    })?)
+                }
+            };
             repository
                 .admin_set_grant_binding(
                     mutation_actor(&caller),
                     GrantBindingReplacement {
                         owner_kind,
                         owner_id: request.owner_id.0,
-                        participant_id: request.participant_id.0,
+                        participant_id,
                         installed_revision,
                         grants,
+                        approval_mode: ApprovalMode::Exact,
+                        approved_capabilities: Vec::new(),
+                        approved_resources,
+                        delegation_ceiling,
+                        approval_decision_digest: idempotency.request_digest.clone(),
+                        companion_approved: false,
                         platform_privileges,
                         expected_revision: expected,
                         expected_current_installed_revision: None,
@@ -240,7 +372,7 @@ pub(super) async fn dispatch(
                 )
                 .await
         }
-        "rpc.v1.Auth.Grants.Revoke" => {
+        "rpc.v1.auth.Grants.Revoke" => {
             let request: AuthGrantsRevokeRequest = serde_json::from_value(input.clone())
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
             let expected = request.expected_revision.0 .0;
@@ -277,5 +409,47 @@ pub(super) async fn dispatch(
         _ => Err(AuthorizationStateError::InvalidRecord(format!(
             "unknown grants operation: {subject}"
         ))),
+    }
+}
+
+fn grant_set_from_generated(grants: AuthGrantSet) -> Result<GrantSet, AuthorizationStateError> {
+    let permissions = grants
+        .permissions
+        .into_iter()
+        .map(|permission| {
+            let target: Value = serde_json::from_slice(&permission.target.0)
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+            Ok(json!({ "action": permission.action, "target": target }))
+        })
+        .collect::<Result<Vec<_>, AuthorizationStateError>>()?;
+    serde_json::from_value(json!({ "format": grants.format, "permissions": permissions }))
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_grant_set_decodes_opaque_target_bytes() {
+        let generated: AuthGrantSet = serde_json::from_value(json!({
+            "format": "trellis.grant-set.v1",
+            "permissions": [{
+                "action": "call",
+                "target": "eyJraW5kIjoiYXBpU3VyZmFjZSIsImFwaSI6InRyZWxsaXMuYXV0aCIsInN1cmZhY2UiOiJycGMiLCJuYW1lIjoiR3JhbnRzLkdldCJ9"
+            }]
+        }))
+        .expect("generated grant DTO");
+
+        let grants = grant_set_from_generated(generated).expect("protocol grant set");
+
+        assert_eq!(
+            grants.permissions()[0].target().as_api_surface(),
+            Some((
+                "trellis.auth",
+                trellis_protocol::ApiSurfaceKind::Rpc,
+                "Grants.Get"
+            ))
+        );
     }
 }

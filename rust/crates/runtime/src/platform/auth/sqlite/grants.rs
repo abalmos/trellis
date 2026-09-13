@@ -5,18 +5,21 @@ use serde_json::{json, Value};
 use trellis_protocol::{
     ParticipantKind, ParticipantResourceKind, PermissionAction, PermissionTarget, PlatformPrivilege,
 };
+use trellis_runtime_apis::apis::trellis_auth_v1::events::GrantsChanged;
 use trellis_runtime_apis::types::{AuthGrantsListRequestOwnerKind, AuthGrantsListRequestState};
 
+use super::super::application::repository::{ActivationReviewClaim, ActivationReviewDecision};
 use super::super::authority::{IssuanceConnection, IssuanceCredential};
 use super::super::context::{
     load_sql_context_by_digest, revoke_sql_contexts, AuthorizationContextRevocationReason,
     AuthorizationContextSelector, AuthorizationContextState,
 };
-use super::super::domain::{require_protocol_timestamp, GrantBindingReplacement};
+use super::super::domain::{require_protocol_timestamp, ApprovedResource, GrantBindingReplacement};
 use super::super::{
-    AuthorizationStateError, GrantBinding, GrantBindingState, GrantOwnerKind,
-    IdempotencyResultRecord, MutationActor, ParticipantBindingRecord, PostCommitActionKind,
-    PostCommitActionRecord, ResourceBindingEvidence,
+    auth_event_subject, AuthorizationStateError, DeviceActivationReviewState,
+    DeviceDelegationRecord, DeviceDelegationState, DeviceState, GrantBinding, GrantBindingState,
+    GrantOwnerKind, IdempotencyResultRecord, MutationActor, ParticipantBindingRecord,
+    PostCommitActionKind, PostCommitActionRecord, SessionRecord,
 };
 
 pub(super) fn require_current_actor(
@@ -84,13 +87,19 @@ pub(super) fn require_current_actor(
     Ok(())
 }
 use super::common::{
-    decode_enum, decode_json, encode_enum, encode_json, map_write_error, sql_error,
+    decode_enum, decode_json, encode_enum, encode_json, map_write_error, sql_error, to_sql_version,
 };
 use super::deployments::{load_deployment_profile, upsert_deployment_profile_evidence};
 use super::evidence::load_deployment;
 use super::outbox::{insert_sql_idempotency_and_actions, sqlite_idempotency_replay};
 use super::principals::load_principal;
+use super::validation::next_version;
 use super::SqliteAuthorizationStore;
+
+enum CompanionActivationReviewMutation {
+    Claim(ActivationReviewClaim),
+    Decision(ActivationReviewDecision),
+}
 
 pub(in crate::platform::auth) fn load_grant_binding(
     connection: &Connection,
@@ -101,8 +110,11 @@ pub(in crate::platform::auth) fn load_grant_binding(
     let binding = connection
         .query_row(
             "SELECT owner_kind, owner_id, participant_id, installed_revision, grants_json,
-                platform_privileges_json, revision, state, expires_at, provenance_json,
-                created_at, updated_at
+                approval_mode, approved_capabilities_json, approved_resources_json,
+                delegation_ceiling_json, approval_decision_digest,
+                approval_expected_grant_revision, companion_approved,
+                platform_privileges_json, revision, state, expires_at,
+                provenance_json, created_at, updated_at
          FROM auth_grant_bindings WHERE owner_kind = ?1 AND owner_id = ?2 AND participant_id = ?3",
             params![encode_enum(owner_kind)?, owner_id, participant_id],
             |row| {
@@ -112,16 +124,23 @@ pub(in crate::platform::auth) fn load_grant_binding(
                     participant_id: row.get(2)?,
                     installed_revision: row.get(3)?,
                     grants: decode_json(row.get::<_, String>(4)?)?,
-                    platform_privileges: decode_json(row.get::<_, String>(5)?)?,
-                    revision: row.get(6)?,
-                    state: decode_enum(row.get::<_, String>(7)?)?,
-                    expires_at: row.get(8)?,
+                    approval_mode: decode_enum(row.get::<_, String>(5)?)?,
+                    approved_capabilities: decode_json(row.get::<_, String>(6)?)?,
+                    approved_resources: decode_json(row.get::<_, String>(7)?)?,
+                    delegation_ceiling: decode_json(row.get::<_, String>(8)?)?,
+                    approval_decision_digest: row.get(9)?,
+                    approval_expected_grant_revision: row.get(10)?,
+                    companion_approved: row.get(11)?,
+                    platform_privileges: decode_json(row.get::<_, String>(12)?)?,
+                    revision: row.get(13)?,
+                    state: decode_enum(row.get::<_, String>(14)?)?,
+                    expires_at: row.get(15)?,
                     provenance: row
-                        .get::<_, Option<String>>(9)?
+                        .get::<_, Option<String>>(16)?
                         .map(decode_json)
                         .transpose()?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
+                    created_at: row.get(17)?,
+                    updated_at: row.get(18)?,
                 })
             },
         )
@@ -192,7 +211,8 @@ pub(in crate::platform::auth) fn install_participant(
             "SELECT revision FROM auth_installed_participants
                WHERE participant_id = ?1 AND participant_kind = ?2 AND participant_digest = ?3
                 AND needs_digest = ?4 AND package_digest = ?5 AND participant_path = ?6
-                AND projection_json = ?7
+                 AND companion_participant_id IS ?7 AND companion_participant_kind IS ?8
+                 AND companion_required = ?9 AND projection_json = ?10
               ORDER BY revision DESC LIMIT 1",
             params![
                 binding.participant_id,
@@ -201,6 +221,13 @@ pub(in crate::platform::auth) fn install_participant(
                 binding.needs_digest,
                 binding.package_digest,
                 binding.participant_path,
+                binding.projection.companion_participant_id,
+                binding
+                    .projection
+                    .companion_participant_kind
+                    .map(encode_enum)
+                    .transpose()?,
+                binding.projection.companion_required,
                 encode_json(&binding.projection)?
             ],
             |row| row.get::<_, u64>(0),
@@ -220,9 +247,10 @@ pub(in crate::platform::auth) fn install_participant(
     connection
         .execute(
             "INSERT INTO auth_installed_participants
-               (participant_id, revision, participant_kind, participant_digest, needs_digest,
-                installed_at, package_digest, participant_path, projection_json)
-              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                (participant_id, revision, participant_kind, participant_digest, needs_digest,
+                 installed_at, package_digest, participant_path, companion_participant_id,
+                 companion_participant_kind, companion_required, projection_json)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 binding.participant_id,
                 revision,
@@ -232,46 +260,18 @@ pub(in crate::platform::auth) fn install_participant(
                 binding.resolved_at,
                 binding.package_digest,
                 binding.participant_path,
+                binding.projection.companion_participant_id,
+                binding
+                    .projection
+                    .companion_participant_kind
+                    .map(encode_enum)
+                    .transpose()?,
+                binding.projection.companion_required,
                 encode_json(&binding.projection)?
             ],
         )
         .map_err(map_write_error)?;
     Ok(revision)
-}
-
-fn participant_install_event(
-    binding: &ParticipantBindingRecord,
-    revision: u64,
-    now: i64,
-) -> Result<PostCommitActionRecord, AuthorizationStateError> {
-    Ok(PostCommitActionRecord {
-        predecessor_action_id: None,
-        action_id: trellis_protocol::digest_json(&json!({
-            "event": "Auth.Participants.Installed",
-            "participantId": binding.participant_id,
-            "revision": revision,
-        }))
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-        kind: PostCommitActionKind::Event,
-        payload: json!({
-            "eventType": "Auth.Participants.Installed",
-            "eventSubject": format!(
-                "events.v1.Auth.Participants.Installed.{}",
-                binding.participant_id
-            ),
-            "eventId": ulid::Ulid::new().to_string(),
-            "occurredAt": now,
-            "participantId": binding.participant_id,
-            "participantKind": binding.participant_kind,
-            "revision": revision,
-            "participantDigest": binding.participant_digest,
-        }),
-        created_at: now,
-        attempts: 0,
-        next_attempt_at: now,
-        claimed_until: None,
-        last_error: None,
-    })
 }
 
 pub(in crate::platform::auth) fn load_installed_participant(
@@ -282,7 +282,8 @@ pub(in crate::platform::auth) fn load_installed_participant(
     connection
         .query_row(
             "SELECT revision, participant_id, participant_kind, participant_digest, needs_digest,
-                installed_at, package_digest, participant_path, projection_json
+                installed_at, package_digest, participant_path, companion_participant_id,
+                companion_participant_kind, companion_required, projection_json
          FROM auth_installed_participants WHERE participant_id = ?1
            AND (?2 IS NULL OR revision = ?2) ORDER BY revision DESC LIMIT 1",
             params![participant_id, revision],
@@ -296,7 +297,10 @@ pub(in crate::platform::auth) fn load_installed_participant(
                     row.get::<_, i64>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, bool>(10)?,
+                    row.get::<_, String>(11)?,
                 ))
             },
         )
@@ -312,8 +316,24 @@ pub(in crate::platform::auth) fn load_installed_participant(
                 resolved_at,
                 package_digest,
                 participant_path,
+                companion_participant_id,
+                companion_participant_kind,
+                companion_required,
                 projection_json,
             )| {
+                let projection: super::super::evidence::ParticipantRuntimeProjection =
+                    decode_json(projection_json).map_err(sql_error)?;
+                if projection.companion_participant_id != companion_participant_id
+                    || projection.companion_participant_kind
+                        != companion_participant_kind
+                            .map(|kind| decode_enum(kind).map_err(sql_error))
+                            .transpose()?
+                    || projection.companion_required != companion_required
+                {
+                    return Err(AuthorizationStateError::InvalidRecord(
+                        "stored companion projection does not match installed columns".to_owned(),
+                    ));
+                }
                 let binding = ParticipantBindingRecord {
                     participant_id,
                     participant_kind: decode_enum(participant_kind).map_err(sql_error)?,
@@ -321,7 +341,7 @@ pub(in crate::platform::auth) fn load_installed_participant(
                     needs_digest,
                     package_digest,
                     participant_path,
-                    projection: decode_json(projection_json).map_err(sql_error)?,
+                    projection,
                     resolved_at,
                     state: super::super::ParticipantBindingState::Resolved,
                     error: None,
@@ -467,8 +487,20 @@ pub(in crate::platform::auth) fn replace_grant_binding(
         participant_id: replacement.participant_id,
         installed_revision,
         grants: replacement.grants,
+        approval_mode: replacement.approval_mode,
+        approved_capabilities: replacement.approved_capabilities,
+        approved_resources: replacement.approved_resources,
+        delegation_ceiling: replacement.delegation_ceiling,
+        approval_decision_digest: replacement.approval_decision_digest,
+        approval_expected_grant_revision: replacement.expected_revision,
+        companion_approved: replacement.companion_approved,
         platform_privileges: replacement.platform_privileges,
-        revision: revision.max(1),
+        revision: revision
+            .checked_add(1)
+            .filter(|revision| *revision <= super::super::MAX_PROTOCOL_INTEGER)
+            .ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord("grant revision overflow".to_owned())
+            })?,
         state: replacement.state,
         expires_at: replacement.expires_at,
         provenance: replacement.provenance,
@@ -536,6 +568,39 @@ pub(in crate::platform::auth) fn replace_grant_binding(
             "grant contains a permission outside the installed participant definitions".to_owned(),
         ));
     }
+    let resources = super::contexts::load_resource_bindings(
+        connection,
+        binding.owner_kind,
+        &binding.owner_id,
+        &binding.participant_id,
+        binding.installed_revision,
+    )?;
+    let authority = super::super::policy::resolve_authority(
+        &participant,
+        binding.approval_mode,
+        &binding.approved_capabilities,
+        &binding.approved_resources,
+        &binding.platform_privileges,
+        &binding.delegation_ceiling,
+        (&resources, true),
+    )?;
+    if binding.approval_mode == super::super::ApprovalMode::Capabilities {
+        binding.grants = authority.exact_grants;
+        binding.platform_privileges = authority.platform_privileges;
+    } else if authority.exact_grants != binding.grants
+        || authority.platform_privileges != binding.platform_privileges
+    {
+        tracing::warn!(
+            owner_kind = ?binding.owner_kind,
+            owner_id = %binding.owner_id,
+            participant_id = %binding.participant_id,
+            revision = binding.revision,
+            "stored grant binding differs from resolved authority"
+        );
+        return Err(AuthorizationStateError::InvalidRecord(
+            "grant binding does not match resolved authority".to_owned(),
+        ));
+    }
     for permission in binding.grants.permissions() {
         if matches!(
             permission.target(),
@@ -580,49 +645,59 @@ pub(in crate::platform::auth) fn replace_grant_binding(
     {
         return Err(AuthorizationStateError::NotAuthorized);
     }
-    if current.as_ref() == Some(&binding) {
-        return Ok((binding, Vec::new()));
-    }
     binding.updated_at = now;
     binding.validate()?;
-    binding.revision = if current.is_none() {
-        1
-    } else {
-        revision
-            .checked_add(1)
-            .filter(|revision| *revision <= super::super::MAX_PROTOCOL_INTEGER)
-            .ok_or_else(|| {
-                AuthorizationStateError::InvalidRecord("grant revision overflow".to_owned())
-            })?
-    };
     connection.execute(
         "INSERT INTO auth_grant_bindings (owner_kind, owner_id, participant_id, installed_revision,
-             grants_json, platform_privileges_json, revision, state, expires_at, provenance_json,
-             created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             grants_json, approval_mode, approved_capabilities_json, approved_resources_json,
+             delegation_ceiling_json, approval_decision_digest,
+             approval_expected_grant_revision, companion_approved,
+             platform_privileges_json, revision, state, expires_at,
+             provenance_json, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
          ON CONFLICT(owner_kind, owner_id, participant_id) DO UPDATE SET
              installed_revision = excluded.installed_revision, grants_json = excluded.grants_json,
+             approval_mode = excluded.approval_mode,
+             approved_capabilities_json = excluded.approved_capabilities_json,
+             approved_resources_json = excluded.approved_resources_json,
+             delegation_ceiling_json = excluded.delegation_ceiling_json,
+             approval_decision_digest = excluded.approval_decision_digest,
+             approval_expected_grant_revision = excluded.approval_expected_grant_revision,
+             companion_approved = excluded.companion_approved,
              platform_privileges_json = excluded.platform_privileges_json, revision = excluded.revision,
               state = excluded.state, expires_at = excluded.expires_at, provenance_json = excluded.provenance_json,
-              updated_at = excluded.updated_at",
+               updated_at = excluded.updated_at",
         params![encode_enum(binding.owner_kind)?, binding.owner_id, binding.participant_id,
-            binding.installed_revision, encode_json(&binding.grants)?, encode_json(&binding.platform_privileges)?,
-            binding.revision, encode_enum(binding.state)?, binding.expires_at,
+            binding.installed_revision, encode_json(&binding.grants)?, encode_enum(binding.approval_mode)?,
+            encode_json(&binding.approved_capabilities)?, encode_json(&binding.approved_resources)?,
+            encode_json(&binding.delegation_ceiling)?, binding.approval_decision_digest,
+            binding.approval_expected_grant_revision, binding.companion_approved,
+            encode_json(&binding.platform_privileges)?, binding.revision, encode_enum(binding.state)?, binding.expires_at,
             binding.provenance.as_ref().map(encode_json).transpose()?, binding.created_at, binding.updated_at],
     ).map_err(map_write_error)?;
-    if binding.owner_kind == GrantOwnerKind::User {
-        let resources =
-            super::super::resources::identity_resources(&participant, &binding.owner_id, now)?;
-        super::evidence::replace_sql_resource_bindings(
-            connection,
-            binding.owner_kind,
-            &binding.owner_id,
-            &binding.participant_id,
-            binding.installed_revision,
-            &resources,
-        )?;
+    if binding.owner_kind == GrantOwnerKind::User && binding.state == GrantBindingState::Active {
+        if let Some(previous) = current.as_ref() {
+            connection
+                .execute(
+                    "UPDATE auth_device_delegations
+                     SET child_grant_revision = ?1
+                     WHERE child_grant_revision = ?2
+                       AND companion_participant_id = ?3
+                       AND user_login_session_id IN (
+                           SELECT session_id FROM auth_sessions
+                           WHERE principal_id = ?4 AND participant_id = ?3
+                       )",
+                    params![
+                        binding.revision,
+                        previous.revision,
+                        binding.participant_id,
+                        binding.owner_id,
+                    ],
+                )
+                .map_err(map_write_error)?;
+        }
     }
-    revoke_sql_contexts(
+    let revoked_contexts = revoke_sql_contexts(
         connection,
         &AuthorizationContextSelector::Grant(
             binding.owner_kind,
@@ -636,6 +711,11 @@ pub(in crate::platform::auth) fn replace_grant_binding(
         },
         now.div_euclid(1_000),
     )?;
+    let mut event_payload = json!({
+        "eventType": "Auth.Grants.Changed",
+        "eventId": ulid::Ulid::new().to_string(), "occurredAt": now, "binding": binding,
+    });
+    event_payload["eventSubject"] = json!(auth_event_subject::<GrantsChanged>(&event_payload)?);
     let event = PostCommitActionRecord {
         predecessor_action_id: None,
         action_id: trellis_protocol::digest_json(&json!({
@@ -645,18 +725,94 @@ pub(in crate::platform::auth) fn replace_grant_binding(
         }))
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
         kind: PostCommitActionKind::Event,
-        payload: json!({
-            "eventType": "Auth.Grants.Changed",
-            "eventSubject": format!("events.v1.Auth.Grants.Changed.{}", binding.owner_id),
-            "eventId": ulid::Ulid::new().to_string(), "occurredAt": now, "binding": binding,
-        }),
+        payload: event_payload,
         created_at: now,
         attempts: 0,
         next_attempt_at: now,
         claimed_until: None,
         last_error: None,
     };
-    Ok((binding, vec![event]))
+    let mut actions = vec![event];
+    for context in revoked_contexts {
+        actions.push(PostCommitActionRecord {
+            predecessor_action_id: Some(super::super::context::context_revocation_action_id(
+                &context,
+            )?),
+            action_id: trellis_protocol::digest_json(&json!({
+                "grantKick": context.connection_id,
+                "participantId": binding.participant_id,
+                "revision": binding.revision,
+            }))
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+            kind: PostCommitActionKind::Kick,
+            payload: json!({
+                "connectionId": context.connection_id,
+                "reason": "grant_replaced",
+            }),
+            created_at: now,
+            attempts: 0,
+            next_attempt_at: now,
+            claimed_until: None,
+            last_error: None,
+        });
+    }
+    actions.extend(super::resources::reconcile_sql_resource_catalog(
+        connection, &binding, now,
+    )?);
+    Ok((binding, actions))
+}
+
+fn write_companion_activation(
+    connection: &Connection,
+    review: &super::super::DeviceActivationReviewRecord,
+    delegation: &DeviceDelegationRecord,
+    session: Option<&SessionRecord>,
+    now: i64,
+) -> Result<(), AuthorizationStateError> {
+    let session = session.ok_or_else(|| {
+        AuthorizationStateError::InvalidRecord(
+            "companion activation requires a login session".to_owned(),
+        )
+    })?;
+    if delegation.user_login_session_id.as_deref() != Some(&session.session_id) {
+        return Err(AuthorizationStateError::InvalidRecord(
+            "companion delegation and session do not match".to_owned(),
+        ));
+    }
+    super::sessions::insert_sql_session(connection, session)?;
+    connection
+        .execute(
+            "INSERT INTO auth_device_delegations (principal_id, deployment_id, companion_participant_id, user_login_session_id, installation_public_key, device_grant_revision, child_grant_revision, required, state, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(principal_id, deployment_id) DO UPDATE SET companion_participant_id = excluded.companion_participant_id, user_login_session_id = excluded.user_login_session_id, installation_public_key = excluded.installation_public_key, device_grant_revision = excluded.device_grant_revision, child_grant_revision = excluded.child_grant_revision, required = excluded.required, state = excluded.state, expires_at = excluded.expires_at",
+            params![
+                delegation.principal_id,
+                delegation.deployment_id,
+                delegation.companion_participant_id,
+                delegation.user_login_session_id,
+                delegation.installation_public_key,
+                delegation.device_grant_revision,
+                delegation.child_grant_revision,
+                delegation.required,
+                encode_enum(delegation.state)?,
+                delegation.expires_at,
+            ],
+        )
+        .map_err(map_write_error)?;
+    let changed = connection
+        .execute(
+            "UPDATE auth_devices SET state = ?1, updated_at = ?2, version = version + 1 WHERE principal_id = ?3 AND deployment_id = ?4",
+            params![
+                encode_enum(DeviceState::Active)?,
+                now,
+                review.principal_id,
+                review.deployment_id,
+            ],
+        )
+        .map_err(map_write_error)?;
+    if changed != 1 {
+        return Err(AuthorizationStateError::StorageConflict);
+    }
+    Ok(())
 }
 
 impl SqliteAuthorizationStore {
@@ -695,6 +851,91 @@ impl SqliteAuthorizationStore {
             load_installed_participant(connection, &participant_id, revision)
         })
         .await
+    }
+
+    pub(crate) async fn is_companion_participant(
+        &self,
+        participant_id: String,
+    ) -> Result<bool, AuthorizationStateError> {
+        self.run_read(move |connection| {
+            connection
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM auth_installed_participants parent
+                        WHERE parent.companion_participant_id = ?1
+                          AND parent.revision = (
+                            SELECT MAX(current.revision) FROM auth_installed_participants current
+                            WHERE current.participant_id = parent.participant_id
+                          )
+                    )",
+                    [participant_id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)
+        })
+        .await
+    }
+
+    pub(crate) async fn get_installed_package_evidence(
+        &self,
+        package_digest: &str,
+    ) -> Result<Option<trellis_idl::PackageEvidence>, AuthorizationStateError> {
+        let package_digest = package_digest.to_owned();
+        self.run_read(move |connection| {
+            connection
+                .query_row(
+                    "SELECT evidence_json FROM auth_package_evidence WHERE package_digest = ?1",
+                    [&package_digest],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(sql_error)?
+                .map(|json| {
+                    serde_json::from_str(&json)
+                        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
+                })
+                .transpose()
+        })
+        .await
+    }
+
+    pub(crate) async fn get_api_binding(
+        &self,
+        participant_id: &str,
+        api_id: &str,
+    ) -> Result<Option<String>, AuthorizationStateError> {
+        let participant_id = participant_id.to_owned();
+        let api_id = api_id.to_owned();
+        self.run_read(move |connection| {
+            connection
+                .query_row(
+                    "SELECT provider_deployment_id FROM auth_api_bindings WHERE participant_id = ?1 AND api_id = ?2",
+                    rusqlite::params![participant_id, api_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(sql_error)
+        })
+        .await
+    }
+
+    pub(crate) async fn put_api_binding(
+        &self,
+        participant_id: &str,
+        api_id: &str,
+        provider_deployment_id: &str,
+    ) -> Result<(), AuthorizationStateError> {
+        let participant_id = participant_id.to_owned();
+        let api_id = api_id.to_owned();
+        let provider_deployment_id = provider_deployment_id.to_owned();
+        self.run(move |connection| {
+            connection.execute(
+                "INSERT INTO auth_api_bindings (participant_id, api_id, provider_deployment_id) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(participant_id, api_id) DO UPDATE SET provider_deployment_id = excluded.provider_deployment_id",
+                rusqlite::params![participant_id, api_id, provider_deployment_id],
+            ).map_err(sql_error)?;
+            Ok(())
+        }).await
     }
 
     pub(crate) async fn put_participant_binding(
@@ -754,7 +995,65 @@ impl SqliteAuthorizationStore {
                     "id": id, "permissions": grant.permissions(),
                 })).collect::<Vec<_>>(),
             }}))
-        }).await
+          }).await
+    }
+
+    pub(crate) async fn list_installed_participants(
+        &self,
+        request: trellis_runtime_apis::types::AuthParticipantsListRequest,
+    ) -> Result<Value, AuthorizationStateError> {
+        let mut query = serde_json::to_value(&request)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        query.as_object_mut().map(|query| query.remove("page"));
+        let digest = trellis_protocol::pagination_query_digest("auth.Participants.List", &query)
+            .map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))?;
+        let limit = request
+            .page
+            .as_ref()
+            .and_then(|page| page.limit)
+            .unwrap_or(50);
+        if limit == 0 || limit > 200 {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "limit must be between 1 and 200".to_owned(),
+            ));
+        }
+        let after = request
+            .page
+            .and_then(|page| page.cursor)
+            .map(|cursor| trellis_protocol::decode_pagination_cursor::<String>(&cursor, &digest))
+            .transpose()
+            .map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))?;
+        let kind = request.kind.map(encode_enum).transpose()?;
+        self.run_read(move |connection| {
+                let mut statement = connection.prepare(
+                    "SELECT participant_id FROM auth_installed_participants p
+                     WHERE revision = (SELECT MAX(revision) FROM auth_installed_participants WHERE participant_id = p.participant_id)
+                       AND (?1 IS NULL OR participant_kind = ?1) AND (?2 IS NULL OR participant_id > ?2)
+                     ORDER BY participant_id LIMIT ?3"
+                ).map_err(sql_error)?;
+                let ids = statement.query_map(params![kind, after, i64::from(limit) + 1], |row| row.get::<_, String>(0))
+                    .map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
+                let next_cursor = (ids.len() > limit as usize).then(|| {
+                    trellis_protocol::encode_pagination_cursor(&digest, &ids[limit as usize - 1])
+                        .map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))
+                }).transpose()?;
+                let items = ids.into_iter().take(limit as usize).map(|id| {
+                    let (revision, binding) = load_installed_participant(connection, &id, None)?
+                        .ok_or(AuthorizationStateError::StorageConflict)?;
+                    Ok(json!({
+                        "participantId": binding.participant_id,
+                        "participantKind": binding.participant_kind,
+                        "revision": revision,
+                        "packageDigest": binding.package_digest,
+                        "participantPath": binding.participant_path,
+                        "participantDigest": binding.participant_digest,
+                        "installedAt": binding.resolved_at,
+                        "companionParticipantId": binding.projection.companion_participant_id,
+                        "companionRequired": binding.projection.companion_required,
+                    }))
+                }).collect::<Result<Vec<_>, AuthorizationStateError>>()?;
+                Ok(json!({"items": items, "page": {"nextCursor": next_cursor}}))
+            }).await
     }
 
     /// List one caller-scoped page in stable owner/participant tuple order.
@@ -762,6 +1061,11 @@ impl SqliteAuthorizationStore {
         &self,
         request: trellis_runtime_apis::types::AuthGrantsListRequest,
     ) -> Result<Value, AuthorizationStateError> {
+        let mut query = serde_json::to_value(&request)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        query.as_object_mut().map(|query| query.remove("page"));
+        let query_digest = trellis_protocol::pagination_query_digest("auth.Grants.List", &query)
+            .map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))?;
         let owner_kind = request
             .owner_kind
             .map(|kind| match kind {
@@ -782,30 +1086,29 @@ impl SqliteAuthorizationStore {
                 ),
             })
             .transpose()?;
-        let limit = request.limit.map_or(100, |limit| limit.0 .0);
-        if !(1..=500).contains(&limit) {
+        let limit = i64::from(
+            request
+                .page
+                .as_ref()
+                .and_then(|page| page.limit)
+                .unwrap_or(50),
+        );
+        if !(1..=200).contains(&limit) {
             return Err(AuthorizationStateError::InvalidRecord(
-                "limit must be between 1 and 500".to_owned(),
+                "limit must be between 1 and 200".to_owned(),
             ));
         }
-        let offset = match request.cursor {
-            Some(cursor)
-                if !cursor.0.is_empty() && cursor.0.bytes().all(|byte| byte.is_ascii_digit()) =>
-            {
-                cursor.0.parse::<i64>().map_err(|_| {
-                    AuthorizationStateError::InvalidRecord("invalid cursor".to_owned())
-                })?
-            }
-            Some(_) => {
-                return Err(AuthorizationStateError::InvalidRecord(
-                    "invalid cursor".to_owned(),
-                ))
-            }
-            None => 0,
-        };
-        let next = offset
-            .checked_add(limit)
-            .ok_or_else(|| AuthorizationStateError::InvalidRecord("cursor overflow".to_owned()))?;
+        let after = request
+            .page
+            .and_then(|page| page.cursor)
+            .map(|cursor| {
+                trellis_protocol::decode_pagination_cursor::<(String, String, String)>(
+                    &cursor,
+                    &query_digest,
+                )
+            })
+            .transpose()
+            .map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))?;
         self.run_read(move |connection| {
             let transaction = connection.unchecked_transaction().map_err(sql_error)?;
             let keys = {
@@ -813,8 +1116,9 @@ impl SqliteAuthorizationStore {
                     .prepare(
                         "SELECT owner_kind, owner_id, participant_id FROM auth_grant_bindings
                      WHERE (?1 IS NULL OR owner_kind = ?1) AND (?2 IS NULL OR owner_id = ?2)
-                       AND (?3 IS NULL OR participant_id = ?3) AND (?4 IS NULL OR state = ?4)
-                     ORDER BY owner_kind, owner_id, participant_id LIMIT ?5 OFFSET ?6",
+                             AND (?3 IS NULL OR participant_id = ?3) AND (?4 IS NULL OR state = ?4)
+                             AND (?5 IS NULL OR owner_kind > ?5 OR (owner_kind = ?5 AND (owner_id > ?6 OR (owner_id = ?6 AND participant_id > ?7))))
+                           ORDER BY owner_kind, owner_id, participant_id LIMIT ?8",
                     )
                     .map_err(sql_error)?;
                 let keys = statement
@@ -823,9 +1127,11 @@ impl SqliteAuthorizationStore {
                             owner_kind.map(encode_enum).transpose()?,
                             request.owner_id.map(|owner| owner.0),
                             request.participant_id.map(|participant| participant.0),
-                            state.map(encode_enum).transpose()?,
-                            limit + 1,
-                            offset
+                                  state.map(encode_enum).transpose()?,
+                                  after.as_ref().map(|after| after.0.as_str()),
+                                  after.as_ref().map(|after| after.1.as_str()),
+                                  after.as_ref().map(|after| after.2.as_str()),
+                                  limit + 1
                         ],
                         |row| {
                             Ok((
@@ -840,8 +1146,14 @@ impl SqliteAuthorizationStore {
                     .map_err(sql_error)?;
                 keys
             };
-            let has_more = keys.len() > limit as usize;
-            let entries = keys
+                  let next_cursor = (keys.len() > limit as usize).then(|| {
+                      let (kind, owner, participant) = &keys[limit as usize - 1];
+                      trellis_protocol::encode_pagination_cursor(
+                          &query_digest,
+                          &(encode_enum(*kind)?, owner, participant),
+                      ).map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))
+                  }).transpose()?;
+                  let entries = keys
                 .into_iter()
                 .take(limit as usize)
                 .map(|(kind, owner, participant)| {
@@ -850,7 +1162,11 @@ impl SqliteAuthorizationStore {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             transaction.commit().map_err(sql_error)?;
-            Ok(json!({"entries": entries, "nextCursor": has_more.then(|| next.to_string())}))
+                  let page = next_cursor.map_or_else(|| json!({}), |cursor| json!({"nextCursor": cursor}));
+            Ok(json!({
+                "items": entries,
+                "page": page,
+            }))
         })
         .await
     }
@@ -864,14 +1180,12 @@ impl SqliteAuthorizationStore {
             ParticipantBindingRecord,
             String,
             String,
-            Vec<String>,
-            Vec<ResourceBindingEvidence>,
+            Option<super::super::ephemeral::ConsentApproval>,
         ),
-        expected_revision: u64,
-        mut idempotency: IdempotencyResultRecord,
+        revision: (u64, IdempotencyResultRecord),
     ) -> Result<Value, AuthorizationStateError> {
-        let (participant, root_package, evidence_json, optional_capabilities, resource_evidence) =
-            deployment_evidence;
+        let (expected_revision, mut idempotency) = revision;
+        let (participant, root_package, evidence_json, approval) = deployment_evidence;
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
             require_current_actor(&transaction, &actor, true, idempotency.created_at)?;
@@ -896,15 +1210,56 @@ impl SqliteAuthorizationStore {
             if current_revision != expected_revision {
                 return Err(AuthorizationStateError::RevisionConflict { expected: expected_revision, current: current_revision });
             }
-            let resolved = participant.resolve()?;
-            let grants = resolved.select_grants(&optional_capabilities)?;
-            let previous_installed_revision = load_installed_participant(
-                &transaction,
-                &participant.participant_id,
-                None,
-            )?
-            .map(|(revision, _)| revision);
+            let ceiling = super::super::policy::participant_delegation_ceiling(&participant)?;
             let installed_revision = install_participant(&transaction, &participant, None)?;
+            let companion = participant
+                .resolve()?
+                .companion_participant_id
+                .as_deref()
+                .map(|participant_id| load_installed_participant(&transaction, participant_id, None))
+                .transpose()?
+                .flatten();
+            let consent = super::super::policy::consent_request(
+                &participant,
+                installed_revision,
+                current.as_ref(),
+                &ceiling,
+                &[],
+                companion
+                    .as_ref()
+                    .map(|(_, child)| (child, None, [].as_slice())),
+            )?;
+            let Some(approval) = approval else {
+                return Err(AuthorizationStateError::ApprovalRequired {
+                    consent_request: serde_json::to_value(&consent)
+                        .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?,
+                });
+            };
+            let approved_capabilities = approval.approved_capabilities.iter().collect::<std::collections::BTreeSet<_>>();
+            let approved_resources = approval.approved_resources.iter().collect::<std::collections::BTreeSet<_>>();
+            if approval.mode != super::super::ApprovalMode::Capabilities
+                || approval.installed_revision != installed_revision
+                || approval.expected_grant_revision != current_revision
+                || approval.decision_digest != consent.decision_digest
+                || approval.delegation_ceiling.as_ref().is_some_and(|submitted| {
+                    submitted.capabilities != ceiling.capabilities
+                        || submitted.exact_restrictions != ceiling.exact_restrictions
+                })
+                || approved_capabilities.len() != approval.approved_capabilities.len()
+                || approved_resources.len() != approval.approved_resources.len()
+                || approval.approved_capabilities.iter().any(|approved| !consent.capabilities.iter().any(|capability| capability.eligible && capability.id == approved.id && capability.consent_digest == approved.consent_digest))
+                || approval.approved_resources.iter().any(|approved| !consent.resources.iter().any(|resource| resource.eligible && resource.kind == approved.kind && resource.name == approved.name && resource.requested_commitment == approved.commitment))
+                || consent.capabilities.iter().any(|capability| capability.required && capability.eligible && !approved_capabilities.iter().any(|approved| approved.id == capability.id && approved.consent_digest == capability.consent_digest))
+                || consent.resources.iter().any(|resource| resource.required && !approved_resources.contains(&ApprovedResource { kind: resource.kind, name: resource.name.clone(), commitment: resource.requested_commitment.clone() }))
+                || consent.companion.as_ref().is_some_and(|companion| companion.required && !approval.companion_approved)
+                || (approval.companion_approved && consent.companion.is_none())
+            {
+                return Err(AuthorizationStateError::ApprovalRequired {
+                    consent_request: serde_json::to_value(&consent)
+                        .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?,
+                });
+            }
+            let authority = super::super::policy::resolve_authority(&participant, approval.mode, &approval.approved_capabilities, &approval.approved_resources, &current.as_ref().map_or_else(Vec::new, |binding| binding.platform_privileges.clone()), &ceiling, (&[], approval.companion_approved))?;
             if deployment.participant_id.is_none() {
                 deployment.participant_id = Some(participant.participant_id.clone());
                 deployment.updated_at = idempotency.created_at;
@@ -916,12 +1271,18 @@ impl SqliteAuthorizationStore {
                 ).map_err(map_write_error)?;
             }
             upsert_deployment_profile_evidence(&transaction, &deployment)?;
-            let (binding, mut actions) = replace_grant_binding(&transaction, GrantBindingReplacement {
+            let (binding, actions) = replace_grant_binding(&transaction, GrantBindingReplacement {
                 owner_kind: GrantOwnerKind::Deployment,
                 owner_id: deployment_id,
                 participant_id: participant.participant_id.clone(),
                 installed_revision,
-                grants,
+                grants: authority.exact_grants,
+                approval_mode: approval.mode,
+                approved_capabilities: approval.approved_capabilities,
+                approved_resources: approval.approved_resources,
+                delegation_ceiling: ceiling,
+                approval_decision_digest: approval.decision_digest,
+                companion_approved: approval.companion_approved,
                 platform_privileges: current.as_ref().map_or_else(Vec::new, |binding| binding.platform_privileges.clone()),
                 expected_revision,
                 expected_current_installed_revision: None,
@@ -929,26 +1290,6 @@ impl SqliteAuthorizationStore {
                 expires_at: current.as_ref().and_then(|binding| binding.expires_at),
                 provenance: None,
             }, idempotency.created_at)?;
-            if !actions.is_empty() {
-                super::evidence::replace_sql_resource_bindings(
-                    &transaction,
-                    GrantOwnerKind::Deployment,
-                    &binding.owner_id,
-                    &binding.participant_id,
-                    installed_revision,
-                    &resource_evidence,
-                )?;
-            }
-            if previous_installed_revision != Some(installed_revision) {
-                actions.insert(
-                    0,
-                    participant_install_event(
-                        &participant,
-                        installed_revision,
-                        idempotency.created_at,
-                    )?,
-                );
-            }
             let principal = super::principals::load_principal(&transaction, &deployment.deployment_id)?
                 .ok_or(AuthorizationStateError::PrincipalMissing)?;
             let mut deployment_value = serde_json::to_value(&deployment)
@@ -958,7 +1299,11 @@ impl SqliteAuthorizationStore {
             }
             deployment_value["disabledAt"] = json!(principal.disabled_at);
             deployment_value["revokedAt"] = json!(principal.revoked_at);
-            idempotency.result = json!({"deployment": deployment_value, "binding": binding});
+            idempotency.result = json!({
+                "deployment": deployment_value,
+                "binding": binding,
+                "consentRequest": consent,
+            });
             insert_sql_idempotency_and_actions(&transaction, &idempotency, &actions)?;
             transaction.commit().map_err(sql_error)?;
             Ok(idempotency.result)
@@ -992,6 +1337,231 @@ impl SqliteAuthorizationStore {
             let (binding, actions) =
                 replace_grant_binding(&transaction, replacement, idempotency.created_at)?;
             idempotency.result = json!({"binding": binding});
+            insert_sql_idempotency_and_actions(&transaction, &idempotency, &actions)?;
+            transaction.commit().map_err(sql_error)?;
+            Ok(idempotency.result)
+        })
+        .await
+    }
+
+    pub(crate) async fn apply_companion_activation_claim(
+        &self,
+        replacement: Option<GrantBindingReplacement>,
+        command: ActivationReviewClaim,
+    ) -> Result<Value, AuthorizationStateError> {
+        self.apply_companion_activation(
+            replacement,
+            CompanionActivationReviewMutation::Claim(command),
+        )
+        .await
+    }
+
+    pub(crate) async fn apply_companion_activation_decision(
+        &self,
+        replacement: Option<GrantBindingReplacement>,
+        command: ActivationReviewDecision,
+    ) -> Result<Value, AuthorizationStateError> {
+        self.apply_companion_activation(
+            replacement,
+            CompanionActivationReviewMutation::Decision(command),
+        )
+        .await
+    }
+
+    async fn apply_companion_activation(
+        &self,
+        replacement: Option<GrantBindingReplacement>,
+        mutation: CompanionActivationReviewMutation,
+    ) -> Result<Value, AuthorizationStateError> {
+        match &mutation {
+            CompanionActivationReviewMutation::Claim(command) => {
+                super::super::application::validation::validate_idempotency_and_actions(
+                    &command.idempotency,
+                    &command.actions,
+                )?;
+            }
+            CompanionActivationReviewMutation::Decision(command) => {
+                super::super::application::validation::validate_activation_decision(
+                    command.state,
+                    command.decided_at,
+                    &command.decided_by,
+                )?;
+                super::super::application::validation::validate_idempotency_and_actions(
+                    &command.idempotency,
+                    &command.actions,
+                )?;
+            }
+        }
+        self.run(move |connection| {
+            let transaction = connection.transaction().map_err(sql_error)?;
+            let idempotency = match &mutation {
+                CompanionActivationReviewMutation::Claim(command) => &command.idempotency,
+                CompanionActivationReviewMutation::Decision(command) => &command.idempotency,
+            };
+            if let Some(result) = sqlite_idempotency_replay(&transaction, idempotency)? {
+                return Ok(result);
+            }
+            let (review_id, expected_version, now) = match &mutation {
+                CompanionActivationReviewMutation::Claim(command) => {
+                    (&command.review_id, command.expected_version, command.now)
+                }
+                CompanionActivationReviewMutation::Decision(command) => {
+                    (&command.review_id, command.expected_version, command.decided_at)
+                }
+            };
+            let current = super::provisioning::load_activation_review(&transaction, review_id)?
+                .ok_or(AuthorizationStateError::StorageConflict)?;
+            if current.version != expected_version || current.expires_at <= now {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
+            match &mutation {
+                CompanionActivationReviewMutation::Claim(command)
+                    if current.state != DeviceActivationReviewState::Approved
+                        || current
+                            .activated_by_user_principal_id
+                            .as_deref()
+                            .is_some_and(|principal| {
+                                principal != command.activated_by_user_principal_id
+                            }) =>
+                {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+                CompanionActivationReviewMutation::Decision(command)
+                    if current.state != DeviceActivationReviewState::Pending
+                        || command.decided_at < current.requested_at =>
+                {
+                    return Err(AuthorizationStateError::StorageConflict);
+                }
+                _ => {}
+            }
+            let (expected_owner, delegation) = match &mutation {
+                CompanionActivationReviewMutation::Claim(command) => (
+                    command.activated_by_user_principal_id.as_str(),
+                    command.delegation.as_ref(),
+                ),
+                CompanionActivationReviewMutation::Decision(command) => {
+                    (command.decided_by.as_str(), command.delegation.as_ref())
+                }
+            };
+            let (binding, mut actions) = if let Some(replacement) = replacement {
+                if replacement.owner_kind != GrantOwnerKind::User
+                    || replacement.owner_id != expected_owner
+                {
+                    return Err(AuthorizationStateError::NotAuthorized);
+                }
+                replace_grant_binding(&transaction, replacement, now)?
+            } else {
+                let delegation = delegation.ok_or_else(|| {
+                    AuthorizationStateError::InvalidRecord(
+                        "companion activation requires delegation".to_owned(),
+                    )
+                })?;
+                let participant_id = delegation
+                    .companion_participant_id
+                    .as_deref()
+                    .ok_or_else(|| {
+                        AuthorizationStateError::InvalidRecord(
+                            "companion activation requires participant identity".to_owned(),
+                        )
+                    })?;
+                let binding = load_grant_binding(
+                    &transaction,
+                    GrantOwnerKind::User,
+                    expected_owner,
+                    participant_id,
+                )?
+                .filter(|binding| {
+                    binding.state == GrantBindingState::Active
+                        && delegation.child_grant_revision == Some(binding.revision)
+                })
+                .ok_or(AuthorizationStateError::StorageConflict)?;
+                (binding, Vec::new())
+            };
+            match &mutation {
+                CompanionActivationReviewMutation::Claim(command) => {
+                    let delegation = command.delegation.as_ref().ok_or_else(|| {
+                        AuthorizationStateError::InvalidRecord(
+                            "companion activation claim requires delegation".to_owned(),
+                        )
+                    })?;
+                    if delegation.principal_id != current.principal_id
+                        || delegation.deployment_id != current.deployment_id
+                        || delegation.state != DeviceDelegationState::Active
+                        || delegation.child_grant_revision != Some(binding.revision)
+                    {
+                        return Err(AuthorizationStateError::InvalidRecord(
+                            "activation claim delegation does not match approved review".to_owned(),
+                        ));
+                    }
+                    write_companion_activation(
+                        &transaction,
+                        &current,
+                        delegation,
+                        command.companion_session.as_ref(),
+                        command.now,
+                    )?;
+                    let changed = transaction
+                        .execute(
+                            "UPDATE auth_device_activation_reviews SET activated_by_user_principal_id = ?1, version = ?2 WHERE review_id = ?3 AND version = ?4 AND expires_at > ?5 AND (activated_by_user_principal_id IS NULL OR activated_by_user_principal_id = ?1)",
+                            params![
+                                command.activated_by_user_principal_id,
+                                to_sql_version(next_version(command.expected_version)?)?,
+                                command.review_id,
+                                to_sql_version(command.expected_version)?,
+                                command.now,
+                            ],
+                        )
+                        .map_err(map_write_error)?;
+                    if changed != 1 {
+                        return Err(AuthorizationStateError::StorageConflict);
+                    }
+                    actions.extend(command.actions.iter().cloned());
+                }
+                CompanionActivationReviewMutation::Decision(command) => {
+                    let delegation = command.delegation.as_ref().ok_or_else(|| {
+                        AuthorizationStateError::InvalidRecord(
+                            "companion activation decision requires delegation".to_owned(),
+                        )
+                    })?;
+                    if !command.activate_device
+                        || command.state != DeviceActivationReviewState::Approved
+                        || delegation.principal_id != current.principal_id
+                        || delegation.deployment_id != current.deployment_id
+                        || delegation.child_grant_revision != Some(binding.revision)
+                    {
+                        return Err(AuthorizationStateError::InvalidRecord(
+                            "activation decision delegation does not match review".to_owned(),
+                        ));
+                    }
+                    write_companion_activation(
+                        &transaction,
+                        &current,
+                        delegation,
+                        command.companion_session.as_ref(),
+                        command.decided_at,
+                    )?;
+                    let changed = transaction
+                        .execute(
+                            "UPDATE auth_device_activation_reviews SET state = ?1, activated_by_user_principal_id = ?3, decided_at = ?2, decided_by = ?3, reason = ?4, version = ?5 WHERE review_id = ?6 AND version = ?7 AND state = 'pending' AND expires_at > ?2",
+                            params![
+                                encode_enum(command.state)?,
+                                command.decided_at,
+                                command.decided_by,
+                                command.reason,
+                                to_sql_version(next_version(command.expected_version)?)?,
+                                command.review_id,
+                                to_sql_version(command.expected_version)?,
+                            ],
+                        )
+                        .map_err(map_write_error)?;
+                    if changed != 1 {
+                        return Err(AuthorizationStateError::StorageConflict);
+                    }
+                    actions.extend(command.actions.iter().cloned());
+                }
+            }
+            let mut idempotency = idempotency.clone();
+            idempotency.result = json!({"reviewId": review_id});
             insert_sql_idempotency_and_actions(&transaction, &idempotency, &actions)?;
             transaction.commit().map_err(sql_error)?;
             Ok(idempotency.result)
@@ -1052,6 +1622,16 @@ impl SqliteAuthorizationStore {
                     participant_id,
                     installed_revision: binding.installed_revision,
                     grants: trellis_protocol::GrantSet::new(Vec::new()),
+                    approval_mode: super::super::ApprovalMode::Exact,
+                    approved_capabilities: Vec::new(),
+                    approved_resources: Vec::new(),
+                    delegation_ceiling: super::super::DelegationCeiling {
+                        capabilities: Vec::new(),
+                        exact_restrictions: Some(trellis_protocol::GrantSet::new(Vec::new())),
+                        platform_privileges: Vec::new(),
+                    },
+                    approval_decision_digest: idempotency.request_digest.clone(),
+                    companion_approved: false,
                     platform_privileges: Vec::new(),
                     state: GrantBindingState::Revoked,
                     expires_at: binding.expires_at,
@@ -1077,9 +1657,9 @@ impl SqliteAuthorizationStore {
         root_package: String,
         evidence_json: String,
         platform_trust: bool,
-        expected_revision: u64,
-        mut idempotency: IdempotencyResultRecord,
+        revision: (u64, IdempotencyResultRecord),
     ) -> Result<Value, AuthorizationStateError> {
+        let (expected_revision, mut idempotency) = revision;
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
             require_current_actor(&transaction, &actor, true, idempotency.created_at)?;
@@ -1090,19 +1670,17 @@ impl SqliteAuthorizationStore {
             let revision = install_participant(&transaction, &binding, Some(expected_revision))?;
             let (_, installed) = load_installed_participant(&transaction, &binding.participant_id, Some(revision))?
                 .ok_or(AuthorizationStateError::ParticipantMissing)?;
-            idempotency.result = json!({"participant": {
+            let mut participant = json!({
                 "participantId": installed.participant_id, "participantKind": installed.participant_kind,
-                 "revision": revision, "participantDigest": installed.participant_digest, "installedAt": installed.resolved_at,
-            }});
-            let actions = if revision == expected_revision {
-                Vec::new()
-            } else {
-                vec![participant_install_event(
-                    &binding,
-                    revision,
-                    idempotency.created_at,
-                )?]
-            };
+                "revision": revision, "participantDigest": installed.participant_digest, "installedAt": installed.resolved_at,
+                "packageDigest": installed.package_digest, "participantPath": installed.participant_path,
+                "companionRequired": installed.projection.companion_required,
+            });
+            if let Some(companion_id) = installed.projection.companion_participant_id {
+                participant["companionParticipantId"] = json!(companion_id);
+            }
+            idempotency.result = json!({"participant": participant});
+            let actions = Vec::new();
             insert_sql_idempotency_and_actions(&transaction, &idempotency, &actions)?;
             transaction.commit().map_err(sql_error)?;
             Ok(idempotency.result)
@@ -1119,6 +1697,43 @@ impl super::super::GrantRepository for SqliteAuthorizationStore {
     ) -> Result<Option<(u64, ParticipantBindingRecord)>, AuthorizationStateError> {
         SqliteAuthorizationStore::get_installed_participant_record(self, participant_id, revision)
             .await
+    }
+
+    async fn is_companion_participant(
+        &self,
+        participant_id: String,
+    ) -> Result<bool, AuthorizationStateError> {
+        SqliteAuthorizationStore::is_companion_participant(self, participant_id).await
+    }
+
+    async fn get_installed_package_evidence(
+        &self,
+        package_digest: &str,
+    ) -> Result<Option<trellis_idl::PackageEvidence>, AuthorizationStateError> {
+        SqliteAuthorizationStore::get_installed_package_evidence(self, package_digest).await
+    }
+
+    async fn get_api_binding(
+        &self,
+        participant_id: &str,
+        api_id: &str,
+    ) -> Result<Option<String>, AuthorizationStateError> {
+        SqliteAuthorizationStore::get_api_binding(self, participant_id, api_id).await
+    }
+
+    async fn put_api_binding(
+        &self,
+        participant_id: &str,
+        api_id: &str,
+        provider_deployment_id: &str,
+    ) -> Result<(), AuthorizationStateError> {
+        SqliteAuthorizationStore::put_api_binding(
+            self,
+            participant_id,
+            api_id,
+            provider_deployment_id,
+        )
+        .await
     }
 
     async fn accept_presented_package(
@@ -1198,6 +1813,22 @@ impl super::super::GrantRepository for SqliteAuthorizationStore {
             .await
     }
 
+    async fn consent_resource_actuals(
+        &self,
+        owner_kind: GrantOwnerKind,
+        owner_id: String,
+        participant_id: String,
+    ) -> Result<Vec<super::super::ephemeral::ConsentResourceActualEntry>, AuthorizationStateError>
+    {
+        SqliteAuthorizationStore::consent_resource_actuals(
+            self,
+            owner_kind,
+            owner_id,
+            participant_id,
+        )
+        .await
+    }
+
     async fn set_grant_binding(
         &self,
         replacement: GrantBindingReplacement,
@@ -1258,6 +1889,16 @@ impl super::super::GrantRepository for SqliteAuthorizationStore {
                     participant_id,
                     installed_revision: binding.installed_revision,
                     grants: trellis_protocol::GrantSet::new(Vec::new()),
+                    approval_mode: super::super::ApprovalMode::Exact,
+                    approved_capabilities: Vec::new(),
+                    approved_resources: Vec::new(),
+                    delegation_ceiling: super::super::DelegationCeiling {
+                        capabilities: Vec::new(),
+                        exact_restrictions: Some(trellis_protocol::GrantSet::new(Vec::new())),
+                        platform_privileges: Vec::new(),
+                    },
+                    approval_decision_digest: idempotency.request_digest.clone(),
+                    companion_approved: false,
                     platform_privileges: Vec::new(),
                     state: GrantBindingState::Revoked,
                     expires_at: binding.expires_at,
@@ -1382,12 +2023,25 @@ fn verify_portal_policy_snapshot(
 #[cfg(test)]
 mod package_evidence_tests {
     use super::*;
-    use crate::platform::auth::evidence::ParticipantRuntimeProjection;
+    use crate::platform::auth::authority::AuthorityEvidenceRepository;
+    use crate::platform::auth::evidence::{PackageEvidenceInput, ParticipantRuntimeProjection};
+    use crate::platform::auth::sqlite::deployments::insert_deployment_profile;
     use crate::platform::auth::{
-        GrantRepository, ParticipantBindingState, ProvisionedIdentityKind,
-        ProvisionedIdentityRecord, ProvisionedIdentityState,
+        resolve_api_bindings, DeploymentProfileRecord, DeploymentProfileState, GrantRepository,
+        LoginPortalMutation, LoginPortalRecord, LoginSettingsRecord, OutboxRepository,
+        ParticipantBindingState, PortalGrantOverrideRecord, PortalRepository, PrincipalKind,
+        ProvisionedIdentityKind, ProvisionedIdentityRecord, ProvisionedIdentityState,
+        SessionRepository,
     };
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+    use ed25519_dalek::SigningKey;
     use std::collections::BTreeMap;
+    use std::path::PathBuf;
+    use trellis_idl::project::{GenerateConfig, PackageManifest, PackageMetadata};
+    use trellis_idl::{
+        canonical_package, compile_project, CanonicalMode, PackageEvidence, PackageSourceEvidence,
+        SourceUnit,
+    };
 
     fn binding(display_name: &str, resolved_at: i64) -> ParticipantBindingRecord {
         let projection = ParticipantRuntimeProjection {
@@ -1401,19 +2055,927 @@ mod package_evidence_tests {
             optional_grant_bundles: BTreeMap::new(),
             required_capabilities: Vec::new(),
             optional_capability_definitions: BTreeMap::new(),
+            companion_participant_id: None,
+            companion_participant_kind: None,
+            companion_required: false,
         };
         ParticipantBindingRecord {
             participant_id: projection.participant_id.clone(),
             participant_kind: projection.participant_kind,
             participant_digest: "a".repeat(43),
-            needs_digest: trellis_protocol::digest_json(&projection).expect("projection digest"),
+            needs_digest: trellis_protocol::digest_json(
+                &serde_json::to_value(&projection).expect("projection value"),
+            )
+            .expect("projection digest"),
             package_digest: "p".repeat(43),
-            participant_path: projection.participant_id.clone(),
+            participant_path: "Service".to_owned(),
             projection,
             resolved_at,
             state: ParticipantBindingState::Resolved,
             error: None,
         }
+    }
+
+    fn package_evidence(source: &str) -> PackageEvidence {
+        let manifest = PackageManifest {
+            package: PackageMetadata {
+                name: "binding-test".into(),
+                version: "1.0.0".parse().expect("version"),
+            },
+            sources: BTreeMap::from([("contract".into(), "contract.trellis".into())]),
+            dependencies: BTreeMap::new(),
+            generate: GenerateConfig::default(),
+            default_registry: None,
+            registries: BTreeMap::new(),
+        };
+        let graph = compile_project(
+            &manifest,
+            vec![SourceUnit {
+                alias: "contract".into(),
+                path: PathBuf::from("contract.trellis"),
+                source: source.into(),
+            }],
+            BTreeMap::new(),
+        )
+        .expect("compile package");
+        PackageEvidence {
+            root_package: "binding-test".into(),
+            root_digest: graph.root_digest().into(),
+            packages: vec![PackageSourceEvidence {
+                name: "binding-test".into(),
+                version: "1.0.0".parse().expect("version"),
+                digest: graph.root_digest().into(),
+                source: canonical_package(&graph, graph.root(), CanonicalMode::Presentation)
+                    .expect("canonical package"),
+            }],
+        }
+    }
+
+    fn installed(
+        evidence: PackageEvidence,
+        participant_path: &str,
+    ) -> (ParticipantBindingRecord, String) {
+        ParticipantBindingRecord::from_package_evidence(
+            &PackageEvidenceInput {
+                package_digest: evidence.root_digest.clone(),
+                package_evidence: evidence,
+                participant_path: participant_path.to_owned(),
+            },
+            1,
+        )
+        .expect("installed participant")
+    }
+
+    fn deployment(
+        deployment_id: &str,
+        participant_id: &str,
+        state: DeploymentProfileState,
+    ) -> DeploymentProfileRecord {
+        DeploymentProfileRecord {
+            deployment_id: deployment_id.to_owned(),
+            kind: PrincipalKind::Service,
+            display_name: deployment_id.to_owned(),
+            participant_id: Some(participant_id.to_owned()),
+            portal_id: None,
+            review_mode: None,
+            requires_device_delegation: false,
+            expires_at: None,
+            state,
+            created_at: 1,
+            updated_at: 1,
+            version: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn stale_companion_review_rolls_back_grant_replacement() {
+        const NOW: i64 = 1_700_000_000_000;
+        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
+        let actor =
+            crate::platform::auth::tests::conformance::fixtures::install_login_mutation_actor(
+                &store, NOW,
+            )
+            .await
+            .unwrap();
+        let participant =
+            crate::platform::auth::builtins::console_participant_binding(NOW).unwrap();
+        let participant_id = participant.participant_id.clone();
+        store
+            .put_participant_binding(participant.clone())
+            .await
+            .unwrap();
+        let grants = participant.projection.required_grants.clone();
+        let replacement = |expected_revision, digest| GrantBindingReplacement {
+            owner_kind: GrantOwnerKind::User,
+            owner_id: actor.principal_id.clone(),
+            participant_id: participant_id.clone(),
+            installed_revision: 1,
+            grants: grants.clone(),
+            approval_mode: super::super::super::ApprovalMode::Exact,
+            approved_capabilities: Vec::new(),
+            approved_resources: Vec::new(),
+            delegation_ceiling: super::super::super::DelegationCeiling {
+                capabilities: Vec::new(),
+                exact_restrictions: Some(grants.clone()),
+                platform_privileges: Vec::new(),
+            },
+            approval_decision_digest: digest,
+            companion_approved: false,
+            platform_privileges: Vec::new(),
+            expected_revision,
+            expected_current_installed_revision: Some(1),
+            state: GrantBindingState::Active,
+            expires_at: None,
+            provenance: None,
+        };
+        let idempotency = |purpose: &str, digest: &str| IdempotencyResultRecord {
+            scope_key: trellis_protocol::digest_json(&json!([purpose])).unwrap(),
+            purpose: purpose.to_owned(),
+            signer_id: actor.principal_id.clone(),
+            request_id: "review-stale".to_owned(),
+            request_digest: digest.to_owned(),
+            result: Value::Null,
+            created_at: NOW,
+            expires_at: NOW + 60_000,
+        };
+        store
+            .set_grant_binding(
+                replacement(0, "A".repeat(43)),
+                idempotency("binding.initial", &"B".repeat(43)),
+            )
+            .await
+            .unwrap();
+        store
+            .run(|connection| {
+                connection
+                    .execute(
+                        "INSERT INTO auth_principals (principal_id, kind, state, created_at, updated_at, version) VALUES ('device-stale', 'device', 'active', ?1, ?1, 1)",
+                        [NOW],
+                    )
+                    .map_err(sql_error)?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_deployments (deployment_id, participant_id, participant_kind, state) VALUES ('deployment-stale', 'device-participant', 'device', 'active')",
+                        [],
+                    )
+                    .map_err(sql_error)?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_instances (instance_id, deployment_id, principal_id, state, created_at, updated_at, version) VALUES ('instance-stale', 'deployment-stale', 'device-stale', 'active', ?1, ?1, 1)",
+                        [NOW],
+                    )
+                    .map_err(sql_error)?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_devices (principal_id, deployment_id, state, created_at, updated_at, version) VALUES ('device-stale', 'deployment-stale', 'pending', ?1, ?1, 1)",
+                        [NOW],
+                    )
+                    .map_err(sql_error)?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_device_activation_reviews (review_id, principal_id, deployment_id, instance_id, request_digest, payload_json, state, requested_at, expires_at, version) VALUES ('review-stale', 'device-stale', 'deployment-stale', 'instance-stale', ?1, '{}', 'pending', ?2, ?3, 1)",
+                        params!["C".repeat(43), NOW - 2, NOW - 1],
+                    )
+                    .map(|_| ())
+                    .map_err(sql_error)
+            })
+            .await
+            .unwrap();
+        let stale_digest = trellis_protocol::digest_json(&json!(["stale-request"])).unwrap();
+        assert_eq!(
+            store
+                .apply_companion_activation_decision(
+                    Some(replacement(1, "E".repeat(43))),
+                    ActivationReviewDecision {
+                        review_id: "review-stale".to_owned(),
+                        expected_version: 1,
+                        state: DeviceActivationReviewState::Approved,
+                        decided_at: NOW,
+                        decided_by: actor.principal_id.clone(),
+                        reason: None,
+                        delegation: None,
+                        companion_session: None,
+                        activate_device: true,
+                        idempotency: idempotency(
+                            "device.companion-activation.approve",
+                            &stale_digest,
+                        ),
+                        actions: Vec::new(),
+                    },
+                )
+                .await,
+            Err(AuthorizationStateError::StorageConflict)
+        );
+        let unchanged = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                actor.principal_id.clone(),
+                participant_id,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged.revision, 1);
+        assert_eq!(unchanged.approval_decision_digest, "A".repeat(43));
+        assert!(store
+            .get_idempotency_result(
+                "device.companion-activation.approve",
+                &actor.principal_id,
+                "review-stale",
+            )
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn repeated_browser_replacement_retains_resource_grants() {
+        const NOW: i64 = 1_700_000_000_000;
+        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
+        let actor =
+            crate::platform::auth::tests::conformance::fixtures::install_login_mutation_actor(
+                &store, NOW,
+            )
+            .await
+            .unwrap();
+        let evidence = package_evidence(
+            r#"
+model Value { value: string; }
+app Companion {
+  kv cache {
+    title "Cache";
+    description "Cache.";
+    schema Value;
+    history 1;
+    ttl 5m;
+  }
+}
+"#,
+        );
+        let (participant, evidence_json) = installed(evidence, "Companion");
+        let participant_id = participant.participant_id.clone();
+        store
+            .install_participant(
+                actor.clone(),
+                participant.clone(),
+                "binding-test".to_owned(),
+                evidence_json,
+                false,
+                (
+                    0,
+                    IdempotencyResultRecord {
+                        scope_key: trellis_protocol::digest_json(&json!(["resource-install"]))
+                            .unwrap(),
+                        purpose: "participant.install".to_owned(),
+                        signer_id: actor.principal_id.clone(),
+                        request_id: "resource-install".to_owned(),
+                        request_digest: "E".repeat(43),
+                        result: Value::Null,
+                        created_at: NOW,
+                        expires_at: NOW + 60_000,
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+        let approved_resources =
+            crate::platform::auth::policy::participant_resource_commitments(&participant).unwrap();
+        let resource_evidence: super::super::super::ResourceBindingEvidence =
+            serde_json::from_value(json!({
+            "resourceKind": "kv",
+            "localName": "cache",
+            "bindingId": "resource-cache",
+            "ownerParticipantId": participant_id,
+            "providerIdentity": {"kind": "kv", "bucket": "resource-cache"},
+            "actual": {"kind": "kv", "history": 1, "ttl_ms": 300000, "max_value_bytes": null},
+            "state": "available",
+            "materializedAt": NOW,
+            "error": null,
+            }))
+            .unwrap();
+        store
+            .replace_resource_bindings(
+                GrantOwnerKind::User,
+                actor.principal_id.clone(),
+                participant_id.clone(),
+                1,
+                vec![resource_evidence.clone()],
+            )
+            .await
+            .unwrap();
+        let ceiling =
+            crate::platform::auth::policy::participant_delegation_ceiling(&participant).unwrap();
+        let replacement = GrantBindingReplacement {
+            owner_kind: GrantOwnerKind::User,
+            owner_id: actor.principal_id.clone(),
+            participant_id: participant_id.clone(),
+            installed_revision: 1,
+            grants: trellis_protocol::GrantSet::new(Vec::new()),
+            approval_mode: super::super::super::ApprovalMode::Capabilities,
+            approved_capabilities: ceiling.capabilities.clone(),
+            approved_resources: approved_resources.clone(),
+            delegation_ceiling: ceiling,
+            approval_decision_digest: trellis_protocol::digest_json(&json!(["browser-approval"]))
+                .unwrap(),
+            companion_approved: false,
+            platform_privileges: Vec::new(),
+            expected_revision: 0,
+            expected_current_installed_revision: Some(1),
+            state: GrantBindingState::Active,
+            expires_at: None,
+            provenance: None,
+        };
+        let idempotency = IdempotencyResultRecord {
+            scope_key: trellis_protocol::digest_json(&json!(["browser-resource"])).unwrap(),
+            purpose: "browser.grant.accept".to_owned(),
+            signer_id: "browser".to_owned(),
+            request_id: "browser-resource".to_owned(),
+            request_digest: trellis_protocol::digest_json(&json!(["browser-request"])).unwrap(),
+            result: Value::Null,
+            created_at: NOW,
+            expires_at: NOW + 60_000,
+        };
+        let applied = store
+            .set_grant_binding(replacement.clone(), idempotency.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .set_grant_binding(replacement, idempotency)
+                .await
+                .unwrap(),
+            applied
+        );
+        let binding = store
+            .get_grant_binding(GrantOwnerKind::User, actor.principal_id, participant_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.approved_resources, approved_resources);
+        assert!(binding
+            .grants
+            .permissions()
+            .iter()
+            .any(|permission| matches!(
+                permission.target(),
+                PermissionTarget::ParticipantResource { name, .. } if name == "cache"
+            )));
+        store
+            .run(|connection| {
+                connection
+                    .execute("DELETE FROM auth_post_commit_actions", [])
+                    .map(|_| ())
+                    .map_err(sql_error)
+            })
+            .await
+            .unwrap();
+
+        let portal = LoginPortalRecord {
+            portal_id: "portal-resource".to_owned(),
+            display_name: "Portal".to_owned(),
+            entry_url: None,
+            builtin: false,
+            disabled: false,
+            removed: false,
+            local_registration_enabled: false,
+            provider_ids: vec!["local".to_owned()],
+            created_at: NOW,
+            updated_at: NOW,
+            version: 1,
+        };
+        let settings = LoginSettingsRecord {
+            portal_id: portal.portal_id.clone(),
+            default_provider_id: Some("local".to_owned()),
+            local_login_enabled: true,
+            federated_registration_enabled: false,
+            provider_selection_enabled: false,
+            updated_at: NOW,
+            version: 1,
+        };
+        let proof = |purpose: &str| IdempotencyResultRecord {
+            scope_key: trellis_protocol::digest_json(&json!([purpose])).unwrap(),
+            purpose: purpose.to_owned(),
+            signer_id: "portal".to_owned(),
+            request_id: purpose.to_owned(),
+            request_digest: trellis_protocol::digest_json(&json!({"purpose": purpose})).unwrap(),
+            result: Value::Null,
+            created_at: NOW,
+            expires_at: NOW + 60_000,
+        };
+        store
+            .put_login_portal(LoginPortalMutation {
+                portal: portal.clone(),
+                settings: settings.clone(),
+                expected_version: None,
+                idempotency: proof("portal.resource.create"),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let policy = PortalGrantOverrideRecord {
+            portal_id: portal.portal_id.clone(),
+            participant_id: binding.participant_id.clone(),
+            direct_capabilities: Vec::new(),
+            capability_group_keys: Vec::new(),
+            role_mappings: Vec::new(),
+            created_at: NOW,
+            updated_at: NOW,
+            version: 1,
+        };
+        store
+            .put_portal_grant_override(policy.clone(), None, proof("portal.resource.policy"))
+            .await
+            .unwrap();
+        let snapshot = crate::platform::auth::portal_policy_snapshot(
+            &portal,
+            &settings,
+            &binding.participant_id,
+            Some(&policy),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        store
+            .replace_resource_bindings(
+                GrantOwnerKind::User,
+                binding.owner_id.clone(),
+                binding.participant_id.clone(),
+                binding.installed_revision,
+                vec![resource_evidence.clone()],
+            )
+            .await
+            .unwrap();
+        store
+            .set_portal_grant_binding(
+                GrantBindingReplacement {
+                    owner_kind: binding.owner_kind,
+                    owner_id: binding.owner_id.clone(),
+                    participant_id: binding.participant_id.clone(),
+                    installed_revision: binding.installed_revision,
+                    grants: trellis_protocol::GrantSet::new(Vec::new()),
+                    approval_mode: binding.approval_mode,
+                    approved_capabilities: Vec::new(),
+                    approved_resources: binding.approved_resources.clone(),
+                    delegation_ceiling: binding.delegation_ceiling.clone(),
+                    approval_decision_digest: trellis_protocol::digest_json(&json!([
+                        "portal-approval"
+                    ]))
+                    .unwrap(),
+                    companion_approved: false,
+                    platform_privileges: Vec::new(),
+                    expected_revision: binding.revision,
+                    expected_current_installed_revision: Some(binding.installed_revision),
+                    state: GrantBindingState::Active,
+                    expires_at: None,
+                    provenance: None,
+                },
+                snapshot,
+                proof("portal.resource.replace"),
+            )
+            .await
+            .unwrap();
+        let portal_binding = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                binding.owner_id,
+                binding.participant_id,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(portal_binding.approved_resources, approved_resources);
+        assert!(portal_binding
+            .grants
+            .permissions()
+            .iter()
+            .any(|permission| matches!(
+                permission.target(),
+                PermissionTarget::ParticipantResource { name, .. } if name == "cache"
+            )));
+        store
+            .run(|connection| {
+                connection
+                    .execute("DELETE FROM auth_post_commit_actions", [])
+                    .map(|_| ())
+                    .map_err(sql_error)
+            })
+            .await
+            .unwrap();
+
+        let installation_key = SigningKey::from_bytes(&[9; 32]);
+        let installation_public_key = URL_SAFE_NO_PAD.encode(installation_key.verifying_key());
+        store
+            .run(|connection| {
+                connection
+                    .execute(
+                        "INSERT INTO auth_principals (principal_id, kind, state, created_at, updated_at, version) VALUES ('device-resource', 'device', 'active', ?1, ?1, 1)",
+                        [NOW],
+                    )
+                    .map_err(sql_error)?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_deployments (deployment_id, participant_id, participant_kind, state) VALUES ('deployment-resource', 'device-participant', 'device', 'active')",
+                        [],
+                    )
+                    .map_err(sql_error)?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_instances (instance_id, deployment_id, principal_id, state, created_at, updated_at, version) VALUES ('instance-resource', 'deployment-resource', 'device-resource', 'active', ?1, ?1, 1)",
+                        [NOW],
+                    )
+                    .map_err(sql_error)?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_devices (principal_id, deployment_id, state, created_at, updated_at, version) VALUES ('device-resource', 'deployment-resource', 'pending', ?1, ?1, 1)",
+                        [NOW],
+                    )
+                    .map_err(sql_error)?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_device_activation_reviews (review_id, principal_id, deployment_id, instance_id, request_digest, payload_json, state, requested_at, expires_at, version) VALUES ('review-resource', 'device-resource', 'deployment-resource', 'instance-resource', ?1, '{}', 'pending', ?2, ?3, 1)",
+                        params![trellis_protocol::digest_json(&json!(["activation-request"])).unwrap(), NOW - 1, NOW + 60_000],
+                    )
+                    .map(|_| ())
+                    .map_err(sql_error)
+            })
+            .await
+            .unwrap();
+        let session_id = "01J00000000000000000000000".to_owned();
+        let command = ActivationReviewDecision {
+            review_id: "review-resource".to_owned(),
+            expected_version: 1,
+            state: DeviceActivationReviewState::Approved,
+            decided_at: NOW,
+            decided_by: portal_binding.owner_id.clone(),
+            reason: None,
+            delegation: Some(DeviceDelegationRecord {
+                principal_id: "device-resource".to_owned(),
+                deployment_id: "deployment-resource".to_owned(),
+                companion_participant_id: Some(portal_binding.participant_id.clone()),
+                user_login_session_id: Some(session_id.clone()),
+                installation_public_key: Some(installation_public_key.clone()),
+                device_grant_revision: Some(1),
+                child_grant_revision: Some(portal_binding.revision + 1),
+                required: true,
+                state: DeviceDelegationState::Active,
+                expires_at: None,
+            }),
+            companion_session: Some(SessionRecord {
+                session_id,
+                principal_id: portal_binding.owner_id.clone(),
+                participant_id: portal_binding.participant_id.clone(),
+                participant_kind: ParticipantKind::App,
+                session_key_id: crate::platform::auth::validate_ed25519_public_key(
+                    "installationPublicKey",
+                    &installation_public_key,
+                )
+                .unwrap(),
+                session_public_key: installation_public_key,
+                state: super::super::super::SessionState::Active,
+                created_at: NOW,
+                last_authenticated_at: NOW,
+                expires_at: None,
+                revoked_at: None,
+                version: 1,
+            }),
+            activate_device: true,
+            idempotency: proof("device.companion-activation.approve"),
+            actions: Vec::new(),
+        };
+        let aggregate_replacement = GrantBindingReplacement {
+            owner_kind: portal_binding.owner_kind,
+            owner_id: portal_binding.owner_id.clone(),
+            participant_id: portal_binding.participant_id.clone(),
+            installed_revision: portal_binding.installed_revision,
+            grants: trellis_protocol::GrantSet::new(Vec::new()),
+            approval_mode: portal_binding.approval_mode,
+            approved_capabilities: portal_binding.approved_capabilities.clone(),
+            approved_resources: portal_binding.approved_resources.clone(),
+            delegation_ceiling: portal_binding.delegation_ceiling.clone(),
+            approval_decision_digest: trellis_protocol::digest_json(&json!(["companion-approval"]))
+                .unwrap(),
+            companion_approved: false,
+            platform_privileges: Vec::new(),
+            expected_revision: portal_binding.revision,
+            expected_current_installed_revision: Some(portal_binding.installed_revision),
+            state: GrantBindingState::Active,
+            expires_at: None,
+            provenance: None,
+        };
+        store
+            .replace_resource_bindings(
+                GrantOwnerKind::User,
+                portal_binding.owner_id.clone(),
+                portal_binding.participant_id.clone(),
+                portal_binding.installed_revision,
+                vec![resource_evidence],
+            )
+            .await
+            .unwrap();
+        let applied = store
+            .apply_companion_activation_decision(Some(aggregate_replacement), command.clone())
+            .await
+            .unwrap();
+        let established = store
+            .get_device_delegation("device-resource", "deployment-resource")
+            .await
+            .unwrap()
+            .unwrap();
+        let established_session = store
+            .get_session(established.user_login_session_id.as_deref().unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .apply_companion_activation_decision(None, command.clone())
+                .await
+                .unwrap(),
+            applied
+        );
+        assert_eq!(
+            store
+                .get_device_delegation("device-resource", "deployment-resource")
+                .await
+                .unwrap(),
+            Some(established)
+        );
+        assert_eq!(
+            store
+                .get_session("01J00000000000000000000000")
+                .await
+                .unwrap(),
+            established_session
+        );
+        let mut collision = command;
+        collision.idempotency.request_digest =
+            trellis_protocol::digest_json(&json!(["changed-companion-approval"])).unwrap();
+        assert_eq!(
+            store
+                .apply_companion_activation_decision(None, collision)
+                .await,
+            Err(AuthorizationStateError::StorageConflict)
+        );
+        let replayed_binding = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                portal_binding.owner_id.clone(),
+                portal_binding.participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(replayed_binding.revision, 3);
+        assert_eq!(replayed_binding.approved_resources, approved_resources);
+        store
+            .set_grant_binding(
+                GrantBindingReplacement {
+                    owner_kind: replayed_binding.owner_kind,
+                    owner_id: replayed_binding.owner_id,
+                    participant_id: replayed_binding.participant_id,
+                    installed_revision: replayed_binding.installed_revision,
+                    grants: replayed_binding.grants,
+                    approval_mode: replayed_binding.approval_mode,
+                    approved_capabilities: replayed_binding.approved_capabilities,
+                    approved_resources: replayed_binding.approved_resources,
+                    delegation_ceiling: replayed_binding.delegation_ceiling,
+                    approval_decision_digest: replayed_binding.approval_decision_digest,
+                    companion_approved: replayed_binding.companion_approved,
+                    platform_privileges: replayed_binding.platform_privileges,
+                    expected_revision: replayed_binding.revision,
+                    expected_current_installed_revision: Some(replayed_binding.installed_revision),
+                    state: replayed_binding.state,
+                    expires_at: replayed_binding.expires_at,
+                    provenance: replayed_binding.provenance,
+                },
+                IdempotencyResultRecord {
+                    scope_key: trellis_protocol::digest_json(&json!(["delegation-cascade"]))
+                        .unwrap(),
+                    purpose: "grant.delegation-cascade".to_owned(),
+                    signer_id: "cascade".to_owned(),
+                    request_id: "delegation-cascade".to_owned(),
+                    request_digest: trellis_protocol::digest_json(&json!(["cascade-request"]))
+                        .unwrap(),
+                    result: Value::Null,
+                    created_at: NOW,
+                    expires_at: NOW + 60_000,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .get_device_delegation("device-resource", "deployment-resource")
+                .await
+                .unwrap()
+                .unwrap()
+                .child_grant_revision,
+            Some(4)
+        );
+    }
+
+    #[tokio::test]
+    async fn bootstrap_binding_stays_sticky_then_reselects_compatible_provider() {
+        const API: &str = r#"
+model Input { value: string; }
+model Output { value: string; }
+api orders@v1 {
+  title "Orders"; description "Orders."; version "1.0.0";
+  rpc Required { input Input; output Output; }
+  capabilities { public { allows { rpc Required; } } }
+}
+"#;
+        let consumer = installed(
+            package_evidence(&format!(
+                "{API}\nservice Consumer {{ use orders {{ rpc Required; }} }}"
+            )),
+            "Consumer",
+        );
+        let provider_z = installed(
+            package_evidence(&format!(
+                "{API}\nservice ProviderZ {{ implements orders; }}"
+            )),
+            "ProviderZ",
+        );
+        let provider_a = installed(
+            package_evidence(&format!(
+                "{API}\nservice ProviderA {{ implements orders; }}"
+            )),
+            "ProviderA",
+        );
+        let missing = installed(
+            package_evidence(
+                r#"
+model Input { value: string; }
+model Output { value: string; }
+api orders@v1 {
+  title "Orders"; description "Orders."; version "1.0.1";
+  rpc Other { input Input; output Output; }
+  capabilities { public { allows { rpc Other; } } }
+}
+service Missing { implements orders; }
+"#,
+            ),
+            "Missing",
+        );
+        let store = SqliteAuthorizationStore::open_in_memory().expect("store");
+        for (record, evidence_json) in [&consumer, &provider_z, &provider_a, &missing] {
+            store
+                .run({
+                    let record = record.clone();
+                    let evidence_json = evidence_json.clone();
+                    move |connection| {
+                        accept_package_evidence(
+                            connection,
+                            &record.package_digest,
+                            "binding-test",
+                            &evidence_json,
+                            false,
+                            None,
+                            1,
+                        )?;
+                        install_participant(connection, &record, Some(0))?;
+                        Ok(())
+                    }
+                })
+                .await
+                .expect("install participant");
+        }
+        store
+            .run({
+                let z = deployment(
+                    "provider-z",
+                    &provider_z.0.participant_id,
+                    DeploymentProfileState::Active,
+                );
+                let a = deployment(
+                    "provider-a",
+                    &provider_a.0.participant_id,
+                    DeploymentProfileState::Active,
+                );
+                let absent_action = deployment(
+                    "provider-missing",
+                    &missing.0.participant_id,
+                    DeploymentProfileState::Active,
+                );
+                move |connection| {
+                    for id in ["provider-z", "provider-a", "provider-missing"] {
+                        connection
+                            .execute(
+                                "INSERT INTO auth_principals (principal_id, kind, state, created_at, updated_at, version) VALUES (?1, 'service', 'active', 1, 1, 1)",
+                                [id],
+                            )
+                            .map_err(map_write_error)?;
+                    }
+                    insert_deployment_profile(connection, &z)?;
+                    insert_deployment_profile(connection, &a)?;
+                    insert_deployment_profile(connection, &absent_action)?;
+                    Ok(())
+                }
+            })
+            .await
+            .expect("initial providers");
+
+        let api = "binding-test.orders@v1";
+        let selected = resolve_api_bindings(&store, &consumer.0, Some("consumer-one"))
+            .await
+            .expect("initial binding");
+        assert_eq!(selected[api].provider_deployment_id, "provider-a");
+
+        store
+            .run({
+                let lower = deployment(
+                    "provider-0",
+                    &provider_a.0.participant_id,
+                    DeploymentProfileState::Active,
+                );
+                move |connection| {
+                    connection
+                        .execute(
+                            "INSERT INTO auth_principals (principal_id, kind, state, created_at, updated_at, version) VALUES ('provider-0', 'service', 'active', 1, 1, 1)",
+                            [],
+                        )
+                        .map_err(map_write_error)?;
+                    insert_deployment_profile(connection, &lower)
+                }
+            })
+            .await
+            .expect("lower provider");
+        let refreshed = resolve_api_bindings(&store, &consumer.0, Some("consumer-one"))
+            .await
+            .expect("sticky refresh");
+        assert_eq!(refreshed[api].provider_deployment_id, "provider-a");
+
+        store
+            .run(|connection| {
+                connection
+                    .execute(
+                        "UPDATE auth_deployment_profiles SET state = 'disabled' WHERE deployment_id = 'provider-a'",
+                        [],
+                    )
+                    .map_err(map_write_error)?;
+                Ok(())
+            })
+            .await
+            .expect("disable provider A");
+        let reselected = resolve_api_bindings(&store, &consumer.0, Some("consumer-one"))
+            .await
+            .expect("safe reselection");
+        assert_eq!(reselected[api].provider_deployment_id, "provider-0");
+        assert!(!reselected
+            .values()
+            .any(|binding| binding.provider_deployment_id == "provider-a"));
+        assert_eq!(
+            store
+                .get_api_binding("consumer-one", api)
+                .await
+                .expect("persisted binding"),
+            Some("provider-0".to_owned())
+        );
+        assert_eq!(
+            store
+                .get_api_binding("consumer-two", api)
+                .await
+                .expect("other consumer binding"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn api_bindings_are_scoped_to_consumer_deployment_and_api() {
+        let store = SqliteAuthorizationStore::open_in_memory().expect("store");
+        store
+            .put_api_binding("consumer-z", "orders@v1", "provider-z")
+            .await
+            .expect("initial binding");
+        store
+            .put_api_binding("consumer-a", "orders@v1", "provider-a")
+            .await
+            .expect("other consumer binding");
+        store
+            .put_api_binding("consumer-z", "billing@v1", "provider-b")
+            .await
+            .expect("other API binding");
+
+        assert_eq!(
+            store
+                .get_api_binding("consumer-z", "orders@v1")
+                .await
+                .expect("consumer binding"),
+            Some("provider-z".to_owned())
+        );
+        assert_eq!(
+            store
+                .get_api_binding("consumer-a", "orders@v1")
+                .await
+                .expect("other consumer binding"),
+            Some("provider-a".to_owned())
+        );
+        assert_eq!(
+            store
+                .get_api_binding("consumer-z", "billing@v1")
+                .await
+                .expect("other API binding"),
+            Some("provider-b".to_owned())
+        );
     }
 
     #[tokio::test]
@@ -1467,45 +3029,84 @@ mod package_evidence_tests {
     }
 
     #[tokio::test]
-    async fn tampered_stored_native_projection_is_rejected() {
+    async fn installed_native_projection_cannot_be_tampered_or_removed() {
         let store = SqliteAuthorizationStore::open_in_memory().expect("store");
-        let mut binding = binding("valid", 1);
-        binding.projection.display_name = "tampered".to_owned();
-        assert_eq!(
-            store
-                .run(move |connection| {
-                    accept_package_evidence(
-                        connection,
-                        &binding.package_digest,
-                        "example",
-                        "{}",
-                        false,
-                        None,
-                        1,
-                    )?;
+        store
+            .run(|connection| {
+                let binding = binding("valid", 1);
+                accept_package_evidence(
+                    connection,
+                    &binding.package_digest,
+                    "example",
+                    "{}",
+                    false,
+                    None,
+                    1,
+                )?;
+                install_participant(connection, &binding, Some(0))?;
+                assert!(connection
+                    .execute(
+                        "UPDATE auth_installed_participants SET projection_json = '{}'",
+                        [],
+                    )
+                    .is_err());
+                assert!(connection
+                    .execute("DELETE FROM auth_installed_participants", [])
+                    .is_err());
+                assert_eq!(
+                    load_installed_participant(connection, "example.Service", None)?
+                        .expect("installed participant")
+                        .1
+                        .projection,
+                    binding.projection
+                );
+                Ok(())
+            })
+            .await
+            .expect("immutable installed projection");
+    }
+
+    #[tokio::test]
+    async fn package_evidence_cache_rejects_a_different_body_for_the_same_digest() {
+        let store = SqliteAuthorizationStore::open_in_memory().expect("store");
+        store
+            .run(|connection| {
+                accept_package_evidence(
+                    connection,
+                    &"p".repeat(43),
+                    "example",
+                    "{\"root\":1}",
+                    false,
+                    None,
+                    1,
+                )?;
+                assert!(accept_package_evidence(
+                    connection,
+                    &"p".repeat(43),
+                    "example",
+                    "{\"root\":2}",
+                    false,
+                    None,
+                    2,
+                )
+                .is_err());
+                assert_eq!(
                     connection
-                        .execute(
-                            "INSERT INTO auth_installed_participants
-                              (participant_id, revision, participant_kind, participant_digest,
-                              needs_digest, package_digest, participant_path, projection_json,
-                              installed_at)
-                             VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
-                            params![
-                                binding.participant_id,
-                                encode_enum(binding.participant_kind)?,
-                                binding.participant_digest,
-                                binding.needs_digest,
-                                binding.package_digest,
-                                binding.participant_path,
-                                encode_json(&binding.projection)?,
-                            ],
+                        .query_row(
+                            "SELECT evidence_json FROM auth_package_evidence WHERE package_digest = ?1",
+                            [&"p".repeat(43)],
+                            |row| row.get::<_, String>(0),
                         )
-                        .map_err(map_write_error)?;
-                    load_installed_participant(connection, "example.Service", None)
-                })
-                .await,
-            Err(AuthorizationStateError::NeedsDigestMismatch)
-        );
+                        .map_err(sql_error)?,
+                    "{\"root\":1}"
+                );
+                assert!(connection
+                    .execute("DELETE FROM auth_package_evidence", [])
+                    .is_err());
+                Ok(())
+            })
+            .await
+            .expect("immutable package evidence cache");
     }
 
     #[tokio::test]

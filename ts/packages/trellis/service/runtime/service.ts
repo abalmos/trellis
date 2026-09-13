@@ -1,3 +1,4 @@
+import { jetstream } from "@nats-io/jetstream";
 import {
   headers as natsHeaders,
   type MsgHdrs,
@@ -42,10 +43,12 @@ import type {
 } from "../../participant_runtime/metadata.ts";
 import type { ContractEventConsumers } from "../../participant_runtime/schemas.ts";
 import {
+  bindApiRoutes,
   type GeneratedParticipant,
   getParticipantRuntime,
   participantAvailability,
   participantEvidence,
+  refreshApiRoutes,
 } from "../../participant_runtime/participant.ts";
 import {
   type ConnectedActionName,
@@ -68,7 +71,6 @@ import {
 import { publishHealthHeartbeatSample } from "../../health_transport.ts";
 import type { EventDesc } from "../../participant.ts";
 import type {
-  AcceptedOperation,
   ActiveEventFacade,
   ActiveEventPublishFacade,
   EventListenerContext,
@@ -84,7 +86,6 @@ import type {
   OperationOutputOf,
   OperationProgressOf,
   OperationRegistration as RootOperationRegistration,
-  OperationRuntimeHandle,
   OperationTransferContextOf,
   OperationUpdateOf,
   PreparedTrellisEvent,
@@ -201,9 +202,6 @@ type ResourceBindingJobsQueue = {
   backoffMs: number[];
   ackWaitMs: number;
   defaultDeadlineMs?: number;
-  progress: boolean;
-  logs: boolean;
-  dlq: boolean;
   keyConcurrency?: JobKeyConcurrencyBinding;
   queue?: JobQueuePolicyBinding;
 };
@@ -264,15 +262,12 @@ function baseJobsQueueBinding(
     ...(queue.update ? { update: queue.update } : {}),
     ...(queue.updatesPrefix ? { updatesPrefix: queue.updatesPrefix } : {}),
     ...(queue.result ? { result: queue.result } : {}),
-    maxDeliver: queue.maxDeliver,
-    backoffMs: queue.backoffMs,
-    ackWaitMs: queue.ackWaitMs,
+    maxDeliver: queue.maxDeliver ?? 5,
+    backoffMs: queue.backoffMs ?? [5_000, 30_000, 120_000, 600_000],
+    ackWaitMs: queue.ackWaitMs ?? 5_000,
     ...(queue.defaultDeadlineMs !== undefined
       ? { defaultDeadlineMs: queue.defaultDeadlineMs }
       : {}),
-    progress: queue.progress,
-    logs: queue.logs,
-    dlq: queue.dlq,
   };
 }
 
@@ -288,12 +283,14 @@ function normalizeQueuePolicy(
 type ResourceBindingEventConsumer = {
   stream: string;
   consumerName: string;
+  resourceId: string;
   filterSubjects: string[];
   replay: "new" | "all";
-  ordering: "strict" | "parallel";
+  concurrency: number;
   ackWaitMs: number;
   maxDeliver: number;
   backoffMs: number[];
+  replayBinding: { stream: string; consumerName: string };
 };
 
 type RpcMethodName<TA extends RuntimeApi> = keyof TA["rpc"] & string;
@@ -503,8 +500,8 @@ export type TrellisServiceConnectTelemetryOpts = false | {
 
 type ServiceKvFacade<TKv extends ParticipantKvMetadata> = {
   [K in keyof TKv]: TKv[K]["required"] extends false
-    ? TypedKV<TKv[K]["schema"]> | undefined
-    : TypedKV<TKv[K]["schema"]>;
+    ? TypedKV<TKv[K]["value"]> | undefined
+    : TypedKV<TKv[K]["value"]>;
 };
 
 type ServiceHandlerResources<
@@ -520,7 +517,7 @@ type ServiceHandlerResources<
 export type Trellis<
   TTrellisApi extends RuntimeApi,
   TKv extends ParticipantKvMetadata = ParticipantKvMetadata,
-  TJobs extends ParticipantJobsMetadata = {},
+  TJobs extends ParticipantJobsMetadata = ParticipantJobsMetadata,
 > =
   & HandlerTrellis<TTrellisApi>
   & ServiceHandlerResources<TKv, TJobs, TTrellisApi>;
@@ -528,7 +525,7 @@ export type Trellis<
 export type GeneratedServiceParticipant<
   TOwnedApi extends RuntimeApi,
   TTrellisApi extends RuntimeApi | undefined,
-  TJobs extends ParticipantJobsMetadata = {},
+  TJobs extends ParticipantJobsMetadata = ParticipantJobsMetadata,
   TKv extends ParticipantKvMetadata = ParticipantKvMetadata,
 > = GeneratedParticipant & {
   readonly __runtimeTypes?: {
@@ -570,7 +567,7 @@ type ParticipantJobsOf<
   >,
 > = TContract extends { readonly __runtimeTypes?: { jobs: infer TJobs } }
   ? Extract<TJobs, ParticipantJobsMetadata>
-  : {};
+  : Record<string, never>;
 
 type ParticipantKvOf<
   TContract extends GeneratedServiceParticipant<
@@ -581,7 +578,7 @@ type ParticipantKvOf<
   >,
 > = TContract extends { readonly __runtimeTypes?: { kv: infer TKv } }
   ? Extract<TKv, ParticipantKvMetadata>
-  : {};
+  : Record<string, never>;
 
 type ServiceHandlerClient<
   TContract extends GeneratedServiceParticipant<
@@ -748,7 +745,7 @@ export type JobQueue<
   TResult,
   TTrellisApi extends RuntimeApi,
   TKv extends ParticipantKvMetadata = ParticipantKvMetadata,
-  TJobs extends ParticipantJobsMetadata = {},
+  TJobs extends ParticipantJobsMetadata = ParticipantJobsMetadata,
   TUpdate = never,
 > = {
   create(
@@ -915,22 +912,9 @@ type ManagedJobsFacade<
   [MANAGED_JOB_WORKERS]: ManagedJobWorkers;
 };
 
-type ServiceHandleOperationLeaf =
-  & ((handler: (context: unknown) => unknown) => Promise<void>)
-  & {
-    accept(
-      args: { sessionKey: string },
-    ): AsyncResult<
-      AcceptedOperation<unknown, unknown, BaseError>,
-      UnexpectedError
-    >;
-    control(
-      operationId: string,
-    ): AsyncResult<
-      OperationRuntimeHandle<unknown, unknown, BaseError>,
-      BaseError
-    >;
-  };
+type ServiceHandleOperationLeaf = (
+  handler: (context: unknown) => unknown,
+) => Promise<void>;
 
 type ServiceHandleFacade = {
   readonly rpc: Record<
@@ -1086,75 +1070,28 @@ type OperationHandleFn<
   O extends keyof TOwnedApi["operations"] & string,
   TKv extends ParticipantKvMetadata,
   TJobs extends ParticipantJobsMetadata,
-> =
-  & ((
-    handler: (
-      context:
-        & OperationHandlerContext<
-          InferSchemaType<TOwnedApi["operations"][O]["input"]>,
-          OperationProgressOf<TOwnedApi, O>,
-          OperationOutputOf<TOwnedApi, O>,
-          OperationTransferContextOf<TOwnedApi, O>,
-          OperationHandlerErrorOf<TOwnedApi, O>,
-          OperationUpdateOf<TOwnedApi, O>
-        >
-        & { client: Trellis<TTrellisApi, TKv, TJobs> },
-    ) => unknown | Promise<unknown>,
-  ) => Promise<void>)
-  & {
-    accept(args: { sessionKey: string }): AsyncResult<
-      AcceptedOperation<
+> = (
+  handler: (
+    context:
+      & OperationHandlerContext<
+        InferSchemaType<TOwnedApi["operations"][O]["input"]>,
         OperationProgressOf<TOwnedApi, O>,
         OperationOutputOf<TOwnedApi, O>,
+        OperationTransferContextOf<TOwnedApi, O>,
         OperationHandlerErrorOf<TOwnedApi, O>,
         OperationUpdateOf<TOwnedApi, O>
-      >,
-      UnexpectedError
-    >;
-    control(operationId: string): AsyncResult<
-      OperationRuntimeHandle<
-        OperationProgressOf<TOwnedApi, O>,
-        OperationOutputOf<TOwnedApi, O>,
-        OperationHandlerErrorOf<TOwnedApi, O>,
-        OperationUpdateOf<TOwnedApi, O>
-      >,
-      BaseError
-    >;
-  };
+      >
+      & { client: Trellis<TTrellisApi, TKv, TJobs> },
+  ) => unknown | Promise<unknown>,
+) => Promise<void>;
 
 export type OperationRegistration<
   TOwnedApi extends RuntimeApi,
   TTrellisApi extends RuntimeApi,
   O extends keyof TOwnedApi["operations"] & string,
   TKv extends ParticipantKvMetadata = ParticipantKvMetadata,
-  TJobs extends ParticipantJobsMetadata = {},
+  TJobs extends ParticipantJobsMetadata = ParticipantJobsMetadata,
 > = {
-  accept(args: {
-    sessionKey: string;
-  }): AsyncResult<
-    AcceptedOperation<
-      OperationProgressOf<TOwnedApi, O>,
-      OperationOutputOf<TOwnedApi, O>,
-      OperationHandlerErrorOf<TOwnedApi, O>,
-      OperationUpdateOf<TOwnedApi, O>
-    >,
-    UnexpectedError
-  >;
-  /**
-   * Loads an existing operation by id and returns a service-side control handle.
-   * The operation must belong to this service and registration name.
-   */
-  control(
-    operationId: string,
-  ): AsyncResult<
-    OperationRuntimeHandle<
-      OperationProgressOf<TOwnedApi, O>,
-      OperationOutputOf<TOwnedApi, O>,
-      OperationHandlerErrorOf<TOwnedApi, O>,
-      OperationUpdateOf<TOwnedApi, O>
-    >,
-    BaseError
-  >;
   handle(
     handler: (
       args:
@@ -1219,7 +1156,7 @@ export type ConnectedTrellisService<
 export async function createConnectedService<
   TOwnedApi extends RuntimeApi,
   TTrellisApi extends RuntimeApi,
-  TJobs extends ParticipantJobsMetadata = {},
+  TJobs extends ParticipantJobsMetadata = ParticipantJobsMetadata,
   TKv extends ParticipantKvMetadata = ParticipantKvMetadata,
 >(args: {
   name: string;
@@ -1233,6 +1170,7 @@ export async function createConnectedService<
   contractJobs: TJobs;
   contractKv: TKv;
   contractEventConsumers?: ContractEventConsumers;
+  apiBindings?: Readonly<Record<string, unknown>>;
   runtime: TrellisServiceRuntimeCreateOpts<TOwnedApi, TTrellisApi>;
   bindings: ResourceBindings;
   availability: TrellisAvailability;
@@ -1240,9 +1178,6 @@ export async function createConnectedService<
     instanceId: string;
     deploymentId: string;
   };
-  durableEventConsumerBeforeReadinessCheck?: TrellisServiceRuntimeDeps[
-    "durableEventConsumerBeforeReadinessCheck"
-  ];
   authorizationProviderCache?: AuthorizationProviderCache;
 }): Promise<TrellisServiceSession<TOwnedApi, TTrellisApi, TJobs, TKv>> {
   const resolvedLog = resolveServiceLogger(args.runtime.log);
@@ -1264,9 +1199,27 @@ export async function createConnectedService<
   const currentApi = (args.runtime.trellisApi ?? args.runtime.api) as
     & TOwnedApi
     & TTrellisApi;
+  const storeNames = Object.keys(args.bindings.store);
   const runtimeApi = {
     ...currentApi,
     rpc: currentApi.rpc,
+    operations: storeNames.length === 1
+      ? Object.fromEntries(
+        Object.entries(currentApi.operations).map(([name, operation]) => [
+          name,
+          operation.transfer?.store === undefined
+            ? {
+              ...operation,
+              ...(operation.transfer
+                ? {
+                  transfer: { ...operation.transfer, store: storeNames[0] },
+                }
+                : {}),
+            }
+            : operation,
+        ]),
+      )
+      : currentApi.operations,
   } as TOwnedApi & TTrellisApi;
 
   const runtime = TrellisServiceRuntime.create(
@@ -1291,7 +1244,8 @@ export async function createConnectedService<
         openOperationTransfer: (transferArgs) =>
           getTransfer().createOperationUpload(transferArgs),
       },
-      operationStoreId: args.healthIdentity?.instanceId,
+      operationDeploymentId: args.healthIdentity?.deploymentId,
+      feedOwnerId: args.healthIdentity?.instanceId ?? ulid(),
     },
   );
 
@@ -1317,33 +1271,32 @@ export async function createConnectedService<
         metadata: args.contractEventConsumers,
         bindings: args.bindings.eventConsumers,
       },
-      durableEventConsumerBeforeReadinessCheck:
-        args.durableEventConsumerBeforeReadinessCheck,
+      apiBindings: args.apiBindings,
       connection,
     },
   );
 
-  let transfer: ServiceTransfer | undefined;
+  const resources: {
+    transfer?: ServiceTransfer;
+    handlerResources?: ServiceHandlerResources<TKv, TJobs, TTrellisApi>;
+  } = {};
   const getTransfer = (): ServiceTransfer => {
-    if (!transfer) {
+    if (!resources.transfer) {
       throw new Error("service transfer helper accessed before initialization");
     }
-    return transfer;
+    return resources.transfer;
   };
-  let handlerResources:
-    | ServiceHandlerResources<TKv, TJobs, TTrellisApi>
-    | undefined;
   const getHandlerResources = (): ServiceHandlerResources<
     TKv,
     TJobs,
     TTrellisApi
   > => {
-    if (!handlerResources) {
+    if (!resources.handlerResources) {
       throw new Error(
         "service resource handles accessed before initialization",
       );
     }
-    return handlerResources;
+    return resources.handlerResources;
   };
 
   const handlerTrellis: Trellis<TTrellisApi, TKv, TJobs> = {
@@ -1410,11 +1363,12 @@ export async function createConnectedService<
       publishingHeartbeat = false;
     }
   };
-  const stopHealthPublishing = async (): Promise<void> => {
+  const stopHealthPublishing = (): Promise<void> => {
     if (healthPublishTimer !== undefined) {
       clearInterval(healthPublishTimer);
       healthPublishTimer = undefined;
     }
+    return Promise.resolve();
   };
 
   const kv = await openServiceKvBindings({
@@ -1452,19 +1406,19 @@ export async function createConnectedService<
     connection,
     trellisServiceConstructorToken,
   ]) as TrellisServiceSession<TOwnedApi, TTrellisApi, TJobs, TKv>;
-  handlerResources = {
+  resources.handlerResources = {
     kv: service.kv,
     store: service.store,
     jobs: service.jobs,
   };
-  transfer = operationTransfer;
+  resources.transfer = operationTransfer;
 
   if (heartbeatEnabled) {
     await publishHealthHeartbeat();
     healthPublishTimer = setInterval(() => {
       void publishHealthHeartbeat();
     }, health.publishIntervalMs);
-    void args.nc.closed().finally(stopHealthPublishing);
+    void args.nc.closed().then(stopHealthPublishing, stopHealthPublishing);
   }
 
   return service;
@@ -2039,49 +1993,53 @@ function createJobRef<TPayload, TResult, TUpdate = unknown>(args: {
           }) ?? args.seed,
         ),
       wait: () =>
-        AsyncResult.from((async () => {
-          try {
-            return Result.ok(await args.lifecycle.wait(args.seed));
-          } catch (cause) {
-            return Result.err(toUnexpectedError(cause));
-          }
-        })()),
+        AsyncResult.from(
+          (async () => {
+            try {
+              return Result.ok(await args.lifecycle.wait(args.seed));
+            } catch (cause) {
+              return Result.err(toUnexpectedError(cause));
+            }
+          })(),
+        ),
       cancel: () =>
-        AsyncResult.from((async () => {
-          const current = args.lifecycle.get<TPayload, TResult>({
-            service: args.seed.service,
-            jobType: args.queueType,
-            id: args.seed.id,
-          }) ?? args.seed;
-          if (isTerminalJobState(current.state)) {
-            return Result.ok(current);
-          }
+        AsyncResult.from(
+          Promise.resolve().then(() => {
+            const current = args.lifecycle.get<TPayload, TResult>({
+              service: args.seed.service,
+              jobType: args.queueType,
+              id: args.seed.id,
+            }) ?? args.seed;
+            if (isTerminalJobState(current.state)) {
+              return Result.ok(current);
+            }
 
-          const event: InternalJobEvent<TPayload, TResult> = {
-            jobId: args.seed.id,
-            service: current.service,
-            jobType: args.queueType,
-            eventType: "cancelled",
-            state: "cancelled",
-            previousState: current.state,
-            context: current.context,
-            tries: current.tries,
-            error: "cancelled",
-            timestamp: new Date().toISOString(),
-          };
+            const event: InternalJobEvent<TPayload, TResult> = {
+              jobId: args.seed.id,
+              service: current.service,
+              jobType: args.queueType,
+              eventType: "cancelled",
+              state: "cancelled",
+              previousState: current.state,
+              context: current.context,
+              tries: current.tries,
+              error: "cancelled",
+              timestamp: new Date().toISOString(),
+            };
 
-          try {
-            args.nc.publish(
-              `${args.queueBinding.publishPrefix}.${args.seed.id}.cancelled`,
-              new TextEncoder().encode(JSON.stringify(event)),
-              { headers: headersFromJobContext(event.context) },
-            );
-          } catch (cause) {
-            return Result.err(toUnexpectedError(cause));
-          }
+            try {
+              args.nc.publish(
+                `${args.queueBinding.publishPrefix}.${args.seed.id}.cancelled`,
+                new TextEncoder().encode(JSON.stringify(event)),
+                { headers: headersFromJobContext(event.context) },
+              );
+            } catch (cause) {
+              return Result.err(toUnexpectedError(cause));
+            }
 
-          return Result.ok(args.lifecycle.apply(event) ?? current);
-        })()),
+            return Result.ok(args.lifecycle.apply(event) ?? current);
+          }),
+        ),
       updates: args.updates,
     },
   );
@@ -2097,74 +2055,76 @@ function subscribeToJobUpdates(args: {
   jobId: string;
   options?: JobUpdatesOptions;
 }): AsyncResult<JobUpdateSubscription<unknown>, BaseError> {
-  return AsyncResult.from((async () => {
-    if (!args.queue.update || !args.queue.updatesPrefix) {
-      return Result.err(toUnexpectedError(
-        new Error("Job updates are not configured for this queue"),
-      ));
-    }
-    if (!/^[^.>*\s]+$/u.test(args.jobId)) {
-      return Result.err(
-        new ValidationError({
-          errors: [{
-            path: "/jobId",
-            message: "Job id must be one NATS token",
-          }],
-        }),
+  return AsyncResult.from(
+    Promise.resolve().then(() => {
+      if (!args.queue.update || !args.queue.updatesPrefix) {
+        return Result.err(toUnexpectedError(
+          new Error("Job updates are not configured for this queue"),
+        ));
+      }
+      if (!/^[^.>*\s]+$/u.test(args.jobId)) {
+        return Result.err(
+          new ValidationError({
+            errors: [{
+              path: "/jobId",
+              message: "Job id must be one NATS token",
+            }],
+          }),
+        );
+      }
+
+      const subscription = args.nc.subscribe(
+        `${args.queue.updatesPrefix}.${args.jobId}`,
       );
-    }
+      args.active.add(subscription);
+      const close = () => {
+        subscription.unsubscribe();
+        args.active.delete(subscription);
+      };
+      const abort = () => close();
+      args.options?.signal?.addEventListener("abort", abort, { once: true });
+      if (args.options?.signal?.aborted) close();
 
-    const subscription = args.nc.subscribe(
-      `${args.queue.updatesPrefix}.${args.jobId}`,
-    );
-    args.active.add(subscription);
-    const close = () => {
-      subscription.unsubscribe();
-      args.active.delete(subscription);
-    };
-    const abort = () => close();
-    args.options?.signal?.addEventListener("abort", abort, { once: true });
-    if (args.options?.signal?.aborted) close();
-
-    const updates: JobUpdateSubscription<unknown> = {
-      unsubscribe: close,
-      async *[Symbol.asyncIterator]() {
-        let attempt = 0;
-        let sequence = 0;
-        try {
-          for await (const message of subscription) {
-            const envelope = decodeJobUpdateEnvelope(message.data);
-            if (!envelope || envelope.jobId !== args.jobId) continue;
-            if (!isJsonValue(envelope.update)) continue;
-            const parsed = parseSchema(args.updateSchema, envelope.update)
-              .take();
-            if (isErr(parsed)) continue;
-            const lifecycleAttempt = args.lifecycle.attempt({
-              service: args.service,
-              jobType: args.queue.queueType,
-              id: args.jobId,
-            }) ?? 0;
-            if (lifecycleAttempt > attempt) {
-              attempt = lifecycleAttempt;
-              sequence = 0;
+      const updates: JobUpdateSubscription<unknown> = {
+        unsubscribe: close,
+        async *[Symbol.asyncIterator]() {
+          let attempt = 0;
+          let sequence = 0;
+          try {
+            for await (const message of subscription) {
+              const envelope = decodeJobUpdateEnvelope(message.data);
+              if (!envelope || envelope.jobId !== args.jobId) continue;
+              if (!isJsonValue(envelope.update)) continue;
+              const parsed = parseSchema(args.updateSchema, envelope.update)
+                .take();
+              if (isErr(parsed)) continue;
+              const lifecycleAttempt = args.lifecycle.attempt({
+                service: args.service,
+                jobType: args.queue.queueType,
+                id: args.jobId,
+              }) ?? 0;
+              if (lifecycleAttempt > attempt) {
+                attempt = lifecycleAttempt;
+                sequence = 0;
+              }
+              if (envelope.attempt < attempt) continue;
+              if (envelope.attempt > attempt) {
+                attempt = envelope.attempt;
+                sequence = 0;
+              }
+              if (envelope.sequence <= sequence) continue;
+              sequence = envelope.sequence;
+              yield parsed;
             }
-            if (envelope.attempt < attempt) continue;
-            if (envelope.attempt > attempt) {
-              attempt = envelope.attempt;
-              sequence = 0;
-            }
-            if (envelope.sequence <= sequence) continue;
-            sequence = envelope.sequence;
-            yield parsed;
+          } finally {
+            close();
+            args.options?.signal?.removeEventListener("abort", abort);
           }
-        } finally {
-          close();
-          args.options?.signal?.removeEventListener("abort", abort);
-        }
-      },
-    };
-    return Result.ok(updates);
-  })());
+        },
+      };
+      return Result.ok(updates);
+    }),
+  );
 }
 
 function createNoopJobWorkerHost(): JobWorkerHostAdapter {
@@ -2200,7 +2160,7 @@ function createJobsFacade<
     ? normalizeResourceJobsBinding(args.jobsBinding)
     : undefined;
   const manager = new InternalJobManager<unknown, unknown>({
-    nc: args.nc,
+    nc: jetstream(args.nc),
     jobs: jobsBinding,
     keyCoordinator,
   });
@@ -2428,13 +2388,12 @@ function createJobsFacade<
               },
               manager,
               heartbeatPublisher: args.nc,
-              getProjectedJob: async (job) => {
-                return lifecycle.get({
+              getProjectedJob: (job) =>
+                Promise.resolve(lifecycle.get({
                   service: job.service,
                   jobType: job.type,
                   id: job.id,
-                });
-              },
+                })),
               handler: async (job: InternalActiveJob<unknown, unknown>) => {
                 let updateSequence = 0;
                 let attemptActive = true;
@@ -2458,51 +2417,56 @@ function createJobsFacade<
                     log: (entry: JobLogEntry) =>
                       wrapVoidTask(() => job.log(entry.level, entry.message)),
                     emitUpdate: (value: unknown) =>
-                      AsyncResult.from((async () => {
-                        if (!attemptActive) {
-                          return Result.err(toUnexpectedError(
-                            new Error("Job attempt is no longer active"),
-                          ));
-                        }
-                        if (
-                          !queueBinding.update || !queueBinding.updatesPrefix ||
-                          !updateSchema
-                        ) {
-                          return Result.err(toUnexpectedError(
-                            new Error(
-                              `Job updates are unavailable for queue '${queueType}'`,
-                            ),
-                          ));
-                        }
-                        if (!isJsonValue(value)) {
-                          return Result.err(
-                            new ValidationError({
-                              errors: [{
-                                path: "/",
-                                message: "Job update must be JSON-serializable",
-                              }],
-                            }),
-                          );
-                        }
-                        const parsed = parseSchema(updateSchema, value).take();
-                        if (isErr(parsed)) return parsed;
-                        updateSequence += 1;
-                        try {
-                          args.nc.publish(
-                            `${queueBinding.updatesPrefix}.${job.job().id}`,
-                            new TextEncoder().encode(JSON.stringify({
-                              jobId: job.job().id,
-                              attempt: job.job().tries + 1,
-                              sequence: updateSequence,
-                              timestamp: new Date().toISOString(),
-                              update: parsed,
-                            })),
-                          );
-                          return Result.ok(undefined);
-                        } catch (cause) {
-                          return Result.err(toUnexpectedError(cause));
-                        }
-                      })()),
+                      AsyncResult.from(
+                        Promise.resolve().then(() => {
+                          if (!attemptActive) {
+                            return Result.err(toUnexpectedError(
+                              new Error("Job attempt is no longer active"),
+                            ));
+                          }
+                          if (
+                            !queueBinding.update ||
+                            !queueBinding.updatesPrefix ||
+                            !updateSchema
+                          ) {
+                            return Result.err(toUnexpectedError(
+                              new Error(
+                                `Job updates are unavailable for queue '${queueType}'`,
+                              ),
+                            ));
+                          }
+                          if (!isJsonValue(value)) {
+                            return Result.err(
+                              new ValidationError({
+                                errors: [{
+                                  path: "/",
+                                  message:
+                                    "Job update must be JSON-serializable",
+                                }],
+                              }),
+                            );
+                          }
+                          const parsed = parseSchema(updateSchema, value)
+                            .take();
+                          if (isErr(parsed)) return parsed;
+                          updateSequence += 1;
+                          try {
+                            args.nc.publish(
+                              `${queueBinding.updatesPrefix}.${job.job().id}`,
+                              new TextEncoder().encode(JSON.stringify({
+                                jobId: job.job().id,
+                                attempt: job.job().tries + 1,
+                                sequence: updateSequence,
+                                timestamp: new Date().toISOString(),
+                                update: parsed,
+                              })),
+                            );
+                            return Result.ok(undefined);
+                          } catch (cause) {
+                            return Result.err(toUnexpectedError(cause));
+                          }
+                        }),
+                      ),
                     waitFor: (target, fn) => job.waitFor(target, fn),
                     redeliveryCount: job.redeliveryCount(),
                     signal: job.signal,
@@ -2762,15 +2726,16 @@ export function connectTrellisServiceWithRuntimeDeps<
         );
         authorizationProviderCache.start();
         await authorizationProviderCache.waitReady();
-        runtimeDeps.authorizationProviderReady?.(
-          authorizationProviderCache,
-          connectedNats,
-          authorizationContexts,
+        void connectedNats.closed().then(
+          () => {
+            stopContextRefresh?.();
+            authorizationProviderCache?.stop();
+          },
+          () => {
+            stopContextRefresh?.();
+            authorizationProviderCache?.stop();
+          },
         );
-        void connectedNats.closed().finally(() => {
-          stopContextRefresh?.();
-          authorizationProviderCache?.stop();
-        });
         recordTrellisDuration(
           "trellis.connect.duration",
           performance.now() - natsStartedAt,
@@ -2812,8 +2777,15 @@ export function connectTrellisServiceWithRuntimeDeps<
         const contractRuntime = getParticipantRuntime(args.participant);
         const runtime = {
           ...(args.runtime ?? {}),
-          api: contractRuntime.ownedApi as TOwnedApi,
-          trellisApi: contractRuntime.api as TTrellisApi,
+          api: bindApiRoutes(
+            contractRuntime.ownedApi,
+            bootstrap.binding.apiBindings,
+          ) as TOwnedApi,
+          trellisApi: bindApiRoutes(
+            contractRuntime.api,
+            bootstrap.binding.apiBindings,
+          ) as TTrellisApi,
+          operationDeploymentId: verifiedContext.context.deploymentId,
         };
 
         const service = await createConnectedService<
@@ -2837,6 +2809,7 @@ export function connectTrellisServiceWithRuntimeDeps<
             TContract
           >,
           contractEventConsumers: contractRuntime.eventConsumers,
+          apiBindings: bootstrap.binding.apiBindings,
           runtime,
           bindings: bootstrap.binding.resources,
           availability: participantAvailability(
@@ -2848,8 +2821,6 @@ export function connectTrellisServiceWithRuntimeDeps<
             instanceId: verifiedContext.context.instanceId,
             deploymentId: verifiedContext.context.deploymentId,
           },
-          durableEventConsumerBeforeReadinessCheck:
-            runtimeDeps.durableEventConsumerBeforeReadinessCheck,
           authorizationProviderCache,
         });
         stopContextRefresh = startAuthorizationContextRefresh({
@@ -2880,16 +2851,30 @@ export function connectTrellisServiceWithRuntimeDeps<
                   bootstrapJwt: next.connectInfo.jwt,
                   bootstrapJwtExpiresAt: next.connectInfo.jwtExpiresAt,
                 },
-                undefined,
+                next.serverNow,
                 shouldInstall,
-              );
-              installConnectionAvailability(
-                service.connection,
-                participantAvailability(
-                  args.participant,
-                  next.binding.apiBindings,
-                  next.binding.resources,
-                ),
+                {
+                  connectionId: next.connectInfo.connectionId,
+                  loginSessionId: null,
+                  participantId: next.connectInfo.participantId,
+                  inboxPrefix,
+                  transports: next.connectInfo.transports,
+                },
+                () => () => {
+                  installConnectionAvailability(
+                    service.connection,
+                    participantAvailability(
+                      args.participant,
+                      next.binding.apiBindings,
+                      next.binding.resources,
+                    ),
+                  );
+                  refreshApiRoutes(runtime.api, next.binding.apiBindings);
+                  refreshApiRoutes(
+                    runtime.trellisApi,
+                    next.binding.apiBindings,
+                  );
+                },
               );
               return context;
             } catch (error) {
@@ -2902,11 +2887,21 @@ export function connectTrellisServiceWithRuntimeDeps<
               throw error;
             }
           },
-          onRefresh: () =>
-            service.connection.status.phase !== "connected"
-              ? nc.reconnect()
-              : undefined,
-          onTerminalFailure: () => nc.drain(),
+          onRefresh: async () => {
+            nc.setServers(
+              selectRuntimeTransportServers(
+                authorizationContexts.runtimeBinding().transports,
+              ),
+            );
+            await nc.reconnect();
+          },
+          onTerminalFailure: async () => {
+            try {
+              await nc.reconnect();
+            } catch {
+              // The cleared context makes every bounded reconnect attempt fail closed.
+            }
+          },
         });
         recordTrellisDuration(
           "trellis.connect.duration",
@@ -2930,42 +2925,11 @@ export function connectTrellisServiceWithRuntimeDeps<
   })());
 }
 
-/** Connects the typed service facade with a live provider-cache test hook. @internal */
-export function connectTrellisServiceWithAuthorizationTestHook<
-  const TContract extends GeneratedServiceParticipant<
-    RuntimeApi,
-    RuntimeApi | undefined,
-    ParticipantJobsMetadata,
-    ParticipantKvMetadata
-  >,
->(
-  args: TrellisServiceConnectArgs<TContract>,
-  authorizationProviderReady: NonNullable<
-    TrellisServiceRuntimeDeps["authorizationProviderReady"]
-  >,
-): AsyncResult<
-  ConnectedTrellisService<TContract>,
-  TransportError | UnexpectedError
-> {
-  return AsyncResult.from((async () => {
-    const connected = await connectTrellisServiceWithRuntimeDeps(args, {
-      authorizationProviderReady,
-    });
-    if (isErr(connected)) return connected;
-    return Result.ok(createProviderRuntime(
-      connected.unwrapOrElse(() => {
-        throw new Error("Connected service result narrowed incorrectly");
-      }),
-      args.participant,
-    ));
-  })());
-}
-
 /** Connected session implementation backing the public service type. */
 export class TrellisServiceSession<
   TOwnedApi extends RuntimeApi = RuntimeApi,
   TTrellisApi extends RuntimeApi = TOwnedApi,
-  TJobs extends ParticipantJobsMetadata = {},
+  TJobs extends ParticipantJobsMetadata = ParticipantJobsMetadata,
   TKv extends ParticipantKvMetadata = ParticipantKvMetadata,
 > {
   readonly name: string;
@@ -3013,7 +2977,6 @@ export class TrellisServiceSession<
       throw new TypeError("TrellisService instances are created by connect()");
     }
     const storeBindings = bindings.store ?? {};
-
     this.name = name;
     this.auth = auth;
     this.#nc = nc;
@@ -3122,19 +3085,13 @@ export class TrellisServiceSession<
       const registration = this.#operation(
         operationName as keyof TOwnedApi["operations"] & string,
       );
-      const leaf = Object.assign(
-        (handler: (context: unknown) => unknown) =>
-          registration.handle((context) =>
-            handler({
-              ...context,
-              client: this.#handlerTrellis,
-            })
-          ),
-        {
-          accept: (args: { sessionKey: string }) => registration.accept(args),
-          control: (operationId: string) => registration.control(operationId),
-        },
-      ) as ServiceHandleOperationLeaf;
+      const leaf = ((handler: (context: unknown) => unknown) =>
+        registration.handle((context) =>
+          handler({
+            ...context,
+            client: this.#handlerTrellis,
+          })
+        )) as ServiceHandleOperationLeaf;
       addSurfaceLeaf(operation, operationName, leaf);
     }
 
@@ -3214,7 +3171,7 @@ export class TrellisServiceSession<
             }
 
             const manager = new InternalJobManager<unknown, unknown>({
-              nc: this.#nc,
+              nc: jetstream(this.#nc),
               jobs: jobsBinding,
               keyCoordinator: createNatsJobKeyCoordinator(this.#nc),
             });
@@ -3484,13 +3441,11 @@ export class TrellisServiceSession<
           try {
             await this.#operationTransfer.stop();
           } finally {
-            await this.#runtime.stop();
-            this.connection.setStatus({
-              kind: this.connection.status.kind,
-              phase: "closed",
-              observedAt: new Date(),
-              transport: { name: "nats" },
-            });
+            try {
+              await this.#runtime.stop();
+            } finally {
+              await this.connection.close();
+            }
           }
         }
       }
@@ -3513,8 +3468,6 @@ export class TrellisServiceSession<
     >;
 
     return {
-      accept: (args) => registration.accept(args),
-      control: (operationId) => registration.control(operationId),
       handle: (
         handler: (
           args:

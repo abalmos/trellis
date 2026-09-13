@@ -1,25 +1,14 @@
-# Use events from another API
+# Consume events durably
 
-Add the API as a project dependency, run `trellis update`, then select the event in the participant:
+Add the owning source package as a dependency, import its API, and select the
+event in a `use` body. For durable processing, declare a `consumer` resource with
+title, description, exact selected events, local concurrency, initial replay,
+and retry policy. An ephemeral event listener is for lossy live-only reactions.
 
-```trellis
-participant "acme.notifications@v1" service {
-  implements "acme.notifications@v1";
-  use required orders "acme.orders@v1" {
-    subscribe event "Orders.Shipped";
-  }
-}
-```
+Register the generated Consumer handler during startup. Trellis owns its stream,
+durable identity, proof verification, retry, progress acknowledgement, and scoped
+DLQ. Concurrency is local per participant process, not a distributed cap.
 
-`trellis generate` emits the selected descriptor and records the exact referenced API digest in the participant artifact.
-
-This consumer owns a separate notifications API and depends on the Orders API
-from the previous step. Register `service.onOrdersShipped(...)` during startup,
-not inside an RPC handler. Read the typed payload from the handler's `event`
-argument and return a `Result` after processing it.
-
-Keep handlers idempotent when delivery can repeat. If a non-idempotent SQL side
-effect needs duplicate suppression, commit its inbox marker in the same
-transaction as that side effect. A runtime-delivered event is already proof
-verified; do not reconstruct signatures or bypass generated subscriptions with
-raw transport listeners.
+Delivery and manual replay are at least once. Keep side effects idempotent or
+commit an inbox marker with the side effect. Final failure is recorded by Events
+before the original delivery is acknowledged; replay targets only this Consumer.

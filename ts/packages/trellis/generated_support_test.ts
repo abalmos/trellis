@@ -58,6 +58,12 @@ Deno.test("generated codecs preserve wire representations and composition", () =
     new Uint8Array([0, 1, 254, 255]),
   );
   assertEquals(
+    new TextDecoder().decode(
+      generated.codecs.bytes.decode("InJlcXVpcmVkIg=="),
+    ),
+    '"required"',
+  );
+  assertEquals(
     generated.codecs.timestamp.decode(
       "2026-09-10T12:34:56.123456789Z",
     ) as string,
@@ -98,8 +104,10 @@ Deno.test("generated descriptors check evidence structure without deriving it", 
   assertEquals(
     generated.participantDescriptor({
       kind: "service",
+      id: "example.Processor",
       identity: "example.Processor",
       path: "Processor",
+      actionNames: {},
       implements: [api],
       uses: [{
         api,
@@ -127,5 +135,63 @@ Deno.test("generated descriptors check evidence structure without deriving it", 
       },
     }).kind,
     "service",
+  );
+});
+
+Deno.test("device companion descriptors require one lexical App or Agent child", () => {
+  const evidence = () => ({
+    rootPackage: "example",
+    rootDigest: "digest",
+    packages: [{
+      name: "example",
+      version: "1.0.0",
+      digest: "digest",
+      source: 'package "example";\n',
+    }],
+  });
+  const participant = (
+    kind: "app" | "agent",
+    identity: string,
+    path: string,
+  ) => ({
+    kind,
+    id: identity,
+    identity,
+    path,
+    implements: [],
+    uses: [],
+    actionNames: {},
+    resources: {},
+    packageEvidence: evidence(),
+  });
+  const child = participant(
+    "app",
+    "example.Sensor.Companion",
+    "Sensor.Companion",
+  );
+  assertEquals(
+    generated.participantDescriptor({
+      ...participant("agent", "example.Sensor", "Sensor"),
+      kind: "device",
+      companion: { participant: child, availability: "required" },
+    }).companion?.participant.identity,
+    child.identity,
+  );
+  assertThrows(() =>
+    generated.participantDescriptor({
+      ...participant("agent", "example.Sensor", "Sensor"),
+      kind: "device",
+      companion: {
+        participant: participant("agent", "example.Sibling", "Sibling"),
+        availability: "optional",
+      },
+    })
+  );
+  assertThrows(() =>
+    generated.participantDescriptor({
+      ...participant("agent", "example.Service", "Service"),
+      kind: "service",
+      companion: { participant: child, availability: "required" },
+    })
   );
 });

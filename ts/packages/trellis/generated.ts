@@ -7,3 +7,8 @@ export {
   participantDescriptor,
   type SerializableErrorData,
 } from "./generated_support.ts";
+export type {
+  ParticipantJobsFromResources,
+  ParticipantKvFromResources,
+  RuntimeApiFromGenerated,
+} from "./participant_runtime/participant.ts";

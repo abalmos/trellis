@@ -11,9 +11,6 @@ export type JobsQueueBinding = {
   backoffMs: number[];
   ackWaitMs: number;
   defaultDeadlineMs?: number;
-  progress: boolean;
-  logs: boolean;
-  dlq: boolean;
   keyConcurrency?: {
     key: string[];
     maxActive: number;

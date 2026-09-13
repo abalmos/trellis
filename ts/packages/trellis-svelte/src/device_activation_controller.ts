@@ -5,8 +5,8 @@ import type {
   TerminalOperation,
 } from "@qlever-llc/trellis";
 import type {
-  AuthDeviceUserAuthoritiesResolveOutput,
-  AuthDeviceUserAuthoritiesResolveProgress,
+  DeviceUserAuthoritiesResolveOutput,
+  DeviceUserAuthoritiesResolveProgress,
 } from "@qlever-llc/trellis/auth";
 import { ulid } from "ulid";
 
@@ -69,16 +69,16 @@ export type DeviceActivationOperationRef = {
   watch(): AsyncResult<
     AsyncIterable<
       OperationEvent<
-        AuthDeviceUserAuthoritiesResolveProgress,
-        AuthDeviceUserAuthoritiesResolveOutput
+        DeviceUserAuthoritiesResolveProgress,
+        DeviceUserAuthoritiesResolveOutput
       >
     >,
     BaseError
   >;
   wait(): AsyncResult<
     TerminalOperation<
-      AuthDeviceUserAuthoritiesResolveProgress,
-      AuthDeviceUserAuthoritiesResolveOutput
+      DeviceUserAuthoritiesResolveProgress,
+      DeviceUserAuthoritiesResolveOutput
     >,
     BaseError
   >;
@@ -89,8 +89,8 @@ type SnapshotCapableDeviceActivationOperationRef =
   & {
     get(): AsyncResult<
       OperationSnapshot<
-        AuthDeviceUserAuthoritiesResolveProgress,
-        AuthDeviceUserAuthoritiesResolveOutput
+        DeviceUserAuthoritiesResolveProgress,
+        DeviceUserAuthoritiesResolveOutput
       >,
       BaseError
     >;
@@ -383,8 +383,8 @@ export class DeviceActivationControllerCore {
   #applyTerminal(
     flowId: string,
     terminal: TerminalOperation<
-      AuthDeviceUserAuthoritiesResolveProgress,
-      AuthDeviceUserAuthoritiesResolveOutput
+      DeviceUserAuthoritiesResolveProgress,
+      DeviceUserAuthoritiesResolveOutput
     >,
   ): void {
     const view = mapDeviceActivationTerminal(flowId, terminal);
@@ -403,8 +403,8 @@ export class DeviceActivationControllerCore {
     flowId: string,
     watch: AsyncIterable<
       OperationEvent<
-        AuthDeviceUserAuthoritiesResolveProgress,
-        AuthDeviceUserAuthoritiesResolveOutput
+        DeviceUserAuthoritiesResolveProgress,
+        DeviceUserAuthoritiesResolveOutput
       >
     >,
     runId: number,

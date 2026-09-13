@@ -57,7 +57,7 @@ Rules:
 - `@qlever-llc/trellis` is a runtime library, not a central registry for every
   service API
 - service APIs are defined with the service that owns them and consumed through
-  canonical API dependencies and consumer-local generated SDKs
+  native source-package dependencies and consumer-local generated SDKs
 
 ### Communication Patterns
 
@@ -68,15 +68,24 @@ Events announce state changes. Publishers fire and forget.
 Subject naming:
 
 ```text
-events.v1.<Domain>.<...tokens>
+events.v1.<A>.<Event>.<...tokens>
 ```
+
+`A` is the unpadded base64url encoding of the event's qualified API identity
+(`<package>.<api>@v<major>`). This keeps the wire subject aligned with the
+generated API descriptor and its ACL identity.
+
+Each parameter token is the unpadded base64url encoding of its canonical UTF-8
+value. The signed event descriptor carries the qualified API ID, exact dotted
+event name, and parameter count so overlapping textual subjects remain
+unambiguous during authorization and projection.
 
 Examples:
 
 ```text
-events.v1.Partner.Changed.<origin>.<id>
-events.v1.Identity.Changed.<origin>.<id>
-events.v1.Document.Uploaded.<contentType>.<partnerId>
+events.v1.YWNtZS5wYXJ0bmVyQHYx.Changed.<origin>.<id>
+events.v1.YWNtZS5pZGVudGl0eUB2MQ.Changed.<origin>.<id>
+events.v1.YWNtZS5kb2N1bWVudEB2MQ.Uploaded.<contentType>.<partnerId>
 ```
 
 Rules:

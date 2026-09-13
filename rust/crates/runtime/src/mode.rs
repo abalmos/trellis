@@ -14,8 +14,8 @@ pub enum RuntimeMode {
     Jobs,
     /// Run only the health subsystem.
     Health,
-    /// Run only the event log subsystem.
-    Eventlog,
+    /// Run only the Events subsystem.
+    Events,
 }
 
 impl RuntimeMode {
@@ -27,12 +27,12 @@ impl RuntimeMode {
                 SubsystemName::Platform,
                 SubsystemName::Jobs,
                 SubsystemName::Health,
-                SubsystemName::Eventlog,
+                SubsystemName::Events,
             ],
             Self::Platform => &[SubsystemName::Platform],
             Self::Jobs => &[SubsystemName::Jobs],
             Self::Health => &[SubsystemName::Health],
-            Self::Eventlog => &[SubsystemName::Eventlog],
+            Self::Events => &[SubsystemName::Events],
         }
     }
 }
@@ -44,7 +44,7 @@ impl fmt::Display for RuntimeMode {
             Self::Platform => "platform",
             Self::Jobs => "jobs",
             Self::Health => "health",
-            Self::Eventlog => "eventlog",
+            Self::Events => "events",
         })
     }
 }
@@ -58,7 +58,7 @@ impl FromStr for RuntimeMode {
             "platform" => Ok(Self::Platform),
             "jobs" => Ok(Self::Jobs),
             "health" => Ok(Self::Health),
-            "eventlog" => Ok(Self::Eventlog),
+            "events" => Ok(Self::Events),
             _ => Err(RuntimeModeParseError {
                 value: value.to_owned(),
             }),
@@ -75,8 +75,8 @@ pub enum SubsystemName {
     Jobs,
     /// Health subsystem.
     Health,
-    /// Event log subsystem.
-    Eventlog,
+    /// Events subsystem.
+    Events,
 }
 
 impl SubsystemName {
@@ -87,7 +87,7 @@ impl SubsystemName {
             Self::Platform => "platform",
             Self::Jobs => "jobs",
             Self::Health => "health",
-            Self::Eventlog => "eventlog",
+            Self::Events => "events",
         }
     }
 }
@@ -100,9 +100,7 @@ impl fmt::Display for SubsystemName {
 
 /// Error returned when parsing a runtime process mode fails.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
-#[error(
-    "unsupported runtime mode {value:?}; expected one of: all, platform, jobs, health, eventlog"
-)]
+#[error("unsupported runtime mode {value:?}; expected one of: all, platform, jobs, health, events")]
 pub struct RuntimeModeParseError {
     /// Original unsupported mode value.
     pub value: String,

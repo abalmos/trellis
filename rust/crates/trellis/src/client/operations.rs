@@ -172,6 +172,7 @@ pub trait OperationDescriptor {
     type UpdateEvidence: OperationUpdateEvidence;
     type Error: Send + 'static;
 
+    const API_ID: &'static str = "";
     const KEY: &'static str;
     const SUBJECT: &'static str;
     const CALLER_CAPABILITIES: &'static [&'static str];
@@ -179,6 +180,8 @@ pub trait OperationDescriptor {
     const CANCEL_CAPABILITIES: &'static [&'static str];
     const CONTROL_CAPABILITIES: &'static [&'static str] = &[];
     const CANCELABLE: bool;
+    /// Whether the operation requires a runtime-owned upload before handler execution.
+    const UPLOAD: bool = false;
     const ERRORS: &'static [&'static str] = &[];
 
     const INPUT_SCHEMA_JSON: &'static str;
@@ -194,8 +197,13 @@ pub trait TransferOperationDescriptor: OperationDescriptor {}
 
 #[doc(hidden)]
 pub trait OperationTransport {
-    fn descriptor_subject(&self, subject: &str) -> String {
-        subject.to_string()
+    fn operation_subject(
+        &self,
+        _api_id: &str,
+        _operation: &str,
+        subject: &str,
+    ) -> Result<String, TrellisClientError> {
+        Ok(subject.to_string())
     }
 
     fn request_json_value<'a>(
@@ -325,13 +333,6 @@ impl<'a, T, D> std::fmt::Debug for OperationRef<'a, T, D> {
     }
 }
 
-fn is_terminal_state(state: &OperationState) -> bool {
-    matches!(
-        state,
-        OperationState::Completed | OperationState::Failed | OperationState::Cancelled
-    )
-}
-
 impl<'a, T, D> OperationInvoker<'a, T, D> {
     /// Create a typed operation reference for an existing operation id.
     ///
@@ -394,9 +395,29 @@ where
         &self,
         input: &D::Input,
     ) -> Result<OperationRef<'a, T, D>, TrellisClientError> {
+        self.start_with_invocation_id(ulid::Ulid::new().to_string(), input)
+            .await
+    }
+
+    /// Start or replay an operation with a caller-selected ULID idempotency key.
+    pub async fn start_with_invocation_id(
+        &self,
+        invocation_id: impl Into<String>,
+        input: &D::Input,
+    ) -> Result<OperationRef<'a, T, D>, TrellisClientError> {
+        let invocation_id = invocation_id.into();
+        invocation_id.parse::<ulid::Ulid>().map_err(|_| {
+            TrellisClientError::OperationProtocol(
+                "operation invocation id must be a ULID".to_owned(),
+            )
+        })?;
         let body = serde_json::to_value(input)?;
         validate_operation_schema(D::INPUT_SCHEMA_JSON, &body, "operation input")?;
-        self.start_encoded(body).await
+        self.start_encoded(serde_json::json!({
+            "invocationId": invocation_id,
+            "input": body,
+        }))
+        .await
     }
 
     pub(crate) async fn start_encoded(
@@ -405,7 +426,11 @@ where
     ) -> Result<OperationRef<'a, T, D>, TrellisClientError> {
         let response = self
             .transport
-            .request_json_value(self.transport.descriptor_subject(D::SUBJECT), body)
+            .request_json_value(
+                self.transport
+                    .operation_subject(D::API_ID, D::KEY, D::SUBJECT)?,
+                body,
+            )
             .await?;
         validate_snapshot_at::<D>(&response, "/snapshot")?;
         let accepted: AcceptedEnvelope<D::Progress, D::Output> = serde_json::from_value(response)?;
@@ -605,7 +630,11 @@ where
         let response = self
             .transport
             .request_json_value(
-                control_subject(&self.transport.descriptor_subject(D::SUBJECT)),
+                control_subject(&self.transport.operation_subject(
+                    D::API_ID,
+                    D::KEY,
+                    D::SUBJECT,
+                )?),
                 body,
             )
             .await?;
@@ -615,24 +644,18 @@ where
     pub async fn wait(
         &self,
     ) -> Result<OperationSnapshot<D::Progress, D::Output>, TrellisClientError> {
-        let body = json!({
-            "action": "wait",
-            "operationId": self.id(),
-        });
-        let response = self
-            .transport
-            .request_json_value(
-                control_subject(&self.transport.descriptor_subject(D::SUBJECT)),
-                body,
-            )
-            .await?;
-        let snapshot = decode_snapshot_response::<D>(response)?;
-        if !is_terminal_state(&snapshot.state) {
-            return Err(TrellisClientError::OperationProtocol(
-                "wait returned non-terminal snapshot".to_string(),
-            ));
+        let mut events = self.watch().await?;
+        while let Some(event) = events.next().await {
+            match event? {
+                OperationEvent::Completed { snapshot }
+                | OperationEvent::Failed { snapshot }
+                | OperationEvent::Cancelled { snapshot } => return Ok(snapshot),
+                _ => {}
+            }
         }
-        Ok(snapshot)
+        Err(TrellisClientError::OperationProtocol(
+            "operation watch ended before a terminal snapshot".to_string(),
+        ))
     }
 
     pub async fn cancel(
@@ -650,7 +673,11 @@ where
         let response = self
             .transport
             .request_json_value(
-                control_subject(&self.transport.descriptor_subject(D::SUBJECT)),
+                control_subject(&self.transport.operation_subject(
+                    D::API_ID,
+                    D::KEY,
+                    D::SUBJECT,
+                )?),
                 body,
             )
             .await?;
@@ -708,7 +735,11 @@ where
         let response = self
             .transport
             .request_json_value(
-                control_subject(&self.transport.descriptor_subject(D::SUBJECT)),
+                control_subject(&self.transport.operation_subject(
+                    D::API_ID,
+                    D::KEY,
+                    D::SUBJECT,
+                )?),
                 body,
             )
             .await?;
@@ -721,7 +752,11 @@ where
         BoxStream<'a, Result<OperationEvent<D::Progress, D::Output, Value>, TrellisClientError>>,
         TrellisClientError,
     > {
-        let control = control_subject(&self.transport.descriptor_subject(D::SUBJECT));
+        let control = control_subject(&self.transport.operation_subject(
+            D::API_ID,
+            D::KEY,
+            D::SUBJECT,
+        )?);
         let body = json!({
             "action": "watch",
             "operationId": self.id(),
@@ -782,7 +817,11 @@ where
         let response = self
             .transport
             .watch_json_value(
-                control_subject(&self.transport.descriptor_subject(D::SUBJECT)),
+                control_subject(&self.transport.operation_subject(
+                    D::API_ID,
+                    D::KEY,
+                    D::SUBJECT,
+                )?),
                 json!({
                     "action": "watch",
                     "operationId": self.id(),
@@ -1320,7 +1359,7 @@ mod tests {
 
     #[tokio::test]
     async fn resumed_operation_reference_preserves_typed_output() {
-        let transport = RecordingTransport::with_responses(vec![json!({
+        let transport = RecordingTransport::with_watch_frames(vec![json!({
             "kind": "snapshot",
             "snapshot": {
                 "revision": 8,

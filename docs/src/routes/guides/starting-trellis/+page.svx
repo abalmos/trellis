@@ -19,7 +19,9 @@ By the end, you will have:
   revalidates the cached archive and binary against the pin, reinstalling
   corrupted or replaced cache entries
 
-The config init command generates NATS operator, account, credential, signing-key, auth-callout, resolver, and authorization-trust files natively. The authorization root seed remains offline in the generated bundle; runtime config references only the online context-issuer seed.
+The config init command generates NATS operator, account, credential,
+signing-key, auth-callout, and resolver files natively. Trellis-owned signing
+authority is persisted in runtime state rather than startup trust files.
 
 ## 1. Generate the local bundle
 
@@ -35,7 +37,6 @@ This creates a movable init bundle under `~/trellis`:
 | `config.toml` | Trellis runtime config using relative file paths |
 | `auth/` | Online issuer seed and Auth runtime state |
 | `session.seed` | Private 32-byte event-session seed referenced from `config.toml` |
-| `trust/authorization-root.seed` | Offline root seed for issuer rotation; never mount this into the runtime |
 
 The generated Trellis config omits `nats.jetstream.replicas`. On startup,
 Trellis probes NATS JetStream topology and uses `1` for this standalone local
@@ -91,8 +92,7 @@ listens on the bundle's loopback ports:
 
 The runtime safely converges the streams and KV buckets owned by its selected
 mode during startup, exposes the embedded portal, first-admin and login flows,
-authorization trust/context registries, `/healthz`, and `/readyz`. Startup
-fails closed if configured trust cannot be verified or published. On a fresh
+authorization context registries, `/healthz`, and `/readyz`. On a fresh
 bundle, the first full run boots into first-administrator onboarding and prints
 a bootstrap URL for the first admin; run
 `trellis-server check --dev --config "$HOME/trellis/config.toml"` before
@@ -123,7 +123,7 @@ The initial administrator remains the permanent bootstrap recovery principal,
 but its `trellis-app.cli@v1` authority follows the ordinary authority lifecycle
 and may be changed or revoked. Start Trellis with `--reset-admin` to recover the
 account. Trellis prints a replacement one-time URL, preserves the principal,
-restores full authority for the exact current CLI artifact and needs digest, and
+restores full approved authority for the exact current CLI participant revision, and
 revokes its existing sessions when reset completes. The command targets this
 bootstrap account even when additional administrators exist.
 

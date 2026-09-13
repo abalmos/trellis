@@ -171,12 +171,12 @@ export type VerifyAuthorizationRequestArgs = {
 /** Arguments for local context-bound event authorization. */
 export type VerifyAuthorizationEventArgs = {
   contextHandle: AuthorizationContextHandle;
+  descriptorIdentity: string;
   subject: string;
   payload: Uint8Array;
   eventId: string;
   eventTime: string;
   proof: string;
-  requiredPermissions: PermissionAtom[];
   policy: AuthorizationVerificationPolicy;
   revokedAt?: number | null;
 };
@@ -273,6 +273,47 @@ export function initializeProtocolWasmSync(): void {
   }
   initSync({ module: bytes as SyncInitInput });
   initializedSync = true;
+}
+
+/** Derive an API-qualified event subject through the shared Rust protocol. */
+export async function eventSubjectWasm(
+  apiId: string,
+  action: string,
+): Promise<string> {
+  await initializeProtocolWasm();
+  return protocolWasm.event_subject(apiId, action);
+}
+
+/** Compute the shared query binding for an opaque pagination cursor. */
+export async function paginationQueryDigest(
+  endpoint: string,
+  query: unknown,
+): Promise<string> {
+  await initializeProtocolWasm();
+  return protocolWasm.pagination_query_digest(endpoint, JSON.stringify(query));
+}
+
+/** Encode a value with the shared versioned pagination cursor codec. */
+export async function encodePaginationCursor(
+  queryDigest: string,
+  after: unknown,
+): Promise<string> {
+  await initializeProtocolWasm();
+  return protocolWasm.encode_pagination_cursor(
+    queryDigest,
+    JSON.stringify(after),
+  );
+}
+
+/** Decode and query-bind a value with the shared pagination cursor codec. */
+export async function decodePaginationCursor<T>(
+  cursor: string,
+  queryDigest: string,
+): Promise<T> {
+  await initializeProtocolWasm();
+  return JSON.parse(
+    protocolWasm.decode_pagination_cursor(cursor, queryDigest),
+  ) as T;
 }
 
 /** Verify a complete signed authorization context through Rust/WASM. */

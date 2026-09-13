@@ -18,7 +18,7 @@ pub(crate) struct BrowserFlowResponse {
 pub(crate) struct PortalFlowResponse {
     #[serde(flatten)]
     flow: BrowserFlowResponse,
-    consent_view_digest: String,
+    decision_digest: String,
     user: BrowserFlowUser,
 }
 
@@ -53,7 +53,7 @@ where
         .await?
         .ok_or_else(|| HttpError::internal("flow_principal_missing"))?;
     Ok(PortalFlowResponse {
-        consent_view_digest: flow.consent.consent_view_digest.clone(),
+        decision_digest: flow.consent.decision_digest.clone(),
         user: BrowserFlowUser {
             origin: "trellis",
             id: profile.principal_id,

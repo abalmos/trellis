@@ -3,6 +3,7 @@ import {
   jetstream,
   type JetStreamClient,
   jetstreamManager,
+  type JsMsg,
 } from "@nats-io/jetstream";
 import {
   createInbox,
@@ -17,11 +18,15 @@ import type {
   InferSchemaType,
   RPCDesc,
 } from "./participant.ts";
-import type {
-  PermissionAtom as DescriptorPermissionAtom,
-  RuntimeApi,
+import {
+  boundApiSubject,
+  feedControlSubject,
+  type PermissionAtom as DescriptorPermissionAtom,
+  routeQueueGroup,
+  type RuntimeApi,
 } from "./participant_runtime/api.ts";
 import type { Codec } from "./generated.ts";
+import { encodeEventSubjectParameterToken } from "./helpers.ts";
 import type { ParticipantKvMetadata } from "./participant_runtime/metadata.ts";
 import type { EventConsumerResourceBinding } from "./participant_runtime/schemas.ts";
 import type { StaticDecode } from "typebox";
@@ -86,7 +91,11 @@ import {
 } from "./errors/index.ts";
 import { RemoteError } from "./errors/RemoteError.ts";
 import { logger, type LoggerLike } from "./globals.ts";
-import { TypedKV } from "./kv.ts";
+import {
+  type KvRepresentation,
+  type ResourceMigrations,
+  TypedKV,
+} from "./kv.ts";
 import { TrellisErrorDataSchema } from "./errors/RemoteError.ts";
 import type {
   ActiveJob,
@@ -104,11 +113,12 @@ import {
 import type { Span } from "./telemetry/mod.ts";
 import {
   API as STATE_API,
+  Conflict as StateRpcConflict,
   type DeleteOutput as StateDeleteResponse,
   type GetOutput as StateGetResponse,
-  type ListOutput as StateListResponse,
-  type PutOutput as StatePutResponse,
+  type PutOutput as StateSetResponse,
 } from "./internal_sdk/generated/apis/state/mod.js";
+import { API as EVENTS_API } from "./internal_sdk/generated/apis/events/mod.js";
 import {
   createTransferHandle,
   type FileInfo,
@@ -181,6 +191,7 @@ type LocalAuthorizationArgs =
     cache: AuthorizationProviderCache | undefined;
     message: LocalAuthorizationEventMessage;
     permission: DescriptorPermissionAtom | undefined;
+    descriptorIdentity: string;
     requiredCapabilities: readonly string[];
   };
 
@@ -247,18 +258,23 @@ export async function verifyLocalAuthorization(
     } else {
       const eventId = args.message.headers?.get("Nats-Msg-Id");
       const eventTime = args.message.headers?.get("Trellis-Event-Time");
-      if (!eventId || !eventTime) {
+      const descriptorIdentity = args.message.headers?.get(
+        "Trellis-Event-Descriptor",
+      );
+      if (
+        !eventId || !eventTime || descriptorIdentity !== args.descriptorIdentity
+      ) {
         return err(new AuthError({ reason: "invalid_signature" }));
       }
       const event: AuthorizationProviderEvent = {
         contextDigest,
         sessionKey,
+        descriptorIdentity,
         subject: args.message.subject,
         payload: new Uint8Array(args.message.data ?? new Uint8Array()),
         eventId,
         eventTime,
         proof,
-        requiredPermissions: [toVerifierPermission(args.permission)],
         requiredCapabilities: [...args.requiredCapabilities],
       };
       result = await args.cache.verifyEvent(event);
@@ -297,7 +313,7 @@ function toVerifierPermission(
     return {
       target: {
         kind: "operationSignal",
-        api: permission.apiId,
+        api: `${permission.apiId}@${permission.apiVersion}`,
         operation: permission.surfaceName.slice(0, separator),
         signal: permission.surfaceName.slice(separator + 1),
       },
@@ -307,7 +323,7 @@ function toVerifierPermission(
   return {
     target: {
       kind: "apiSurface",
-      api: permission.apiId,
+      api: `${permission.apiId}@${permission.apiVersion}`,
       surface: permission.surfaceKind,
       name: permission.surfaceName,
     },
@@ -650,11 +666,11 @@ type ContractJobsFor<TContract> = TContract extends {
   }
   : {};
 export type RuntimeStateStoreShape = {
-  kind: "value" | "map";
+  kind: "value";
   value: unknown;
-  schema?: unknown;
-  stateVersion?: string;
-  acceptedVersions?: Record<string, unknown>;
+  codec: Codec<unknown>;
+  version: number;
+  migrations: Readonly<Record<number, Codec<unknown>>>;
 };
 export type RuntimeStateStores = Record<string, RuntimeStateStoreShape>;
 export type RuntimeStateStoresForContract<TContract> = TContract extends {
@@ -666,7 +682,12 @@ export type RuntimeStateStoresForContract<TContract> = TContract extends {
     ]: TResources[K] extends { codec: infer TCodec } ? {
         kind: "value";
         value: TCodec extends Codec<infer TValue> ? TValue : unknown;
-        schema: TCodec;
+        codec: TCodec;
+        version: TResources[K] extends { version: infer TVersion } ? TVersion
+          : number;
+        migrations: TResources[K] extends { migrations: infer TMigrations }
+          ? TMigrations
+          : {};
       }
       : never;
   }
@@ -827,6 +848,7 @@ export type PreparedTrellisEvent<
   TPayload extends Record<string, unknown> = Record<string, unknown>,
 > = Readonly<{
   event: string;
+  descriptorIdentity: string;
   subject: string;
   /** Runtime event metadata assigned when the event was prepared. */
   header: TrellisEventHeader;
@@ -899,6 +921,8 @@ export type OperationRuntimeHandle<
   nextSignal(
     name?: string,
   ): AsyncResult<RuntimeOperationSignal, BaseError>;
+  /** Durably acknowledges a signal after its side effects have been accepted. */
+  acknowledgeSignal(sequence: number): AsyncResult<void, BaseError>;
   defer(): OperationDeferred;
 };
 export type OperationDeferred = {
@@ -933,102 +957,47 @@ export type OperationTransferHandle = {
   updates(): AsyncIterable<RuntimeOperationTransferProgress>;
   completed(): AsyncResult<FileInfo, TransferError>;
 };
-type StateEntryBase<TValue> = {
-  value: TValue;
+/** Decoded current State value and its opaque storage revision. */
+export type StateValue<T> = Readonly<{
+  value: T;
   revision: string;
+  createdAt: string;
   updatedAt: string;
-  expiresAt?: string;
-};
-type ValueStateEntry<TValue> = StateEntryBase<TValue>;
-type MapStateEntry<TValue> = StateEntryBase<TValue> & { key: string };
-type StateMigrationRequiredEntry<TEntry> = {
-  migrationRequired: true;
-  entry: TEntry;
-  stateVersion: string;
-  currentStateVersion: string;
-  writerContractDigest: string;
-};
-type StateGetResult<TStore extends RuntimeStateStoreShape> =
-  | { found: false }
-  | {
-    found: true;
-    entry: TStore["kind"] extends "map" ? MapStateEntry<TStore["value"]>
-      : ValueStateEntry<TStore["value"]>;
+}>;
+
+/** State CAS failure with the authoritative current value, when present. */
+export class StateConflictError<T> extends BaseError {
+  override readonly name = "StateConflictError" as const;
+  readonly current?: StateValue<T>;
+
+  constructor(current?: StateValue<T>) {
+    super("State revision conflict");
+    this.current = current;
   }
-  | StateMigrationRequiredEntry<
-    TStore["kind"] extends "map" ? MapStateEntry<unknown>
-      : ValueStateEntry<unknown>
-  >;
-type StatePutResult<TStore extends RuntimeStateStoreShape> =
-  | {
-    applied: true;
-    entry: TStore["kind"] extends "map" ? MapStateEntry<TStore["value"]>
-      : ValueStateEntry<TStore["value"]>;
+
+  override toSerializable() {
+    return this.baseSerializable();
   }
-  | {
-    applied: false;
-    found: boolean;
-    entry?:
-      | (TStore["kind"] extends "map" ? MapStateEntry<TStore["value"]>
-        : ValueStateEntry<TStore["value"]>)
-      | StateMigrationRequiredEntry<
-        TStore["kind"] extends "map" ? MapStateEntry<unknown>
-          : ValueStateEntry<unknown>
-      >;
-  };
-type StateDeleteOptions = {
-  expectedRevision?: string;
-};
-type StatePutOptions = {
-  expectedRevision?: string | null;
-  ttlMs?: number;
-};
-type StateListOptions = {
-  offset?: number;
-  limit?: number;
-};
-export type ValueStateStoreClient<TValue> = {
-  get(): AsyncResult<
-    StateGetResult<{ kind: "value"; value: TValue }>,
-    BaseError
-  >;
-  put(
-    value: TValue,
-    opts?: StatePutOptions,
-  ): AsyncResult<StatePutResult<{ kind: "value"; value: TValue }>, BaseError>;
-  delete(
-    opts?: StateDeleteOptions,
-  ): AsyncResult<{ deleted: boolean }, BaseError>;
-};
-export type MapStateStoreClient<TValue> = {
-  get(
-    key: string,
-  ): AsyncResult<StateGetResult<{ kind: "map"; value: TValue }>, BaseError>;
-  put(
-    key: string,
-    value: TValue,
-    opts?: StatePutOptions,
-  ): AsyncResult<StatePutResult<{ kind: "map"; value: TValue }>, BaseError>;
-  delete(
-    key: string,
-    opts?: StateDeleteOptions,
-  ): AsyncResult<{ deleted: boolean }, BaseError>;
-  list(opts?: StateListOptions): AsyncResult<{
-    entries: Array<
-      | MapStateEntry<TValue>
-      | StateMigrationRequiredEntry<MapStateEntry<unknown>>
-    >;
-    count: number;
-    offset: number;
-    limit: number;
-    nextOffset?: number;
-  }, BaseError>;
-  prefix(path: string): MapStateStoreClient<TValue>;
-};
+}
+
+/** Raised when an optional participant resource is not installed. */
+export class ResourceUnavailableError extends BaseError {
+  override readonly name = "ResourceUnavailableError" as const;
+
+  /** Construct an unavailable-resource failure. */
+  constructor(readonly kind: string, readonly resourceName: string) {
+    super(`${kind} resource '${resourceName}' is unavailable`);
+  }
+
+  override toSerializable() {
+    return this.baseSerializable();
+  }
+}
+
+/** Typed single-value State handle. */
+export type ValueStateStoreClient<TValue> = StateHandle<TValue>;
 export type StateFacade<TState extends RuntimeStateStores> = {
-  [K in keyof TState]: TState[K]["kind"] extends "map"
-    ? MapStateStoreClient<TState[K]["value"]>
-    : ValueStateStoreClient<TState[K]["value"]>;
+  [K in keyof TState]: ValueStateStoreClient<TState[K]["value"]>;
 };
 export type OperationHandlerContext<
   TInput,
@@ -1041,6 +1010,12 @@ export type OperationHandlerContext<
   input: TInput;
   op: OperationRuntimeHandle<TProgress, TOutput, TError, TUpdate>;
   caller: SessionCaller;
+  /** Aborted when cancellation is committed or this executor loses ownership. */
+  signal: AbortSignal;
+  /** Whether this handler invocation reclaimed an expired executor lease. */
+  resuming: boolean;
+  /** Last durably persisted progress available to a resumed handler. */
+  progress?: TProgress;
 } & (TTransfer extends undefined ? {} : { transfer: TTransfer });
 export type OperationRegistration<
   TInput,
@@ -1050,12 +1025,6 @@ export type OperationRegistration<
   TError extends BaseError,
   TUpdate = unknown,
 > = {
-  accept(args: {
-    sessionKey: string;
-  }): AsyncResult<
-    AcceptedOperation<TProgress, TOutput, TError, TUpdate>,
-    UnexpectedError
-  >;
   /**
    * Loads an existing operation by id and returns a service-side control handle.
    * The operation must belong to this service and registration name.
@@ -1167,6 +1136,7 @@ function recordRuntimeError(
 export type RuntimeOperationDesc = {
   subject: string;
   input: unknown;
+  revision: number;
   progress?: unknown;
   update?: unknown;
   output?: unknown;
@@ -1187,9 +1157,11 @@ export type RuntimeOperationDesc = {
 export type RuntimeOperationSignal = {
   operationId: string;
   sequence: number;
+  requestId: string;
   signal: string;
   input?: JsonValue;
   acceptedAt: string;
+  acknowledged: boolean;
 };
 
 export type RuntimeOperationSignalWaiter = (
@@ -1228,7 +1200,19 @@ export type RuntimeOperationRecord = {
   id: string;
   service: string;
   operation: string;
-  ownerSessionKey: string;
+  callerSessionKey: string;
+  invocationDigest: string;
+  caller: VerifiedCaller;
+  creatorPrincipalId: string;
+  creatorParticipantId: string;
+  apiId: string;
+  input: unknown;
+  revision: number;
+  ownerInstanceId: string;
+  ownerEpoch: number;
+  leaseExpiresAt: string;
+  cancelRequestedAt?: string;
+  transferGrant?: SendTransferGrant;
   snapshot: RuntimeOperationSnapshot;
   sequence: number;
   signalSequence: number;
@@ -1236,24 +1220,41 @@ export type RuntimeOperationRecord = {
   terminal: boolean;
   watchers: Map<string, { includeUpdates: boolean }>;
   frameQueue: Promise<void>;
-  waiters: Set<string>;
   signalWaiters: Set<RuntimeOperationSignalWaiter>;
+  cancellation: AbortController;
+  reclaimed?: boolean;
 };
 
 export type DurableOperationRecord = {
-  ownerSessionKey: string;
+  invocationId: string;
+  callerSessionKey: string;
+  invocationDigest: string;
+  caller: VerifiedCaller;
+  creatorPrincipalId: string;
+  creatorParticipantId: string;
+  apiId: string;
+  operation: string;
+  input: unknown;
+  revision: number;
+  ownerInstanceId: string;
+  ownerEpoch: number;
+  leaseExpiresAt: string;
+  cancelRequestedAt?: string;
+  transferGrant?: SendTransferGrant;
   sequence: number;
-  signalSequence?: number;
-  signals?: RuntimeOperationSignal[];
+  signalSequence: number;
+  signals: RuntimeOperationSignal[];
   snapshot: RuntimeOperationSnapshot;
 };
 
 const DurableOperationSignalSchema = Type.Object({
   operationId: Type.String(),
   sequence: Type.Number(),
+  requestId: Type.String(),
   signal: Type.String(),
   input: Type.Optional(Type.Any()),
   acceptedAt: Type.String(),
+  acknowledged: Type.Boolean(),
 });
 
 const DurableOperationSnapshotSchema = Type.Object({
@@ -1288,10 +1289,19 @@ const DurableOperationSnapshotSchema = Type.Object({
 });
 
 export const DurableOperationRecordSchema = Type.Object({
-  ownerSessionKey: Type.String(),
+  invocationId: Type.String(),
+  callerSessionKey: Type.String(),
+  apiId: Type.String(),
+  operation: Type.String(),
+  input: Type.Any(),
+  ownerInstanceId: Type.String(),
+  ownerEpoch: Type.Number(),
+  leaseExpiresAt: Type.String(),
+  cancelRequestedAt: Type.Optional(Type.String()),
+  transferGrant: Type.Optional(Type.Any()),
   sequence: Type.Number(),
-  signalSequence: Type.Optional(Type.Number()),
-  signals: Type.Optional(Type.Array(DurableOperationSignalSchema)),
+  signalSequence: Type.Number(),
+  signals: Type.Array(DurableOperationSignalSchema),
   snapshot: DurableOperationSnapshotSchema,
 });
 
@@ -1304,7 +1314,7 @@ export type RuntimeOperationAcceptedEnvelope = {
 
 export type RuntimeOperationControlRequest =
   | {
-    action: "get" | "wait" | "cancel";
+    action: "get" | "cancel";
     operationId: string;
   }
   | {
@@ -1427,6 +1437,11 @@ export type TrellisOpts<TA extends RuntimeApi> = {
   noResponderRetry?: NoResponderRetryOpts;
   api?: TA;
   state?: RuntimeStateStores;
+  stateMigrations?: Readonly<
+    Record<string, ResourceMigrations<unknown> | undefined>
+  >;
+  resourceGeneration?: () => number;
+  resourceAvailability?: (name: string) => boolean;
   connection?: TrellisConnection;
   onSessionNotFound?: () => MaybePromise<void>;
   contractId?: string;
@@ -1435,23 +1450,26 @@ export type TrellisOpts<TA extends RuntimeApi> = {
 
 export type RequestOpts = {
   timeout?: number;
+  signal?: AbortSignal;
 };
 
 const FEED_CANCEL_TOMBSTONE_MS = 30_000;
 const MAX_FEED_CANCEL_TOMBSTONES = 1_024;
+const MAX_OPERATION_INPUT_BYTES = 256 * 1024;
+const MAX_OPERATION_PROGRESS_BYTES = 64 * 1024;
+const MAX_OPERATION_OUTPUT_BYTES = 512 * 1024;
+const MAX_OPERATION_ERROR_BYTES = 32 * 1024;
+const MAX_OPERATION_SIGNALS = 100;
+const MAX_OPERATION_SIGNAL_BYTES = 64 * 1024;
+const MAX_OPERATION_RECORD_BYTES = 1024 * 1024;
 
 export type EventOpts = {
   mode?: "durable" | "ephemeral";
-  replay?: "all" | "new";
-  /** Worker loops started for this durable group by this service instance. */
-  concurrency?: number;
   /**
    * Contract event consumer group to use for durable service listeners when an
    * event is declared in more than one group.
    */
   group?: string;
-  /** @deprecated Durable service listener names are provisioned by Trellis bindings. */
-  durableName?: string;
   signal?: AbortSignal;
 };
 
@@ -1514,12 +1532,6 @@ type RuntimeEventConsumerGroups = Readonly<
   Record<string, RuntimeEventConsumerGroup>
 >;
 
-/** @internal Hook used by Trellis-owned integration tests for durable event interleavings. */
-export type TrellisDurableEventConsumerBeforeReadinessCheckHook = (args: {
-  group: string;
-  subject: string;
-}) => void | Promise<void>;
-
 function eventConsumerGroupEvents(group: RuntimeEventConsumerGroup): string[] {
   const events = new Set<string>();
   for (const groupEvents of Object.values(group.uses ?? {})) {
@@ -1527,6 +1539,17 @@ function eventConsumerGroupEvents(group: RuntimeEventConsumerGroup): string[] {
   }
   for (const event of group.self ?? []) events.add(event);
   return [...events].sort();
+}
+
+function jetStreamDeliveryProof(message: JsMsg): string {
+  const raw = Reflect.get(message, "msg");
+  const reply = raw && typeof raw === "object"
+    ? Reflect.get(raw, "reply")
+    : undefined;
+  if (typeof reply !== "string" || !reply.startsWith("$JS.ACK.")) {
+    throw new Error("JetStream delivery has no acknowledgement subject");
+  }
+  return reply;
 }
 
 function isConsumerNotFoundError(error: unknown): boolean {
@@ -1539,19 +1562,15 @@ function isConsumerNotFoundError(error: unknown): boolean {
 type TrellisInternalOpts<TA extends RuntimeApi> = TrellisOpts<TA> & {
   inboxPrefix?: string;
   eventConsumers?: RuntimeEventConsumers;
-  durableEventConsumerBeforeReadinessCheck?:
-    TrellisDurableEventConsumerBeforeReadinessCheckHook;
+  apiBindings?: Readonly<Record<string, unknown>>;
 };
 
 const internalEventConsumers = Symbol("trellis.internal.eventConsumers");
-const internalDurableEventConsumerBeforeReadinessCheck = Symbol(
-  "trellis.internal.durableEventConsumerBeforeReadinessCheck",
-);
+const internalApiBindings = Symbol("trellis.internal.apiBindings");
 
 type InternalizedTrellisOpts<TA extends RuntimeApi> = TrellisOpts<TA> & {
   [internalEventConsumers]?: RuntimeEventConsumers;
-  [internalDurableEventConsumerBeforeReadinessCheck]?:
-    TrellisDurableEventConsumerBeforeReadinessCheckHook;
+  [internalApiBindings]?: Readonly<Record<string, unknown>>;
 };
 
 /**
@@ -1570,16 +1589,15 @@ export function createTrellisInternal<
   opts?: TrellisInternalOpts<TA>,
 ): Trellis<TA, TMode, TState> {
   const {
-    durableEventConsumerBeforeReadinessCheck,
     eventConsumers,
+    apiBindings,
     inboxPrefix,
     ...publicOpts
   } = opts ?? {};
   const internalOpts: InternalizedTrellisOpts<TA> = {
     ...publicOpts,
     [internalEventConsumers]: eventConsumers,
-    [internalDurableEventConsumerBeforeReadinessCheck]:
-      durableEventConsumerBeforeReadinessCheck,
+    [internalApiBindings]: apiBindings,
   };
   return new Trellis<TA, TMode, TState>(
     name,
@@ -1602,6 +1620,16 @@ type DurableEventConsumerLoop<TA extends RuntimeApi> = {
   concurrency: number;
   startedWorkers: Set<number>;
   messages: Set<ConsumerMessages>;
+};
+
+type ConsumerReplayEnvelope = {
+  deadLetterId: string;
+  generation: number;
+  resourceId: string;
+  originalRecordSequence: number;
+  originalSubject: string;
+  originalPayloadBytes: number[];
+  originalHeaders: Record<string, string[]>;
 };
 
 export type FeedSubscribeOpts = {
@@ -1873,8 +1901,8 @@ function natsSubjectMatches(pattern: string, subject: string): boolean {
 
 export type HandlerKvFacade<TKv extends ParticipantKvMetadata> = {
   [K in keyof TKv]: TKv[K]["required"] extends false
-    ? TypedKV<TKv[K]["schema"]> | undefined
-    : TypedKV<TKv[K]["schema"]>;
+    ? TypedKV<TKv[K]["value"]> | undefined
+    : TypedKV<TKv[K]["value"]>;
 };
 
 export type HandlerStoreHandle = {
@@ -1942,293 +1970,237 @@ export type HandlerFn<
   Result<MethodOutputOf<TMountApi, M>, HandlerErrorOf<TMountApi, M>>
 >;
 
-const DEFAULT_STATE_LIST_LIMIT = 100;
-const STATE_TEXT_ENCODER = new TextEncoder();
-const STATE_TEXT_DECODER = new TextDecoder();
-
-function decodeStateJson(value: Uint8Array): JsonValue {
-  return JSON.parse(STATE_TEXT_DECODER.decode(value)) as JsonValue;
-}
-
 const STATE_RUNTIME_RPC = {
-  get: {
+  Get: {
     subject: "rpc.v1.state.Get",
     input: STATE_API.actions["rpc:Get"].input,
     output: STATE_API.actions["rpc:Get"].output,
     callerCapabilities: [],
-    errors: ["AuthError", "ValidationError", "UnexpectedError"] as const,
-    declaredErrorTypes: [
-      "AuthError",
-      "ValidationError",
-      "UnexpectedError",
-    ] as const,
+    errors: STATE_API.actions["rpc:Get"].errors.map((error) => error.type),
+    declaredErrorTypes: STATE_API.actions["rpc:Get"].errors.map((error) =>
+      error.type
+    ),
+    runtimeErrors: STATE_API.actions["rpc:Get"].errors,
   },
-  put: {
+  Put: {
     subject: "rpc.v1.state.Put",
     input: STATE_API.actions["rpc:Put"].input,
     output: STATE_API.actions["rpc:Put"].output,
     callerCapabilities: [],
-    errors: ["AuthError", "ValidationError", "UnexpectedError"] as const,
-    declaredErrorTypes: [
-      "AuthError",
-      "ValidationError",
-      "UnexpectedError",
-    ] as const,
+    errors: STATE_API.actions["rpc:Put"].errors.map((error) => error.type),
+    declaredErrorTypes: STATE_API.actions["rpc:Put"].errors.map((error) =>
+      error.type
+    ),
+    runtimeErrors: STATE_API.actions["rpc:Put"].errors,
   },
-  delete: {
+  Delete: {
     subject: "rpc.v1.state.Delete",
     input: STATE_API.actions["rpc:Delete"].input,
     output: STATE_API.actions["rpc:Delete"].output,
     callerCapabilities: [],
-    errors: ["AuthError", "ValidationError", "UnexpectedError"] as const,
-    declaredErrorTypes: [
-      "AuthError",
-      "ValidationError",
-      "UnexpectedError",
-    ] as const,
+    errors: STATE_API.actions["rpc:Delete"].errors.map((error) => error.type),
+    declaredErrorTypes: STATE_API.actions["rpc:Delete"].errors.map((error) =>
+      error.type
+    ),
+    runtimeErrors: STATE_API.actions["rpc:Delete"].errors,
   },
-  list: {
-    subject: "rpc.v1.state.List",
-    input: STATE_API.actions["rpc:List"].input,
-    output: STATE_API.actions["rpc:List"].output,
-    callerCapabilities: [],
-    errors: ["AuthError", "ValidationError", "UnexpectedError"] as const,
-    declaredErrorTypes: [
-      "AuthError",
-      "ValidationError",
-      "UnexpectedError",
-    ] as const,
-  },
-} satisfies Record<string, {
-  subject: string;
-  input: unknown;
-  output: unknown;
-  callerCapabilities: readonly string[];
-  errors: readonly string[];
-  declaredErrorTypes: readonly string[];
+};
+
+/** Transport calls consumed by a typed State handle. */
+export type StateResourceCalls = Readonly<{
+  get(
+    input: { resourceName: string },
+  ): PromiseLike<Result<StateGetResponse, BaseError>>;
+  set(input: {
+    resourceName: string;
+    representationVersion: bigint;
+    value: Uint8Array;
+    mode: "create" | "set" | "replace";
+    revision?: string;
+  }): PromiseLike<Result<StateSetResponse, BaseError>>;
+  delete(input: {
+    resourceName: string;
+    revision?: string;
+  }): PromiseLike<Result<StateDeleteResponse, BaseError>>;
 }>;
 
-function joinStatePath(prefix: string | undefined, key: string): string {
-  return prefix ? `${prefix}/${key}` : key;
-}
+/** Typed handle for one generated single-value State resource. */
+export class StateHandle<T> {
+  readonly #resourceName: string;
+  readonly #definition: KvRepresentation<T>;
+  readonly #migrations: ResourceMigrations<T>;
+  readonly #isCurrent: () => boolean;
+  readonly #isAvailable: () => boolean;
+  readonly #calls: StateResourceCalls;
 
-function validateStateValue(
-  schema: unknown,
-  value: JsonValue,
-): Result<unknown, ValidationError | UnexpectedError> {
-  const result = parseRuntimeSchema(schema, value);
-  // State validation is an internal path; collapse SchemaValidationError
-  // into ValidationError to keep internal error types narrow.
-  if (result.isOk()) {
-    return result as Result<unknown, ValidationError | UnexpectedError>;
-  }
-  const resultError = result.error;
-  if (resultError instanceof SchemaValidationError) {
-    return Result.err(
-      new ValidationError({
-        errors: resultError.issues.map((i) => ({
-          path: i.path,
-          message: i.message,
-        })),
-        cause: resultError.cause,
-      }),
-    ) as Result<unknown, ValidationError | UnexpectedError>;
-  }
-  return result as Result<unknown, ValidationError | UnexpectedError>;
-}
-
-function validateStateGetResult<TStore extends RuntimeStateStoreShape>(
-  descriptor: RuntimeStateStoreShape,
-  result: StateGetResult<TStore>,
-): Result<StateGetResult<TStore>, ValidationError | UnexpectedError> {
-  if ("migrationRequired" in result) {
-    const schema = descriptor.acceptedVersions?.[result.stateVersion];
-    if (!schema) {
-      return Result.err(
-        new ValidationError({
-          errors: [{
-            path: "/stateVersion",
-            message:
-              `state version '${result.stateVersion}' is not accepted by the runtime store`,
-          }],
-        }),
-      );
-    }
-    const parsed = validateStateValue(schema, result.entry.value as JsonValue);
-    if (parsed.isErr()) return Result.err(parsed.error);
-    return Result.ok({
-      ...result,
-      entry: {
-        ...result.entry,
-        value: parsed.unwrapOrElse(() => {
-          throw new Error("state value validation unexpectedly failed");
-        }),
-      },
-    });
+  /** Construct a handle from generated metadata and settled State transport calls. */
+  constructor(args: {
+    resourceName: string;
+    definition: KvRepresentation<T>;
+    migrations?: ResourceMigrations<T>;
+    isCurrent?: () => boolean;
+    isAvailable?: () => boolean;
+    calls: StateResourceCalls;
+  }) {
+    this.#resourceName = args.resourceName;
+    this.#definition = args.definition;
+    this.#migrations = args.migrations ?? {};
+    this.#isCurrent = args.isCurrent ?? (() => true);
+    this.#isAvailable = args.isAvailable ?? (() => true);
+    this.#calls = args.calls;
   }
 
-  if (!result.found) {
-    return Result.ok(result);
-  }
-
-  const parsed = validateStateValue(
-    descriptor.schema,
-    result.entry.value as JsonValue,
-  );
-  if (parsed.isErr()) {
-    return Result.err(parsed.error);
-  }
-
-  return Result.ok({
-    ...result,
-    entry: {
-      ...result.entry,
-      value: parsed.unwrapOrElse(() => {
-        throw new Error("state value validation unexpectedly failed");
-      }),
-    },
-  });
-}
-
-function validateStatePutResult<TStore extends RuntimeStateStoreShape>(
-  descriptor: RuntimeStateStoreShape,
-  result: StatePutResult<TStore>,
-): Result<StatePutResult<TStore>, ValidationError | UnexpectedError> {
-  if (result.applied) {
-    const parsed = validateStateValue(
-      descriptor.schema,
-      result.entry.value as JsonValue,
-    );
-    if (parsed.isErr()) return Result.err(parsed.error);
-    return Result.ok({
-      ...result,
-      entry: {
-        ...result.entry,
-        value: parsed.unwrapOrElse(() => {
-          throw new Error("state value validation unexpectedly failed");
-        }),
-      },
-    });
-  }
-
-  if (!result.entry) {
-    return Result.ok(result);
-  }
-
-  if ("migrationRequired" in result.entry) {
-    const schema = descriptor.acceptedVersions?.[result.entry.stateVersion];
-    if (!schema) {
-      return Result.err(
-        new ValidationError({
-          errors: [{
-            path: "/stateVersion",
-            message:
-              `state version '${result.entry.stateVersion}' is not accepted by the runtime store`,
-          }],
-        }),
-      );
-    }
-    const parsed = validateStateValue(
-      schema,
-      result.entry.entry.value as JsonValue,
-    );
-    if (parsed.isErr()) return Result.err(parsed.error);
-    return Result.ok({
-      ...result,
-      entry: {
-        ...result.entry,
-        entry: {
-          ...result.entry.entry,
-          value: parsed.unwrapOrElse(() => {
-            throw new Error("state value validation unexpectedly failed");
-          }),
-        },
-      },
-    });
-  }
-
-  const parsed = validateStateValue(
-    descriptor.schema,
-    result.entry.value as JsonValue,
-  );
-  if (parsed.isErr()) {
-    return Result.err(parsed.error);
-  }
-
-  return Result.ok({
-    ...result,
-    entry: {
-      ...result.entry,
-      value: parsed.unwrapOrElse(() => {
-        throw new Error("state value validation unexpectedly failed");
-      }),
-    },
-  });
-}
-
-function validateStateListResult(
-  descriptor: RuntimeStateStoreShape,
-  result: {
-    entries: Array<
-      MapStateEntry<unknown> | {
-        migrationRequired: true;
-        entry: MapStateEntry<unknown>;
-        stateVersion: string;
-        currentStateVersion: string;
-        writerContractDigest: string;
+  async #project(
+    entry: NonNullable<StateGetResponse["entry"]>,
+  ): Promise<StateValue<T>> {
+    const version = Number(entry.representationVersion);
+    const encoded = JSON.parse(new TextDecoder().decode(entry.value));
+    let value: T;
+    if (version === this.#definition.version) {
+      value = this.#definition.codec.decode(encoded);
+    } else {
+      const historicCodec = this.#definition.migrations[version];
+      const migrate = this.#migrations[version];
+      if (!historicCodec || !migrate) {
+        throw new Error(`Unsupported State representation version ${version}`);
       }
-    >;
-    count: number;
-    offset: number;
-    limit: number;
-    nextOffset?: number;
-  },
-): Result<typeof result, ValidationError | UnexpectedError> {
-  const entries: typeof result.entries = [];
-  for (const entry of result.entries) {
-    if ("migrationRequired" in entry) {
-      const schema = descriptor.acceptedVersions?.[entry.stateVersion];
-      if (!schema) {
+      const migrated = await migrate(historicCodec.decode(encoded));
+      value = this.#definition.codec.decode(this.#definition.codec.encode(
+        migrated instanceof Result ? migrated.orThrow() : migrated,
+      ));
+    }
+    return {
+      value,
+      revision: entry.revision,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+    };
+  }
+
+  #assertCurrent(): void {
+    if (!this.#isAvailable()) {
+      throw new ResourceUnavailableError("State", this.#resourceName);
+    }
+    if (!this.#isCurrent()) {
+      throw new Error(
+        `State resource '${this.#resourceName}' has a stale generation`,
+      );
+    }
+  }
+
+  async #conflict(error: StateRpcConflict) {
+    return Result.err(
+      new StateConflictError(
+        error.data.current
+          ? await this.#project(error.data.current)
+          : undefined,
+      ),
+    );
+  }
+
+  #write(
+    value: T,
+    mode: "create" | "set" | "replace",
+    expectedRevision?: string,
+  ): AsyncResult<StateValue<T>, BaseError> {
+    return AsyncResult.from((async () => {
+      try {
+        this.#assertCurrent();
+        const result = await this.#calls.set({
+          resourceName: this.#resourceName,
+          representationVersion: BigInt(this.#definition.version),
+          value: new TextEncoder().encode(
+            JSON.stringify(this.#definition.codec.encode(value)),
+          ),
+          mode,
+          ...(expectedRevision === undefined
+            ? {}
+            : { revision: expectedRevision }),
+        });
+        if (result.isErr()) {
+          return result.error instanceof StateRpcConflict
+            ? await this.#conflict(result.error)
+            : result;
+        }
+        return Result.ok(
+          await this.#project(
+            result.unwrapOrElse(() => {
+              throw new Error("State set unexpectedly failed");
+            }).entry,
+          ),
+        );
+      } catch (cause) {
         return Result.err(
-          new ValidationError({
-            errors: [{
-              path: "/stateVersion",
-              message:
-                `state version '${entry.stateVersion}' is not accepted by the runtime store`,
-            }],
-          }),
+          cause instanceof BaseError ? cause : new UnexpectedError({ cause }),
         );
       }
-      const parsed = validateStateValue(schema, entry.entry.value as JsonValue);
-      if (parsed.isErr()) return Result.err(parsed.error);
-      entries.push({
-        ...entry,
-        entry: {
-          ...entry.entry,
-          value: parsed.unwrapOrElse(() => {
-            throw new Error("state value validation unexpectedly failed");
-          }),
-        },
-      });
-      continue;
-    }
-
-    const parsed = validateStateValue(
-      descriptor.schema,
-      entry.value as JsonValue,
-    );
-    if (parsed.isErr()) {
-      return Result.err(parsed.error);
-    }
-    entries.push({
-      ...entry,
-      value: parsed.unwrapOrElse(() => {
-        throw new Error("state value validation unexpectedly failed");
-      }),
-    });
+    })());
   }
 
-  return Result.ok({ ...result, entries });
+  /** Read the current value, migrating only in memory when required. */
+  get(): AsyncResult<StateValue<T> | undefined, BaseError> {
+    return AsyncResult.from((async () => {
+      try {
+        this.#assertCurrent();
+        const result = await this.#calls.get({
+          resourceName: this.#resourceName,
+        });
+        if (result.isErr()) return result;
+        const response = result.unwrapOrElse(() => {
+          throw new Error("State get unexpectedly failed");
+        });
+        return Result.ok(
+          response.entry ? await this.#project(response.entry) : undefined,
+        );
+      } catch (cause) {
+        return Result.err(
+          cause instanceof BaseError ? cause : new UnexpectedError({ cause }),
+        );
+      }
+    })());
+  }
+
+  /** Create the value only when no live value exists. */
+  create(value: T): AsyncResult<StateValue<T>, BaseError> {
+    return this.#write(value, "create");
+  }
+
+  /** Unconditionally replace the current value. */
+  set(value: T): AsyncResult<StateValue<T>, BaseError> {
+    return this.#write(value, "set");
+  }
+
+  /** Replace the value only while `revision` remains current. */
+  replace(revision: string, value: T): AsyncResult<StateValue<T>, BaseError> {
+    return this.#write(value, "replace", revision);
+  }
+
+  /** Delete unconditionally or only while `revision` remains current. */
+  delete(revision?: string): AsyncResult<boolean, BaseError> {
+    return AsyncResult.from((async () => {
+      try {
+        this.#assertCurrent();
+        const result = await this.#calls.delete({
+          resourceName: this.#resourceName,
+          ...(revision === undefined ? {} : { revision }),
+        });
+        if (result.isErr()) {
+          return result.error instanceof StateRpcConflict
+            ? await this.#conflict(result.error)
+            : result;
+        }
+        return Result.ok(
+          result.unwrapOrElse(() => {
+            throw new Error("State delete unexpectedly failed");
+          }).deleted,
+        );
+      } catch (cause) {
+        return Result.err(
+          cause instanceof BaseError ? cause : new UnexpectedError({ cause }),
+        );
+      }
+    })());
+  }
 }
 
 export type RpcRequestErrorOf<
@@ -2252,8 +2224,6 @@ export type EventPayload<
 type DeepRecord<T> = {
   [k: string]: T | DeepRecord<T>;
 };
-
-const NATS_SUBJECT_TOKEN_FORBIDDEN = /[\u0000\s.*>~]/gu;
 
 const DEFAULT_NO_RESPONDER_MAX_RETRIES = 2;
 const DEFAULT_NO_RESPONDER_RETRY_MS = 200;
@@ -2318,7 +2288,8 @@ function isDeclaredRpcError(
 }
 
 function isRuntimeRpcErrorDesc(value: unknown): value is RuntimeRpcErrorDesc {
-  return !!value && typeof value === "object" &&
+  return !!value &&
+    (typeof value === "object" || typeof value === "function") &&
     typeof Reflect.get(value, "type") === "string" &&
     typeof Reflect.get(value, "fromSerializable") === "function";
 }
@@ -2417,15 +2388,25 @@ export class Trellis<
   #noResponderMaxRetries: number;
   #noResponderRetryMs: number;
   #onSessionNotFound?: () => MaybePromise<void>;
-  #operationStore?: Promise<TypedKV<typeof DurableOperationRecordSchema>>;
-  #operationStoreId: string;
+  #operationStore?: Promise<TypedKV<DurableOperationRecord>>;
+  #operationDeploymentId?: string;
+  #feedOwnerId: string;
   #eventConsumers: RuntimeEventConsumers;
-  #durableEventConsumerBeforeReadinessCheck?:
-    TrellisDurableEventConsumerBeforeReadinessCheckHook;
+  #apiBindings: Readonly<Record<string, unknown>>;
   #durableEventLoops = new Map<string, DurableEventConsumerLoop<TA>>();
   #durableEventListenersStopped = false;
-  #activeFeeds = new Map<string, AbortController>();
+  #activeFeeds = new Map<string, {
+    controller: AbortController;
+    feedId: string;
+    principalId: string;
+    participantId: string;
+  }>();
   #pendingFeedCancels = new Map<string, ReturnType<typeof setTimeout>>();
+  #resourceGeneration: () => number;
+  #resourceAvailability: (name: string) => boolean;
+  #stateMigrations: Readonly<
+    Record<string, ResourceMigrations<unknown> | undefined>
+  >;
 
   constructor(
     name: string, // Must be unique for a service
@@ -2441,7 +2422,7 @@ export class Trellis<
     this.#nats = nats;
     this.#js = jetstream(this.#nats);
     this.#auth = auth as TrellisAuth;
-    this.#operationStoreId = auth.sessionKey.slice(0, 16);
+    this.#feedOwnerId = auth.sessionKey;
     this.#inboxPrefix = inboxPrefix;
     this.api = (api ?? EMPTY_TRELLIS_API) as TA;
     this.#log = (opts?.log ?? logger).child({ lib: "trellis" });
@@ -2455,9 +2436,11 @@ export class Trellis<
     this.#noResponderRetryMs = opts?.noResponderRetry?.baseDelayMs ??
       DEFAULT_NO_RESPONDER_RETRY_MS;
     this.#onSessionNotFound = opts?.onSessionNotFound;
+    this.#resourceGeneration = opts?.resourceGeneration ?? (() => 0);
+    this.#resourceAvailability = opts?.resourceAvailability ?? (() => true);
+    this.#stateMigrations = opts?.stateMigrations ?? {};
     this.#eventConsumers = internalOpts?.[internalEventConsumers] ?? {};
-    this.#durableEventConsumerBeforeReadinessCheck = internalOpts
-      ?.[internalDurableEventConsumerBeforeReadinessCheck];
+    this.#apiBindings = internalOpts?.[internalApiBindings] ?? {};
     this.connection = opts?.connection ??
       new TrellisConnection({ kind: "client" });
 
@@ -2484,162 +2467,75 @@ export class Trellis<
 
   #createStateFacade(state: TState | undefined): StateFacade<TState> {
     const stores = (state ?? {}) as RuntimeStateStores;
-    const facade = Object.fromEntries(
-      Object.entries(stores).map(([store, descriptor]) => {
-        if (descriptor.kind === "value") {
-          const client: ValueStateStoreClient<unknown> = {
-            get: () =>
-              AsyncResult.from((async () => {
-                const result = await this.#requestBuiltRpc<
-                  StateGetResponse
-                >(
+    const facade: Record<string, ValueStateStoreClient<unknown>> = {};
+    const stateRpc = (name: "Get" | "Put" | "Delete") => {
+      const descriptor = Object.values(this.api.rpc).find((candidate) =>
+        candidate.permission.apiId === "trellis.state" &&
+        candidate.permission.apiVersion === "v1" &&
+        candidate.permission.surfaceName === name
+      );
+      if (!descriptor) {
+        throw new Error(`Generated participant is missing State.${name}`);
+      }
+      return descriptor;
+    };
+    for (const [resourceName, descriptor] of Object.entries(stores)) {
+      Object.defineProperty(facade, resourceName, {
+        enumerable: true,
+        get: () => {
+          const generation = this.#resourceGeneration();
+          return new StateHandle({
+            resourceName,
+            definition: descriptor,
+            migrations: this.#stateMigrations[resourceName],
+            isCurrent: () => generation === this.#resourceGeneration(),
+            isAvailable: () => this.#resourceAvailability(resourceName),
+            calls: {
+              get: (input) =>
+                this.#requestBuiltRpc<StateGetResponse>(
                   "State.Get",
-                  { store },
-                  STATE_RUNTIME_RPC.get,
-                );
-                if (result.isErr()) return result;
-                return validateStateGetResult(
-                  descriptor,
-                  decodeStateJson(result.unwrapOrElse(() => {
-                    throw new Error("state get unexpectedly failed");
-                  })) as StateGetResult<{ kind: "value"; value: unknown }>,
-                );
-              })()),
-            put: (value, opts) =>
-              AsyncResult.from((async () => {
-                const encoded = encodeRuntimeSchema(descriptor.schema, value)
-                  .take();
-                if (isErr(encoded)) {
-                  return Result.err(encoded.error);
-                }
-                const result = await this.#requestBuiltRpc<
-                  StatePutResponse
-                >(
+                  input,
+                  {
+                    ...STATE_RUNTIME_RPC.Get,
+                    subject: stateRpc("Get").subject,
+                  },
+                ),
+              set: (input) =>
+                this.#requestBuiltRpc<StateSetResponse>(
                   "State.Put",
                   {
-                    store,
-                    value: STATE_TEXT_ENCODER.encode(encoded),
-                    ...opts,
-                    ...(opts?.ttlMs === undefined
+                    resourceName: input.resourceName,
+                    representationVersion: Number(input.representationVersion),
+                    value: input.value,
+                    mode: input.mode,
+                    ...(input.revision === undefined
                       ? {}
-                      : { ttlMs: BigInt(opts.ttlMs) }),
+                      : { revision: input.revision }),
                   },
-                  STATE_RUNTIME_RPC.put,
-                );
-                if (result.isErr()) return result;
-                return validateStatePutResult(
-                  descriptor,
-                  decodeStateJson(result.unwrapOrElse(() => {
-                    throw new Error("state put unexpectedly failed");
-                  })) as StatePutResult<{ kind: "value"; value: unknown }>,
-                );
-              })()),
-            delete: (opts) =>
-              this.#requestBuiltRpc<{ deleted: boolean }>(
-                "State.Delete",
-                { store, ...opts },
-                STATE_RUNTIME_RPC.delete,
-              ),
-          };
-          return [store, client];
-        }
-
-        const mapClient = (prefix?: string): MapStateStoreClient<unknown> => ({
-          get: (key) =>
-            AsyncResult.from((async () => {
-              const result = await this.#requestBuiltRpc<
-                StateGetResponse
-              >(
-                "State.Get",
-                { store, key: joinStatePath(prefix, key) },
-                STATE_RUNTIME_RPC.get,
-              );
-              if (result.isErr()) return result;
-              return validateStateGetResult(
-                descriptor,
-                decodeStateJson(result.unwrapOrElse(() => {
-                  throw new Error("state get unexpectedly failed");
-                })) as StateGetResult<{ kind: "map"; value: unknown }>,
-              );
-            })()),
-          put: (key, value, opts) =>
-            AsyncResult.from((async () => {
-              const encoded = encodeRuntimeSchema(descriptor.schema, value)
-                .take();
-              if (isErr(encoded)) {
-                return Result.err(encoded.error);
-              }
-              const result = await this.#requestBuiltRpc<
-                StatePutResponse
-              >(
-                "State.Put",
-                {
-                  store,
-                  key: joinStatePath(prefix, key),
-                  value: STATE_TEXT_ENCODER.encode(encoded),
-                  ...opts,
-                  ...(opts?.ttlMs === undefined
-                    ? {}
-                    : { ttlMs: BigInt(opts.ttlMs) }),
-                },
-                STATE_RUNTIME_RPC.put,
-              );
-              if (result.isErr()) return result;
-              return validateStatePutResult(
-                descriptor,
-                decodeStateJson(result.unwrapOrElse(() => {
-                  throw new Error("state put unexpectedly failed");
-                })) as StatePutResult<{ kind: "map"; value: unknown }>,
-              );
-            })()),
-          delete: (key, opts) =>
-            this.#requestBuiltRpc<{ deleted: boolean }>(
-              "State.Delete",
-              { store, key: joinStatePath(prefix, key), ...opts },
-              STATE_RUNTIME_RPC.delete,
-            ),
-          list: (opts) =>
-            AsyncResult.from((async () => {
-              const result = await this.#requestBuiltRpc<StateListResponse>(
-                "State.List",
-                {
-                  store,
-                  ...(prefix ? { prefix } : {}),
-                  offset: BigInt(opts?.offset ?? 0),
-                  limit: BigInt(opts?.limit ?? DEFAULT_STATE_LIST_LIMIT),
-                },
-                STATE_RUNTIME_RPC.list,
-              );
-              if (result.isErr()) return result;
-              return validateStateListResult(
-                descriptor,
-                (() => {
-                  const value = result.unwrapOrElse(() => {
-                    throw new Error("state list unexpectedly failed");
-                  });
-                  return {
-                    entries: value.entries.map((entry) =>
-                      decodeStateJson(entry) as
-                        | MapStateEntry<unknown>
-                        | StateMigrationRequiredEntry<MapStateEntry<unknown>>
-                    ),
-                    count: Number(value.count),
-                    offset: Number(value.offset),
-                    limit: Number(value.limit),
-                    ...(value.nextOffset === undefined
+                  {
+                    ...STATE_RUNTIME_RPC.Put,
+                    subject: stateRpc("Put").subject,
+                  },
+                ),
+              delete: (input) =>
+                this.#requestBuiltRpc<StateDeleteResponse>(
+                  "State.Delete",
+                  {
+                    resourceName: input.resourceName,
+                    ...(input.revision === undefined
                       ? {}
-                      : { nextOffset: Number(value.nextOffset) }),
-                  };
-                })(),
-              );
-            })()),
-          prefix: (path) => mapClient(joinStatePath(prefix, path)),
-        });
-
-        return [store, mapClient()];
-      }),
-    );
-
+                      : { revision: input.revision }),
+                  },
+                  {
+                    ...STATE_RUNTIME_RPC.Delete,
+                    subject: stateRpc("Delete").subject,
+                  },
+                ),
+            },
+          });
+        },
+      });
+    }
     return facade as StateFacade<TState>;
   }
 
@@ -2690,7 +2586,7 @@ export class Trellis<
       addSurfaceLeaf(surface, event, {
         prepare: (payload) => this.prepare(event, payload),
         publish: (payload) => this.publish(event, payload),
-        listen: (handler, subjectData = {}, opts) =>
+        listen: (handler, subjectData = {}, opts = {}) =>
           this.listenEvent(event, subjectData, handler, opts),
       });
     }
@@ -2765,18 +2661,33 @@ export class Trellis<
   }
 
   async operationStoreHandle(): Promise<
-    TypedKV<typeof DurableOperationRecordSchema>
+    TypedKV<DurableOperationRecord>
   > {
     if (!this.#operationStore) {
-      const bucket = `trellis_operations_${this.#operationStoreId}`;
-      this.#operationStore = (async () => {
-        const result = await TypedKV.open(
+      if (!this.#operationDeploymentId) {
+        throw new Error(
+          "Service operation runtime requires a deployment operation store id",
+        );
+      }
+      const bucket = `trellis_operations_${this.#operationDeploymentId}`;
+      const operationStore = (async (): Promise<
+        TypedKV<DurableOperationRecord>
+      > => {
+        const result = await TypedKV.open<DurableOperationRecord>(
           this.#nats,
           bucket,
-          DurableOperationRecordSchema,
           {
-            history: 5,
-            ttl: 0,
+            version: 1,
+            migrations: {},
+            codec: {
+              encode: (value: DurableOperationRecord) => value,
+              decode: (value) => value as DurableOperationRecord,
+            },
+          },
+          {
+            bindOnly: true,
+            ttl: 30 * 24 * 60 * 60 * 1_000,
+            maxValueBytes: 1024 * 1024,
           },
         );
         const value = result.take();
@@ -2785,36 +2696,120 @@ export class Trellis<
         }
         return value;
       })();
+      this.#operationStore = operationStore;
     }
-    return this.#operationStore;
+    return this.#operationStore!;
   }
 
-  protected setOperationStoreId(id: string): void {
-    this.#operationStoreId = id;
+  protected setOperationDeploymentId(id: string): void {
+    this.#operationDeploymentId = id;
+  }
+
+  protected setFeedOwnerId(id: string): void {
+    this.#feedOwnerId = id;
   }
 
   async loadOperationRecord(
     operationId: string,
   ): Promise<DurableOperationRecord | null> {
     const store = await this.operationStoreHandle();
-    const entry = await store.get(operationId);
+    const entry = await store.getEntry(operationId);
     const value = entry.take();
     if (isErr(value)) {
-      return null;
+      throw value.error;
     }
-    return value.value as DurableOperationRecord;
+    if (!value) return null;
+    return value.value ?? null;
+  }
+
+  protected async listNonterminalOperationRecords(): Promise<
+    DurableOperationRecord[]
+  > {
+    const store = await this.operationStoreHandle();
+    const keys = await store.keys();
+    const keyValue = keys.take();
+    if (isErr(keyValue)) throw keyValue.error;
+    const records: DurableOperationRecord[] = [];
+    for await (const key of keyValue) {
+      const record = await this.loadOperationRecord(key);
+      if (
+        record && record.snapshot.state !== "completed" &&
+        record.snapshot.state !== "failed" &&
+        record.snapshot.state !== "cancelled"
+      ) records.push(record);
+    }
+    return records;
   }
 
   async saveOperationRecord(runtime: RuntimeOperationRecord): Promise<void> {
     const store = await this.operationStoreHandle();
+    const loaded = await store.getEntry(runtime.id);
+    const loadedValue = loaded.take();
+    if (isErr(loadedValue)) throw loadedValue.error;
+    const existing = loadedValue?.value;
+    if (existing && existing.revision !== runtime.revision) {
+      throw new Error("operation revision conflict");
+    }
+    const revision = existing ? runtime.revision + 1 : runtime.revision;
     const record: DurableOperationRecord = {
-      ownerSessionKey: runtime.ownerSessionKey,
+      invocationId: runtime.id,
+      callerSessionKey: runtime.callerSessionKey,
+      invocationDigest: runtime.invocationDigest,
+      caller: runtime.caller,
+      creatorPrincipalId: runtime.creatorPrincipalId,
+      creatorParticipantId: runtime.creatorParticipantId,
+      apiId: runtime.apiId,
+      operation: runtime.operation,
+      input: runtime.input,
+      revision,
+      ownerInstanceId: runtime.ownerInstanceId,
+      ownerEpoch: runtime.ownerEpoch,
+      leaseExpiresAt: runtime.leaseExpiresAt,
+      ...(runtime.cancelRequestedAt
+        ? { cancelRequestedAt: runtime.cancelRequestedAt }
+        : {}),
+      ...(runtime.transferGrant
+        ? { transferGrant: runtime.transferGrant }
+        : {}),
       sequence: runtime.sequence,
       signalSequence: runtime.signalSequence,
       signals: runtime.signals,
       snapshot: runtime.snapshot,
     };
-    await store.put(runtime.id, record);
+    const byteLength = (value: unknown) =>
+      new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    if (byteLength(record.input) > MAX_OPERATION_INPUT_BYTES) {
+      throw new Error("operation input exceeds 256 KiB");
+    }
+    if (
+      record.snapshot.progress !== undefined &&
+      byteLength(record.snapshot.progress) > MAX_OPERATION_PROGRESS_BYTES
+    ) throw new Error("operation progress exceeds 64 KiB");
+    if (
+      record.snapshot.output !== undefined &&
+      byteLength(record.snapshot.output) > MAX_OPERATION_OUTPUT_BYTES
+    ) throw new Error("operation output exceeds 512 KiB");
+    if (
+      record.snapshot.error !== undefined &&
+      byteLength(record.snapshot.error) > MAX_OPERATION_ERROR_BYTES
+    ) throw new Error("operation error exceeds 32 KiB");
+    if ((record.signals?.length ?? 0) > MAX_OPERATION_SIGNALS) {
+      throw new Error("operation signal limit exceeded");
+    }
+    for (const signal of record.signals) {
+      if (byteLength(signal.input ?? null) > MAX_OPERATION_SIGNAL_BYTES) {
+        throw new Error("operation signal payload exceeds 64 KiB");
+      }
+    }
+    if (byteLength(record) > MAX_OPERATION_RECORD_BYTES) {
+      throw new Error("operation record exceeds 1 MiB");
+    }
+    const saved = loadedValue === undefined
+      ? await store.create(runtime.id, record)
+      : await store.replace(runtime.id, loadedValue.revision, record);
+    const value = saved.take();
+    if (isErr(value)) throw value.error;
+    runtime.revision = revision;
   }
 
   /**
@@ -2926,6 +2921,7 @@ export class Trellis<
           subject,
           payload: msg,
           timeout: opts?.timeout ?? this.timeout,
+          signal: opts?.signal,
           callerCapabilities: ctx.callerCapabilities,
           span,
         });
@@ -3204,15 +3200,26 @@ export class Trellis<
 
       const sub = this.#nats.subscribe(inbox);
       const iterator = sub[Symbol.asyncIterator]();
-      const cancelPayload = JSON.stringify({
-        _trellisFeedCancel: inbox,
-      });
-      let cancelled = false;
+      let feedId: string | undefined;
+      let cancelRequested = false;
+      let cancelSent = false;
+      let controlSubject: string | undefined;
       const cancel = async () => {
-        if (cancelled) return;
-        cancelled = true;
+        cancelRequested = true;
+        if (
+          cancelSent || controlSubject === undefined || feedId === undefined
+        ) return;
+        cancelSent = true;
         try {
-          const auth = await this.#createProof(subject, cancelPayload, inbox);
+          const cancelPayload = JSON.stringify({
+            _trellisFeedCancel: inbox,
+            feedId,
+          });
+          const auth = await this.#createProof(
+            controlSubject,
+            cancelPayload,
+            inbox,
+          );
           const cancelHeaders = natsHeaders();
           cancelHeaders.set("proof", auth.proof);
           cancelHeaders.set("iat", String(auth.iat));
@@ -3220,7 +3227,7 @@ export class Trellis<
           cancelHeaders.set("authorization-context", auth.contextDigest);
           cancelHeaders.set("session-key", this.#auth.sessionKey);
           injectTraceContext(createNatsHeaderCarrier(cancelHeaders));
-          this.#nats.publish(subject, cancelPayload, {
+          this.#nats.publish(controlSubject, cancelPayload, {
             headers: cancelHeaders,
             reply: inbox,
           });
@@ -3326,6 +3333,9 @@ export class Trellis<
         return err(error);
       }
       const firstMessage = firstFrame.value;
+      controlSubject = firstMessage.headers?.get("feed-control-subject");
+      feedId = firstMessage.headers?.get("feed-id");
+      if (cancelRequested) await cancel();
       if (firstMessage.headers?.get("status") === "error") {
         opts?.signal?.removeEventListener("abort", abort);
         sub.unsubscribe();
@@ -3416,8 +3426,11 @@ export class Trellis<
     const subject = this.template(descriptor.subject, {}, true).take();
     if (isErr(subject)) throw subject.error;
     let sub: ReturnType<NatsConnection["subscribe"]>;
+    let controlSub: ReturnType<NatsConnection["subscribe"]>;
+    const controlSubject = feedControlSubject(subject, this.#feedOwnerId);
     try {
-      sub = this.#nats.subscribe(subject);
+      sub = this.#nats.subscribe(subject, { queue: routeQueueGroup(subject) });
+      controlSub = this.#nats.subscribe(controlSubject);
     } catch (cause) {
       const error = createTransportError({
         code: "trellis.feed.listen_failed",
@@ -3470,6 +3483,21 @@ export class Trellis<
       }
     });
     this.#tasks.add(`feed:${feed}`, task);
+    this.#tasks.add(
+      `feed:${feed}:control`,
+      AsyncResult.try(async () => {
+        for await (const msg of controlSub) {
+          const result = await this.#processFeedMessage(
+            feed,
+            descriptor,
+            msg,
+            handler,
+          );
+          const value = result.take();
+          if (isErr(value)) this.#respondWithError(msg, value.error);
+        }
+      }),
+    );
   }
 
   async #processFeedMessage<TInput, TEvent>(
@@ -3506,8 +3534,10 @@ export class Trellis<
       return callerValue;
     }
     const cancelReply = json && typeof json === "object" &&
-        !Array.isArray(json) && Object.keys(json).length === 1 &&
-        typeof (json as Record<string, unknown>)._trellisFeedCancel === "string"
+        !Array.isArray(json) && Object.keys(json).length === 2 &&
+        typeof (json as Record<string, unknown>)._trellisFeedCancel ===
+          "string" &&
+        typeof (json as Record<string, unknown>).feedId === "string"
       ? (json as Record<string, string>)._trellisFeedCancel
       : undefined;
     if (cancelReply !== undefined) {
@@ -3519,7 +3549,28 @@ export class Trellis<
           }),
         );
       }
-      this.#activeFeeds.get(cancelReply)?.abort();
+      const active = this.#activeFeeds.get(cancelReply);
+      const controlFeedId = (json as Record<string, string>).feedId;
+      if (
+        !active || active.feedId !== controlFeedId ||
+        msg.subject !==
+          feedControlSubject(
+            descriptor.subject,
+            this.#feedOwnerId,
+            controlFeedId,
+          ) ||
+        callerValue.type !== "verified" ||
+        active.principalId !== callerValue.principalId ||
+        active.participantId !== callerValue.participantId
+      ) {
+        return err(
+          new AuthError({
+            reason: "feed_control_denied",
+            context: { feed, feedId: controlFeedId },
+          }),
+        );
+      }
+      active.controller.abort();
       if (this.#activeFeeds.delete(cancelReply)) return ok(undefined);
       const previous = this.#pendingFeedCancels.get(cancelReply);
       if (previous !== undefined) clearTimeout(previous);
@@ -3563,11 +3614,25 @@ export class Trellis<
       return ok(undefined);
     }
     const controller = new AbortController();
-    this.#activeFeeds.get(msg.reply)?.abort();
-    this.#activeFeeds.set(msg.reply, controller);
+    if (callerValue.type !== "verified") {
+      return err(new AuthError({ reason: "feed_creator_identity_required" }));
+    }
+    const feedId = crypto.randomUUID();
+    this.#activeFeeds.get(msg.reply)?.controller.abort();
+    this.#activeFeeds.set(msg.reply, {
+      controller,
+      feedId,
+      principalId: callerValue.principalId,
+      participantId: callerValue.participantId,
+    });
     try {
       const readyHeaders = natsHeaders();
       readyHeaders.set("feed-status", "ready");
+      readyHeaders.set("feed-id", feedId);
+      readyHeaders.set(
+        "feed-control-subject",
+        feedControlSubject(descriptor.subject, this.#feedOwnerId, feedId),
+      );
       this.#nats.publish(msg.reply, new Uint8Array(), {
         headers: readyHeaders,
       });
@@ -3641,7 +3706,7 @@ export class Trellis<
       }
       return ok(undefined);
     } finally {
-      if (this.#activeFeeds.get(msg.reply) === controller) {
+      if (this.#activeFeeds.get(msg.reply)?.controller === controller) {
         this.#activeFeeds.delete(msg.reply);
       }
       controller.abort();
@@ -3757,7 +3822,9 @@ export class Trellis<
       { method: String(method) },
       `Mounting ${method.toString()} RPC handler`,
     );
-    const sub = this.#nats.subscribe(subject, { queue: subject });
+    const sub = this.#nats.subscribe(subject, {
+      queue: routeQueueGroup(subject),
+    });
 
     return AsyncResult.try(async () => {
       for await (const msg of sub) {
@@ -4229,9 +4296,11 @@ export class Trellis<
       for (const [key, value] of headers) {
         headerRecord[key] = value.join(",");
       }
+      headerRecord["Trellis-Event-Descriptor"] = ctx.descriptorIdentity;
 
       return ok(Object.freeze({
         event: event.toString(),
+        descriptorIdentity: ctx.descriptorIdentity,
         subject,
         header: Object.freeze(header),
         payload,
@@ -4268,6 +4337,7 @@ export class Trellis<
         }
         headers.set("Nats-Msg-Id", event.header.id);
         headers.set("Trellis-Event-Time", event.header.time);
+        headers.set("Trellis-Event-Descriptor", event.descriptorIdentity);
         const proof = await this.#createEventProof(event);
         headers.set("proof", proof.proof);
         headers.set("authorization-context", proof.contextDigest);
@@ -4333,31 +4403,12 @@ export class Trellis<
         if (isErr(subject)) return subject;
 
         if (opts?.mode === "ephemeral") {
-          if (opts.concurrency !== undefined) {
-            throw new Error(
-              "Event listener concurrency is only supported for durable consumer groups.",
-            );
-          }
           return await this.#startEphemeralEvent(
             eventName,
             ctx,
             subject,
             fn,
             opts.signal,
-          );
-        }
-
-        if (opts?.durableName) {
-          return err(
-            new UnexpectedError({
-              cause: new Error(
-                "Durable event listener names are provisioned by Trellis event consumer bindings; use opts.group instead.",
-              ),
-              context: {
-                event: event.toString(),
-                durableName: opts.durableName,
-              },
-            }),
           );
         }
 
@@ -4371,7 +4422,6 @@ export class Trellis<
           ctx,
           subject,
           fn,
-          concurrency: opts?.concurrency ?? 1,
           signal: opts?.signal,
         });
         return ok(undefined);
@@ -4588,37 +4638,31 @@ export class Trellis<
     ctx: EventDescriptorOf<TA, EventsOf<TA>>;
     subject: string;
     fn: EventCallback<EventOf<TA, EventsOf<TA>>>;
-    concurrency: number;
     signal?: AbortSignal;
   }): void {
     if (args.signal?.aborted || this.#durableEventListenersStopped) return;
 
-    if (!Number.isInteger(args.concurrency) || args.concurrency < 1) {
-      throw new Error(
-        `Event consumer group '${args.group}' has invalid concurrency ${args.concurrency}; expected a positive integer`,
-      );
-    }
     const binding = this.#eventConsumers.bindings?.[args.group];
     if (!binding) {
       throw new Error(
         `Event consumer group '${args.group}' has no Trellis-provisioned binding.`,
       );
     }
-    if (binding.ordering === "strict" && args.concurrency !== 1) {
+    if (!Number.isInteger(binding.concurrency) || binding.concurrency < 1) {
       throw new Error(
-        `Event consumer group '${args.group}' uses strict ordering and requires concurrency 1`,
+        `Event consumer group '${args.group}' has invalid concurrency ${binding.concurrency}; expected a positive integer`,
       );
     }
 
     const loop = this.#durableEventLoops.get(args.group) ?? {
       registrations: [],
-      concurrency: args.concurrency,
+      concurrency: binding.concurrency,
       startedWorkers: new Set<number>(),
       messages: new Set<ConsumerMessages>(),
     };
-    if (loop.concurrency !== args.concurrency) {
+    if (loop.concurrency !== binding.concurrency) {
       throw new Error(
-        `Event consumer group '${args.group}' is already registered with concurrency ${loop.concurrency}; received ${args.concurrency}`,
+        `Event consumer group '${args.group}' is already registered with concurrency ${loop.concurrency}; binding now requires ${binding.concurrency}`,
       );
     }
     const registration: DurableEventRegistration<TA> = {
@@ -4696,6 +4740,8 @@ export class Trellis<
         );
       }
 
+      let originalOpened = false;
+      let fetchingReplay = true;
       try {
         const infoResult = await AsyncResult.try(async () => {
           const jsm = await jetstreamManager(this.#nats);
@@ -4719,16 +4765,29 @@ export class Trellis<
           }
           return info;
         }
+        originalOpened = true;
 
-        const consumer = this.#js.consumers.getConsumerFromInfo(info);
+        const replayInfo = await (await jetstreamManager(this.#nats)).consumers
+          .info(
+            binding.replayBinding.stream,
+            binding.replayBinding.consumerName,
+          );
+        const consumers = [
+          this.#js.consumers.getConsumerFromInfo(info),
+          this.#js.consumers.getConsumerFromInfo(replayInfo),
+        ];
+        let replay = false;
         while (
           !this.#durableEventListenersStopped &&
           this.#durableEventConsumerGroupReady(group, loop)
         ) {
-          const messages = await consumer.fetch({
+          fetchingReplay = replay;
+          const messages = await consumers[replay ? 1 : 0]!.fetch({
             max_messages: 1,
-            expires: 30_000,
+            expires: 1_000,
           });
+          const isReplay = replay;
+          replay = !replay;
           loop.messages.add(messages);
           if (!this.#durableEventConsumerGroupReady(group, loop)) {
             messages.stop();
@@ -4736,7 +4795,12 @@ export class Trellis<
             break;
           }
           try {
-            await this.#handleDurableEventConsumer(group, loop, messages)
+            await this.#handleDurableEventConsumer(
+              group,
+              loop,
+              messages,
+              isReplay,
+            )
               .orThrow();
           } finally {
             loop.messages.delete(messages);
@@ -4749,7 +4813,10 @@ export class Trellis<
         ) {
           return ok(undefined);
         }
-        if (isConsumerNotFoundError(cause)) {
+        if (
+          isConsumerNotFoundError(cause) &&
+          (fetchingReplay || !originalOpened)
+        ) {
           this.#log.debug(
             { group, stream: binding.stream, consumer: binding.consumerName },
             "Durable event consumer is not available yet; retrying",
@@ -4757,6 +4824,7 @@ export class Trellis<
           await sleep(25);
           return ok(undefined);
         }
+        await sleep(25);
         return err(new UnexpectedError({ cause, context: { group } }));
       } finally {
         loop.startedWorkers.delete(workerIndex);
@@ -4768,76 +4836,108 @@ export class Trellis<
     })());
   }
 
-  #handleDurableEvent(
-    event: EventsOf<TA>,
-    ctx: EventDescriptorOf<TA, EventsOf<TA>>,
-    messages: ConsumerMessages,
-    fn: EventCallback<EventOf<TA, EventsOf<TA>>>,
-  ): AsyncResult<void, ValidationError | UnexpectedError> {
-    return AsyncResult.try(async () => {
-      for await (const msg of messages) {
-        const proofResult = await this.#validateEventProof(event, ctx, msg);
-        const proofValue = proofResult.take();
-        if (isErr(proofValue)) {
-          this.#log.warn(
-            { error: proofValue.error, event, subject: msg.subject },
-            "Event auth validation failed",
-          );
-          msg.term();
-          continue;
-        }
-
-        const parsedEvent = this.#parseEventMessage(event, ctx, msg);
-        const m = parsedEvent.take();
-        if (isErr(m)) {
-          this.#log.error({ error: m.error }, "Event validation failed");
-          msg.term();
-          continue;
-        }
-
-        const handlerResult = await this.#invokeEventHandler({
-          event,
-          payload: m,
-          mode: "durable",
-          message: msg,
-          fn,
-        });
-        const handlerValue = handlerResult.take();
-        if (isErr(handlerValue)) {
-          this.#log.error(
-            {
-              error: handlerValue.error.toSerializable(),
-              event,
-              subject: msg.subject,
-            },
-            "Event handler failed",
-          );
-          msg.nak();
-          continue;
-        }
-
-        msg.ack();
-      }
-    });
-  }
-
   #handleDurableEventConsumer(
     group: string,
     loop: DurableEventConsumerLoop<TA>,
     messages: ConsumerMessages,
+    isReplay = false,
   ): AsyncResult<void, ValidationError | UnexpectedError> {
     return AsyncResult.try(async () => {
+      const binding = this.#eventConsumers.bindings?.[group];
+      if (!binding) {
+        throw new Error(`Event consumer group '${group}' is unavailable`);
+      }
       for await (const msg of messages) {
-        await this.#durableEventConsumerBeforeReadinessCheck?.({
-          group,
-          subject: msg.subject,
-        });
+        let replayEnvelope: ConsumerReplayEnvelope | undefined;
+        let deliveredMessage: Pick<
+          Msg,
+          "data" | "headers" | "subject" | "json"
+        > = msg;
+        if (isReplay) {
+          const parsedReplayEnvelope = JSON.parse(
+            new TextDecoder().decode(msg.data),
+          ) as ConsumerReplayEnvelope;
+          replayEnvelope = parsedReplayEnvelope;
+          if (
+            parsedReplayEnvelope.resourceId !== binding.resourceId ||
+            parsedReplayEnvelope.originalRecordSequence <= 0
+          ) {
+            msg.ack();
+            continue;
+          }
+          let inspected: Record<string, unknown>;
+          try {
+            inspected = await this.#requestConsumerManagement(
+              "DeadLetters.Inspect",
+              {
+                resourceId: binding.resourceId,
+                deadLetterId: parsedReplayEnvelope.deadLetterId,
+              },
+            );
+          } catch (error) {
+            this.#log.warn(
+              { error, group },
+              "Replay state inspection unavailable",
+            );
+            const delivery = msg.info.deliveryCount;
+            msg.nak(
+              binding.backoffMs[
+                Math.min(
+                  Math.max(0, delivery - 1),
+                  binding.backoffMs.length - 1,
+                )
+              ] ?? binding.ackWaitMs,
+            );
+            continue;
+          }
+          const detail = Reflect.get(inspected, "deadLetter");
+          const deadLetter = detail && typeof detail === "object"
+            ? Reflect.get(detail, "deadLetter")
+            : undefined;
+          const projectedGeneration =
+            deadLetter && typeof deadLetter === "object"
+              ? Reflect.get(deadLetter, "generation")
+              : undefined;
+          if (
+            typeof projectedGeneration !== "number" ||
+            projectedGeneration < parsedReplayEnvelope.generation
+          ) {
+            msg.nak(25);
+            continue;
+          }
+          if (
+            projectedGeneration !== parsedReplayEnvelope.generation ||
+            !["replayPending", "replaying"].includes(
+              Reflect.get(deadLetter, "state"),
+            )
+          ) {
+            msg.ack();
+            continue;
+          }
+          const originalHeaders = natsHeaders();
+          for (
+            const [name, values] of Object.entries(
+              parsedReplayEnvelope.originalHeaders,
+            )
+          ) {
+            for (const value of values) originalHeaders.append(name, value);
+          }
+          const data = new Uint8Array(
+            parsedReplayEnvelope.originalPayloadBytes,
+          );
+          deliveredMessage = {
+            data,
+            headers: originalHeaders,
+            subject: parsedReplayEnvelope.originalSubject,
+            json: () => JSON.parse(new TextDecoder().decode(data)),
+          };
+        }
         if (!this.#durableEventConsumerGroupReady(group, loop)) {
           messages.stop();
           break;
         }
         const matching = loop.registrations.filter((registration) =>
-          natsSubjectMatches(registration.subject, msg.subject)
+          natsSubjectMatches(registration.subject, deliveredMessage.subject)
         );
         if (matching.length === 0) {
           this.#log.warn(
@@ -4853,7 +4953,7 @@ export class Trellis<
           const proofResult = await this.#validateEventProof(
             registration.event,
             registration.ctx,
-            msg,
+            deliveredMessage,
           );
           const proofValue = proofResult.take();
           if (isErr(proofValue)) {
@@ -4875,8 +4975,38 @@ export class Trellis<
               proofValue.error instanceof EventVerificationAuthError &&
               proofValue.error.retryable
             ) {
-              msg.nak(5_000);
+              const delivery = msg.info.deliveryCount;
+              msg.nak(
+                binding.backoffMs[
+                  Math.min(
+                    Math.max(0, delivery - 1),
+                    binding.backoffMs.length - 1,
+                  )
+                ] ?? binding.ackWaitMs,
+              );
             } else {
+              if (replayEnvelope) {
+                try {
+                  msg.working();
+                  await this.#reportConsumerDelivery({
+                    resourceId: binding.resourceId,
+                    sourceStream: binding.replayBinding.stream,
+                    sourceSequence: BigInt(msg.info.streamSequence),
+                    deliveryCount: msg.info.deliveryCount,
+                    deliveryProof: jetStreamDeliveryProof(msg),
+                    replayGeneration: replayEnvelope.generation,
+                    outcome: "unreplayable",
+                    error: proofValue.error.message,
+                  });
+                } catch (error) {
+                  this.#log.warn(
+                    { error, group },
+                    "Replay delivery report unavailable",
+                  );
+                  failed = true;
+                  break;
+                }
+              }
               msg.term();
             }
             failed = true;
@@ -4886,7 +5016,7 @@ export class Trellis<
           const parsedEvent = this.#parseEventMessage(
             registration.event,
             registration.ctx,
-            msg,
+            deliveredMessage,
           );
           const eventPayload = parsedEvent.take();
           if (isErr(eventPayload)) {
@@ -4905,14 +5035,22 @@ export class Trellis<
             break;
           }
 
+          const delivery = msg.info.deliveryCount;
+          const wait = binding.backoffMs[
+            Math.min(Math.max(0, delivery - 1), binding.backoffMs.length - 1)
+          ] ?? binding.ackWaitMs;
+          const progress = setInterval(
+            () => msg.working(),
+            Math.max(1, Math.min(wait - 1, Math.floor(wait / 3))),
+          );
           const handlerResult = await this.#invokeEventHandler({
             event: registration.event,
             payload: eventPayload,
             mode: "durable",
             group,
-            message: msg,
+            message: deliveredMessage,
             fn: registration.fn,
-          });
+          }).finally(() => clearInterval(progress));
           const handlerValue = handlerResult.take();
           if (isErr(handlerValue)) {
             recordRuntimeError(handlerValue.error, {
@@ -4929,15 +5067,97 @@ export class Trellis<
               },
               "Event handler failed",
             );
-            msg.nak();
+            if (delivery >= binding.maxDeliver) {
+              try {
+                msg.working();
+                await this.#reportConsumerDelivery({
+                  resourceId: binding.resourceId,
+                  sourceStream: isReplay
+                    ? binding.replayBinding.stream
+                    : binding.stream,
+                  sourceSequence: BigInt(msg.info.streamSequence),
+                  deliveryCount: delivery,
+                  deliveryProof: jetStreamDeliveryProof(msg),
+                  ...(replayEnvelope
+                    ? { replayGeneration: replayEnvelope.generation }
+                    : {}),
+                  outcome: "exhausted",
+                  error: JSON.stringify(handlerValue.error.toSerializable()),
+                });
+                msg.ack();
+              } catch (error) {
+                this.#log.warn({ error, group }, "Delivery report unavailable");
+              }
+              failed = true;
+              break;
+            }
+            const delay = binding.backoffMs[
+              Math.min(Math.max(0, delivery - 1), binding.backoffMs.length - 1)
+            ] ?? 0;
+            msg.nak(delay);
             failed = true;
             break;
           }
         }
 
-        if (!failed) msg.ack();
+        if (!failed) {
+          if (replayEnvelope) {
+            try {
+              msg.working();
+              await this.#reportConsumerDelivery({
+                resourceId: binding.resourceId,
+                sourceStream: binding.replayBinding.stream,
+                sourceSequence: BigInt(msg.info.streamSequence),
+                deliveryCount: msg.info.deliveryCount,
+                deliveryProof: jetStreamDeliveryProof(msg),
+                replayGeneration: replayEnvelope.generation,
+                outcome: "succeeded",
+              });
+            } catch (error) {
+              this.#log.warn({ error, group }, "Delivery report unavailable");
+              continue;
+            }
+          }
+          msg.ack();
+        }
       }
     });
+  }
+
+  async #reportConsumerDelivery(input: Record<string, unknown>): Promise<void> {
+    await this.#requestConsumerManagement("Consumers.ReportDelivery", input);
+  }
+
+  async #requestConsumerManagement(
+    method: string,
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const binding = this.#apiBindings[EVENTS_API.identity];
+    const providerDeploymentId = binding && typeof binding === "object"
+      ? Reflect.get(binding, "providerDeploymentId")
+      : undefined;
+    const action = method === "Consumers.ReportDelivery"
+      ? EVENTS_API.actions["rpc:Consumers.ReportDelivery"]
+      : method === "DeadLetters.Inspect"
+      ? EVENTS_API.actions["rpc:DeadLetters.Inspect"]
+      : undefined;
+    if (typeof providerDeploymentId !== "string" || !action) {
+      throw new Error(`Consumer management '${method}' is unavailable`);
+    }
+    return await this.#requestBuiltRpc<Record<string, unknown>>(method, input, {
+      subject: boundApiSubject(
+        "rpc",
+        EVENTS_API.identity,
+        providerDeploymentId,
+        method,
+      ),
+      input: action.input,
+      output: action.output,
+      callerCapabilities: [],
+      errors: action.errors.map((error) => error.type),
+      declaredErrorTypes: action.errors.map((error) => error.type),
+      runtimeErrors: action.errors,
+    }).orThrow();
   }
 
   #parseEventMessage(
@@ -4971,6 +5191,7 @@ export class Trellis<
       cache: this.#auth.authorizationProviderCache,
       message: msg,
       permission: descriptor.publishPermission,
+      descriptorIdentity: descriptor.descriptorIdentity,
       requiredCapabilities: descriptor.publishCapabilities,
     });
   }
@@ -5013,6 +5234,23 @@ export class Trellis<
           }),
         );
       }
+      if (
+        value !== undefined && value !== null && value !== "*" &&
+        (typeof value !== "string" && typeof value !== "number" ||
+          typeof value === "number" &&
+            (!Number.isFinite(value) ||
+              Number.isInteger(value) && !Number.isSafeInteger(value)))
+      ) {
+        return err(
+          new ValidationError({
+            errors: [{
+              path: key,
+              message: "Subject template values must be strings or numbers",
+            }],
+            context: { key },
+          }),
+        );
+      }
     }
 
     const result = subject.replace(/\{([^}]+)\}/g, (_, key) => {
@@ -5023,24 +5261,14 @@ export class Trellis<
       if (allowWildcards && (value === undefined || value === null)) {
         return "*";
       }
-      return this.#escapeSubjectToken(`${value}`);
+      return this.#encodeSubjectToken(`${Object.is(value, -0) ? 0 : value}`);
     });
 
     return ok(result);
   }
 
-  #escapeSubjectToken(token: string): string {
-    const out = token.replace(
-      NATS_SUBJECT_TOKEN_FORBIDDEN,
-      (ch) => `~${ch.codePointAt(0)!.toString(16).toUpperCase()}~`,
-    );
-
-    // Protect stapRet with $ due to NATS internal use of it
-    if (out.length === 0 || out.startsWith("$")) {
-      return `_${out}`;
-    }
-
-    return out;
+  #encodeSubjectToken(token: string): string {
+    return encodeEventSubjectParameterToken(token);
   }
 
   #currentIat(): number {
@@ -5098,6 +5326,7 @@ export class Trellis<
     );
     const input = buildEventProofInput(
       contextDigest,
+      event.descriptorIdentity,
       event.subject,
       payloadHash,
       event.header.id,
@@ -5115,10 +5344,20 @@ export class Trellis<
     subject: string;
     payload: string;
     timeout: number;
+    signal?: AbortSignal;
     callerCapabilities?: readonly string[];
     span?: Span;
   }): Promise<Result<Msg, TransportError>> {
     for (let retry = 0; retry <= this.#noResponderMaxRetries; retry++) {
+      if (args.signal?.aborted) {
+        return err(classifyRequestTransportFailure({
+          method: args.method,
+          subject: args.subject,
+          callerCapabilities: args.callerCapabilities,
+          cause: args.signal.reason ??
+            new DOMException("Request aborted", "AbortError"),
+        }));
+      }
       if (this.#nats.isClosed()) {
         return err(requestFailedTransportError({
           code: "trellis.request.closed",
@@ -5146,6 +5385,12 @@ export class Trellis<
 
       const result = await AsyncResult.try(async () => {
         const response = Promise.withResolvers<Msg>();
+        const abort = () =>
+          response.reject(
+            args.signal?.reason ??
+              new DOMException("Request aborted", "AbortError"),
+          );
+        args.signal?.addEventListener("abort", abort, { once: true });
         const subscription = this.#nats.subscribe(reply, {
           max: 1,
           timeout: args.timeout,
@@ -5180,9 +5425,17 @@ export class Trellis<
           ) response.reject(error);
         });
         try {
-          this.#nats.publish(args.subject, args.payload, { headers, reply });
+          if (args.signal?.aborted) {
+            abort();
+          } else {
+            this.#nats.publish(args.subject, args.payload, {
+              headers,
+              reply,
+            });
+          }
           return await response.promise;
         } finally {
+          args.signal?.removeEventListener("abort", abort);
           stopObserving();
           subscription.unsubscribe();
         }
@@ -5201,9 +5454,18 @@ export class Trellis<
           { method: args.method, subject: args.subject, retry },
           "No responders, retrying...",
         );
-        await new Promise((resolve) =>
-          setTimeout(resolve, this.#noResponderRetryMs * (retry + 1))
-        );
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            clearTimeout(timeout);
+            args.signal?.removeEventListener("abort", done);
+            resolve();
+          };
+          const timeout = setTimeout(
+            done,
+            this.#noResponderRetryMs * (retry + 1),
+          );
+          args.signal?.addEventListener("abort", done, { once: true });
+        });
         continue;
       }
 

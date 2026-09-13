@@ -35,10 +35,10 @@
     loading = true;
     error = null;
     try {
-      currentSessionId = (await trellis.authSessionsMe({}).orThrow()).session?.sessionId ?? null;
-      const response = await trellis.authSessionsList({ limit: 100 }).take();
+      currentSessionId = (await trellis.sessionsMe({}).orThrow()).session?.sessionId ?? null;
+      const response = await trellis.sessionsList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
-      sessions = response.entries ?? [];
+      sessions = response.items ?? [];
       const requestedSessionKey = page.url.searchParams.get("sessionKey");
       selectedSessionKey = requestedSessionKey && sessions.some((session) => session.sessionId === requestedSessionKey) ? requestedSessionKey : (sessions[0]?.sessionId ?? "");
     } catch (e) {
@@ -54,12 +54,12 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authSessionsRevoke({
+      const response = await trellis.sessionsRevoke({
         expectedVersion: selectedSession.version,
         idempotencyKey: ulid(),
         reason: null,
         sessionId: selectedSession.sessionId,
-      } satisfies apis.auth.AuthSessionsRevokeInput).take();
+      } satisfies apis.auth.SessionsRevokeInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Session revoked for ${summary.title}.`, "Revoked");
       await goto(resolve("/admin/sessions"));

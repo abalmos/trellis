@@ -35,6 +35,7 @@ type VectorDefaults = {
     requestId: string;
   };
   event: {
+    descriptorIdentity: string;
     subject: string;
     payload: string;
     eventId: string;
@@ -111,6 +112,7 @@ Deno.test("request and event proof v1 match language-neutral vectors", async () 
   const eventPayloadHash = await sha256(utf8(defaults.event.payload));
   const eventProofInput = buildEventProofInput(
     chain.contextDigest,
+    defaults.event.descriptorIdentity,
     defaults.event.subject,
     eventPayloadHash,
     defaults.event.eventId,
@@ -130,6 +132,7 @@ Deno.test("request and event proof v1 match language-neutral vectors", async () 
       auth.sessionKey,
       {
         contextDigest: chain.contextDigest,
+        descriptorIdentity: defaults.event.descriptorIdentity,
         subject: defaults.event.subject,
         payloadHash: eventPayloadHash,
         eventId: defaults.event.eventId,
@@ -143,9 +146,25 @@ Deno.test("request and event proof v1 match language-neutral vectors", async () 
       auth.sessionKey,
       {
         contextDigest: chain.contextDigest,
+        descriptorIdentity: defaults.event.descriptorIdentity,
         subject: defaults.event.subject,
         payloadHash: eventPayloadHash,
         eventId: "evt_other",
+        eventTime: defaults.event.eventTime,
+      },
+      eventProof,
+    )),
+  );
+  assert(
+    !(await verifyEventProof(
+      auth.sessionKey,
+      {
+        contextDigest: chain.contextDigest,
+        descriptorIdentity:
+          "v1.ZG9jdW1lbnRzQHYx.RG9jdW1lbnRzLkNoYW5nZWQuT3RoZXI.1",
+        subject: defaults.event.subject,
+        payloadHash: eventPayloadHash,
+        eventId: defaults.event.eventId,
         eventTime: defaults.event.eventTime,
       },
       eventProof,

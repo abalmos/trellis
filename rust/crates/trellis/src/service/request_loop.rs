@@ -50,7 +50,11 @@ pub enum HandlerResponse {
     Frames(Vec<Bytes>),
     Error(Bytes),
     Stream(ResponseStream),
-    FeedStream(ResponseStream),
+    FeedStream {
+        stream: ResponseStream,
+        control_subject: String,
+        feed_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -161,7 +165,7 @@ pub trait RequestHandler: Send + Sync {
                     }
                     Ok(frames)
                 }
-                HandlerResponse::FeedStream(mut stream) => {
+                HandlerResponse::FeedStream { mut stream, .. } => {
                     let mut frames = Vec::new();
                     while let Some(frame) = stream.next().await {
                         frames.push(frame?);
@@ -220,7 +224,7 @@ impl RequestHandler for Router {
 
 impl<V> RequestHandler for AuthenticatedRouter<V>
 where
-    V: RequestValidator,
+    V: RequestValidator + 'static,
 {
     fn handle<'a>(
         &'a self,
@@ -299,6 +303,8 @@ pub fn decode_nats_request(message: &async_nats::Message) -> InboundRequest {
         payload: message.payload.clone(),
         reply_to: reply_to.clone(),
         context: RequestContext {
+            resuming: false,
+            operation_progress: None,
             subject,
             session_key,
             proof,
@@ -711,9 +717,15 @@ async fn publish_response(
                 }
             }
         },
-        HandlerResponse::FeedStream(mut stream) => {
+        HandlerResponse::FeedStream {
+            mut stream,
+            control_subject,
+            feed_id,
+        } => {
             let mut headers = HeaderMap::new();
             headers.insert("feed-status", "ready");
+            headers.insert("feed-control-subject", control_subject.as_str());
+            headers.insert("feed-id", feed_id.as_str());
             client
                 .publish_with_headers(reply_to.clone(), headers, Bytes::new())
                 .await
@@ -1046,6 +1058,8 @@ mod tests {
 
     fn test_context(subject: &str) -> RequestContext {
         RequestContext {
+            resuming: false,
+            operation_progress: None,
             subject: subject.to_string(),
             session_key: None,
             proof: None,

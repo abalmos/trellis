@@ -1,7 +1,7 @@
-use trellis_protocol::ParticipantKind;
 use ulid::Ulid;
 
 use super::super::*;
+use trellis_protocol::ParticipantKind;
 
 /// Verified interactive authentication input for a user installation login.
 #[derive(Clone, Debug)]
@@ -45,30 +45,7 @@ impl<R: SessionRepository + Clone> AuthService<R> {
             created_at: input.created_at,
             expires_at: Some(expires_at),
         })?;
-        let mut actions = input.actions;
-        actions.push(PostCommitActionRecord {
-            predecessor_action_id: None,
-            action_id: trellis_protocol::digest_json(&serde_json::json!({
-                "event": "Auth.Sessions.Created",
-                "sessionId": session.session_id,
-            }))
-            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
-            kind: PostCommitActionKind::Event,
-            payload: serde_json::json!({
-                "eventType": "Auth.Sessions.Created",
-                "eventSubject": format!("events.v1.Auth.Sessions.Created.{}", session.session_id),
-                "eventId": Ulid::new().to_string(),
-                "occurredAt": session.created_at,
-                "sessionId": session.session_id,
-                "principalId": session.principal_id,
-                "participantId": session.participant_id,
-            }),
-            created_at: session.created_at,
-            attempts: 0,
-            next_attempt_at: session.created_at,
-            claimed_until: None,
-            last_error: None,
-        });
+        let actions = input.actions;
         super::validation::validate_idempotency_and_actions(&input.idempotency, &actions)?;
         self.repository
             .create_session(SessionCreation {

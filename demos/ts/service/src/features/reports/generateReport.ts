@@ -7,7 +7,7 @@ import { recordActivity } from "../activity/index.ts";
 import { buildReportRecord, recordReport } from "./reportStore.ts";
 
 export const generateReport: OperationHandler<
-  typeof participants.demoService.participant,
+  typeof participants.Service.participant,
   "Reports.Generate"
 > = async ({ input, op, client }) => {
   function toBaseError(cause: unknown): BaseError {

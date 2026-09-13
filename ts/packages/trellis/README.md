@@ -54,7 +54,6 @@ root package browser-safe. Browser login and portal-flow helpers live on
 
 Service authors should not use the core package to recreate service bootstrap or
 fetch resource bindings. Connect with `TrellisService.connect(...)` from
-`@qlever-llc/trellis/service/deno` or `@qlever-llc/trellis/service/node` and use
-the returned resource handles instead of calling `Trellis.Bindings.Get`,
-constructing `TrellisService` or `StoreHandle`, or passing binding/resource data
-into `Trellis` constructors.
+`@qlever-llc/trellis/service` and use the returned resource handles instead of
+calling `Trellis.Bindings.Get`, constructing `TrellisService` or `StoreHandle`,
+or passing binding/resource data into `Trellis` constructors.

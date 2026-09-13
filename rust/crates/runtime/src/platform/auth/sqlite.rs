@@ -13,6 +13,7 @@ pub(super) mod outbox;
 mod policy;
 mod principals;
 mod provisioning;
+mod resources;
 #[cfg(test)]
 mod rollback_tests;
 mod sessions;

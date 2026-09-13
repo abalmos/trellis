@@ -1,0 +1,28 @@
+format = 2
+root = "runtime-trellis"
+
+[[packages]]
+name = "runtime-trellis"
+version = "0.12.0"
+digest = "ZPHXIgCgc1j3vMpGUpSwshfRTFKrbD1wRlOAbRbxEzY"
+distribution-digest = "sha256:74ae40af7dcb6de99c364fabbaed5f97ced68d9051fe808aab1446568d138a8d"
+
+[[packages.dependencies]]
+name = "trellis"
+version = "0.12.0"
+digest = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY"
+
+[packages.source]
+kind = "path"
+path = "."
+
+[[packages]]
+name = "trellis"
+version = "0.12.0"
+digest = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY"
+distribution-digest = "sha256:cc15320aca48e1019f205d4ab4f31de0780b27d27480169913d30b30f3677721"
+dependencies = []
+
+[packages.source]
+kind = "path"
+path = "./../../../rust/crates/runtime"

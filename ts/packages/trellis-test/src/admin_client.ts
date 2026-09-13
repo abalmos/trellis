@@ -18,6 +18,7 @@ import {
   adminMethods,
   adminParticipant,
   type AdminRpc,
+  type AdminRpcInput,
   type TrellisTestAdminRpcMethod,
 } from "./admin/methods.ts";
 import { recordTrellisDuration } from "./admin/metrics.ts";
@@ -176,24 +177,36 @@ export class TrellisTestAdminAutomation {
     );
   }
 
-  async stateAdminGet(
-    input: import("../trellis/index.js").apis.state.AdminGetInput,
-  ): Promise<import("../trellis/index.js").apis.state.AdminGetOutput> {
-    return await this.#rpc("stateAdminGet", input);
+  async stateResourcesInspect(
+    input: import("../trellis/index.js").apis.state.ResourcesInspectInput,
+  ): Promise<import("../trellis/index.js").apis.state.ResourcesInspectOutput> {
+    return await this.#rpc("stateResourcesInspect", input);
   }
 
-  async stateAdminList(
-    input: import("../trellis/index.js").apis.state.AdminListInput,
-  ): Promise<import("../trellis/index.js").apis.state.AdminListOutput> {
-    return await this.#rpc("stateAdminList", input);
+  async stateResourcesQuery(
+    input: import("../trellis/index.js").apis.state.ResourcesQueryInput,
+  ): Promise<import("../trellis/index.js").apis.state.ResourcesQueryOutput> {
+    return await this.#rpc("stateResourcesQuery", input);
   }
 
-  async stateAdminDelete(
-    input: import("../trellis/index.js").apis.state.AdminDeleteInput,
-  ): Promise<
-    import("../trellis/index.js").apis.state.AdminDeleteOutput
-  > {
-    return await this.#rpc("stateAdminDelete", input);
+  async eventsConsumersQuery(input: AdminRpcInput<"eventsConsumersQuery">) {
+    return await this.#rpc("eventsConsumersQuery", input);
+  }
+
+  async eventsDeadLettersQuery(input: AdminRpcInput<"eventsDeadLettersQuery">) {
+    return await this.#rpc("eventsDeadLettersQuery", input);
+  }
+
+  async eventsDeadLettersInspect(
+    input: AdminRpcInput<"eventsDeadLettersInspect">,
+  ) {
+    return await this.#rpc("eventsDeadLettersInspect", input);
+  }
+
+  async eventsDeadLettersReplay(
+    input: AdminRpcInput<"eventsDeadLettersReplay">,
+  ) {
+    return await this.#rpc("eventsDeadLettersReplay", input);
   }
 
   /** Completes a public app/client authentication flow as the test admin user. */
@@ -262,6 +275,13 @@ export class TrellisTestAdminAutomation {
       this.#deployment,
       args,
     );
+  }
+
+  /** Disables one service instance through the bootstrap administrator identity. */
+  async disableServiceInstance(
+    input: AdminRpcInput<"authServiceInstancesDisable">,
+  ): Promise<AdminRpc["authServiceInstancesDisable"]["output"]> {
+    return await this.#rpc("authServiceInstancesDisable", input);
   }
 
   /** Ensures bootstrap is complete and clears the admin connection before a Trellis restart. */

@@ -39,6 +39,7 @@ miette.workspace = true
 notify-debouncer-mini.workspace = true
 base64.workspace = true
 bytes.workspace = true
+futures-util.workspace = true
 docker_credential = "1.4.0"
 ed25519-dalek.workspace = true
 oci-client = { version = "0.17", default-features = false, features = ["rustls-tls"] }

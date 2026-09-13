@@ -30,6 +30,7 @@ import {
 import {
   base64urlDecode,
   base64urlEncode,
+  canonicalizeJsonValue,
   sha256,
   toArrayBuffer,
   utf8,
@@ -37,6 +38,7 @@ import {
 
 const DEVICE_IDENTITY_HKDF_INFO = "trellis/device-identity/v1";
 const DEVICE_ACTIVATION_HKDF_INFO = "trellis/device-activate/v1";
+const DEVICE_USER_COMPANION_DOMAIN = "trellis.device.user-companion.v1";
 const DEVICE_QR_MAC_DOMAIN = "trellis-device-qr/v1";
 const DEVICE_CONFIRMATION_DOMAIN = "trellis-device-confirm/v1";
 const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -71,6 +73,13 @@ export type DeviceIdentity = {
   publicIdentityKey: string;
   activationKey: Uint8Array;
   activationKeyBase64url: string;
+};
+
+/** Device-local credential for one exact origin-bound user companion. */
+export type DeviceCompanionIdentity = {
+  installationSeed: Uint8Array;
+  installationSeedBase64url: string;
+  installationPublicKey: string;
 };
 
 type AuthResolveDeviceUserAuthoritiesOperationShape = {
@@ -131,7 +140,7 @@ function normalizeSecretBytes(
 
 async function hkdfSha256(
   inputKeyingMaterial: Uint8Array,
-  info: string,
+  info: string | Uint8Array,
   length: number,
 ): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
@@ -146,7 +155,7 @@ async function hkdfSha256(
       name: "HKDF",
       hash: "SHA-256",
       salt: toArrayBuffer(new Uint8Array(0)),
-      info: toArrayBuffer(utf8(info)),
+      info: toArrayBuffer(typeof info === "string" ? utf8(info) : info),
     },
     key,
     length * 8,
@@ -240,6 +249,49 @@ export async function deriveDeviceIdentity(
     publicIdentityKey,
     activationKey,
     activationKeyBase64url: base64urlEncode(activationKey),
+  };
+}
+
+/** Derive the installation credential for one exact child participant. */
+export async function deriveDeviceUserCompanion(
+  deviceRootSecret: Uint8Array,
+  trellisUrl: string,
+  childParticipantId: string,
+): Promise<DeviceCompanionIdentity> {
+  if (deviceRootSecret.length !== 32) {
+    throw new Error(
+      `Invalid device root secret length: ${deviceRootSecret.length} (expected 32)`,
+    );
+  }
+  if (!childParticipantId) {
+    throw new Error("Companion participant ID must not be empty");
+  }
+  const url = new URL(trellisUrl);
+  const loopback = url.hostname === "localhost" || url.hostname === "[::1]" ||
+    url.hostname.startsWith("127.");
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new Error("Trellis URL must use HTTPS except on loopback");
+  }
+  const origin = url.origin;
+  const encoder = new TextEncoder();
+  const parts = [
+    encoder.encode(DEVICE_USER_COMPANION_DOMAIN),
+    encoder.encode(origin),
+    encoder.encode(childParticipantId),
+  ];
+  const info = concatBytes(parts.flatMap((part) => {
+    const length = new Uint8Array(8);
+    new DataView(length.buffer).setBigUint64(0, BigInt(part.length));
+    return [length, part];
+  }));
+  const installationSeed = await hkdfSha256(deviceRootSecret, info, 32);
+  const installationAuth = await createAuth({
+    sessionKeySeed: base64urlEncode(installationSeed),
+  });
+  return {
+    installationSeed,
+    installationSeedBase64url: base64urlEncode(installationSeed),
+    installationPublicKey: installationAuth.sessionKey,
   };
 }
 
@@ -338,6 +390,11 @@ export async function requestDeviceEnrollment(args: {
   packageDigest: string;
   challengeDigest: string;
   confirmationCode: string;
+  companion?: {
+    participantId: string;
+    kind: "app" | "agent";
+    installation: DeviceCompanionIdentity;
+  };
   provisioningSecret?: string;
   signal?: AbortSignal;
 }): Promise<Record<string, unknown>> {
@@ -346,7 +403,7 @@ export async function requestDeviceEnrollment(args: {
       normalizeSecretBytes(args.identitySeed, "identitySeed"),
     ),
   });
-  const unsignedRequest = {
+  const unsignedRequest: Record<string, unknown> & { iat: number } = {
     identityKeyId: base64urlEncode(
       await sha256(base64urlDecode(identityAuth.sessionKey)),
     ),
@@ -365,6 +422,30 @@ export async function requestDeviceEnrollment(args: {
       provisioningSecret: args.provisioningSecret,
     }),
   };
+  if (args.companion) {
+    const claim = {
+      participantId: args.companion.participantId,
+      kind: args.companion.kind,
+      installationPublicKey: args.companion.installation.installationPublicKey,
+    };
+    const requestDigest = base64urlEncode(
+      await sha256(utf8(canonicalizeJsonValue({
+        format: DEVICE_USER_COMPANION_DOMAIN,
+        origin: new URL(args.trellisUrl).origin,
+        enrollment: unsignedRequest,
+        claim,
+      }))),
+    );
+    const installationAuth = await createAuth({
+      sessionKeySeed: args.companion.installation.installationSeedBase64url,
+    });
+    unsignedRequest.companion = {
+      ...claim,
+      requestProof: base64urlEncode(
+        await installationAuth.sign(base64urlDecode(requestDigest)),
+      ),
+    };
+  }
   const response = await fetch(
     new URL("/auth/device/enroll", args.trellisUrl),
     {
@@ -411,6 +492,11 @@ export async function waitForDeviceActivation(args: {
   pollIntervalMs?: number;
   sessionIdentity?: Awaited<ReturnType<typeof createAuth>>;
   connectionId?: string;
+  companion?: {
+    participantId: string;
+    kind: "app" | "agent";
+    installation: DeviceCompanionIdentity;
+  };
 }): Promise<{
   state: "ready";
   sessionIdentity: Awaited<ReturnType<typeof createAuth>>;

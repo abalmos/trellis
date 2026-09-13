@@ -1,4 +1,5 @@
 import { deepEqual, ok } from "node:assert/strict";
+import { apis } from "trellis-web-generated";
 
 import {
   canAccessRoute,
@@ -14,18 +15,16 @@ Deno.test("control panel keeps admin navigation focused on active sections", () 
   const sections = getVisibleNavSections({
     active: true,
     capabilities: [
-      "trellis.auth::authorities.read",
-      "trellis.auth::capabilities.read",
-      "trellis.auth::admin",
-      "trellis.auth::connections.read",
-      "trellis.auth::devices.read",
-      "trellis.auth::portals.read",
-      "trellis.auth::services.read",
-      "trellis.auth::sessions.read",
-      "trellis.auth::users.read",
-      "trellis.eventlog::read",
-      "trellis.health::read",
-      "trellis.jobs::read",
+      `${apis.auth.API.identity}::authorities_read`,
+      `${apis.auth.API.identity}::capabilities_read`,
+      `${apis.auth.API.identity}::devices_read`,
+      `${apis.auth.API.identity}::portals_read`,
+      `${apis.auth.API.identity}::services_read`,
+      `${apis.auth.API.identity}::sessions_read`,
+      `${apis.auth.API.identity}::users_read`,
+      `${apis.events.API.identity}::read`,
+      `${apis.health.API.identity}::read`,
+      `${apis.jobs.API.identity}::read`,
     ],
     email: "ada@example.com",
     id: "user-1",
@@ -58,19 +57,19 @@ Deno.test("control panel keeps admin navigation focused on active sections", () 
     href: "/admin/services",
     label: "Services",
     icon: "server",
-    capabilities: ["trellis.auth::services.read"],
+    capabilities: [`${apis.auth.API.identity}::services_read`],
   });
   deepEqual(manageSection?.items[1], {
     href: "/admin/devices",
     label: "Devices",
     icon: "phone",
-    capabilities: ["trellis.auth::devices.read"],
+    capabilities: [`${apis.auth.API.identity}::devices_read`],
   });
   deepEqual(manageSection?.items[2], {
     href: "/admin/users",
     label: "Users",
     icon: "users",
-    capabilities: ["trellis.auth::users.read"],
+    capabilities: [`${apis.auth.API.identity}::users_read`],
   });
   ok(labels.includes("Jobs"));
   ok(!labels.includes("API Catalog"));
@@ -96,7 +95,7 @@ Deno.test("control panel keeps admin navigation focused on active sections", () 
 Deno.test("control panel exposes only routes backed by exact capabilities", () => {
   const profile = {
     active: true,
-    capabilities: ["trellis.jobs::read"],
+    capabilities: [`${apis.jobs.API.identity}::read`],
     email: null,
     id: "operator-1",
     name: "Job Reader",

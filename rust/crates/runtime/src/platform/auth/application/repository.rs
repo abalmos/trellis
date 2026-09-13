@@ -171,6 +171,8 @@ pub(crate) struct ActivationReviewDecision {
     pub reason: Option<String>,
     /// Optional approved delegation replacement; absent on rejection.
     pub delegation: Option<DeviceDelegationRecord>,
+    /// Separate user session installed for the device's companion.
+    pub companion_session: Option<SessionRecord>,
     /// Whether this decision satisfies every requirement for device readiness.
     pub activate_device: bool,
     /// Durable proof claim and replay result.
@@ -192,6 +194,8 @@ pub(crate) struct ActivationReviewClaim {
     pub now: i64,
     /// Active delegation created when claiming an already approved review.
     pub delegation: Option<DeviceDelegationRecord>,
+    /// Separate user session installed for the device's companion.
+    pub companion_session: Option<SessionRecord>,
     /// Durable operation result.
     pub idempotency: IdempotencyResultRecord,
     /// Deterministic post-commit actions.
@@ -461,10 +465,12 @@ pub(crate) trait AccountRepository: Send + Sync {
         principal_id: &str,
     ) -> Result<Option<(PrincipalRecord, UserProfileRecord)>, AuthorizationStateError>;
 
-    /// List user accounts by principal ID after an optional exclusive cursor.
+    /// List filtered user accounts after an optional exclusive stable-sort cursor.
     async fn list_user_accounts(
         &self,
-        cursor: Option<&str>,
+        cursor: Option<&(i64, String)>,
+        state: Option<&str>,
+        search: Option<&str>,
         limit: usize,
     ) -> Result<Vec<(PrincipalRecord, UserProfileRecord)>, AuthorizationStateError>;
 
@@ -753,14 +759,13 @@ pub(crate) trait OutboxRepository: Send + Sync {
         action_id: &str,
         now: i64,
         claimed_until: i64,
-    ) -> Result<Option<PostCommitActionRecord>, AuthorizationStateError>;
+    ) -> Result<Option<PostCommitActionClaim>, AuthorizationStateError>;
 
     /// Persist or read the immutable delivery proof for one currently claimed event action.
     async fn prepare_post_commit_event_delivery(
         &self,
         action_id: &str,
-        expected_claimed_until: i64,
-        expected_attempts: u32,
+        claim_token: &str,
         delivery: Value,
     ) -> Result<Value, AuthorizationStateError>;
 
@@ -768,7 +773,7 @@ pub(crate) trait OutboxRepository: Send + Sync {
     async fn fail_post_commit_action(
         &self,
         action_id: &str,
-        expected_claimed_until: i64,
+        claim_token: &str,
         next_attempt_at: i64,
         error: String,
     ) -> Result<PostCommitActionRecord, AuthorizationStateError>;
@@ -777,6 +782,13 @@ pub(crate) trait OutboxRepository: Send + Sync {
     async fn acknowledge_post_commit_action(
         &self,
         action_id: &str,
-        expected_claimed_until: i64,
+        claim_token: &str,
     ) -> Result<(), AuthorizationStateError>;
+}
+
+/// One uniquely fenced ownership claim over a post-commit action.
+#[derive(Debug)]
+pub(crate) struct PostCommitActionClaim {
+    pub(crate) action: PostCommitActionRecord,
+    pub(crate) token: String,
 }

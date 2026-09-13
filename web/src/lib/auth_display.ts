@@ -13,10 +13,9 @@ type UserPrincipal = {
   };
 };
 
-export type SessionRecord = apis.auth.AuthSessionsListOutput["entries"][number];
+export type SessionRecord = apis.auth.SessionsListOutput["items"][number];
 
-export type ConnectionRecord =
-  apis.auth.AuthConnectionsListOutput["entries"][number];
+export type ConnectionRecord = apis.auth.ConnectionsListOutput["items"][number];
 
 export type UserGrantRecord = {
   identityGrantId: string;
@@ -32,29 +31,7 @@ export type UserGrantRecord = {
   updatedAt: string;
 };
 
-type LegacySessionRecord = {
-  key: string;
-  sessionKey: string;
-  principal: UserPrincipal | {
-    type: "device";
-    deviceId: string;
-    deviceType: string;
-    runtimePublicKey?: string;
-    deploymentId: string;
-  } | {
-    type: "service" | "app" | "agent";
-    id: string;
-    name: string;
-    deploymentId: string;
-    instanceId: string;
-  };
-  contractDisplayName?: string | null;
-  contractId?: string | null;
-  createdAt: number;
-  lastAuth: number;
-};
-
-type SessionLike = SessionRecord | ConnectionRecord | LegacySessionRecord;
+type SessionLike = SessionRecord | ConnectionRecord;
 
 export function formatIdentityProviderSubject(
   identity: UserPrincipal["identity"],
@@ -92,7 +69,7 @@ export function formatShortKey(
   return value.length <= size ? value : `${value.slice(0, size)}…`;
 }
 
-export function participantKindLabel(kind: ParticipantKind): string {
+export function participantKindLabel(kind: string): string {
   switch (kind) {
     case "app":
       return "App";
@@ -104,11 +81,10 @@ export function participantKindLabel(kind: ParticipantKind): string {
       return "Service";
   }
 
-  const exhaustive: never = kind;
-  return exhaustive;
+  return kind || "Unknown";
 }
 
-export function participantKindBadgeClass(kind: ParticipantKind): string {
+export function participantKindBadgeClass(kind: string): string {
   switch (kind) {
     case "app":
       return "badge-primary";
@@ -120,8 +96,7 @@ export function participantKindBadgeClass(kind: ParticipantKind): string {
       return "badge-outline";
   }
 
-  const exhaustive: never = kind;
-  return exhaustive;
+  return "badge-neutral";
 }
 
 function contractLabel(record: SessionLike): string | null {
@@ -150,43 +125,20 @@ export function describeSessionPrincipal(
   record: SessionLike,
 ): { title: string; details: string } {
   const contract = contractLabel(record);
-  if (!("principal" in record)) {
-    const title = "userNkey" in record ? record.userNkey : record.principalId;
-    const id = "userNkey" in record ? record.connectionId : record.sessionId;
-    return { title, details: joinDetails([id, contract]) };
-  }
-  const principal = record.principal;
-
-  if (principal.type === "user") {
-    const identity = formatIdentityProviderSubject(principal.identity);
+  if ("userNkey" in record && typeof record.userNkey === "string") {
     return {
-      title: principal.userId,
+      title: record.userNkey,
       details: joinDetails([
-        principal.name.trim() || null,
-        identity,
-        principal.identity.identityId,
+        typeof record.connectionId === "string" ? record.connectionId : null,
         contract,
       ]),
     };
   }
-
-  if (principal.type === "device") {
-    return {
-      title: principal.deviceId,
-      details: joinDetails([
-        principal.deviceType,
-        principal.deploymentId,
-        contract,
-      ]),
-    };
-  }
-
   return {
-    title: principal.name,
+    title: record.principalId,
     details: joinDetails([
-      principal.id,
-      principal.deploymentId,
-      principal.instanceId,
+      typeof record.sessionId === "string" ? record.sessionId : null,
+      contract,
     ]),
   };
 }

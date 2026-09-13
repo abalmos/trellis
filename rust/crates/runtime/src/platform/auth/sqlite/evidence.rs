@@ -63,9 +63,9 @@ pub(in crate::platform::auth) fn replace_sql_resource_bindings(
             .execute(
                 "INSERT INTO auth_resource_binding_evidence (
                 owner_kind, owner_id, participant_id, installed_revision,
-                resource_kind, local_name, binding_id, provider_identity,
+                resource_kind, local_name, binding_id, provider_identity, actual_json,
                 state, materialized_at, error
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     encode_enum(owner_kind)?,
                     owner_id,
@@ -75,6 +75,7 @@ pub(in crate::platform::auth) fn replace_sql_resource_bindings(
                     item.local_name,
                     item.binding_id,
                     encode_json(&item.provider_identity)?,
+                    item.actual.as_ref().map(encode_json).transpose()?,
                     encode_enum(item.state)?,
                     item.materialized_at,
                     item.error,
@@ -301,7 +302,9 @@ pub(in crate::platform::auth) fn load_device_delegation(
 ) -> Result<Option<DeviceDelegationRecord>, AuthorizationStateError> {
     connection
         .query_row(
-            "SELECT principal_id, deployment_id, required, state, expires_at
+            "SELECT principal_id, deployment_id, companion_participant_id,
+                user_login_session_id, installation_public_key, device_grant_revision,
+                child_grant_revision, required, state, expires_at
          FROM auth_device_delegations
          WHERE principal_id = ?1 AND deployment_id = ?2",
             params![principal_id, deployment_id],
@@ -309,9 +312,14 @@ pub(in crate::platform::auth) fn load_device_delegation(
                 Ok(DeviceDelegationRecord {
                     principal_id: row.get(0)?,
                     deployment_id: row.get(1)?,
-                    required: row.get(2)?,
-                    state: decode_enum(row.get(3)?)?,
-                    expires_at: row.get(4)?,
+                    companion_participant_id: row.get(2)?,
+                    user_login_session_id: row.get(3)?,
+                    installation_public_key: row.get(4)?,
+                    device_grant_revision: row.get(5)?,
+                    child_grant_revision: row.get(6)?,
+                    required: row.get(7)?,
+                    state: decode_enum(row.get(8)?)?,
+                    expires_at: row.get(9)?,
                 })
             },
         )

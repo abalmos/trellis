@@ -50,10 +50,14 @@ export async function refreshAuthorizationContextWithMetadata(args: {
   trellisUrl: string;
   sessionId: string;
   auth: TrellisAuth;
+  sessionKey?: string;
   cache: AuthorizationContextCache;
   fetch?: typeof globalThis.fetch;
   shouldInstall?: () => boolean;
   requiredTransport?: "native" | "websocket";
+  prepareInstall?: (
+    response: AuthorizationContextRefreshResponse,
+  ) => Promise<(verified: VerifiedAuthorizationContext) => void>;
 }): Promise<AuthorizationContextRefreshResult> {
   const fetch = args.fetch ?? globalThis.fetch;
   let current: VerifiedAuthorizationContext | undefined;
@@ -77,6 +81,7 @@ export async function refreshAuthorizationContextWithMetadata(args: {
     issuedAt: Math.trunc(args.auth.currentIat() * 1_000),
     loginSessionId: args.sessionId,
     connectionId: runtime?.connectionId ?? ulid(),
+    sessionKey: args.sessionKey ?? args.auth.sessionKey,
     currentContextDigest: current?.contextDigest ?? null,
   };
   const proof = await args.auth.signSessionProof({
@@ -127,6 +132,10 @@ export async function refreshAuthorizationContextWithMetadata(args: {
     Math.floor(next.serverNow / 1_000),
     args.shouldInstall,
     nextRuntime,
+    async (verified) => {
+      const installAdditional = await args.prepareInstall?.(next);
+      return installAdditional ? () => installAdditional(verified) : undefined;
+    },
   );
   return { context, response: next };
 }
@@ -136,6 +145,7 @@ export async function refreshAuthorizationContext(args: {
   trellisUrl: string;
   sessionId: string;
   auth: TrellisAuth;
+  sessionKey?: string;
   cache: AuthorizationContextCache;
   fetch?: typeof globalThis.fetch;
   shouldInstall?: () => boolean;
@@ -149,6 +159,7 @@ export function startAuthorizationContextRefresh(args: {
   trellisUrl: string;
   sessionId: string;
   auth: TrellisAuth;
+  sessionKey?: string;
   cache: AuthorizationContextCache;
   fetch?: typeof globalThis.fetch;
   refresh?: (

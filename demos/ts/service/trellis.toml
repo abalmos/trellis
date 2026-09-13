@@ -1,4 +1,9 @@
-format = 1
-name = "service-trellis"
+[package]
+name = "demo-service"
+version = "1.0.0"
 
-[apis]
+[sources]
+service = "contract.trellis"
+
+[generate.typescript]
+output = "trellis"

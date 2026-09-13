@@ -409,7 +409,12 @@ impl PermissionAtom {
                     matches!(action, PermissionAction::Submit | PermissionAction::Process)
                 }
                 ParticipantResourceKind::EventConsumer => {
-                    matches!(action, PermissionAction::Consume)
+                    matches!(
+                        action,
+                        PermissionAction::Consume
+                            | PermissionAction::Read
+                            | PermissionAction::Control
+                    )
                 }
                 ParticipantResourceKind::State => {
                     matches!(
@@ -682,6 +687,23 @@ mod tests {
             PermissionAction::Control,
         )
         .unwrap();
+
+        for action in [
+            PermissionAction::Consume,
+            PermissionAction::Read,
+            PermissionAction::Control,
+        ] {
+            PermissionAtom::new(
+                PermissionTarget::participant_resource(
+                    "documents-worker",
+                    ParticipantResourceKind::EventConsumer,
+                    "updates",
+                )
+                .unwrap(),
+                action,
+            )
+            .unwrap();
+        }
     }
 
     #[test]

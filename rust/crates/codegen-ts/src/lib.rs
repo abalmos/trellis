@@ -96,6 +96,7 @@ pub fn collect_ts_package_sources(
         .enumerate()
         .map(|(index, id)| (id.as_str().to_owned(), format!("p{index}")))
         .collect::<BTreeMap<_, _>>();
+    let api_modules = api_modules(graph);
     let mut sources = vec![GeneratedTsSource {
         path: "package.json".into(),
         contents: serde_json::to_string_pretty(&serde_json::json!({
@@ -127,15 +128,15 @@ pub fn collect_ts_package_sources(
     let mut api_index = String::new();
     for package in graph.packages().values() {
         for api in package.apis().values() {
+            let (export, module) = &api_modules[api.identity().as_str()];
             writeln!(
                 api_index,
                 "export * as {} from \"./{}/mod.ts\";",
-                api.name(),
-                api.name()
+                export, module
             )
             .unwrap();
             sources.push(GeneratedTsSource {
-                path: PathBuf::from("apis").join(api.name()).join("mod.ts"),
+                path: PathBuf::from("apis").join(module).join("mod.ts"),
                 contents: render_api(graph, api, &package_modules)?,
             });
         }
@@ -196,15 +197,23 @@ fn validate_names(
     public_types: &BTreeSet<TypeRef>,
     participant_types: &BTreeMap<&trellis_idl::ParticipantId, BTreeSet<TypeRef>>,
 ) -> Result<(), CodegenTsError> {
-    let mut apis = BTreeMap::new();
+    let api_modules = api_modules(graph);
+    let mut paths = BTreeMap::new();
+    let mut exports = BTreeMap::new();
     for package in graph.packages().values() {
         for api in package.apis().values() {
             validate_export_name("API", api.name())?;
-            if let Some(previous) = apis.insert(api.name(), api.identity().as_str()) {
+            let (export, path) = &api_modules[api.identity().as_str()];
+            if let Some(previous) = paths.insert(path.to_lowercase(), api.identity().as_str()) {
                 return Err(CodegenTsError::ExportNameCollision(format!(
-                    "apis/{}: '{}' and '{}'",
-                    api.name(),
+                    "apis/{path}: '{}' and '{}'",
                     previous,
+                    api.identity()
+                )));
+            }
+            if let Some(previous) = exports.insert(export.to_lowercase(), api.identity().as_str()) {
+                return Err(CodegenTsError::ExportNameCollision(format!(
+                    "API export '{export}': '{previous}' and '{}'",
                     api.identity()
                 )));
             }
@@ -223,6 +232,7 @@ fn validate_names(
                     } => {
                         let mut names = vec![format!("{alias}Input"), format!("{alias}Output")];
                         if update.is_some() {
+                            names.push(format!("{alias}Progress"));
                             names.push(format!("{alias}Update"));
                         }
                         names.extend(
@@ -781,6 +791,10 @@ fn render_api(
                         "export type {base}Progress = {};",
                         type_ref(update, package, modules)
                     ));
+                    lines.push(format!(
+                        "export type {base}Update = {};",
+                        type_ref(update, package, modules)
+                    ));
                 }
                 for (name, ty) in signals {
                     lines.push(format!(
@@ -865,9 +879,10 @@ fn render_action(
             if pagination.is_some() { "\"cursor\"" } else { "undefined" }
         ),
         ActionDefinition::Operation { input, output, update, errors, signals, upload } => format!(
-            "{{ kind: \"operation\", descriptorName: {descriptor}, input: {}, output: {}, progress: {}, errors: [{}], signals: {{ {} }}, upload: {upload} }}",
+            "{{ kind: \"operation\", descriptorName: {descriptor}, input: {}, output: {}, progress: {}, update: {}, errors: [{}], signals: {{ {} }}, upload: {upload} }}",
             type_codec(input, package, modules),
             type_codec(output, package, modules),
+            update.as_ref().map(|value| type_codec(value, package, modules)).unwrap_or_else(|| "undefined".into()),
             update.as_ref().map(|value| type_codec(value, package, modules)).unwrap_or_else(|| "undefined".into()),
             errors.iter().map(|error| error.to_owned()).collect::<Vec<_>>().join(", "),
             signals.iter().map(|(name, ty)| format!("{}: {}", property_name(name), type_codec(ty, package, modules))).collect::<Vec<_>>().join(", ")
@@ -910,9 +925,10 @@ fn render_action_type(
             if pagination.is_some() { "\"cursor\"" } else { "undefined" }
         ),
         ActionDefinition::Operation { input, output, update, errors, signals, upload } => format!(
-            "{{ {common}; readonly input: typeof {}; readonly output: typeof {}; readonly progress: {}; readonly errors: readonly [{}]; readonly signals: {{ {} }}; readonly upload: {upload} }}",
+            "{{ {common}; readonly input: typeof {}; readonly output: typeof {}; readonly progress: {}; readonly update: {}; readonly errors: readonly [{}]; readonly signals: {{ {} }}; readonly upload: {upload} }}",
             type_codec(input, package, modules),
             type_codec(output, package, modules),
+            update.as_ref().map(|value| format!("typeof {}", type_codec(value, package, modules))).unwrap_or_else(|| "undefined".into()),
             update.as_ref().map(|value| format!("typeof {}", type_codec(value, package, modules))).unwrap_or_else(|| "undefined".into()),
             errors.iter().map(|error| format!("typeof {error}")).collect::<Vec<_>>().join(", "),
             signals.iter().map(|(name, ty)| format!("readonly {}: typeof {}", property_name(name), type_codec(ty, package, modules))).collect::<Vec<_>>().join("; ")
@@ -1008,6 +1024,7 @@ fn render_participant(
     let types_prefix = "../".repeat(depth + 2);
     let mut lines =
         vec!["import { participantDescriptor } from \"@qlever-llc/trellis/generated\";".to_owned()];
+    lines.push("import type { ParticipantJobsFromResources, ParticipantKvFromResources, RuntimeApiFromGenerated } from \"@qlever-llc/trellis/generated\";".to_owned());
     lines.push("import * as types from \"./types.ts\";".to_owned());
     lines.push("export { types };".to_owned());
     let referenced = participant
@@ -1016,14 +1033,36 @@ fn render_participant(
         .chain(participant.uses().keys())
         .collect::<BTreeSet<_>>();
     let mut aliases = BTreeMap::new();
+    let api_modules = api_modules(graph);
     for (index, id) in referenced.iter().enumerate() {
         let api = find_api(graph, id)?;
         let alias = format!("Api{index}");
         lines.push(format!(
             "import * as {alias} from \"{api_prefix}apis/{}/mod.ts\";",
-            api.name()
+            api_modules[api.identity().as_str()].1
         ));
         aliases.insert(id.as_str(), alias);
+    }
+    let mut action_name_counts = BTreeMap::new();
+    for id in &referenced {
+        for action in find_api(graph, id)?.actions().keys() {
+            *action_name_counts
+                .entry(action.name.to_ascii_lowercase())
+                .or_insert(0usize) += 1;
+        }
+    }
+    let mut action_names = Vec::new();
+    for id in &referenced {
+        let api = find_api(graph, id)?;
+        for action in api.actions().keys() {
+            let descriptor = descriptor_name(action);
+            let name = if action_name_counts[&action.name.to_ascii_lowercase()] > 1 {
+                format!("{}.{}", api.name(), action.name)
+            } else {
+                action.name.clone()
+            };
+            action_names.push((format!("{}:{descriptor}", id.as_str()), name));
+        }
     }
     for package_id in participant_resource_packages(participant) {
         let module = &modules[package_id];
@@ -1048,10 +1087,29 @@ fn render_participant(
         ));
     }
     lines.push(String::new());
+    lines.push("type __ActionNames = {".into());
+    for (key, name) in &action_names {
+        lines.push(format!(
+            "  readonly {}: {};",
+            js_string(key),
+            js_string(name)
+        ));
+    }
+    lines.push("};".into());
+    lines.push("type __Resources = {".into());
+    for (name, resource) in participant.resources() {
+        lines.push(format!(
+            "  readonly {}: {};",
+            property_name(name.as_str()),
+            render_resource_type(resource, modules)
+        ));
+    }
+    lines.push("};".into());
     lines.push("const __participant: {".into());
     lines.push(format!(
-        "  readonly kind: {}; readonly identity: {}; readonly path: {};",
+        "  readonly kind: {}; readonly id: {}; readonly identity: {}; readonly path: {};",
         js_string(participant_kind(participant.kind())),
+        js_string(participant.identity().as_str()),
         js_string(participant.identity().as_str()),
         js_string(path)
     ));
@@ -1088,14 +1146,30 @@ fn render_participant(
         ));
     }
     lines.push("  ];".into());
-    lines.push("  readonly resources: {".into());
-    for (name, resource) in participant.resources() {
-        lines.push(format!(
-            "    readonly {}: {};",
-            property_name(name.as_str()),
-            render_resource_type(resource, modules)
-        ));
-    }
+    lines.push("  readonly actionNames: __ActionNames;".into());
+    lines.push("  readonly resources: __Resources;".into());
+    lines.push("  readonly __runtimeTypes?: {".into());
+    lines.push(format!(
+        "    readonly ownedApi: RuntimeApiFromGenerated<{}, __ActionNames>;",
+        type_union(
+            participant
+                .implements()
+                .iter()
+                .map(|id| format!("typeof {}.API", aliases[id.as_str()]))
+                .collect::<Vec<_>>()
+        )
+    ));
+    lines.push(format!(
+        "    readonly api: RuntimeApiFromGenerated<{}, __ActionNames>;",
+        type_union(
+            referenced
+                .iter()
+                .map(|id| format!("typeof {}.API", aliases[id.as_str()]))
+                .collect::<Vec<_>>()
+        )
+    ));
+    lines.push("    readonly jobs: ParticipantJobsFromResources<__Resources>;".into());
+    lines.push("    readonly kv: ParticipantKvFromResources<__Resources>;".into());
     lines.push("  };".into());
     if let Some(companion) = participant.companion() {
         lines.push(format!(
@@ -1111,6 +1185,10 @@ fn render_participant(
     ));
     lines.push(format!(
         "  identity: {},",
+        js_string(participant.identity().as_str())
+    ));
+    lines.push(format!(
+        "  id: {},",
         js_string(participant.identity().as_str())
     ));
     lines.push(format!("  path: {},", js_string(path)));
@@ -1147,6 +1225,11 @@ fn render_participant(
         ));
     }
     lines.push("  ],".into());
+    lines.push("  actionNames: {".into());
+    for (key, name) in &action_names {
+        lines.push(format!("    {}: {},", js_string(key), js_string(name)));
+    }
+    lines.push("  },".into());
     lines.push("  resources: {".into());
     for (name, resource) in participant.resources() {
         lines.push(format!(
@@ -1166,11 +1249,14 @@ fn render_participant(
     lines.push("});".into());
     lines.push("export const participant: {".into());
     lines.push("  readonly kind: typeof __participant.kind;".into());
+    lines.push("  readonly id: typeof __participant.id;".into());
     lines.push("  readonly identity: typeof __participant.identity;".into());
     lines.push("  readonly path: typeof __participant.path;".into());
     lines.push("  readonly implements: typeof __participant.implements;".into());
     lines.push("  readonly uses: typeof __participant.uses;".into());
+    lines.push("  readonly actionNames: typeof __participant.actionNames;".into());
     lines.push("  readonly resources: typeof __participant.resources;".into());
+    lines.push("  readonly __runtimeTypes?: typeof __participant.__runtimeTypes;".into());
     if participant.companion().is_some() {
         lines.push("  readonly companion: typeof __participant.companion;".into());
     }
@@ -1236,7 +1322,7 @@ fn render_participant_types(
     }
     lines.push("  }>;".into());
     lines.push("  capabilities: Readonly<{".into());
-    for (_api, selection) in participant.uses() {
+    for selection in participant.uses().values() {
         for capability in &selection.optional_capabilities {
             lines.push(format!(
                 "    readonly {}: boolean;",
@@ -1352,15 +1438,12 @@ fn render_resource(resource: &ResourceDefinition, modules: &BTreeMap<String, Str
             "{{ kind: \"store\", availability: {}, ttlMs: {ttl_ms}, desiredMaxObject: {}, desiredMaxTotal: {} }}",
             availability(*optional), option_number(*desired_max_object), option_number(*desired_max_total)
         ),
-        ResourceDefinition::Job { optional, payload, result, update, deadline_ms, retry, key_concurrency, .. } => format!(
-            "{{ kind: \"job\", availability: {}, payload: {}, result: {}, update: {}, deadlineMs: {}, retry: {}, keyConcurrency: {} }}",
+        ResourceDefinition::Job { optional, payload, result, update, .. } => format!(
+            "{{ kind: \"job\", availability: {}, payload: {}, result: {}, update: {} }}",
             availability(*optional),
             type_codec(payload, "", modules),
             result.as_ref().map(|value| type_codec(value, "", modules)).unwrap_or_else(|| "undefined".into()),
-            update.as_ref().map(|value| type_codec(value, "", modules)).unwrap_or_else(|| "undefined".into()),
-            option_number(*deadline_ms),
-            retry.as_ref().map(|value| serde_json::json!({"attempts":value.attempts,"backoffMs":value.backoff_ms}).to_string()).unwrap_or_else(|| "undefined".into()),
-            key_concurrency.as_ref().map(|value| serde_json::json!({"path":value.path,"policy":format!("{:?}", value.policy).to_lowercase()}).to_string()).unwrap_or_else(|| "undefined".into())
+            update.as_ref().map(|value| type_codec(value, "", modules)).unwrap_or_else(|| "undefined".into())
         ),
         ResourceDefinition::Consumer { optional, events, concurrency, replay, retry, .. } => format!(
             "{{ kind: \"consumer\", availability: {}, events: {}, concurrency: {concurrency}, replay: {}, retry: {} }}",
@@ -1628,6 +1711,41 @@ fn descriptor_name(id: &ActionId) -> String {
 
 fn action_type_base(id: &ActionId) -> String {
     pascal(&id.name)
+}
+
+fn type_union(types: Vec<String>) -> String {
+    if types.is_empty() {
+        "never".to_owned()
+    } else {
+        types.join(" | ")
+    }
+}
+
+fn api_modules(graph: &PackageGraph) -> BTreeMap<String, (String, String)> {
+    let apis = graph
+        .packages()
+        .values()
+        .flat_map(|package| package.apis().values())
+        .collect::<Vec<_>>();
+    let mut counts = BTreeMap::<String, usize>::new();
+    for api in &apis {
+        *counts.entry(api.name().to_lowercase()).or_default() += 1;
+    }
+    apis.into_iter()
+        .map(|api| {
+            let export = if counts[&api.name().to_lowercase()] == 1 {
+                api.name().to_owned()
+            } else {
+                pascal(api.identity().as_str())
+            };
+            let module = if counts[&api.name().to_lowercase()] == 1 {
+                api.name().to_owned()
+            } else {
+                export.clone()
+            };
+            (api.identity().as_str().to_owned(), (export, module))
+        })
+        .collect()
 }
 
 fn pascal(value: &str) -> String {
@@ -1921,7 +2039,7 @@ mod tests {
             model Empty {}
             model PrivateV1 { value: string; }
             model PrivateState { entries: list<Node>; lookup: map<Node>; maybe: Node | null; }
-            api Orders@v1 {
+            api orders@v1 {
               title "Orders";
               description "Order operations.";
               error Failed(Node);
@@ -1930,13 +2048,13 @@ mod tests {
               event Changed { payload Node; }
               capabilities { public { allows { rpc Get; operation Work; publish event Changed; subscribe event Changed; } } }
             }
-            api Catalog@v2 {
+            api catalog@v2 {
               title "Catalog";
               description "Catalog operations.";
               rpc List { input Empty; output Node; }
               capabilities { public { allows { rpc List; } } }
             }
-            service Worker { implements Orders; implements Catalog; kv optional cache { title "Cache"; description "Cache"; schema PrivateState; version 2; accepts { 1: PrivateV1; } } }
+            service Worker { implements orders; implements catalog; kv optional cache { title "Cache"; description "Cache"; schema PrivateState; version 2; accepts { 1: PrivateV1; } } }
             device Sensor { app optional Console { kv values { title "Values"; description "Values"; schema Node; } } }
             "#,
         );
@@ -1955,6 +2073,7 @@ mod tests {
             "import { codecs } from \"@qlever-llc/trellis/generated\";",
             "import { participantDescriptor } from \"@qlever-llc/trellis/generated\";",
             "import type { SerializableErrorData } from \"@qlever-llc/trellis/generated\";",
+            "import type { ParticipantJobsFromResources, ParticipantKvFromResources, RuntimeApiFromGenerated } from \"@qlever-llc/trellis/generated\";",
         ]);
         for import in sources
             .iter()
@@ -1970,20 +2089,24 @@ mod tests {
             serde_json::from_str(&fs::read_to_string(root.join("package.json")).unwrap()).unwrap();
         assert_eq!(package["version"], "2.3.4");
         assert!(!root.join("artifacts").exists());
-        assert!(root.join("apis/Orders/mod.js").exists());
+        assert!(root.join("apis/orders/mod.js").exists());
         assert!(root.join("participants/Sensor/Console/mod.d.ts").exists());
         assert!(root.join("types/index.js").exists());
         assert!(root.join("participants/Worker/types.d.ts").exists());
-        let api = fs::read_to_string(root.join("apis/Orders/mod.js")).unwrap();
+        let worker = fs::read_to_string(root.join("participants/Worker/mod.d.ts")).unwrap();
+        assert!(worker.contains("readonly __runtimeTypes?:"));
+        assert!(worker.contains("RuntimeApiFromGenerated<typeof Api0.API | typeof Api1.API"));
+        assert!(worker.contains("ParticipantKvFromResources<__Resources>"));
+        let api = fs::read_to_string(root.join("apis/orders/mod.js")).unwrap();
         assert!(api.contains("rpc:Get"));
         assert!(api.contains("operation:Work"));
         assert!(api.contains("TrellisError"));
-        let api_declaration = fs::read_to_string(root.join("apis/Orders/mod.d.ts")).unwrap();
-        assert!(api_declaration.contains("example.Orders@v1::Failed"));
+        let api_declaration = fs::read_to_string(root.join("apis/orders/mod.d.ts")).unwrap();
+        assert!(api_declaration.contains("example.orders@v1::Failed"));
         assert!(api_declaration.contains("payloadCodec"));
         assert!(api_declaration.contains("import type { SerializableErrorData }"));
         assert!(!api_declaration.contains("import type { Codec"));
-        let catalog = fs::read_to_string(root.join("apis/Catalog/mod.d.ts")).unwrap();
+        let catalog = fs::read_to_string(root.join("apis/catalog/mod.d.ts")).unwrap();
         assert!(!catalog.contains("TrellisError"));
         assert!(!catalog.contains("SerializableErrorData"));
         let participant = fs::read_to_string(root.join("participants/Worker/mod.js")).unwrap();
@@ -2043,11 +2166,51 @@ mod tests {
     }
 
     #[test]
+    fn generates_native_cursor_pagination_codecs_and_marker() {
+        let graph = graph(include_str!("../../idl/fixtures/cursor-pagination.trellis"));
+        let sources = collect_ts_package_sources(&graph, "@example/generated").unwrap();
+        let api = sources
+            .iter()
+            .find(|source| source.path == Path::new("apis/catalog/mod.ts"))
+            .unwrap();
+        let types = sources
+            .iter()
+            .find(|source| source.path == Path::new("types/_internal/p0.ts"))
+            .unwrap();
+
+        assert!(api.contents.contains("pagination: \"cursor\""));
+        assert!(api.contents.contains("readonly pagination: \"cursor\""));
+        assert!(types
+            .contents
+            .contains("limit: codecs.optional(codecs.u32)"));
+        assert!(types
+            .contents
+            .contains("nextCursor: codecs.optional(codecs.string)"));
+    }
+
+    #[test]
     fn invalid_generated_ts_is_rejected_before_write() {
         let root = unique_temp_dir("invalid-ts-before-write");
         let target = root.join("out/broken.ts");
         let error = write_generated_file(&target, "export const broken = ;\n").unwrap_err();
         assert!(matches!(error, CodegenTsError::InvalidTypeScript { .. }));
         assert!(!target.exists());
+    }
+
+    #[test]
+    fn api_paths_and_exports_follow_valid_api_names() {
+        let graph = graph("model Value {} api events_upper@v1 { title \"Events\"; description \"Upper.\"; capabilities { public { allows { rpc Get; } } } rpc Get { input Value; output Value; } } api events@v2 { title \"events\"; description \"Lower.\"; capabilities { public { allows { rpc Get; } } } rpc Get { input Value; output Value; } }");
+        let sources = collect_ts_package_sources(&graph, "fixture").unwrap();
+        let paths = sources
+            .iter()
+            .map(|source| source.path.to_string_lossy().to_lowercase())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(paths.len(), sources.len());
+        let index = sources
+            .iter()
+            .find(|source| source.path == Path::new("apis/index.ts"))
+            .unwrap();
+        assert!(index.contents.contains("events_upper"));
+        assert!(index.contents.contains("events"));
     }
 }

@@ -12,10 +12,6 @@ pub trait JobDescriptor {
 
     /// Contract-local queue type.
     const QUEUE_TYPE: &'static str;
-    /// Declared payload JSON Schema.
-    const PAYLOAD_SCHEMA_JSON: &'static str;
-    /// Declared result JSON Schema, when present.
-    const RESULT_SCHEMA_JSON: Option<&'static str>;
 }
 
 /// Descriptor extension implemented only by jobs queues that declare live updates.

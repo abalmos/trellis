@@ -23,7 +23,7 @@
     pending = true;
     error = null;
     try {
-      const input: apis.auth.AuthDeploymentsCreateInput = {
+      const input: apis.auth.DeploymentsCreateInput = {
         displayName: deploymentId.trim(),
         expiresAt: null,
         idempotencyKey: ulid(),
@@ -31,10 +31,10 @@
         participantId: null,
         portalId: null,
         requiresDeviceDelegation,
-        reviewMode,
+        reviewMode: new TextEncoder().encode(JSON.stringify(reviewMode)),
       };
 
-      const response = await trellis.authDeploymentsCreate(input).take();
+      const response = await trellis.deploymentsCreate(input).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device deployment ${response.deployment.deploymentId} created.`, "Created");
       deploymentId = "";

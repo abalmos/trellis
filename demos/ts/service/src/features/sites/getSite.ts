@@ -3,12 +3,12 @@ import type { RpcHandler } from "@qlever-llc/trellis/service";
 import { type participants } from "../../../trellis/index.js";
 
 type Handler = RpcHandler<
-  typeof participants.demoService.participant,
+  typeof participants.Service.participant,
   "Sites.Get"
 >;
 
 export const getSite: Handler = async ({ input, client }) => {
   const entry = await client.kv.siteSummaries.get(input.siteId).take();
 
-  return ok({ site: isErr(entry) ? undefined : entry.value });
+  return ok({ site: isErr(entry) ? undefined : entry });
 };

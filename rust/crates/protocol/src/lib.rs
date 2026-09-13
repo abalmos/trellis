@@ -9,6 +9,7 @@ pub mod authorization;
 mod canonical;
 mod error;
 mod identifiers;
+mod pagination;
 mod participant;
 mod permissions;
 mod session_proof;
@@ -32,6 +33,9 @@ pub use authorization::{
 pub use canonical::{canonicalize_json, digest_json, sha256_base64url};
 pub use error::{AuthorizationErrorCode, ProtocolError, SessionProofErrorCode};
 pub use identifiers::validate_api_id;
+pub use pagination::{
+    decode_pagination_cursor, encode_pagination_cursor, pagination_query_digest, InvalidPagination,
+};
 pub use participant::ParticipantKind;
 pub use permissions::{
     ApiSurfaceKind, CapabilityDefinition, ConsentMetadata, GrantOwnerKind, GrantSet,
@@ -46,7 +50,10 @@ pub use session_proof::{
     SESSION_PROOF_FORMAT_V1,
 };
 pub use subjects::{
-    derive_event_subject, derive_event_wildcard_subject, derive_feed_subject,
-    derive_operation_subject, derive_rpc_subject, event_patterns_overlap, DerivedApiSubjects,
-    DerivedEventSubjects,
+    decode_event_descriptor_identity, derive_bound_feed_subject, derive_bound_operation_subject,
+    derive_bound_rpc_subject, derive_event_subject, derive_event_wildcard_subject,
+    derive_feed_control_subject, derive_feed_instance_control_subject, derive_feed_subject,
+    derive_operation_subject, derive_rpc_subject, encode_event_descriptor_identity,
+    event_patterns_overlap, route_queue_group, validate_event_descriptor_subject,
+    DerivedApiSubjects, DerivedEventSubjects, EventDescriptorIdentity,
 };

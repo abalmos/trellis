@@ -3,12 +3,11 @@ use axum::response::IntoResponse;
 use super::{
     canonical_origin, first_admin_token_hash, oauth_cookie_header, oauth_cookie_name,
     oidc_portal_policy_digest, project_service_resource_bindings, require_oauth_browser_binding,
-    select_browser_authority, session_public_key_to_user_nkey, validate_redirect,
-    NatsBootstrapIssuer, EMBEDDED_WEB_ASSETS,
+    session_public_key_to_user_nkey, validate_redirect, NatsBootstrapIssuer, EMBEDDED_WEB_ASSETS,
 };
 use crate::platform::auth::AuthorizationStateError;
 use crate::platform::auth::{
-    ephemeral::{AuthOAuthKind, AuthOAuthState, AuthOAuthStatus, BrowserConsentProposal},
+    ephemeral::{AuthOAuthKind, AuthOAuthState, AuthOAuthStatus},
     LoginPortalRecord, LoginSettingsRecord, ResourceBindingEvidence, ResourceBindingState,
     ResourceProviderIdentity,
 };
@@ -20,11 +19,8 @@ use nats_jwt_rs::user::User;
 use nats_jwt_rs::Claims;
 use nkeys::KeyPair;
 use sha2::{Digest as _, Sha256};
-use std::collections::BTreeMap;
 use std::sync::Arc;
-use trellis_protocol::{
-    ApiSurfaceKind, GrantSet, PermissionAction, PermissionAtom, PermissionTarget,
-};
+use trellis_protocol::ParticipantResourceKind;
 
 const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
@@ -36,47 +32,6 @@ fn session_public_key_derives_the_same_nats_user_key() {
         session_public_key_to_user_nkey(&URL_SAFE_NO_PAD.encode(raw)).unwrap(),
         key.public_key()
     );
-}
-
-fn permission(target: PermissionTarget, action: PermissionAction) -> PermissionAtom {
-    PermissionAtom::new(target, action).unwrap()
-}
-
-fn consent_with_view(view: serde_json::Value) -> BrowserConsentProposal {
-    let required = permission(
-        PermissionTarget::api_surface("example.api@v1", ApiSurfaceKind::Rpc, "Read").unwrap(),
-        PermissionAction::Call,
-    );
-    let optional = permission(
-        PermissionTarget::api_surface("example.api@v1", ApiSurfaceKind::Event, "Updated").unwrap(),
-        PermissionAction::Subscribe,
-    );
-    let required_grant_set = GrantSet::new(vec![required]);
-    let optional_grant_bundles =
-        BTreeMap::from([("events".to_owned(), GrantSet::new(vec![optional]))]);
-    let required_capabilities = vec!["read".to_owned()];
-    let optional_capability_definitions = BTreeMap::new();
-    BrowserConsentProposal {
-        participant_id: "app-1".to_owned(),
-        participant_digest: DIGEST.to_owned(),
-        participant_needs_digest: DIGEST.to_owned(),
-        consent_view_digest: trellis_protocol::digest_json(&view).unwrap(),
-        proposal_digest: trellis_protocol::digest_json(&serde_json::json!({
-            "participantId": "app-1",
-            "participantDigest": DIGEST,
-            "participantNeedsDigest": DIGEST,
-            "requiredGrantSet": required_grant_set,
-            "optionalGrantBundles": optional_grant_bundles,
-            "requiredCapabilities": required_capabilities,
-            "optionalCapabilityDefinitions": optional_capability_definitions,
-        }))
-        .unwrap(),
-        consent_view: view,
-        required_grant_set,
-        optional_grant_bundles,
-        required_capabilities,
-        optional_capability_definitions,
-    }
 }
 
 #[test]
@@ -94,26 +49,6 @@ fn browser_security_boundaries_are_exact() {
     let digest = first_admin_token_hash(&token).unwrap();
     assert_eq!(digest.len(), 43);
     assert!(!digest.contains(&token));
-}
-
-#[test]
-fn browser_approval_accepts_only_server_owned_optional_bundles() {
-    let consent = consent_with_view(serde_json::json!({ "title": "Read data" }));
-    let (required, capabilities, selected) = select_browser_authority(&consent, &[]).unwrap();
-    assert_eq!(required, consent.required_grant_set);
-    assert_eq!(capabilities, vec!["read"]);
-    assert!(selected.is_empty());
-
-    let (with_optional, _, selected) =
-        select_browser_authority(&consent, &["events".to_owned()]).unwrap();
-    assert_eq!(with_optional.permissions().len(), 2);
-    assert!(selected.contains("events"));
-    assert_eq!(
-        select_browser_authority(&consent, &["unknown".to_owned()])
-            .unwrap_err()
-            .code,
-        "unknown_optional_bundle"
-    );
 }
 
 #[tokio::test]
@@ -165,14 +100,6 @@ fn stale_authority_issuance_is_retryable() {
         super::map_issuance_error(AuthorizationStateError::MaterializationStale).status,
         axum::http::StatusCode::SERVICE_UNAVAILABLE,
     );
-}
-
-#[test]
-fn consent_wording_does_not_change_machine_authority() {
-    let before = consent_with_view(serde_json::json!({ "title": "Read data" }));
-    let after = consent_with_view(serde_json::json!({ "title": "View data" }));
-    assert_eq!(before.proposal_digest, after.proposal_digest);
-    assert_ne!(before.consent_view_digest, after.consent_view_digest);
 }
 
 #[test]
@@ -296,38 +223,107 @@ fn embedded_web_app_contains_fallback_and_assets() {
 }
 
 #[test]
-fn bootstrap_projects_exact_physical_resource_binding() {
-    let participant = serde_json::json!({
-        "resources": {
-            "kv": {
-                "cache": {
-                    "history": 2,
-                    "ttlMs": 60000,
-                    "maxValueBytes": 4096
-                }
-            }
+fn bootstrap_projects_soft_store_max_object_as_absent_actual_binding() {
+    let mut participant = crate::platform::auth::builtins::auth_runtime_participant_binding(0)
+        .unwrap()
+        .projection;
+    participant.resources.insert(
+        "cache".to_owned(),
+        crate::platform::auth::evidence::ResourceRuntimeProjection {
+            kind: ParticipantResourceKind::Kv,
+            optional: false,
+            title: "Cache".to_owned(),
+            description: "Cache".to_owned(),
+            representation: None,
+            history: Some(2),
+            ttl_ms: Some(60_000),
+            desired_max_value: Some(4096),
+            desired_max_object: None,
+            desired_max_total: None,
+            deadline_ms: None,
+            payload_schema: None,
+            result_schema: None,
+            update_schema: None,
+            retry_attempts: None,
+            retry_backoff_ms: Vec::new(),
+            job_key_path: None,
+            job_key_policy: None,
+            consumer_events: Default::default(),
+            consumer_replay_all: false,
+            consumer_concurrency: None,
         },
-        "jobQueues": {},
-        "eventConsumers": {}
-    });
-    let evidence = ResourceBindingEvidence {
-        resource_kind: "kv".to_owned(),
-        local_name: "cache".to_owned(),
-        binding_id: "bind_cache".to_owned(),
-        owner_participant_id: "example".to_owned(),
-        provider_identity: ResourceProviderIdentity::Kv {
-            bucket: "KV_EXAMPLE_CACHE".to_owned(),
+    );
+    participant.resources.insert(
+        "objects".to_owned(),
+        crate::platform::auth::evidence::ResourceRuntimeProjection {
+            kind: ParticipantResourceKind::Store,
+            optional: false,
+            title: "Objects".to_owned(),
+            description: "Objects".to_owned(),
+            representation: None,
+            history: None,
+            ttl_ms: Some(0),
+            desired_max_value: None,
+            desired_max_object: Some(4096),
+            desired_max_total: Some(8192),
+            deadline_ms: None,
+            payload_schema: None,
+            result_schema: None,
+            update_schema: None,
+            retry_attempts: None,
+            retry_backoff_ms: Vec::new(),
+            job_key_path: None,
+            job_key_policy: None,
+            consumer_events: Default::default(),
+            consumer_replay_all: false,
+            consumer_concurrency: None,
         },
-        state: ResourceBindingState::Available,
-        materialized_at: 1,
-        error: None,
-    };
+    );
+    let evidence = vec![
+        ResourceBindingEvidence {
+            resource_kind: "kv".to_owned(),
+            local_name: "cache".to_owned(),
+            binding_id: "bind_cache".to_owned(),
+            owner_participant_id: "example".to_owned(),
+            provider_identity: ResourceProviderIdentity::Kv {
+                bucket: "KV_EXAMPLE_CACHE".to_owned(),
+            },
+            actual: Some(crate::platform::auth::resources::ResourceActual::Kv {
+                history: 3,
+                ttl_ms: 120_000,
+                max_value_bytes: None,
+            }),
+            state: ResourceBindingState::Available,
+            materialized_at: 1,
+            error: None,
+        },
+        ResourceBindingEvidence {
+            resource_kind: "store".to_owned(),
+            local_name: "objects".to_owned(),
+            binding_id: "bind_objects".to_owned(),
+            owner_participant_id: "example".to_owned(),
+            provider_identity: ResourceProviderIdentity::Store {
+                bucket: "OBJ_EXAMPLE_OBJECTS".to_owned(),
+            },
+            actual: Some(crate::platform::auth::resources::ResourceActual::Store {
+                ttl_ms: 0,
+                max_object_bytes: None,
+                max_total_bytes: Some(16_384),
+            }),
+            state: ResourceBindingState::Available,
+            materialized_at: 1,
+            error: None,
+        },
+    ];
 
-    let projected =
-        project_service_resource_bindings(&participant.to_string(), &[evidence], "example")
-            .expect("resource binding");
+    let projected = project_service_resource_bindings(&participant, &evidence, "example")
+        .expect("resource binding");
     assert_eq!(projected.kv["cache"].bucket, "KV_EXAMPLE_CACHE");
-    assert_eq!(projected.kv["cache"].history, 2);
+    assert_eq!(projected.kv["cache"].history, 3);
+    assert_eq!(projected.kv["cache"].ttl_ms, 120_000);
+    assert_eq!(projected.kv["cache"].max_value_bytes, None);
+    assert_eq!(projected.store["objects"].max_object_bytes, None);
+    assert_eq!(projected.store["objects"].max_total_bytes, Some(16_384));
 }
 
 #[test]
@@ -375,7 +371,5 @@ fn administrator_grants_include_console_surfaces() {
     let grants = super::browser::complete_participant_grants(&binding)
         .unwrap_or_else(|_| panic!("complete administration grant set"));
     let json = serde_json::to_string(&grants).expect("serialize administration grants");
-    assert!(json.contains("Health.Query"));
-    assert!(json.contains("Health.Watch"));
-    assert!(json.contains("EventLog.Query"));
+    assert!(json.contains("Capabilities.List"), "{json}");
 }

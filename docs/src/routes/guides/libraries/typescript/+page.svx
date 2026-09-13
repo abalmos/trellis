@@ -2,7 +2,7 @@
 
 Application code imports runtime classes from `@qlever-llc/trellis` and the `apis`
 and `participants` namespaces from its ordinary generated package. With
-`format = 1` and `name = "orders-trellis"` in `trellis.toml`:
+`[package]` and `[generate.typescript].output` in `trellis.toml`:
 
 ```ts
 import { TrellisClient } from "@qlever-llc/trellis";
@@ -16,20 +16,19 @@ const client = await TrellisClient.connect({
 ```
 
 Do not construct API or participant metadata in TypeScript. Author it in native
-IDL and run `trellis generate`. One detected language defaults to `trellis/`;
-`[generate].output` can override it. Mixed-language projects require explicit
-Rust and TypeScript output tables. Each language gets one package, not one per
-API or participant.
+IDL and run `trellis generate`. Configure output with
+`[generate.typescript].output`. Each language gets one package, not one per API
+or participant.
 
 The generated ESM package contains executable `.js`, `.d.ts`, and `package.json`,
-always at version `0.0.0`, with the published runtime dependency matching the CLI.
+at the source package version, with the published runtime dependency matching the CLI.
 It needs no consumer transpiler or Trellis CLI. Install it with ordinary package
 tooling, for example `npm install ./trellis`; Deno projects can map the package
 name to `./trellis/index.js` in their own imports. Generation creates no Deno
 configuration and never edits the consumer's manifest. Commit output when clones
-should build without regeneration or the Trellis API cache.
+should build without regeneration or the Trellis source-package cache.
 
-Use `@qlever-llc/trellis/service/deno` or `/service/node` for service bootstrap.
+Use `@qlever-llc/trellis/service` for service bootstrap in Node or Deno.
 Pass `participant` and the immutable provisioned identity `seed` to
 `TrellisService.connect(...)`; `name` is optional. Automatic telemetry can be
 disabled with `telemetry: false`, while `runtime` configures service logging,
@@ -41,8 +40,21 @@ The browser-safe root does not expose native filesystem helpers.
 Connected clients expose only the actions selected by their generated
 participant. RPCs return `Result`-style values; `.orThrow()` is convenient at an
 application boundary, while handlers should model expected failures explicitly.
-Do not import provider source to call a service: install its canonical API,
-select the required actions in native IDL, and generate your own local SDK.
+Do not import provider implementation source to call a service: depend on its
+source package, select exact actions in native IDL, and generate your local SDK.
 
 Find exact signatures through [/api](/api). Generate after every IDL change
 before checking extracted handler types.
+
+Generated paginated RPCs retain their one-page method and add lazy `.pages(...)`
+and `.items(...)` iterators. Missing `nextCursor` is the only end signal;
+pagination is keyset-based and does not generally promise a snapshot.
+
+State is one typed value per declared resource. KV is typed key/value history,
+and Store remains raw object bytes. Optional resources are `undefined`; an
+available but unwritten State resource returns no value. State/KV representation
+migrations happen in SDK memory and do not rewrite stored bytes.
+
+Generated service participants expose declared jobs through `service.jobs`.
+Keyed capacity waits happen before handler execution and do not consume retry
+attempts; retryable handler errors do. See [Jobs: TypeScript](/guides/using-jobs-ts).

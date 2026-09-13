@@ -30,7 +30,7 @@ output = "generated"
         root.path().join("main.trellis"),
         r#"
 model Empty {}
-api Ping@v1 {
+api ping@v1 {
   title "Ping";
   description "A generation fixture.";
   rpc Get { input Empty; output Empty; }

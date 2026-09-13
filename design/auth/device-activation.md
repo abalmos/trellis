@@ -13,6 +13,9 @@ Status: authoritative device enrollment and bootstrap model after WO-02.
 - Every attempt proves possession of both the durable identity key and the
   ephemeral session key used for the eventual NATS connection.
 - Device runtimes have no durable user-login row.
+- A declared companion is the device's lexical `app` or `agent` child, but it
+  runs under separate user authority with its own login session, context,
+  resources, and connection.
 
 ## Provisioning
 
@@ -43,15 +46,31 @@ Responses are:
 
 The TypeScript and Rust activation helpers retain one durable identity and one
 ephemeral session key/logical connection ID across retries. They do not create
-new reviews while polling.
+new reviews while polling. When the device declares a companion, enrollment also
+carries a proof-bound claim for that exact lexical child and its separate
+installation key. The child cannot start an independent browser or native
+bootstrap; it is admitted only through this parent activation.
 
 ## User Approval
 
 The activation Portal resolves review state from Auth and presents the exact
 device, deployment, requested participant, and confirmation code. The signed-in
 user approves or rejects through `Auth.DeviceUserAuthorities.Resolve` and the
-device review RPCs. The operation retains pending/approved/rejected progress and
-events but no identity-authority payload.
+device review RPCs. For a device companion, operation progress includes the
+server-computed `companionConsent` for the child participant. The approving user
+must submit a separate child `Approval` that repeats its `decisionDigest`,
+`installedRevision`, and `expectedGrantRevision` and selects only eligible
+capabilities and resources from that consent. Required eligible entries must be
+included. Auth rejects the approval if the consent, installed revision, grant
+revision, eligibility, consent digest, or resource commitment is stale or does
+not match exactly.
+
+Auth commits the child approval and device authority before creating the child
+login session. The device does not lend its principal or grants to the child;
+the resulting user-owned child binding, login session, authorization context,
+resource bindings, and connection remain distinct from the parent's. The
+operation retains pending/approved/rejected progress and events but no
+identity-authority payload.
 
 Portal authentication uses the standard browser flow, browser-binding secret,
 and OIDC/local-login controls. The Portal participant is installed as a
@@ -74,6 +93,12 @@ The response uses the shared native installation shape documented in
 `auth-protocol.md`: `assignment`, `runtime`, and `transports`. The runtime
 validates exact participant/API evidence, grant/resource bindings, signed
 context, route JWT, session key, inbox, and endpoints before NATS CONNECT.
+
+When activation established a companion, device bootstrap may also return that
+exact child installation. The device runtime opens it as a separate ordinary
+user connection using the committed child login and authority. A required child
+must be available; an optional child may be absent without merging or widening
+the parent device authority.
 
 ## Identity And Session Keys
 
@@ -113,5 +138,6 @@ episode.
 - deployment/instance IDs in bootstrap configuration;
 - client-supplied participant artifacts or authority state;
 - persistent device login sessions;
+- standalone browser or native bootstrap for a device companion;
 - a server QR endpoint; and
 - compatibility with retired device-connect or identity-authority payloads.

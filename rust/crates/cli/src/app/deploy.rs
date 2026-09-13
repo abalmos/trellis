@@ -1,16 +1,18 @@
 use std::{
     collections::BTreeMap,
-    io::{self, Write},
+    io::{self, IsTerminal, Write},
 };
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use futures_util::TryStreamExt as _;
 use miette::IntoDiagnostic;
 use serde_json::{json, Value};
 use trellis_idl::project::read_manifest;
 use trellis_idl::CanonicalMode;
 use trellis_rs::auth as authlib;
 use trellis_rs::generated::Client;
+use trellis_runtime_apis::apis::trellis_auth_v1::rpc::DeploymentsApplyError;
 use trellis_runtime_apis::apis::trellis_auth_v1::Client as AuthClient;
 use trellis_runtime_apis::types as auth_types;
 
@@ -57,7 +59,7 @@ pub(super) async fn run_dev(format: OutputFormat, command: DevCommand) -> miette
 async fn run_svc_resource(format: OutputFormat, command: SvcResourceCommand) -> miette::Result<()> {
     match command.action {
         SvcResourceAction::Show => show_service(format, &command.id).await,
-        SvcResourceAction::Create(args) => create_service(format, &command.id, &args).await,
+        SvcResourceAction::Create(_) => create_service(format, &command.id).await,
         SvcResourceAction::Apply(args) => {
             apply_contract(format, DeploymentKind::Service, &command.id, &args).await
         }
@@ -109,6 +111,8 @@ pub(super) fn compile_participant_input(
     source: &std::path::Path,
     selected_participant: Option<&str>,
     expected_kind: Option<trellis_idl::ParticipantKind>,
+    _approved_capabilities: &[String],
+    _approved_resources: &[String],
 ) -> miette::Result<CompiledParticipantInput> {
     let root = source.canonicalize().into_diagnostic()?;
     let manifest = read_manifest(&root.join("trellis.toml"))?;
@@ -183,15 +187,17 @@ pub(super) fn compile_participant_input(
 async fn list_services(format: OutputFormat, args: &SvcListArgs) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
     let deployments = AuthClient::from_generated(connected.clone())
-        .deployments_list(&auth_types::AuthDeploymentsListRequest {
+        .deployments_list_items(auth_types::AuthDeploymentsListRequest {
             kind: Some(auth_types::AuthDeploymentsListRequestKind::Service),
             state: (!args.disabled).then_some(auth_types::AuthDeploymentsListRequestState::Active),
-            cursor: None,
-            limit: Some(wire("100")?),
+            page: Some(trellis_runtime_apis::CursorQuery {
+                cursor: None,
+                limit: Some(100),
+            }),
         })
+        .try_collect::<Vec<_>>()
         .await
-        .into_diagnostic()?
-        .entries;
+        .into_diagnostic()?;
     if output::is_json(format) {
         output::print_json(&json!({ "deployments": deployments }))?;
         return Ok(());
@@ -206,15 +212,17 @@ async fn list_services(format: OutputFormat, args: &SvcListArgs) -> miette::Resu
 async fn list_devices(format: OutputFormat, args: &DevListArgs) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
     let deployments = AuthClient::from_generated(connected.clone())
-        .deployments_list(&auth_types::AuthDeploymentsListRequest {
+        .deployments_list_items(auth_types::AuthDeploymentsListRequest {
             kind: Some(auth_types::AuthDeploymentsListRequestKind::Device),
             state: (!args.disabled).then_some(auth_types::AuthDeploymentsListRequestState::Active),
-            cursor: None,
-            limit: Some(wire("100")?),
+            page: Some(trellis_runtime_apis::CursorQuery {
+                cursor: None,
+                limit: Some(100),
+            }),
         })
+        .try_collect::<Vec<_>>()
         .await
-        .into_diagnostic()?
-        .entries;
+        .into_diagnostic()?;
     if output::is_json(format) {
         output::print_json(&json!({ "deployments": deployments }))?;
         return Ok(());
@@ -238,11 +246,7 @@ async fn show_device(format: OutputFormat, id: &str) -> miette::Result<()> {
     print_deployment_show_result(format, DeploymentKind::Device, &deployment)
 }
 
-async fn create_service(
-    format: OutputFormat,
-    id: &str,
-    _args: &SvcCreateArgs,
-) -> miette::Result<()> {
+async fn create_service(format: OutputFormat, id: &str) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
     let deployment = AuthClient::from_generated(connected.clone())
         .deployments_create(&auth_types::AuthDeploymentsCreateRequest {
@@ -294,6 +298,8 @@ async fn apply_contract(
         &args.source,
         args.participant.as_deref(),
         Some(expected_kind),
+        &args.approve_capability,
+        &args.approve_resource,
     )?;
     let (_state, connected) = connect_authenticated_cli_client().await?;
     let current = AuthClient::from_generated(connected.clone())
@@ -330,30 +336,152 @@ async fn apply_contract(
             .and_then(|revision| revision.parse().ok())
             .unwrap_or(0)
     });
-    let response = AuthClient::from_generated(connected.clone())
-        .deployments_apply(&auth_types::AuthDeploymentsApplyRequest {
-            deployment_id: wire(deployment_id)?,
-            expected_revision: wire(expected_revision.to_string())?,
-            idempotency_key: wire(cli_idempotency_key())?,
-            optional_capabilities: (!args.optional_capability.is_empty())
-                .then(|| args.optional_capability.iter().map(wire).collect())
-                .transpose()?,
-            package_evidence: participant.package_evidence,
-            participant_path: participant.participant_path,
-            package_digest: participant.package_digest,
+    let mut request = auth_types::AuthDeploymentsApplyRequest {
+        approval: None,
+        deployment_id: wire(deployment_id)?,
+        expected_revision: wire(expected_revision.to_string())?,
+        idempotency_key: wire(cli_idempotency_key())?,
+        package_evidence: participant.package_evidence,
+        participant_path: participant.participant_path,
+        package_digest: participant.package_digest,
+    };
+    let client = AuthClient::from_generated(connected.clone());
+    let consent = match client.deployments_apply(&request).await {
+        Ok(response) => {
+            return print_apply_response(
+                format,
+                deployment_id,
+                &participant.participant_id,
+                &participant.participant_digest,
+                response,
+            )
+        }
+        Err(error) => approval_required(&error).ok_or(error).into_diagnostic()?,
+    };
+    if output::is_json(format) {
+        output::print_json(&serde_json::to_value(&consent).into_diagnostic()?)?;
+    } else {
+        output::print_info("server-computed deployment consent request:");
+        output::print_json(&serde_json::to_value(&consent).into_diagnostic()?)?;
+    }
+    if let Some(digest) = &args.confirm_digest {
+        miette::ensure!(
+            digest == &consent.decision_digest,
+            "--confirm-digest does not match the displayed request"
+        );
+    }
+    let approve_all = args.yes
+        || (args.approve_capability.is_empty()
+            && args.approve_resource.is_empty()
+            && io::stdin().is_terminal());
+    if !args.yes
+        && io::stdin().is_terminal()
+        && !prompt_for_typed_identifier(&consent.decision_digest)?
+    {
+        return Err(miette::miette!("deployment approval cancelled"));
+    }
+    if !args.yes
+        && !io::stdin().is_terminal()
+        && args.approve_capability.is_empty()
+        && args.approve_resource.is_empty()
+        && !args.approve_companion
+    {
+        return Err(miette::miette!(
+            "approval_required: rerun with explicit approval selectors or --yes"
+        ));
+    }
+    request.approval = Some(approval_from_consent(&consent, args, approve_all));
+    let response = match client.deployments_apply(&request).await {
+        Ok(response) => response,
+        Err(error)
+            if approval_required(&error)
+                .is_some_and(|current| current.decision_digest == consent.decision_digest) =>
+        {
+            client.deployments_apply(&request).await.into_diagnostic()?
+        }
+        Err(error) => return Err(error).into_diagnostic(),
+    };
+    print_apply_response(
+        format,
+        deployment_id,
+        &participant.participant_id,
+        &participant.participant_digest,
+        response,
+    )
+}
+
+fn approval_from_consent(
+    consent: &auth_types::ConsentRequest,
+    args: &ApplyArgs,
+    approve_all: bool,
+) -> auth_types::Approval {
+    let approved_capabilities = consent
+        .capabilities
+        .iter()
+        .filter(|capability| {
+            capability.eligible
+                && (approve_all
+                    || capability.already_approved
+                    || args.approve_capability.contains(&capability.id))
         })
-        .await
-        .into_diagnostic()?;
+        .map(|capability| auth_types::ApprovedCapability {
+            id: capability.id.clone(),
+            consent_digest: capability.consent_digest.clone(),
+        })
+        .collect();
+    let approved_resources = consent
+        .resources
+        .iter()
+        .filter(|resource| {
+            resource.eligible
+                && (approve_all
+                    || resource.already_approved
+                    || args.approve_resource.contains(&resource.name))
+        })
+        .map(|resource| auth_types::ApprovedResource {
+            kind: resource.kind.clone(),
+            name: resource.name.clone(),
+            commitment: resource.requested_commitment.clone(),
+        })
+        .collect();
+    auth_types::Approval {
+        approved_capabilities,
+        approved_resources,
+        companion_approved: approve_all || args.approve_companion,
+        decision_digest: consent.decision_digest.clone(),
+        delegation_ceiling: None,
+        expected_grant_revision: consent.expected_grant_revision,
+        installed_revision: consent.installed_revision,
+        mode: auth_types::ApprovalMode::Capabilities,
+    }
+}
+
+fn approval_required(
+    error: &trellis_rs::client::CallError<DeploymentsApplyError>,
+) -> Option<auth_types::ConsentRequest> {
+    let trellis_rs::client::CallError::Declared(error) = error else {
+        return None;
+    };
+    let DeploymentsApplyError::AuthError(error) = error.as_ref() else {
+        return None;
+    };
+    serde_json::from_value(error.error.extra.get("consentRequest")?.clone()).ok()
+}
+
+fn print_apply_response(
+    format: OutputFormat,
+    deployment_id: &str,
+    participant_id: &str,
+    participant_digest: &str,
+    response: auth_types::AuthDeploymentsApplyResponse,
+) -> miette::Result<()> {
     if output::is_json(format) {
         output::print_json(&serde_json::to_value(response).into_diagnostic()?)?;
     } else {
         output::print_success("deployment participant applied");
         output::print_info(&format!("deploymentId={deployment_id}"));
-        output::print_info(&format!("participantId={}", participant.participant_id));
-        output::print_info(&format!(
-            "participantDigest={}",
-            participant.participant_digest
-        ));
+        output::print_info(&format!("participantId={participant_id}"));
+        output::print_info(&format!("participantDigest={}", participant_digest));
         output::print_json(&response.binding)?;
     }
     Ok(())
@@ -457,12 +585,14 @@ async fn service_instances(
             deployment_id: Some(wire(id)?),
             state: (!args.disabled)
                 .then_some(auth_types::AuthServiceInstancesListRequestState::Active),
-            cursor: None,
-            limit: Some(wire("100")?),
+            page: Some(trellis_runtime_apis::CursorQuery {
+                cursor: None,
+                limit: Some(100),
+            }),
         })
         .await
         .into_diagnostic()?
-        .entries;
+        .items;
     print_service_instances_result(format, instances)
 }
 
@@ -481,12 +611,14 @@ async fn device_instances(
                 DeviceInstanceState::Disabled => auth_types::AuthDevicesListRequestState::Disabled,
                 DeviceInstanceState::Revoked => auth_types::AuthDevicesListRequestState::Revoked,
             }),
-            cursor: None,
-            limit: Some(wire("100")?),
+            page: Some(trellis_runtime_apis::CursorQuery {
+                cursor: None,
+                limit: Some(100),
+            }),
         })
         .await
         .into_diagnostic()?
-        .entries;
+        .items;
     print_device_instances_result(format, instances)
 }
 
@@ -559,12 +691,14 @@ async fn dev_activations(
                             auth_types::AuthDevicesListRequestState::Revoked
                         }
                     }),
-                    cursor: None,
-                    limit: Some(wire("100")?),
+                    page: Some(trellis_runtime_apis::CursorQuery {
+                        cursor: None,
+                        limit: Some(100),
+                    }),
                 })
                 .await
                 .into_diagnostic()?
-                .entries;
+                .items;
             let activations = activations
                 .into_iter()
                 .filter(|entry| {
@@ -581,12 +715,14 @@ async fn dev_activations(
                 .devices_list(&auth_types::AuthDevicesListRequest {
                     deployment_id: Some(wire(deployment_id)?),
                     state: None,
-                    cursor: None,
-                    limit: Some(wire("100")?),
+                    page: Some(trellis_runtime_apis::CursorQuery {
+                        cursor: None,
+                        limit: Some(100),
+                    }),
                 })
                 .await
                 .into_diagnostic()?
-                .entries;
+                .items;
             let device = devices
                 .into_iter()
                 .find(|device| device.instance_id.as_ref() == args.instance_id)
@@ -623,12 +759,10 @@ async fn dev_reviews(
                         DeviceReviewState::Approved => auth_types::AuthDeviceUserAuthoritiesReviewsListRequestState::Approved,
                         DeviceReviewState::Rejected => auth_types::AuthDeviceUserAuthoritiesReviewsListRequestState::Rejected,
                     }),
-                    cursor: None,
-                    limit: Some(wire("100")?), },
+                    page: Some(trellis_runtime_apis::CursorQuery { cursor: None, limit: Some(100) }), },
                 )
                 .await
-                .into_diagnostic()?
-                .entries;
+                .into_diagnostic()?.items;
             let reviews = reviews
                 .into_iter()
                 .filter(|review| {
@@ -659,13 +793,15 @@ async fn review_decide(
             &auth_types::AuthDeviceUserAuthoritiesReviewsListRequest {
                 deployment_id: None,
                 state: None,
-                cursor: None,
-                limit: Some(wire("100")?),
+                page: Some(trellis_runtime_apis::CursorQuery {
+                    cursor: None,
+                    limit: Some(100),
+                }),
             },
         )
         .await
         .into_diagnostic()?
-        .entries
+        .items
         .into_iter()
         .find(|review| review.review_id.as_ref() == args.review_id)
         .ok_or_else(|| miette::miette!("device review not found: {}", args.review_id))?;
@@ -1016,21 +1152,98 @@ async fn find_deployment(
         DeploymentKind::Device => auth_types::AuthDeploymentsListRequestKind::Device,
     };
     let entries = AuthClient::from_generated(connected.clone())
-        .deployments_list(&auth_types::AuthDeploymentsListRequest {
+        .deployments_list_items(auth_types::AuthDeploymentsListRequest {
             kind: Some(kind),
             state: None,
-            cursor: None,
-            limit: Some(wire("100")?),
+            page: Some(trellis_runtime_apis::CursorQuery {
+                cursor: None,
+                limit: Some(100),
+            }),
         })
+        .try_collect::<Vec<_>>()
         .await
         .into_diagnostic()?
-        .entries;
-    entries
         .into_iter()
         .map(serde_json::to_value)
         .collect::<Result<Vec<_>, _>>()
-        .into_diagnostic()?
+        .into_diagnostic()?;
+    find_deployment_entry(entries, deployment_id)
+}
+
+fn find_deployment_entry(
+    entries: impl IntoIterator<Item = Value>,
+    deployment_id: &str,
+) -> miette::Result<Value> {
+    entries
         .into_iter()
         .find(|entry| entry.get("deploymentId").and_then(Value::as_str) == Some(deployment_id))
         .ok_or_else(|| miette::miette!("deployment not found: {deployment_id}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trellis_rs::client::CallError;
+    use trellis_rs::generated::SerializableErrorData;
+    use trellis_runtime_apis::apis::trellis_auth_v1::errors::AuthError;
+
+    #[test]
+    fn deployment_lookup_reaches_items_after_the_first_page() {
+        let entries = (0..101).map(|index| json!({ "deploymentId": format!("svc-{index}") }));
+
+        let deployment = find_deployment_entry(entries, "svc-100").expect("deployment found");
+
+        assert_eq!(deployment["deploymentId"], "svc-100");
+    }
+
+    #[test]
+    fn deployment_apply_plan_builds_executable_selected_approval() {
+        let consent: auth_types::ConsentRequest = serde_json::from_value(json!({
+            "capabilities": [
+                { "alreadyApproved": false, "consentDigest": "cap-digest", "consequence": "", "description": "", "eligible": true, "id": "api::write", "required": true, "title": "Write" },
+                { "alreadyApproved": false, "consentDigest": "denied", "consequence": "", "description": "", "eligible": false, "id": "api::denied", "required": false, "title": "Denied" }
+            ],
+            "companion": null,
+            "decisionDigest": "decision",
+            "expectedGrantRevision": "4",
+            "installedRevision": "7",
+            "packageDigest": "package",
+            "participantId": "acme.service@v1",
+            "resources": []
+        }))
+        .expect("valid consent request");
+        let error = CallError::Declared(Box::new(DeploymentsApplyError::AuthError(AuthError {
+            error: SerializableErrorData {
+                id: "error-id".to_string(),
+                error_type: "trellis.auth@v1::AuthError".to_string(),
+                message: "approval required".to_string(),
+                context: None,
+                trace_id: None,
+                extra: serde_json::Map::from_iter([(
+                    "consentRequest".to_string(),
+                    serde_json::to_value(&consent).expect("serialize consent"),
+                )]),
+            },
+        })));
+        let plan = approval_required(&error).expect("extract server plan");
+        let args = ApplyArgs {
+            source: "project".into(),
+            participant: None,
+            approve_capability: vec!["api::write".to_string()],
+            approve_resource: vec![],
+            approve_companion: false,
+            confirm_digest: Some("decision".to_string()),
+            yes: false,
+            expected_revision: None,
+        };
+
+        let approval = approval_from_consent(&plan, &args, false);
+
+        assert_eq!(approval.decision_digest, "decision");
+        assert_eq!(approval.expected_grant_revision.to_string(), "4");
+        assert_eq!(approval.installed_revision.to_string(), "7");
+        assert_eq!(approval.approved_capabilities.len(), 1);
+        assert_eq!(approval.approved_capabilities[0].id, "api::write");
+        assert!(!approval.companion_approved);
+    }
 }

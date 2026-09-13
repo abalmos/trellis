@@ -16,6 +16,7 @@
   import Panel from "$lib/components/Panel.svelte";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
   import {
+    boundedNumber,
     compactDuration,
     errorMessage,
     formatDate,
@@ -65,14 +66,14 @@
   const activeWaits = $derived(job?.state === "active" ? job.waitingOn ?? [] : []);
   const selectedTimeline = $derived.by(() => {
     const tryNumber = selectedAttempt?.try;
-    if (typeof tryNumber !== "number") return timeline;
+    if (tryNumber === undefined) return timeline;
     return jobTimelineEventsForAttempt(timeline, tryNumber);
   });
   const canCancel = $derived(job?.state === "pending" || job?.state === "retry" || job?.state === "active");
   const canRetry = $derived(job?.state === "failed");
   const canDlq = $derived(job?.state === "dead");
 
-  const sortedAttempts = $derived([...attempts].sort((a, b) => a.try - b.try));
+  const sortedAttempts = $derived([...attempts].sort((a, b) => boundedNumber(a.try - b.try)));
   const selectedAttempt = $derived(
     sortedAttempts[Math.min(activeAttemptIndex, Math.max(0, sortedAttempts.length - 1))] ?? null,
   );
@@ -229,13 +230,13 @@
     error = null;
     try {
       if (name === "cancel") {
-        await cancelJob({ action: (input) => trellis.jobsCancel(input) }, actionJobId);
+        await cancelJob({ action: (input) => trellis.cancel(input) }, actionJobId);
       } else if (name === "retry") {
-        await retryJob({ action: (input) => trellis.jobsRetry(input) }, actionJobId);
+        await retryJob({ action: (input) => trellis.retry(input) }, actionJobId);
       } else if (name === "replay") {
-        await replayDlqJob({ action: (input) => trellis.jobsReplayDlq(input) }, actionJobId);
+        await replayDlqJob({ action: (input) => trellis.replayDlq(input) }, actionJobId);
       } else {
-        await dismissDlqJob({ action: (input) => trellis.jobsDismissDlq(input) }, actionJobId);
+        await dismissDlqJob({ action: (input) => trellis.dismissDlq(input) }, actionJobId);
       }
       await load(actionJobId);
     } catch (e) {
@@ -321,11 +322,11 @@
   const runtimeBaseline = $derived.by(() => {
     if (!job || !metrics) return null;
     const group = metrics.summary.find((g) => g.key === job.type);
-    if (!group || !group.runtime || group.runtime.count === 0) return null;
+    if (!group || !group.runtime || group.runtime.count === 0n) return null;
     return {
-      p50: group.runtime.p50Ms ?? null,
-      p95: group.runtime.p95Ms ?? null,
-      max: group.runtime.maxMs ?? null,
+      p50: group.runtime.p50Ms == null ? null : boundedNumber(group.runtime.p50Ms),
+      p95: group.runtime.p95Ms == null ? null : boundedNumber(group.runtime.p95Ms),
+      max: group.runtime.maxMs == null ? null : boundedNumber(group.runtime.maxMs),
       count: group.runtime.count,
     };
   });
@@ -333,11 +334,11 @@
   const queueWaitBaseline = $derived.by(() => {
     if (!job || !metrics) return null;
     const group = metrics.summary.find((g) => g.key === job.type);
-    if (!group || !group.queueWait || group.queueWait.count === 0) return null;
+    if (!group || !group.queueWait || group.queueWait.count === 0n) return null;
     return {
-      p50: group.queueWait.p50Ms ?? null,
-      p95: group.queueWait.p95Ms ?? null,
-      max: group.queueWait.maxMs ?? null,
+      p50: group.queueWait.p50Ms == null ? null : boundedNumber(group.queueWait.p50Ms),
+      p95: group.queueWait.p95Ms == null ? null : boundedNumber(group.queueWait.p95Ms),
+      max: group.queueWait.maxMs == null ? null : boundedNumber(group.queueWait.maxMs),
       count: group.queueWait.count,
     };
   });
@@ -392,9 +393,9 @@
     void (async () => {
       try {
         const stream = await trellis.jobsWatch({ includeInitial: false, jobId: id }, { signal: controller.signal }).orThrow();
-        for await (const event of stream) {
+        for await (const _event of stream) {
           if (controller.signal.aborted) return;
-          if (event.kind !== "ready") scheduleWatchReload(id);
+          scheduleWatchReload(id);
         }
       } catch {
         // Jobs.Watch is optional; manual refresh remains available.
@@ -484,7 +485,7 @@
           <span class="stats-cell-baseline tabular-nums">{firstWait ? waitDurationLabel(firstWait) : UNSET}{activeWaits.length > 1 ? ` · +${activeWaits.length - 1} more` : ""}</span>
         </div>
       {/if}
-      <div class="stats-cell" title={jobRuntimeMs != null && runtimeBaseline ? `Job runtime vs p50 ${compactDuration(runtimeBaseline.p50 ?? 0)} / p95 ${compactDuration(runtimeBaseline.p95 ?? 0)} over the last ${runtimeBaseline.count} ${runtimeBaseline.count === 1 ? "job" : "jobs"} of type ${job.type}` : "Runtime since the job started"}>
+      <div class="stats-cell" title={jobRuntimeMs != null && runtimeBaseline ? `Job runtime vs p50 ${compactDuration(runtimeBaseline.p50 ?? 0)} / p95 ${compactDuration(runtimeBaseline.p95 ?? 0)} over the last ${runtimeBaseline.count} ${runtimeBaseline.count === 1n ? "job" : "jobs"} of type ${job.type}` : "Runtime since the job started"}>
         <span class="stats-cell-label">Runtime</span>
         <span class="stats-cell-value tabular-nums">{jobRuntime}</span>
         {#if runtimeBaseline}
@@ -503,7 +504,7 @@
             {#if runtimeBaseline.p50 != null && runtimeBaseline.p95 != null}
               p50 {compactDuration(runtimeBaseline.p50)} · p95 {compactDuration(runtimeBaseline.p95)}
             {:else}
-              n {runtimeBaseline.count} job{runtimeBaseline.count === 1 ? "" : "s"}
+              n {runtimeBaseline.count} job{runtimeBaseline.count === 1n ? "" : "s"}
             {/if}
           </span>
         {:else if metricsUnavailable}
@@ -514,7 +515,7 @@
           <span class="stats-cell-baseline">Loading baseline…</span>
         {/if}
       </div>
-      <div class="stats-cell" title={jobQueueWaitMs != null && queueWaitBaseline ? `Queue wait vs p50 ${compactDuration(queueWaitBaseline.p50 ?? 0)} / p95 ${compactDuration(queueWaitBaseline.p95 ?? 0)} over the last ${queueWaitBaseline.count} ${queueWaitBaseline.count === 1 ? "job" : "jobs"} of type ${job.type}` : "Time the job spent in the queue before starting"}>
+      <div class="stats-cell" title={jobQueueWaitMs != null && queueWaitBaseline ? `Queue wait vs p50 ${compactDuration(queueWaitBaseline.p50 ?? 0)} / p95 ${compactDuration(queueWaitBaseline.p95 ?? 0)} over the last ${queueWaitBaseline.count} ${queueWaitBaseline.count === 1n ? "job" : "jobs"} of type ${job.type}` : "Time the job spent in the queue before starting"}>
         <span class="stats-cell-label">Queue wait</span>
         <span class="stats-cell-value tabular-nums">{jobQueueWaitMs != null ? compactDuration(jobQueueWaitMs) : UNSET}</span>
         {#if queueWaitBaseline && jobQueueWaitMs != null}
@@ -531,7 +532,7 @@
             {#if queueWaitBaseline.p50 != null && queueWaitBaseline.p95 != null}
               p50 {compactDuration(queueWaitBaseline.p50)} · p95 {compactDuration(queueWaitBaseline.p95)}
             {:else}
-              n {queueWaitBaseline.count} job{queueWaitBaseline.count === 1 ? "" : "s"}
+              n {queueWaitBaseline.count} job{queueWaitBaseline.count === 1n ? "" : "s"}
             {/if}
           </span>
         {:else if jobQueueWaitMs == null}
@@ -540,8 +541,8 @@
       </div>
       <div class="stats-cell">
         <span class="stats-cell-label">Tries</span>
-        <span class={["stats-cell-value tabular-nums", job.tries > 1 ? "text-warning" : ""]}>{job.tries}/{job.maxTries}</span>
-        {#if job.tries > 1}
+        <span class={["stats-cell-value tabular-nums", job.tries > 1n ? "text-warning" : ""]}>{job.tries}/{job.maxTries}</span>
+        {#if job.tries > 1n}
           <span class="stats-cell-baseline text-warning">retrying</span>
         {:else}
           <span class="stats-cell-baseline">first attempt</span>
@@ -605,8 +606,8 @@
         <div class="stats-cell">
           <span class="stats-cell-label">Concurrency</span>
           <span class="trellis-identifier stats-cell-value break-anywhere">{job.concurrency.key}</span>
-          {#if job.concurrency.staleTakeoverCount !== undefined && job.concurrency.staleTakeoverCount > 0}
-            <span class="stats-cell-baseline text-warning">{job.concurrency.staleTakeoverCount} stale takeover{job.concurrency.staleTakeoverCount === 1 ? "" : "s"}</span>
+          {#if job.concurrency.staleTakeoverCount !== undefined && job.concurrency.staleTakeoverCount > 0n}
+            <span class="stats-cell-baseline text-warning">{job.concurrency.staleTakeoverCount} stale takeover{job.concurrency.staleTakeoverCount === 1n ? "" : "s"}</span>
           {:else}
             <span class="stats-cell-baseline">keyed</span>
           {/if}

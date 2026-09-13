@@ -8,28 +8,28 @@ Status: authoritative command and project-tooling model after WO-02.
   models do not survive as aliases or wrappers.
 - Machine-readable output uses `--format json` and reserves stdout for JSON.
 - Project compilation completes before generated output is replaced.
-- Locks and generated artifacts are exact, deterministic, and never hand-edited.
+- Locks and generated packages are exact, deterministic, and never hand-edited.
 
 ## Project Commands
 
 ```text
-trellis add <api> [--version <requirement>]
-trellis rm <api>
+trellis add <package> [--version <requirement>]
+trellis rm <package>
 trellis update
 trellis install
 trellis generate
 trellis publish
 ```
 
-`add`, `rm`, and `update` resolve the project API graph and write an exact
+`add`, `rm`, and `update` resolve the source-package graph and write an exact
 `trellis.lock`. `install` recreates language outputs from that lock. `generate`
 compiles native Trellis IDL and stages all generated output before atomically
-replacing the last-good tree. `publish` pushes every project-owned canonical API
-to OCI with immutable version rules.
+replacing the last-good tree. `publish` pushes the source bundle and frozen
+resolution metadata to OCI with immutable version rules.
 
 Package references are declared in `trellis.toml`. Generated Rust and TypeScript
-modules consume exact locked API descriptors and participant artifacts;
-application code does not author wire schemas.
+modules consume exact locked semantic projections; application code does not
+author wire schemas.
 
 ## Authentication
 
@@ -67,8 +67,8 @@ trellis issuers revoke <issuer-key-id> ...
 Grant commands call `Auth.Grants.*` and require explicit expected revisions for
 mutations. They operate on one identity/participant binding and may assign only
 declared atoms and finite platform privileges. Participant installation compiles
-or reads canonical artifacts in memory and calls `Auth.Participants.Install`; it
-does not grant authority as a side effect.
+verified source-package semantics and calls `Auth.Participants.Install`; it does
+not grant authority as a side effect.
 
 Issuer commands manage the online signer. No `infra`, trust-root, certificate,
 manifest, trust-floor, offline-signing, or compatibility command exists.

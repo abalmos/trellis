@@ -18,8 +18,8 @@
   import { bulkExpectedCount, bulkTargetDetails, runBulk, toggleAll, toggleId } from "$lib/bulk.ts";
   import { getTrellis } from "$lib/trellis";
 
-  type Policy = apis.auth.AuthPortalsGrantOverridesListOutput["entries"][number];
-  type Group = apis.auth.AuthCapabilityGroupsListOutput["entries"][number];
+  type Policy = apis.auth.PortalsGrantOverridesListOutput["items"][number];
+  type Group = apis.auth.CapabilityGroupsListOutput["items"][number];
 
   const trellis = getTrellis();
   let loading = $state(true);
@@ -84,13 +84,13 @@
     if (!preserveSaved) saved = null;
     try {
       const [policyResponse, groupResponse] = await Promise.all([
-        trellis.authPortalsGrantOverridesList({ limit: 500, offset: 0 }).take(),
-        trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take(),
+        trellis.portalsGrantOverridesList({ limit: 500, offset: 0 }).take(),
+        trellis.capabilityGroupsList({ limit: 500, offset: 0 }).take(),
       ]);
       if (isErr(policyResponse)) throw new Error(errorMessage(policyResponse));
       if (isErr(groupResponse)) throw new Error(errorMessage(groupResponse));
-      policies = policyResponse.entries.toSorted((left, right) => key(left).localeCompare(key(right)));
-      groups = groupResponse.entries;
+      policies = policyResponse.items.toSorted((left, right) => key(left).localeCompare(key(right)));
+      groups = groupResponse.items;
     } catch (cause) {
       error = caughtMessage(cause);
     } finally {
@@ -112,7 +112,7 @@
     error = null;
     saved = null;
     try {
-      const response = await trellis.authPortalsGrantOverridesRemove({
+      const response = await trellis.portalsGrantOverridesRemove({
         portalId: policy.portalId,
         participantId: policy.participantId,
         expectedVersion: policy.version,
@@ -132,7 +132,7 @@
     bulkBusy = true;
     bulkResult = null;
     const outcome = await runBulk(targets, async (policy) => {
-      const response = await trellis.authPortalsGrantOverridesRemove({
+      const response = await trellis.portalsGrantOverridesRemove({
         portalId: policy.portalId,
         participantId: policy.participantId,
         expectedVersion: policy.version,

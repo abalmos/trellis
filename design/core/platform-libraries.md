@@ -33,8 +33,7 @@ connection walkthroughs, and exact public signatures belong in:
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
 | `@qlever-llc/trellis`              | Canonical core Trellis runtime package: client/device helpers, Result helpers, transfers, and generated-contract support | Frontend apps, services, CLI tools  |
 | `@qlever-llc/trellis/service`      | Service-side runtime facade, extracted handler types, and service-only helpers                                           | Backend services                    |
-| `@qlever-llc/trellis/service/node` | Node service adapter                                                                                                     | External Node services              |
-| `@qlever-llc/trellis/service/deno` | Deno service adapter                                                                                                     | In-repo Deno services               |
+| `@qlever-llc/trellis/service`      | Shared Node-compatible native service runtime                                                                            | Node and Deno services              |
 | `@qlever-llc/trellis/auth`         | Full auth helper and auth protocol surface, including browser bind helpers                                               | Apps, services, docs, tests         |
 | `@qlever-llc/trellis/auth/browser` | Browser-only auth and portal-flow helper facade                                                                          | Browser apps, custom portals        |
 | `@qlever-llc/trellis/participant`  | Participant metadata and canonical runtime types                                                                         | Generated code and tooling          |
@@ -50,15 +49,15 @@ connection walkthroughs, and exact public signatures belong in:
   through contract packages
 - server helpers live on explicit Trellis subpaths
 - APIs and participant surfaces live in the configured local generated package,
-  with fixed package version `0.0.0` and the CLI-matched published runtime
+  with the source package version and the CLI-matched published runtime
   dependency
 - health contract types come from the generated Health API module
 - framework adapters such as `@qlever-llc/trellis-svelte` remain separate
   packages
 - platform packages should expose stable ergonomic surfaces and hide
   transport/bootstrap details
-- browser-safe public runtime APIs and the kind-specific contract builders
-  belong on `@qlever-llc/trellis`
+- browser-safe public runtime APIs and generated descriptor support belong on
+  `@qlever-llc/trellis`
 - the root package should expose Trellis-owned lifecycle handles such as
   `TrellisConnection`, not raw transport handles such as `NatsConnection`
 - browser-only login and portal-flow helpers belong on

@@ -3,11 +3,12 @@
 use trellis_rs::service::{DeclaredRpcError, Router, ServerError};
 use trellis_runtime_apis::apis::trellis_jobs_v1::rpc::{
     Cancel, DismissDLQ, GetKey, Inspect, ListDLQ, ListServices, Metrics, Query, ReplayDLQ, Retry,
+    Summary,
 };
 use trellis_runtime_apis::types::{
     JobsCancelRequest, JobsDismissDLQRequest, JobsGetKeyRequest, JobsInspectRequest,
     JobsListDLQRequest, JobsListServicesRequest, JobsMetricsRequest, JobsQueryRequest,
-    JobsReplayDLQRequest, JobsRetryRequest,
+    JobsReplayDLQRequest, JobsRetryRequest, JobsSummaryRequest,
 };
 
 use crate::query::{JobsQuery, JobsQueryError};
@@ -15,6 +16,7 @@ use crate::query::{JobsQuery, JobsQueryError};
 /// Build the Jobs admin RPC router backed by a SQL projection query adapter.
 pub fn build_router_with_query(query: JobsQuery) -> Router {
     let mut router = Router::new();
+    router.set_provider_deployment_id("dep_trellis_jobs_runtime");
     router.register_rpc::<ListServices, _, _>({
         let query = query.clone();
         move |_ctx, input: JobsListServicesRequest| {
@@ -27,6 +29,13 @@ pub fn build_router_with_query(query: JobsQuery) -> Router {
         move |_ctx, input: JobsQueryRequest| {
             let query = query.clone();
             async move { query.query_jobs(&input).await.map_err(map_query_error) }
+        }
+    });
+    router.register_rpc::<Summary, _, _>({
+        let query = query.clone();
+        move |_ctx, input: JobsSummaryRequest| {
+            let query = query.clone();
+            async move { query.summary(&input).await.map_err(map_query_error) }
         }
     });
     router.register_rpc::<Metrics, _, _>({

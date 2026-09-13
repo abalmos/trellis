@@ -1,6 +1,6 @@
 //! Generated API `trellis.auth@v1`.
 pub const API_ID: &str = "trellis.auth@v1";
-pub const API_DIGEST: &str = "yq6ATxM5WBjmIJQDSkL5OeZ2L6E8y0hbSvY_ElbZA2U";
+pub const API_DIGEST: &str = "sNLVgGp5fF1O6yg5mO9eYhfKtOqfQAWaTkZieEdvkGY";
 pub struct Api;
 impl trellis_rs::generated::ApiDescriptor for Api {
     const ID: &'static str = API_ID;
@@ -87,7 +87,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum CapabilitiesListError {
@@ -128,6 +128,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -193,6 +194,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -256,6 +258,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -278,7 +281,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum CapabilityGroupsListError {
@@ -319,6 +322,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -382,6 +386,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -445,6 +450,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -467,7 +473,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum ConnectionsListError {
@@ -508,6 +514,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -571,6 +578,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -634,6 +642,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -697,6 +706,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -760,6 +770,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -823,6 +834,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -845,7 +857,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum DeploymentsListError {
@@ -886,6 +898,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -949,6 +962,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -972,7 +986,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum DeviceUserAuthoritiesListError {
@@ -1013,6 +1027,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1078,6 +1093,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1102,7 +1118,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum DeviceUserAuthoritiesReviewsListError {
@@ -1143,6 +1159,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1208,6 +1225,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1271,6 +1289,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1334,6 +1353,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1355,7 +1375,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum DevicesListError {
@@ -1396,6 +1416,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1459,6 +1480,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1522,6 +1544,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1585,6 +1608,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1607,7 +1631,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum GrantsListError {
@@ -1648,6 +1672,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1711,6 +1736,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1774,6 +1800,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1837,6 +1864,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1900,6 +1928,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -1963,10 +1992,75 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
             ParticipantsInstallError::decode(value)
+        }
+    }
+    pub type ParticipantsListInput = crate::__types::trellis::AuthParticipantsListRequest;
+    pub type ParticipantsListOutput = crate::__types::trellis::AuthParticipantsListResponse;
+    pub struct ParticipantsList;
+    impl ParticipantsList {
+        pub const API_ID: &'static str = super::API_ID;
+        pub const DESCRIPTOR_NAME: &'static str = "rpc.Participants.List";
+        pub const KEY: &'static str = "auth.Participants.List";
+        pub const SUBJECT: &'static str = "rpc.v1.auth.Participants.List";
+        pub const CALLER_CAPABILITIES: &'static [&'static str] =
+            &["trellis.auth@v1::authorities_read"];
+        pub const ERRORS: &'static [&'static str] = &[
+            "trellis.auth@v1::AuthError",
+            "trellis.auth@v1::UnexpectedError",
+            "trellis.auth@v1::ValidationError",
+        ];
+        pub const DOWNLOAD: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum ParticipantsListError {
+        AuthError(super::errors::AuthError),
+        UnexpectedError(super::errors::UnexpectedError),
+        ValidationError(super::errors::ValidationError),
+    }
+    impl ParticipantsListError {
+        pub fn decode(value: serde_json::Value) -> Result<Option<Self>, serde_json::Error> {
+            let error_type = value.get("type").and_then(serde_json::Value::as_str);
+            match error_type {
+                Some("trellis.auth@v1::AuthError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::AuthError>(value)
+                        .map(|value| value.map(Self::AuthError))
+                }
+                Some("trellis.auth@v1::UnexpectedError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::UnexpectedError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::UnexpectedError))
+                }
+                Some("trellis.auth@v1::ValidationError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::ValidationError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::ValidationError))
+                }
+                _ => Ok(None),
+            }
+        }
+    }
+    impl trellis_rs::generated::RpcDescriptor for ParticipantsList {
+        type Input = ParticipantsListInput;
+        type Output = ParticipantsListOutput;
+        type Error = ParticipantsListError;
+        const API_ID: &'static str = super::API_ID;
+        const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME;
+        const SUBJECT: &'static str = Self::SUBJECT;
+        const KEY: &'static str = Self::KEY;
+        const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
+        fn decode_error(
+            value: serde_json::Value,
+        ) -> Result<Option<Self::Error>, serde_json::Error> {
+            ParticipantsListError::decode(value)
         }
     }
     pub type PortalsGetInput = crate::__types::trellis::AuthPortalsGetRequest;
@@ -2025,6 +2119,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2048,7 +2143,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum PortalsGrantOverridesListError {
@@ -2089,6 +2184,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2154,6 +2250,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2219,6 +2316,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2240,7 +2338,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum PortalsListError {
@@ -2281,6 +2379,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2345,6 +2444,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2410,6 +2510,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2473,6 +2574,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2536,6 +2638,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2599,6 +2702,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2662,6 +2766,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2727,6 +2832,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2792,6 +2898,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2814,7 +2921,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum ServiceInstancesListError {
@@ -2855,6 +2962,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2920,6 +3028,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -2985,6 +3094,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3007,7 +3117,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum SessionsListError {
@@ -3048,6 +3158,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3110,6 +3221,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3172,6 +3284,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3235,6 +3348,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3256,7 +3370,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum UserIdentitiesListError {
@@ -3297,6 +3411,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3359,6 +3474,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3421,6 +3537,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3483,6 +3600,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3547,6 +3665,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3568,7 +3687,7 @@ pub mod rpc {
             "trellis.auth@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum UsersListError {
@@ -3609,6 +3728,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3671,6 +3791,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3735,6 +3856,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3797,6 +3919,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3859,6 +3982,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3937,6 +4061,8 @@ pub mod operations {
         type Input = DeviceUserAuthoritiesResolveInput;
         type Output = DeviceUserAuthoritiesResolveOutput;
         type Progress = DeviceUserAuthoritiesResolveProgress;
+        type Update = DeviceUserAuthoritiesResolveProgress;
+        type UpdateEvidence = trellis_rs::client::DeclaredOperationUpdates;
         type Error = DeviceUserAuthoritiesResolveError;
         const API_ID: &'static str = super::API_ID;
         const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME;
@@ -3949,8 +4075,12 @@ pub mod operations {
             "trellis.auth@v1::ValidationError",
         ];
         const SIGNALS: &'static [&'static str] = &[];
+        const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = "{}";
         const UPLOAD: bool = Self::UPLOAD;
         const HAS_PROGRESS: bool = true;
+        const UPDATE_SCHEMA_JSON: Option<&'static str> = Some(
+            "{\"$defs\":{\"trellis.AuthDeviceUserAuthoritiesResolveProgress\":{\"additionalProperties\":true,\"properties\":{\"companionConsent\":{\"$ref\":\"#/$defs/trellis.ConsentRequest\"},\"retryAfterMs\":{\"pattern\":\"^(0|[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"uint64\",\"x-trellis-maximum\":\"18446744073709551615\",\"x-trellis-minimum\":\"0\"},\"state\":{\"$ref\":\"#/$defs/trellis.AuthDeviceUserAuthoritiesResolveProgressState\"}},\"required\":[\"retryAfterMs\",\"state\"],\"type\":\"object\"},\"trellis.AuthDeviceUserAuthoritiesResolveProgressState\":{\"type\":\"string\",\"x-trellis-symbols\":[\"delegation_pending\",\"review_pending\",\"waiting\"]},\"trellis.ConsentCapability\":{\"additionalProperties\":true,\"properties\":{\"alreadyApproved\":{\"type\":\"boolean\"},\"consentDigest\":{\"type\":\"string\"},\"consequence\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"eligible\":{\"type\":\"boolean\"},\"id\":{\"type\":\"string\"},\"required\":{\"type\":\"boolean\"},\"title\":{\"type\":\"string\"}},\"required\":[\"alreadyApproved\",\"consentDigest\",\"consequence\",\"description\",\"eligible\",\"id\",\"required\",\"title\"],\"type\":\"object\"},\"trellis.ConsentCompanion\":{\"additionalProperties\":true,\"properties\":{\"capabilities\":{\"items\":{\"$ref\":\"#/$defs/trellis.ConsentCapability\"},\"type\":\"array\"},\"kind\":{\"$ref\":\"#/$defs/trellis.ResourceOwnerKind\"},\"participantId\":{\"type\":\"string\"},\"required\":{\"type\":\"boolean\"},\"resources\":{\"items\":{\"$ref\":\"#/$defs/trellis.ConsentResource\"},\"type\":\"array\"}},\"required\":[\"capabilities\",\"kind\",\"participantId\",\"required\",\"resources\"],\"type\":\"object\"},\"trellis.ConsentRequest\":{\"additionalProperties\":true,\"properties\":{\"capabilities\":{\"items\":{\"$ref\":\"#/$defs/trellis.ConsentCapability\"},\"type\":\"array\"},\"companion\":{\"$ref\":\"#/$defs/trellis.ConsentCompanion\"},\"decisionDigest\":{\"type\":\"string\"},\"expectedGrantRevision\":{\"pattern\":\"^(0|[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"uint64\",\"x-trellis-maximum\":\"18446744073709551615\",\"x-trellis-minimum\":\"0\"},\"installedRevision\":{\"pattern\":\"^(0|[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"uint64\",\"x-trellis-maximum\":\"18446744073709551615\",\"x-trellis-minimum\":\"0\"},\"packageDigest\":{\"type\":\"string\"},\"participantId\":{\"type\":\"string\"},\"resources\":{\"items\":{\"$ref\":\"#/$defs/trellis.ConsentResource\"},\"type\":\"array\"}},\"required\":[\"capabilities\",\"decisionDigest\",\"expectedGrantRevision\",\"installedRevision\",\"packageDigest\",\"participantId\",\"resources\"],\"type\":\"object\"},\"trellis.ConsentResource\":{\"additionalProperties\":true,\"properties\":{\"actual\":{\"$ref\":\"#/$defs/trellis.ResourceActual\"},\"alreadyApproved\":{\"type\":\"boolean\"},\"change\":{\"$ref\":\"#/$defs/trellis.ConsentResourceChange\"},\"description\":{\"type\":\"string\"},\"eligible\":{\"type\":\"boolean\"},\"kind\":{\"$ref\":\"#/$defs/trellis.ResourceKind\"},\"name\":{\"type\":\"string\"},\"requestedCommitment\":{\"$ref\":\"#/$defs/trellis.ResourceCommitment\"},\"required\":{\"type\":\"boolean\"},\"title\":{\"type\":\"string\"}},\"required\":[\"alreadyApproved\",\"change\",\"description\",\"eligible\",\"kind\",\"name\",\"requestedCommitment\",\"required\",\"title\"],\"type\":\"object\"},\"trellis.ConsentResourceChange\":{\"type\":\"string\",\"x-trellis-symbols\":[\"detached\",\"expanded\",\"incompatible\",\"new\",\"reduced\",\"unchanged\"]},\"trellis.ResourceActual\":{\"additionalProperties\":true,\"properties\":{\"history\":{\"$ref\":\"#/$defs/trellis.ResourceHistory\"},\"maxObjectBytes\":{\"$ref\":\"#/$defs/trellis.ResourceCapacityBytes\"},\"maxTotalBytes\":{\"$ref\":\"#/$defs/trellis.ResourceCapacityBytes\"},\"maxValueBytes\":{\"$ref\":\"#/$defs/trellis.ResourceCapacityBytes\"},\"representationVersion\":{\"$ref\":\"#/$defs/trellis.StateRepresentationVersion\"},\"ttlMs\":{\"pattern\":\"^(0|[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"uint64\",\"x-trellis-maximum\":\"18446744073709551615\",\"x-trellis-minimum\":\"0\"}},\"required\":[],\"type\":\"object\"},\"trellis.ResourceCapacityBytes\":{\"pattern\":\"^(0|[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"uint64\",\"x-trellis-maximum\":\"9007199254740991\",\"x-trellis-minimum\":\"0\"},\"trellis.ResourceCommitment\":{\"additionalProperties\":true,\"properties\":{\"desiredMaxObjectBytes\":{\"$ref\":\"#/$defs/trellis.ResourceCapacityBytes\"},\"desiredMaxTotalBytes\":{\"$ref\":\"#/$defs/trellis.ResourceCapacityBytes\"},\"desiredMaxValueBytes\":{\"$ref\":\"#/$defs/trellis.ResourceCapacityBytes\"},\"history\":{\"$ref\":\"#/$defs/trellis.ResourceHistory\"},\"ttlMs\":{\"pattern\":\"^(0|[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"uint64\",\"x-trellis-maximum\":\"18446744073709551615\",\"x-trellis-minimum\":\"0\"}},\"required\":[],\"type\":\"object\"},\"trellis.ResourceHistory\":{\"pattern\":\"^(0|[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"uint64\",\"x-trellis-maximum\":\"9007199254740991\",\"x-trellis-minimum\":\"0\"},\"trellis.ResourceKind\":{\"type\":\"string\",\"x-trellis-symbols\":[\"consumer\",\"job\",\"kv\",\"state\",\"store\"]},\"trellis.ResourceOwnerKind\":{\"type\":\"string\",\"x-trellis-symbols\":[\"agent\",\"app\",\"device\",\"service\"]},\"trellis.StateRepresentationVersion\":{\"maximum\":4294967295,\"minimum\":1,\"type\":\"integer\"}},\"$ref\":\"#/$defs/trellis.AuthDeviceUserAuthoritiesResolveProgress\",\"$schema\":\"https://json-schema.org/draft/2020-12/schema\"}",
+        );
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -3965,8 +4095,9 @@ pub mod events {
         pub const API_ID: &'static str = super::API_ID;
         pub const DESCRIPTOR_NAME: &'static str = "event.Connections.Closed";
         pub const KEY: &'static str = "auth.Connections.Closed";
-        pub const SUBJECT: &'static str = "events.v1.auth.Connections.Closed";
-        pub const SUBSCRIBE_SUBJECT: &'static str = "events.v1.auth.Connections.Closed";
+        pub const SUBJECT: &'static str = "events.v1.dHJlbGxpcy5hdXRoQHYx.Connections.Closed";
+        pub const SUBSCRIBE_SUBJECT: &'static str =
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.Connections.Closed";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] =
@@ -3989,8 +4120,9 @@ pub mod events {
         pub const API_ID: &'static str = super::API_ID;
         pub const DESCRIPTOR_NAME: &'static str = "event.Connections.Kicked";
         pub const KEY: &'static str = "auth.Connections.Kicked";
-        pub const SUBJECT: &'static str = "events.v1.auth.Connections.Kicked";
-        pub const SUBSCRIBE_SUBJECT: &'static str = "events.v1.auth.Connections.Kicked";
+        pub const SUBJECT: &'static str = "events.v1.dHJlbGxpcy5hdXRoQHYx.Connections.Kicked";
+        pub const SUBSCRIBE_SUBJECT: &'static str =
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.Connections.Kicked";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] =
@@ -4013,8 +4145,9 @@ pub mod events {
         pub const API_ID: &'static str = super::API_ID;
         pub const DESCRIPTOR_NAME: &'static str = "event.Connections.Opened";
         pub const KEY: &'static str = "auth.Connections.Opened";
-        pub const SUBJECT: &'static str = "events.v1.auth.Connections.Opened";
-        pub const SUBSCRIBE_SUBJECT: &'static str = "events.v1.auth.Connections.Opened";
+        pub const SUBJECT: &'static str = "events.v1.dHJlbGxpcy5hdXRoQHYx.Connections.Opened";
+        pub const SUBSCRIBE_SUBJECT: &'static str =
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.Connections.Opened";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] =
@@ -4039,9 +4172,9 @@ pub mod events {
         pub const DESCRIPTOR_NAME: &'static str = "event.DeviceUserAuthorities.Approved";
         pub const KEY: &'static str = "auth.DeviceUserAuthorities.Approved";
         pub const SUBJECT: &'static str =
-            "events.v1.auth.DeviceUserAuthorities.Approved.{/deploymentId}";
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.DeviceUserAuthorities.Approved.{/deploymentId}";
         pub const SUBSCRIBE_SUBJECT: &'static str =
-            "events.v1.auth.DeviceUserAuthorities.Approved.*";
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.DeviceUserAuthorities.Approved.*";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] =
@@ -4066,9 +4199,9 @@ pub mod events {
         pub const DESCRIPTOR_NAME: &'static str = "event.DeviceUserAuthorities.Requested";
         pub const KEY: &'static str = "auth.DeviceUserAuthorities.Requested";
         pub const SUBJECT: &'static str =
-            "events.v1.auth.DeviceUserAuthorities.Requested.{/deploymentId}";
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.DeviceUserAuthorities.Requested.{/deploymentId}";
         pub const SUBSCRIBE_SUBJECT: &'static str =
-            "events.v1.auth.DeviceUserAuthorities.Requested.*";
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.DeviceUserAuthorities.Requested.*";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] =
@@ -4093,9 +4226,9 @@ pub mod events {
         pub const DESCRIPTOR_NAME: &'static str = "event.DeviceUserAuthorities.Resolved";
         pub const KEY: &'static str = "auth.DeviceUserAuthorities.Resolved";
         pub const SUBJECT: &'static str =
-            "events.v1.auth.DeviceUserAuthorities.Resolved.{/deploymentId}";
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.DeviceUserAuthorities.Resolved.{/deploymentId}";
         pub const SUBSCRIBE_SUBJECT: &'static str =
-            "events.v1.auth.DeviceUserAuthorities.Resolved.*";
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.DeviceUserAuthorities.Resolved.*";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] =
@@ -4120,9 +4253,9 @@ pub mod events {
         pub const DESCRIPTOR_NAME: &'static str = "event.DeviceUserAuthorities.ReviewRequested";
         pub const KEY: &'static str = "auth.DeviceUserAuthorities.ReviewRequested";
         pub const SUBJECT: &'static str =
-            "events.v1.auth.DeviceUserAuthorities.ReviewRequested.{/deploymentId}";
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.DeviceUserAuthorities.ReviewRequested.{/deploymentId}";
         pub const SUBSCRIBE_SUBJECT: &'static str =
-            "events.v1.auth.DeviceUserAuthorities.ReviewRequested.*";
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.DeviceUserAuthorities.ReviewRequested.*";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] =
@@ -4145,8 +4278,8 @@ pub mod events {
         pub const API_ID: &'static str = super::API_ID;
         pub const DESCRIPTOR_NAME: &'static str = "event.Grants.Changed";
         pub const KEY: &'static str = "auth.Grants.Changed";
-        pub const SUBJECT: &'static str = "events.v1.auth.Grants.Changed";
-        pub const SUBSCRIBE_SUBJECT: &'static str = "events.v1.auth.Grants.Changed";
+        pub const SUBJECT: &'static str = "events.v1.dHJlbGxpcy5hdXRoQHYx.Grants.Changed";
+        pub const SUBSCRIBE_SUBJECT: &'static str = "events.v1.dHJlbGxpcy5hdXRoQHYx.Grants.Changed";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
@@ -4168,8 +4301,9 @@ pub mod events {
         pub const API_ID: &'static str = super::API_ID;
         pub const DESCRIPTOR_NAME: &'static str = "event.Issuers.Revoked";
         pub const KEY: &'static str = "auth.Issuers.Revoked";
-        pub const SUBJECT: &'static str = "events.v1.auth.Issuers.Revoked";
-        pub const SUBSCRIBE_SUBJECT: &'static str = "events.v1.auth.Issuers.Revoked";
+        pub const SUBJECT: &'static str = "events.v1.dHJlbGxpcy5hdXRoQHYx.Issuers.Revoked";
+        pub const SUBSCRIBE_SUBJECT: &'static str =
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.Issuers.Revoked";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
@@ -4191,8 +4325,9 @@ pub mod events {
         pub const API_ID: &'static str = super::API_ID;
         pub const DESCRIPTOR_NAME: &'static str = "event.Sessions.Revoked";
         pub const KEY: &'static str = "auth.Sessions.Revoked";
-        pub const SUBJECT: &'static str = "events.v1.auth.Sessions.Revoked";
-        pub const SUBSCRIBE_SUBJECT: &'static str = "events.v1.auth.Sessions.Revoked";
+        pub const SUBJECT: &'static str = "events.v1.dHJlbGxpcy5hdXRoQHYx.Sessions.Revoked";
+        pub const SUBSCRIBE_SUBJECT: &'static str =
+            "events.v1.dHJlbGxpcy5hdXRoQHYx.Sessions.Revoked";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.auth@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] =
@@ -4213,6 +4348,7 @@ pub mod events {
 pub mod feeds {}
 /// Registers metadata for every RPC in this API.
 pub fn register_rpc_metadata(router: &mut trellis_rs::service::Router) {
+    let _ = router;
     router.register_rpc_metadata::<rpc::CapabilitiesList>();
     router.register_rpc_metadata::<rpc::CapabilityGroupsDelete>();
     router.register_rpc_metadata::<rpc::CapabilityGroupsGet>();
@@ -4243,6 +4379,7 @@ pub fn register_rpc_metadata(router: &mut trellis_rs::service::Router) {
     router.register_rpc_metadata::<rpc::IssuersRevoke>();
     router.register_rpc_metadata::<rpc::ParticipantsGet>();
     router.register_rpc_metadata::<rpc::ParticipantsInstall>();
+    router.register_rpc_metadata::<rpc::ParticipantsList>();
     router.register_rpc_metadata::<rpc::PortalsGet>();
     router.register_rpc_metadata::<rpc::PortalsGrantOverridesList>();
     router.register_rpc_metadata::<rpc::PortalsGrantOverridesPut>();
@@ -4291,6 +4428,97 @@ impl Client {
     > {
         self.inner.call::<rpc::CapabilitiesList>(input).await
     }
+    pub fn capabilities_list_pages(
+        &self,
+        input: rpc::CapabilitiesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::CapabilitiesListOutput, crate::PaginationError<rpc::CapabilitiesListError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .capabilities_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn capabilities_list_items(
+        &self,
+        input: rpc::CapabilitiesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthCapabilitiesListResponseentriesItem,
+            crate::PaginationError<rpc::CapabilitiesListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthCapabilitiesListResponseentriesItem>::new()
+                    .into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .capabilities_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
+    }
     pub async fn capability_groups_delete(
         &self,
         input: &rpc::CapabilityGroupsDeleteInput,
@@ -4318,6 +4546,100 @@ impl Client {
     > {
         self.inner.call::<rpc::CapabilityGroupsList>(input).await
     }
+    pub fn capability_groups_list_pages(
+        &self,
+        input: rpc::CapabilityGroupsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            rpc::CapabilityGroupsListOutput,
+            crate::PaginationError<rpc::CapabilityGroupsListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .capability_groups_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn capability_groups_list_items(
+        &self,
+        input: rpc::CapabilityGroupsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthCapabilityGroupsListResponseentriesItem,
+            crate::PaginationError<rpc::CapabilityGroupsListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthCapabilityGroupsListResponseentriesItem>::new()
+                    .into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .capability_groups_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
+    }
     pub async fn capability_groups_put(
         &self,
         input: &rpc::CapabilityGroupsPutInput,
@@ -4340,6 +4662,97 @@ impl Client {
     ) -> Result<rpc::ConnectionsListOutput, trellis_rs::client::CallError<rpc::ConnectionsListError>>
     {
         self.inner.call::<rpc::ConnectionsList>(input).await
+    }
+    pub fn connections_list_pages(
+        &self,
+        input: rpc::ConnectionsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::ConnectionsListOutput, crate::PaginationError<rpc::ConnectionsListError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .connections_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn connections_list_items(
+        &self,
+        input: rpc::ConnectionsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthConnectionsListResponseentriesItem,
+            crate::PaginationError<rpc::ConnectionsListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthConnectionsListResponseentriesItem>::new()
+                    .into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .connections_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
     }
     pub async fn deployments_apply(
         &self,
@@ -4391,6 +4804,97 @@ impl Client {
     {
         self.inner.call::<rpc::DeploymentsList>(input).await
     }
+    pub fn deployments_list_pages(
+        &self,
+        input: rpc::DeploymentsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::DeploymentsListOutput, crate::PaginationError<rpc::DeploymentsListError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .deployments_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn deployments_list_items(
+        &self,
+        input: rpc::DeploymentsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthDeploymentsListResponseentriesItem,
+            crate::PaginationError<rpc::DeploymentsListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthDeploymentsListResponseentriesItem>::new()
+                    .into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .deployments_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
+    }
     pub async fn deployments_remove(
         &self,
         input: &rpc::DeploymentsRemoveInput,
@@ -4410,6 +4914,104 @@ impl Client {
         self.inner
             .call::<rpc::DeviceUserAuthoritiesList>(input)
             .await
+    }
+    pub fn device_user_authorities_list_pages(
+        &self,
+        input: rpc::DeviceUserAuthoritiesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            rpc::DeviceUserAuthoritiesListOutput,
+            crate::PaginationError<rpc::DeviceUserAuthoritiesListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .device_user_authorities_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn device_user_authorities_list_items(
+        &self,
+        input: rpc::DeviceUserAuthoritiesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthDeviceUserAuthoritiesListResponseentriesItem,
+            crate::PaginationError<rpc::DeviceUserAuthoritiesListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(
+            futures_util::stream::try_unfold(
+                (
+                    client,
+                    input,
+                    seen,
+                    false,
+                    Vec::<
+                        crate::__types::trellis::AuthDeviceUserAuthoritiesListResponseentriesItem,
+                    >::new()
+                        .into_iter(),
+                ),
+                |(client, mut input, mut seen, mut done, mut items)| async move {
+                    loop {
+                        if let Some(item) = items.next() {
+                            return Ok(Some((item, (client, input, seen, done, items))));
+                        }
+                        if done {
+                            return Ok(None);
+                        }
+                        let page = client
+                            .device_user_authorities_list(&input)
+                            .await
+                            .map_err(crate::PaginationError::Call)?;
+                        let next = page.page.next_cursor.clone();
+                        done = next.is_none();
+                        if let Some(cursor) = next {
+                            if !seen.insert(cursor.clone()) {
+                                return Err(crate::PaginationError::RepeatedCursor(cursor));
+                            }
+                            let limit = input.page.as_ref().and_then(|page| page.limit);
+                            input.page = Some(crate::__types::CursorQuery {
+                                cursor: Some(cursor),
+                                limit,
+                            });
+                        }
+                        items = page.items.into_iter();
+                    }
+                },
+            ),
+        )
     }
     pub async fn device_user_authorities_reviews_decide(
         &self,
@@ -4432,6 +5034,104 @@ impl Client {
         self.inner
             .call::<rpc::DeviceUserAuthoritiesReviewsList>(input)
             .await
+    }
+    pub fn device_user_authorities_reviews_list_pages(
+        &self,
+        input: rpc::DeviceUserAuthoritiesReviewsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            rpc::DeviceUserAuthoritiesReviewsListOutput,
+            crate::PaginationError<rpc::DeviceUserAuthoritiesReviewsListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .device_user_authorities_reviews_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn device_user_authorities_reviews_list_items(
+        &self,
+        input: rpc::DeviceUserAuthoritiesReviewsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthDeviceUserAuthoritiesReviewsListResponseentriesItem,
+            crate::PaginationError<rpc::DeviceUserAuthoritiesReviewsListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(
+            futures_util::stream::try_unfold(
+                (
+                    client,
+                    input,
+                    seen,
+                    false,
+                    Vec::<
+                        crate::__types::trellis::AuthDeviceUserAuthoritiesReviewsListResponseentriesItem,
+                    >::new()
+                        .into_iter(),
+                ),
+                |(client, mut input, mut seen, mut done, mut items)| async move {
+                    loop {
+                        if let Some(item) = items.next() {
+                            return Ok(Some((item, (client, input, seen, done, items))));
+                        }
+                        if done {
+                            return Ok(None);
+                        }
+                        let page = client
+                            .device_user_authorities_reviews_list(&input)
+                            .await
+                            .map_err(crate::PaginationError::Call)?;
+                        let next = page.page.next_cursor.clone();
+                        done = next.is_none();
+                        if let Some(cursor) = next {
+                            if !seen.insert(cursor.clone()) {
+                                return Err(crate::PaginationError::RepeatedCursor(cursor));
+                            }
+                            let limit = input.page.as_ref().and_then(|page| page.limit);
+                            input.page = Some(crate::__types::CursorQuery {
+                                cursor: Some(cursor),
+                                limit,
+                            });
+                        }
+                        items = page.items.into_iter();
+                    }
+                },
+            ),
+        )
     }
     pub async fn device_user_authorities_revoke(
         &self,
@@ -4464,6 +5164,97 @@ impl Client {
     ) -> Result<rpc::DevicesListOutput, trellis_rs::client::CallError<rpc::DevicesListError>> {
         self.inner.call::<rpc::DevicesList>(input).await
     }
+    pub fn devices_list_pages(
+        &self,
+        input: rpc::DevicesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::DevicesListOutput, crate::PaginationError<rpc::DevicesListError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .devices_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn devices_list_items(
+        &self,
+        input: rpc::DevicesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthDevicesListResponseentriesItem,
+            crate::PaginationError<rpc::DevicesListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthDevicesListResponseentriesItem>::new()
+                    .into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .devices_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
+    }
     pub async fn devices_provision(
         &self,
         input: &rpc::DevicesProvisionInput,
@@ -4491,6 +5282,96 @@ impl Client {
         input: &rpc::GrantsListInput,
     ) -> Result<rpc::GrantsListOutput, trellis_rs::client::CallError<rpc::GrantsListError>> {
         self.inner.call::<rpc::GrantsList>(input).await
+    }
+    pub fn grants_list_pages(
+        &self,
+        input: rpc::GrantsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::GrantsListOutput, crate::PaginationError<rpc::GrantsListError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .grants_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn grants_list_items(
+        &self,
+        input: rpc::GrantsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthGrantBinding,
+            crate::PaginationError<rpc::GrantsListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthGrantBinding>::new().into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .grants_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
     }
     pub async fn grants_revoke(
         &self,
@@ -4528,6 +5409,105 @@ impl Client {
     > {
         self.inner.call::<rpc::ParticipantsInstall>(input).await
     }
+    pub async fn participants_list(
+        &self,
+        input: &rpc::ParticipantsListInput,
+    ) -> Result<
+        rpc::ParticipantsListOutput,
+        trellis_rs::client::CallError<rpc::ParticipantsListError>,
+    > {
+        self.inner.call::<rpc::ParticipantsList>(input).await
+    }
+    pub fn participants_list_pages(
+        &self,
+        input: rpc::ParticipantsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::ParticipantsListOutput, crate::PaginationError<rpc::ParticipantsListError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .participants_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn participants_list_items(
+        &self,
+        input: rpc::ParticipantsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::InstalledParticipantSummary,
+            crate::PaginationError<rpc::ParticipantsListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::InstalledParticipantSummary>::new().into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .participants_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
+    }
     pub async fn portals_get(
         &self,
         input: &rpc::PortalsGetInput,
@@ -4544,6 +5524,104 @@ impl Client {
         self.inner
             .call::<rpc::PortalsGrantOverridesList>(input)
             .await
+    }
+    pub fn portals_grant_overrides_list_pages(
+        &self,
+        input: rpc::PortalsGrantOverridesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            rpc::PortalsGrantOverridesListOutput,
+            crate::PaginationError<rpc::PortalsGrantOverridesListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .portals_grant_overrides_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn portals_grant_overrides_list_items(
+        &self,
+        input: rpc::PortalsGrantOverridesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthPortalsGrantOverridesListResponseentriesItem,
+            crate::PaginationError<rpc::PortalsGrantOverridesListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(
+            futures_util::stream::try_unfold(
+                (
+                    client,
+                    input,
+                    seen,
+                    false,
+                    Vec::<
+                        crate::__types::trellis::AuthPortalsGrantOverridesListResponseentriesItem,
+                    >::new()
+                        .into_iter(),
+                ),
+                |(client, mut input, mut seen, mut done, mut items)| async move {
+                    loop {
+                        if let Some(item) = items.next() {
+                            return Ok(Some((item, (client, input, seen, done, items))));
+                        }
+                        if done {
+                            return Ok(None);
+                        }
+                        let page = client
+                            .portals_grant_overrides_list(&input)
+                            .await
+                            .map_err(crate::PaginationError::Call)?;
+                        let next = page.page.next_cursor.clone();
+                        done = next.is_none();
+                        if let Some(cursor) = next {
+                            if !seen.insert(cursor.clone()) {
+                                return Err(crate::PaginationError::RepeatedCursor(cursor));
+                            }
+                            let limit = input.page.as_ref().and_then(|page| page.limit);
+                            input.page = Some(crate::__types::CursorQuery {
+                                cursor: Some(cursor),
+                                limit,
+                            });
+                        }
+                        items = page.items.into_iter();
+                    }
+                },
+            ),
+        )
     }
     pub async fn portals_grant_overrides_put(
         &self,
@@ -4572,6 +5650,97 @@ impl Client {
         input: &rpc::PortalsListInput,
     ) -> Result<rpc::PortalsListOutput, trellis_rs::client::CallError<rpc::PortalsListError>> {
         self.inner.call::<rpc::PortalsList>(input).await
+    }
+    pub fn portals_list_pages(
+        &self,
+        input: rpc::PortalsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::PortalsListOutput, crate::PaginationError<rpc::PortalsListError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .portals_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn portals_list_items(
+        &self,
+        input: rpc::PortalsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthPortalsListResponseentriesItem,
+            crate::PaginationError<rpc::PortalsListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthPortalsListResponseentriesItem>::new()
+                    .into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .portals_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
     }
     pub async fn portals_login_settings_get(
         &self,
@@ -4651,6 +5820,100 @@ impl Client {
     > {
         self.inner.call::<rpc::ServiceInstancesList>(input).await
     }
+    pub fn service_instances_list_pages(
+        &self,
+        input: rpc::ServiceInstancesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            rpc::ServiceInstancesListOutput,
+            crate::PaginationError<rpc::ServiceInstancesListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .service_instances_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn service_instances_list_items(
+        &self,
+        input: rpc::ServiceInstancesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthServiceInstancesListResponseentriesItem,
+            crate::PaginationError<rpc::ServiceInstancesListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthServiceInstancesListResponseentriesItem>::new()
+                    .into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .service_instances_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
+    }
     pub async fn service_instances_provision(
         &self,
         input: &rpc::ServiceInstancesProvisionInput,
@@ -4677,6 +5940,96 @@ impl Client {
     ) -> Result<rpc::SessionsListOutput, trellis_rs::client::CallError<rpc::SessionsListError>>
     {
         self.inner.call::<rpc::SessionsList>(input).await
+    }
+    pub fn sessions_list_pages(
+        &self,
+        input: rpc::SessionsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::SessionsListOutput, crate::PaginationError<rpc::SessionsListError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .sessions_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn sessions_list_items(
+        &self,
+        input: rpc::SessionsListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthLoginSession,
+            crate::PaginationError<rpc::SessionsListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthLoginSession>::new().into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .sessions_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
     }
     pub async fn sessions_logout(
         &self,
@@ -4706,6 +6059,97 @@ impl Client {
         trellis_rs::client::CallError<rpc::UserIdentitiesListError>,
     > {
         self.inner.call::<rpc::UserIdentitiesList>(input).await
+    }
+    pub fn user_identities_list_pages(
+        &self,
+        input: rpc::UserIdentitiesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::UserIdentitiesListOutput, crate::PaginationError<rpc::UserIdentitiesListError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .user_identities_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn user_identities_list_items(
+        &self,
+        input: rpc::UserIdentitiesListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthUserIdentitiesListResponseentriesItem,
+            crate::PaginationError<rpc::UserIdentitiesListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthUserIdentitiesListResponseentriesItem>::new()
+                    .into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .user_identities_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
     }
     pub async fn user_identities_unlink(
         &self,
@@ -4742,6 +6186,96 @@ impl Client {
         input: &rpc::UsersListInput,
     ) -> Result<rpc::UsersListOutput, trellis_rs::client::CallError<rpc::UsersListError>> {
         self.inner.call::<rpc::UsersList>(input).await
+    }
+    pub fn users_list_pages(
+        &self,
+        input: rpc::UsersListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::UsersListOutput, crate::PaginationError<rpc::UsersListError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .users_list(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn users_list_items(
+        &self,
+        input: rpc::UsersListInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::AuthUsersListResponseentriesItem,
+            crate::PaginationError<rpc::UsersListError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::AuthUsersListResponseentriesItem>::new().into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .users_list(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
     }
     pub async fn users_password_change(
         &self,
@@ -5436,6 +6970,20 @@ impl<'a, P: trellis_rs::generated::ParticipantDescriptor> Provider<'a, P> {
         self.runtime
             .register_rpc::<rpc::ParticipantsInstall, _, _>(handler);
     }
+    pub fn register_participants_list<F, Fut>(&mut self, handler: F)
+    where
+        F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::ParticipantsListInput) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: std::future::Future<
+                Output = trellis_rs::service::HandlerResult<rpc::ParticipantsListOutput>,
+            > + Send
+            + 'static,
+    {
+        self.runtime
+            .register_rpc::<rpc::ParticipantsList, _, _>(handler);
+    }
     pub fn register_portals_get<F, Fut>(&mut self, handler: F)
     where
         F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::PortalsGetInput) -> Fut
@@ -5858,16 +7406,31 @@ impl<'a, P: trellis_rs::generated::ParticipantDescriptor> Provider<'a, P> {
     {
         self.runtime.register_rpc::<rpc::UsersUpdate, _, _>(handler);
     }
-    pub fn register_device_user_authorities_resolve<O>(&mut self, provider: O)
+    pub fn register_device_user_authorities_resolve<F, Fut>(&mut self, handler: F)
     where
-        O: trellis_rs::generated::OperationProvider<operations::DeviceUserAuthoritiesResolve>,
+        F: Fn(
+                trellis_rs::service::RequestContext,
+                operations::DeviceUserAuthoritiesResolveInput,
+                trellis_rs::service::OperationControl<
+                    trellis_rs::generated::OperationAdapter<
+                        operations::DeviceUserAuthoritiesResolve,
+                    >,
+                >,
+            ) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: std::future::Future<Output = Result<(), trellis_rs::service::ServerError>>
+            + Send
+            + 'static,
     {
         self.runtime
-            .register_operation_provider::<
+            .register_operation_handler::<
                 trellis_rs::generated::OperationAdapter<
                     operations::DeviceUserAuthoritiesResolve,
                 >,
-                O,
-            >(provider);
+                F,
+                Fut,
+            >(handler);
     }
 }

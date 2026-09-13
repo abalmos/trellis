@@ -1,23 +1,28 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import DataTable from "$lib/components/DataTable.svelte";
+  import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";
   import LoadingState from "$lib/components/LoadingState.svelte";
   import MetricsLedger from "$lib/components/MetricsLedger.svelte";
   import Notice from "$lib/components/Notice.svelte";
   import PageToolbar from "$lib/components/PageToolbar.svelte";
   import Panel from "$lib/components/Panel.svelte";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
-  import { compactDuration, errorMessage, formatDate, jsonBlock } from "$lib/format";
+  import { boundedNumber, compactDuration, errorMessage, formatDate, jsonBlock } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
   import { type apis } from "trellis-web-generated";
+  import { subjectMatches } from "./subject";
 
   type WindowValue = "15m" | "1h" | "6h" | "24h" | "7d";
   type EventResolution = "resolved" | "unresolved" | "malformed";
   type EventVerificationStatus =
     | "verified"
     | "missing-proof"
+    | "missing-key"
+    | "untrusted-key"
     | "invalid-signature"
     | "missing-session"
     | "subject-denied"
@@ -28,35 +33,19 @@
   type ConsumerManagedBy = "authority" | "platform" | "external";
   type ConsumerStatus = "current" | "processing" | "behind" | "saturated" | "inactive" | "failing" | "missing" | "orphaned" | "unmanaged";
 
-  type EventLogRow = {
-    eventId: string;
-    eventTime: string;
-    streamSequence: number;
-    subject: string;
-    ownerContractId?: string;
-    ownerEventName?: string;
-    resolution: EventResolution;
-    verificationStatus: EventVerificationStatus;
-    publisherKind?: "service" | "device" | "user";
-    publisherDeploymentId?: string;
-    publisherInstanceId?: string;
-    publisherContractId?: string;
-    publisherContractDigest?: string;
-    traceId?: string;
-    payloadSizeBytes: number;
-    headerCount: number;
-  };
+  type EventRow = apis.events.QueryOutput["items"][number];
 
   type EventInspect = {
-    event: EventLogRow;
+    event: EventRow;
     headers: Record<string, string>;
-    payload?: unknown;
+    payload?: Uint8Array;
     payloadText?: string;
     decodeError?: string;
     related: Array<{ eventId: string; eventTime: string; subject: string; matchedBy: string }>;
   };
 
   type ConsumerRow = {
+    resourceId: string;
     deploymentId?: string;
     contractId?: string;
     group?: string;
@@ -88,6 +77,8 @@
   ];
   const verificationIssues: EventVerificationStatus[] = [
     "missing-proof",
+    "missing-key",
+    "untrusted-key",
     "invalid-signature",
     "missing-session",
     "subject-denied",
@@ -112,9 +103,15 @@
   let unavailableMessage = $state<string | null>(null);
   let feedOnline = $state(false);
   let feedMessage = $state<string | null>(null);
-  let rows = $state.raw<EventLogRow[]>([]);
+  let rows = $state.raw<EventRow[]>([]);
   let consumers = $state.raw<ConsumerRow[]>([]);
-  let metrics = $state.raw<apis.eventlog.EventLogMetricsOutput | null>(null);
+  let metrics = $state.raw<apis.events.MetricsOutput | null>(null);
+  let diagnostics = $state.raw<apis.events.DiagnosticsOutput | null>(null);
+  let deadLetters = $state.raw<apis.events.DeadLettersQueryOutput["items"]>([]);
+  let selectedDeadLetter = $state.raw<apis.events.DeadLettersInspectOutput["deadLetter"] | null>(null);
+  let deadLetterError = $state<Record<string, string>>({});
+  let deadLetterBusy = $state<string | null>(null);
+  let confirmationModal: ConfirmationModal | undefined = $state();
   let selectedEvent = $state.raw<EventInspect | null>(null);
   let selectedConsumer = $state.raw<{ row: ConsumerRow; detail: Record<string, unknown> | null } | null>(null);
   let detailLoading = $state(false);
@@ -122,12 +119,18 @@
   let focus = $state<Focus>(asEventFocus(page.url.searchParams.get("focus")) ?? "exceptions");
   let handledFocusParam = page.url.searchParams.get("focus");
 
-  $effect(() => {
+  afterNavigate(() => {
     const value = page.url.searchParams.get("focus");
     if (value === handledFocusParam) return;
     handledFocusParam = value;
     const next = asEventFocus(value);
-    if (next && next !== focus) selectFocus(next);
+    if (next && next !== focus) {
+      focus = next;
+      cursor = undefined;
+      cursorBackStack = [];
+      selectedEvent = null;
+      void load();
+    }
   });
   let selectedEventType = $state.raw<EventTypeRef | null>(null);
   let attentionConsumersOnly = $state(false);
@@ -135,9 +138,9 @@
   let ownerContractId = $state("");
   let publisherDeploymentId = $state("");
   let windowValue = $state<WindowValue>("1h");
-  let offset = $state(0);
-  let total = $state(0);
-  let consumerTotal = $state(0);
+  let cursor = $state<string | undefined>();
+  let cursorBackStack = $state<string[]>([]);
+  let nextCursor = $state<string | undefined>();
   let lastUpdated = $state<Date | null>(null);
 
   let loadSequence = 0;
@@ -146,9 +149,15 @@
   let reloadTimer: ReturnType<typeof setTimeout> | null = null;
 
   const windowOption = $derived(windows.find((option) => option.value === windowValue) ?? windows[1]);
-  const eventRate = $derived((metrics?.summary.total ?? 0) / windowOption.minutes);
-  const averagePayload = $derived(metrics?.summary.total ? metrics.summary.payloadSizeBytes / metrics.summary.total : 0);
-  const eventTypesByCount = $derived.by(() => [...(metrics?.summary.eventTypes ?? [])].sort((a, b) => b.count - a.count));
+  const eventRate = $derived(boundedNumber(metrics?.summary.total ?? 0n) / windowOption.minutes);
+  const averagePayload = $derived(metrics?.summary.total ? boundedNumber(metrics.summary.payloadSizeBytes) / boundedNumber(metrics.summary.total) : 0);
+  const eventTypesByCount = $derived.by(() => [...(metrics?.summary.eventTypes ?? [])].sort((a, b) => boundedNumber(b.count - a.count)));
+  const matchingConsumers = $derived.by(() => {
+    const subject = selectedEvent?.event.subject;
+    return subject
+      ? consumers.filter((consumer) => consumer.filterSubjects.some((filter) => subjectMatches(filter, subject)))
+      : [];
+  });
   const sortedConsumers = $derived.by(() => [...consumers].sort((a, b) => consumerSeverity[a.status] - consumerSeverity[b.status]));
   const attentionConsumers = $derived(sortedConsumers.filter(isAttentionConsumer));
   const displayedConsumers = $derived(attentionConsumersOnly ? attentionConsumers : sortedConsumers);
@@ -157,8 +166,8 @@
       .filter((consumer) => consumer.oldestPendingAt)
       .sort((a, b) => new Date(a.oldestPendingAt ?? 0).getTime() - new Date(b.oldestPendingAt ?? 0).getTime())[0],
   );
-  const eventPoints = $derived(chartPoints(metrics?.buckets.map((bucket) => bucket.total) ?? []));
-  const exceptionPoints = $derived(chartPoints(metrics?.buckets.map((bucket) => bucket.integrityExceptions) ?? []));
+  const eventPoints = $derived(chartPoints(metrics?.buckets.map((bucket) => boundedNumber(bucket.total)) ?? []));
+  const exceptionPoints = $derived(chartPoints(metrics?.buckets.map((bucket) => boundedNumber(bucket.integrityExceptions)) ?? []));
   const focusTitle = $derived(`${selectedEventType ? `${selectedEventType.ownerEventName} · ` : ""}${focusLabel(focus)}`);
   const focusDescription = $derived(focusDetail(focus));
 
@@ -171,6 +180,7 @@
   }
 
   function numberValue(value: unknown): number | undefined {
+    if (typeof value === "bigint") return boundedNumber(value);
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
   }
 
@@ -194,18 +204,6 @@
     return value === "authority" || value === "platform" || value === "external";
   }
 
-  function isEventLogRow(value: unknown): value is EventLogRow {
-    const row = objectRecord(value);
-    return typeof row.eventId === "string" &&
-      typeof row.eventTime === "string" &&
-      typeof row.streamSequence === "number" &&
-      typeof row.subject === "string" &&
-      isResolution(row.resolution) &&
-      isVerificationStatus(row.verificationStatus) &&
-      typeof row.payloadSizeBytes === "number" &&
-      typeof row.headerCount === "number";
-  }
-
   function toConsumerRow(value: unknown): ConsumerRow | null {
     const row = objectRecord(value);
     const stream = stringValue(row.stream);
@@ -213,6 +211,7 @@
     if (!stream || !consumerName || !isConsumerStatus(row.status)) return null;
     const managedBy = isConsumerManagedBy(row.managedBy) ? row.managedBy : stringValue(row.deploymentId) ? "authority" : "external";
     return {
+      resourceId: stringValue(row.resourceId) ?? "",
       deploymentId: stringValue(row.deploymentId),
       contractId: stringValue(row.contractId),
       group: stringValue(row.group),
@@ -233,32 +232,13 @@
     };
   }
 
-  function toInspect(value: unknown): EventInspect | null {
-    const record = objectRecord(value);
-    if (!isEventLogRow(record.event)) return null;
-    const headers: Record<string, string> = {};
-    for (const [key, headerValue] of Object.entries(objectRecord(record.headers))) {
-      if (typeof headerValue === "string") headers[key] = headerValue;
+  function toInspect(value: apis.events.InspectOutput): EventInspect {
+    const payload = value.event.payload;
+    try {
+      return { event: value.event.row, headers: value.event.headers, payload, payloadText: new TextDecoder("utf-8", { fatal: true }).decode(payload), related: [] };
+    } catch {
+      return { event: value.event.row, headers: value.event.headers, payload, payloadText: Array.from(payload, (byte) => byte.toString(16).padStart(2, "0")).join(" "), decodeError: "Payload is not valid UTF-8; showing hexadecimal bytes.", related: [] };
     }
-    const related = Array.isArray(record.related)
-      ? record.related.map((entry) => {
-        const item = objectRecord(entry);
-        return {
-          eventId: stringValue(item.eventId) ?? "",
-          eventTime: stringValue(item.eventTime) ?? "",
-          subject: stringValue(item.subject) ?? "",
-          matchedBy: stringValue(item.matchedBy) ?? "related",
-        };
-      }).filter((entry) => entry.eventId && entry.subject)
-      : [];
-    return {
-      event: record.event,
-      headers,
-      payload: record.payload,
-      payloadText: stringValue(record.payloadText),
-      decodeError: stringValue(record.decodeError),
-      related,
-    };
   }
 
   function isAttentionConsumer(consumer: ConsumerRow): boolean {
@@ -272,6 +252,19 @@
     return "badge-error";
   }
 
+  function verificationCount(status: EventVerificationStatus): bigint {
+    const counts = metrics?.summary.byVerificationStatus;
+    if (!counts) return 0n;
+    if (status === "missing-proof") return counts.missingProof ?? 0n;
+    if (status === "invalid-signature") return counts.invalidSignature ?? 0n;
+    if (status === "missing-session") return counts.missingSession ?? 0n;
+    if (status === "subject-denied") return counts.subjectDenied ?? 0n;
+    if (status === "outside-session-window") return counts.outsideSessionWindow ?? 0n;
+    if (status === "auth-unavailable") return counts.authUnavailable ?? 0n;
+    if (status === "verified") return counts.verified ?? 0n;
+    return 0n;
+  }
+
   function consumerVariant(consumer: ConsumerRow): "healthy" | "degraded" | "unhealthy" | "offline" {
     if (consumer.status === "current" || consumer.status === "processing") return "healthy";
     if (consumer.status === "behind" || consumer.status === "saturated") return "degraded";
@@ -281,11 +274,11 @@
 
   const ledgerItems = $derived([
     { id: "all", label: "Event flow", value: (metrics?.summary.total ?? 0).toLocaleString(), detail: `${eventRate.toLocaleString(undefined, { maximumFractionDigits: 1 })} per minute`, tone: "info" as const, active: focus === "all" },
-    { id: "exceptions", label: "Integrity exceptions", value: (metrics?.summary.integrityExceptions ?? 0).toLocaleString(), detail: `${metrics?.summary.total ? (metrics.summary.integrityExceptions / metrics.summary.total * 100).toFixed(2) : "0.00"}% of events`, tone: "error" as const, active: focus === "exceptions" },
+    { id: "exceptions", label: "Integrity exceptions", value: (metrics?.summary.integrityExceptions ?? 0n).toLocaleString(), detail: `${metrics?.summary.total ? (boundedNumber(metrics.summary.integrityExceptions) / boundedNumber(metrics.summary.total) * 100).toFixed(2) : "0.00"}% of events`, tone: "error" as const, active: focus === "exceptions" },
     { id: "unresolved", label: "Unresolved", value: (metrics?.summary.byResolution.unresolved ?? 0).toLocaleString(), detail: "owner not resolved", tone: "warning" as const, active: focus === "unresolved" },
-    { id: "consumers", label: "Consumers", value: attentionConsumers.length, detail: `need attention · ${consumerTotal} total`, tone: "error" as const, active: attentionConsumersOnly },
+    { id: "consumers", label: "Consumers", value: attentionConsumers.length, detail: `need attention · ${consumers.length} shown`, tone: "error" as const, active: attentionConsumersOnly },
     { id: "oldest-lag", label: "Oldest lag", value: ageLabel(oldestLagConsumer?.oldestPendingAt), detail: oldestLagConsumer?.consumerName ?? "no pending events", tone: "warning" as const, active: selectedConsumer?.row.consumerName === oldestLagConsumer?.consumerName, disabled: !oldestLagConsumer },
-    { id: "largest", label: "Payload", value: formatBytes(metrics?.summary.payloadSizeBytes ?? 0), detail: `${formatBytes(averagePayload)} average`, tone: "success" as const, active: focus === "largest" },
+    { id: "largest", label: "Payload", value: formatBytes(boundedNumber(metrics?.summary.payloadSizeBytes ?? 0n)), detail: `${formatBytes(averagePayload)} average`, tone: "success" as const, active: focus === "largest" },
   ]);
 
   function handleLedgerSelect(id: string) {
@@ -307,13 +300,13 @@
     return Number.isNaN(time) ? value : compactDuration(Date.now() - time);
   }
 
-  function subjectOwner(row: EventLogRow): string {
+  function subjectOwner(row: EventRow): string {
     if (row.ownerContractId && row.ownerEventName) return `${row.ownerContractId} / ${row.ownerEventName}`;
     return row.ownerContractId ?? row.ownerEventName ?? row.resolution;
   }
 
-  function publisherLabel(row: EventLogRow): string {
-    return row.publisherDeploymentId ?? row.publisherContractId ?? row.publisherKind ?? "unverified";
+  function publisherLabel(row: EventRow): string {
+    return row.publisherDeploymentId ?? row.publisherParticipantId ?? row.publisherKind ?? "unverified";
   }
 
   function focusLabel(value: Focus): string {
@@ -340,35 +333,50 @@
     return values.map((value, index) => `${values.length === 1 ? 130 : index * 260 / (values.length - 1)},${52 - value / maximum * 46}`).join(" ");
   }
 
-  function buildEventQuery(): apis.eventlog.EventLogQueryInput {
-    const input: apis.eventlog.EventLogQueryInput = {
+  function buildEventQuery(): apis.events.QueryInput {
+    const input: apis.events.QueryInput = {
       includeEventTypes: selectedEventType ? [selectedEventType] : undefined,
-      limit: pageLimit,
-      offset,
+      page: { cursor, limit: pageLimit },
       ownerContractId: ownerContractId.trim() || undefined,
       publisherDeploymentId: publisherDeploymentId.trim() || undefined,
       search: searchText.trim() || undefined,
       sort: { field: focus === "largest" ? "payloadSize" : "eventTime", direction: "desc" },
       window: windowValue,
     };
-    if (focus === "exceptions") input.integrityExceptionOnly = true;
-    else if (focus === "unresolved" || focus === "malformed") input.resolution = [focus];
-    else if (focus === "verified") input.verificationStatus = [focus];
+    if (focus === "exceptions") return { ...input, integrityExceptionOnly: true };
+    if (focus === "unresolved" || focus === "malformed") return { ...input, resolution: [focus] };
+    if (isVerificationStatus(focus)) return { ...input, verificationStatus: [focus] };
     return input;
   }
 
-  function buildConsumerQuery(): apis.eventlog.EventLogConsumersQueryInput {
-    return { limit: 100, offset: 0 };
+  function buildConsumerQuery(): apis.events.ConsumersQueryInput {
+    return { page: { limit: 500 } };
+  }
+
+  async function loadConsumers(): Promise<apis.events.ConsumersQueryOutput["items"]> {
+    const items: apis.events.ConsumersQueryOutput["items"] = [];
+    for await (const item of trellis.consumersQuery.items(buildConsumerQuery(), { timeout: rpcTimeout })) {
+      items.push(item.orThrow());
+    }
+    return items;
+  }
+
+  async function loadDeadLetters(resourceId: string): Promise<apis.events.DeadLettersQueryOutput["items"]> {
+    const items: apis.events.DeadLettersQueryOutput["items"] = [];
+    for await (const item of trellis.deadLettersQuery.items({ resourceId, state: ["dead", "replayPending", "replaying"], page: { limit: 500 } }, { timeout: rpcTimeout })) {
+      items.push(item.orThrow());
+    }
+    return items;
   }
 
   function unavailableText(loadError: unknown): string | null {
     const message = errorMessage(loadError);
     const normalized = message.toLowerCase();
     if (normalized.includes("no responders") || normalized.includes("not currently reachable") || normalized.includes("inactive contract")) {
-      return "Event Log service is optional; events continue to publish without it.";
+      return "Events management is unavailable; event history, managed Consumer DLQ, and replay cannot be inspected.";
     }
-    if (message.includes("Permissions Violation") && message.includes("EventLog")) {
-      return "Your current session is not approved for Event Log access. Sign out and sign back in to refresh permissions.";
+    if (normalized.includes("permissions violation")) {
+      return "Your current session is not approved for Events access. Sign out and sign back in to refresh permissions.";
     }
     return null;
   }
@@ -380,18 +388,22 @@
     error = null;
     unavailableMessage = null;
     try {
-      const metricsInput: apis.eventlog.EventLogMetricsInput = { window: windowValue };
-      const [eventData, consumerData, metricData] = await Promise.all([
-        trellis.eventLogQuery(buildEventQuery(), { timeout: rpcTimeout }).orThrow(),
-        trellis.eventLogConsumersQuery(buildConsumerQuery(), { timeout: rpcTimeout }).orThrow(),
-        trellis.eventLogMetrics(metricsInput, { timeout: rpcTimeout }).orThrow(),
+      const metricsInput: apis.events.MetricsInput = { window: windowValue };
+      const selectedResourceId = selectedConsumer?.row.resourceId;
+      const [eventData, consumerData, metricData, diagnosticsData, deadLetterData] = await Promise.all([
+        trellis.eventsQuery(buildEventQuery(), { timeout: rpcTimeout }).orThrow(),
+        loadConsumers(),
+        trellis.eventsMetrics(metricsInput, { timeout: rpcTimeout }).orThrow(),
+        trellis.diagnostics({}, { timeout: rpcTimeout }).orThrow(),
+        selectedResourceId ? loadDeadLetters(selectedResourceId) : Promise.resolve([]),
       ]);
       if (sequence !== loadSequence) return;
-      rows = eventData.events.filter(isEventLogRow);
-      total = eventData.total;
-      consumers = consumerData.consumers.map(toConsumerRow).filter((row): row is ConsumerRow => row !== null);
-      consumerTotal = consumerData.total;
+      rows = eventData.items;
+      nextCursor = eventData.page.nextCursor;
+      consumers = consumerData.map(toConsumerRow).filter((row): row is ConsumerRow => row !== null);
       metrics = metricData;
+      diagnostics = diagnosticsData;
+      deadLetters = deadLetterData;
       lastUpdated = new Date();
     } catch (loadError) {
       if (sequence !== loadSequence) return;
@@ -401,16 +413,12 @@
         rows = [];
         consumers = [];
         metrics = null;
-        total = 0;
-        consumerTotal = 0;
       } else {
         error = errorMessage(loadError);
         if (showLoading) {
           rows = [];
           consumers = [];
           metrics = null;
-          total = 0;
-          consumerTotal = 0;
         }
       }
     } finally {
@@ -422,7 +430,8 @@
   }
 
   function resetAndLoad() {
-    offset = 0;
+    cursor = undefined;
+    cursorBackStack = [];
     selectedEvent = null;
     void load();
   }
@@ -434,6 +443,7 @@
 
   function asEventFocus(value: string | null): Focus | null {
     if (value === "all" || value === "exceptions" || value === "unresolved" || value === "malformed" || value === "largest") return value;
+    if (isVerificationStatus(value)) return value;
     return null;
   }
 
@@ -468,16 +478,16 @@
     resetAndLoad();
   }
 
-  async function inspectEvent(row: EventLogRow) {
+  async function inspectEvent(row: EventRow) {
     const sequence = ++detailSequence;
     detailLoading = true;
     detailError = null;
     selectedConsumer = null;
     try {
-      const input: apis.eventlog.EventLogInspectInput = row.eventId ? { eventId: row.eventId } : { streamSequence: row.streamSequence };
-      const detail = toInspect(await trellis.eventLogInspect(input, { timeout: rpcTimeout }).orThrow());
+      const input: apis.events.InspectInput = row.eventId ? { eventId: row.eventId } : { streamSequence: row.streamSequence };
+      const detail = toInspect(await trellis.eventsInspect(input, { timeout: rpcTimeout }).orThrow());
       if (sequence !== detailSequence) return;
-      selectedEvent = detail ?? { event: row, headers: {}, related: [] };
+      selectedEvent = detail;
     } catch (inspectError) {
       if (sequence !== detailSequence) return;
       detailError = errorMessage(inspectError);
@@ -492,12 +502,16 @@
     detailLoading = true;
     detailError = null;
     selectedEvent = null;
+    selectedDeadLetter = null;
+    deadLetters = [];
     try {
-      const detail = await trellis.eventLogConsumersInspect({ consumerName: row.consumerName, stream: row.stream },
-        { timeout: rpcTimeout },
-      ).orThrow();
+      const [detail, consumerDeadLetters] = await Promise.all([
+        trellis.consumersInspect({ resourceId: row.resourceId }, { timeout: rpcTimeout }).orThrow(),
+        loadDeadLetters(row.resourceId),
+      ]);
       if (sequence !== detailSequence) return;
       selectedConsumer = { row, detail: objectRecord(detail) };
+      deadLetters = consumerDeadLetters;
     } catch (inspectError) {
       if (sequence !== detailSequence) return;
       detailError = errorMessage(inspectError);
@@ -507,17 +521,51 @@
     }
   }
 
+  async function inspectDeadLetter(deadLetter: apis.events.DeadLettersQueryOutput["items"][number]) {
+    deadLetterError = { ...deadLetterError, [deadLetter.deadLetterId]: "" };
+    try {
+      selectedDeadLetter = (await trellis.deadLettersInspect({ resourceId: deadLetter.resourceId, deadLetterId: deadLetter.deadLetterId }, { timeout: rpcTimeout }).orThrow()).deadLetter;
+    } catch (cause) {
+      deadLetterError = { ...deadLetterError, [deadLetter.deadLetterId]: errorMessage(cause) };
+    }
+  }
+
+  async function changeDeadLetter(deadLetter: apis.events.DeadLettersQueryOutput["items"][number], action: "replay" | "dismiss") {
+    const confirmed = await confirmationModal?.confirm({
+      title: `${action === "replay" ? "Replay" : "Dismiss"} dead letter?`,
+      message: action === "replay" ? "The original event will be queued for another delivery attempt." : "The dead letter will be marked dismissed without redelivery.",
+      confirmLabel: action === "replay" ? "Replay" : "Dismiss",
+      targetLabel: "Dead letter",
+      targetName: deadLetter.deadLetterId,
+    });
+    if (!confirmed) return;
+    deadLetterBusy = deadLetter.deadLetterId;
+    deadLetterError = { ...deadLetterError, [deadLetter.deadLetterId]: "" };
+    const input = { resourceId: deadLetter.resourceId, deadLetterId: deadLetter.deadLetterId, expectedRevision: deadLetter.revision, requestId: crypto.randomUUID() };
+    try {
+      if (action === "replay") await trellis.deadLettersReplay(input, { timeout: rpcTimeout }).orThrow();
+      else await trellis.deadLettersDismiss(input, { timeout: rpcTimeout }).orThrow();
+      await load(false);
+    } catch (cause) {
+      deadLetterError = { ...deadLetterError, [deadLetter.deadLetterId]: errorMessage(cause) };
+    } finally {
+      deadLetterBusy = null;
+    }
+  }
+
   function selectOldestLag() {
     if (oldestLagConsumer) void inspectConsumer(oldestLagConsumer);
   }
 
   function goPrevious() {
-    offset = Math.max(0, offset - pageLimit);
+    cursor = cursorBackStack.pop() || undefined;
     void load();
   }
 
   function goNext() {
-    offset += pageLimit;
+    if (!nextCursor) return;
+    cursorBackStack.push(cursor ?? "");
+    cursor = nextCursor;
     void load();
   }
 
@@ -535,7 +583,7 @@
     watchController = controller;
     void (async () => {
       try {
-        const stream = await trellis.eventLogWatch({}, { signal: controller.signal }).orThrow();
+        const stream = await trellis.eventsWatch({}, { signal: controller.signal }).orThrow();
         for await (const frame of stream) {
           if (controller.signal.aborted) return;
           const record = objectRecord(frame);
@@ -590,13 +638,17 @@
   {#if loading}
     <LoadingState label="Loading event health" />
   {:else if unavailableMessage}
-    <EmptyState title="Event Log is unavailable" description="Event publishing and consuming continue without the optional visibility service." />
+    <EmptyState title="Events is unavailable" description="Event publishing and consuming continue without the optional visibility service." />
   {:else}
     <MetricsLedger ariaLabel="Event health summary" items={ledgerItems} onSelect={handleLedgerSelect} />
 
+    {#if diagnostics?.gapDetected}
+      <Notice variant="warning">Event history has a retention gap. Complete since {diagnostics.completeSince ? formatDate(diagnostics.completeSince) : "unknown"}; revision {diagnostics.revision.toLocaleString()}.</Notice>
+    {/if}
+
     <div class="health-layout">
       <Panel eyebrow="Secondary" title="Consumer delivery health" class="consumer-health min-w-0">
-        {#snippet actions()}<span class="text-sm text-base-content/70">{displayedConsumers.length} of {consumerTotal}</span>{/snippet}
+        {#snippet actions()}<span class="text-sm text-base-content/70">{displayedConsumers.length} shown</span>{/snippet}
         <p class="text-sm text-base-content/70">Known Trellis consumers first; external consumers remain neutral.</p>
         {#if displayedConsumers.length === 0}
           <EmptyState title="No consumers need attention" description="All known Trellis consumers are current or processing." />
@@ -642,8 +694,8 @@
           </svg>
           <div class="integrity-breakdown">
             {#each verificationIssues as status (status)}
-              {#if (metrics?.summary.byVerificationStatus[status] ?? 0) > 0}
-                <button aria-pressed={focus === status} onclick={() => selectFocus(status)}><span>{status.replaceAll("-", " ")}</span><strong>{metrics?.summary.byVerificationStatus[status] ?? 0}</strong></button>
+              {#if verificationCount(status) > 0n}
+                <button aria-pressed={focus === status} onclick={() => selectFocus(status)}><span>{status.replaceAll("-", " ")}</span><strong>{verificationCount(status)}</strong></button>
               {/if}
             {/each}
             {#if (metrics?.summary.byResolution.malformed ?? 0) > 0}
@@ -656,7 +708,7 @@
             {#each eventTypesByCount.slice(0, 6) as eventType (`${eventType.ownerContractId}:${eventType.ownerEventName}`)}
               <button class:active={selectedEventType?.ownerContractId === eventType.ownerContractId && selectedEventType.ownerEventName === eventType.ownerEventName} aria-pressed={selectedEventType?.ownerContractId === eventType.ownerContractId && selectedEventType.ownerEventName === eventType.ownerEventName} onclick={() => selectEventType(eventType)}>
                 <span><strong>{eventType.ownerEventName}</strong><small>{eventType.ownerContractId}</small></span><b>{eventType.count.toLocaleString()}</b>
-                <i style={`--width: ${metrics?.summary.total ? eventType.count / metrics.summary.total * 100 : 0}%`}></i>
+                 <i style={`--width: ${metrics?.summary.total ? boundedNumber(eventType.count) / boundedNumber(metrics.summary.total) * 100 : 0}%`}></i>
               </button>
             {:else}
               <p class="text-sm text-base-content/70">No resolved event types in this window.</p>
@@ -666,12 +718,39 @@
       </aside>
     </div>
 
+    <Panel eyebrow="Primary" title="Consumer dead letters">
+      {#if !selectedConsumer}
+        <EmptyState title="Select a consumer" description="Choose a managed Consumer above to inspect its active dead letters." />
+      {:else if deadLetters.length === 0}
+        <EmptyState title="No active dead letters" description="Exhausted managed Consumer deliveries appear here for replay or dismissal." />
+      {:else}
+        <DataTable>
+          <thead><tr><th>Updated</th><th>Resource / dead letter</th><th>State</th><th>Deliveries</th><th>Error</th><th>Actions</th></tr></thead>
+          <tbody>
+            {#each deadLetters as deadLetter (deadLetter.deadLetterId)}
+              <tr>
+                <td>{formatDate(deadLetter.updatedAt)}</td>
+                <td><button class="link link-hover trellis-identifier" onclick={() => inspectDeadLetter(deadLetter)}>{deadLetter.resourceId}</button><small class="block trellis-metadata trellis-identifier">{deadLetter.deadLetterId}</small></td>
+                <td><StatusBadge label={deadLetter.state} status={deadLetter.state === "dead" ? "unhealthy" : "degraded"} /></td>
+                <td>{deadLetter.deliveries.toLocaleString()}</td>
+                <td>{deadLetterError[deadLetter.deadLetterId] || deadLetter.lastError || "-"}</td>
+                <td class="space-x-2"><button class="btn btn-outline btn-xs" disabled={deadLetterBusy === deadLetter.deadLetterId} onclick={() => changeDeadLetter(deadLetter, "replay")}>Replay</button><button class="btn btn-error btn-outline btn-xs" disabled={deadLetterBusy === deadLetter.deadLetterId} onclick={() => changeDeadLetter(deadLetter, "dismiss")}>Dismiss</button></td>
+              </tr>
+            {/each}
+          </tbody>
+        </DataTable>
+      {/if}
+      {#if selectedDeadLetter}
+        <div class="payload-grid mt-4"><div><h3>Original event</h3><p class="trellis-identifier">{selectedDeadLetter.originalSubject}</p><pre>{jsonBlock(selectedDeadLetter.originalHeaders)}</pre></div><div><h3>Original payload bytes</h3><pre>{Array.from(selectedDeadLetter.originalPayload, (byte) => byte.toString(16).padStart(2, "0")).join(" ")}</pre></div></div>
+      {/if}
+    </Panel>
+
     <Panel eyebrow="Primary" title={focusTitle}>
       {#snippet actions()}
         <div class="flex items-center gap-2">
           <input class="input input-bordered input-sm w-56" placeholder="Search event metadata" bind:value={searchText} onchange={resetAndLoad} />
           {#if selectedEventType || ownerContractId || publisherDeploymentId || searchText}<button class="btn btn-ghost btn-sm" onclick={clearEventFilters}>Clear scope</button>{/if}
-          <span class="text-sm text-base-content/70">{rows.length} shown from {total}</span>
+           <span class="text-sm text-base-content/70">{rows.length} shown</span>
         </div>
       {/snippet}
       <p class="text-sm text-base-content/70">{focusDescription}</p>
@@ -698,16 +777,16 @@
                 <td class="min-w-0"><button type="button" class="link link-hover block max-w-xs truncate text-left trellis-identifier" onclick={() => selectOwner(row.ownerContractId)}>{subjectOwner(row)}</button></td>
                 <td><button type="button" class="link link-hover trellis-identifier" onclick={() => selectPublisher(row.publisherDeploymentId)}>{publisherLabel(row)}</button></td>
                 <td><span class="flex gap-1"><span class={["badge badge-sm trellis-badge-soft border-0", statusBadgeClass(row.verificationStatus)]}>{row.verificationStatus}</span>{#if row.resolution !== "resolved"}<span class={["badge badge-sm trellis-badge-soft border-0", statusBadgeClass(row.resolution)]}>{row.resolution}</span>{/if}</span></td>
-                <td class="tabular-nums">{formatBytes(row.payloadSizeBytes)}</td>
+                 <td class="tabular-nums">{formatBytes(boundedNumber(row.payloadSizeBytes))}</td>
               </tr>
             {/each}
           </tbody>
         </DataTable>
-        {#if offset > 0 || offset + pageLimit < total}
+        {#if cursorBackStack.length > 0 || nextCursor}
           <div class="flex items-center justify-end gap-3 text-sm text-base-content/70">
-            <button class="btn btn-outline btn-xs" onclick={goPrevious} disabled={offset === 0}>Previous</button>
-            <span>Page {Math.floor(offset / pageLimit) + 1}</span>
-            <button class="btn btn-outline btn-xs" onclick={goNext} disabled={offset + pageLimit >= total}>Next</button>
+            <button class="btn btn-outline btn-xs" onclick={goPrevious} disabled={cursorBackStack.length === 0}>Previous</button>
+            <span>Page {cursorBackStack.length + 1}</span>
+            <button class="btn btn-outline btn-xs" onclick={goNext} disabled={!nextCursor}>Next</button>
           </div>
         {/if}
       {/if}
@@ -721,7 +800,8 @@
         <div class="detail-grid">
           <div><h3>Event identity</h3><p><span>id</span><code>{selectedEvent.event.eventId}</code></p><p><span>time</span><code>{selectedEvent.event.eventTime}</code></p><p><span>subject</span><code>{selectedEvent.event.subject}</code></p><p><span>stream sequence</span><code>{selectedEvent.event.streamSequence}</code></p></div>
           <div><h3>Owner from subject/catalog</h3><p><span>contract</span><code>{selectedEvent.event.ownerContractId ?? "unresolved"}</code></p><p><span>event</span><code>{selectedEvent.event.ownerEventName ?? "-"}</code></p><p><span>resolution</span><code>{selectedEvent.event.resolution}</code></p></div>
-          <div><h3>Publisher from verified session</h3><p><span>status</span><code>{selectedEvent.event.verificationStatus}</code></p><p><span>deployment</span><code>{selectedEvent.event.publisherDeploymentId ?? "-"}</code></p><p><span>instance</span><code>{selectedEvent.event.publisherInstanceId ?? "-"}</code></p><p><span>contract</span><code>{selectedEvent.event.publisherContractId ?? "-"}</code></p></div>
+           <div><h3>Publisher from verified session</h3><p><span>status</span><code>{selectedEvent.event.verificationStatus}</code></p><p><span>deployment</span><code>{selectedEvent.event.publisherDeploymentId ?? "-"}</code></p><p><span>instance</span><code>{selectedEvent.event.publisherInstanceId ?? "-"}</code></p><p><span>participant</span><code>{selectedEvent.event.publisherParticipantId ?? "-"}</code></p><p><span>digest</span><code>{selectedEvent.event.publisherParticipantDigest ?? "-"}</code></p></div>
+           <div><h3>Matching consumers</h3><p><span>durables</span><code>{matchingConsumers.map((consumer) => consumer.consumerName).join(", ") || "-"}</code></p></div>
         </div>
         <div class="payload-grid"><div><h3>Headers</h3><pre>{jsonBlock(selectedEvent.headers)}</pre></div><div><h3>Payload</h3>{#if selectedEvent.decodeError}<p class="text-xs text-error">{selectedEvent.decodeError}</p>{/if}<pre>{selectedEvent.payloadText ?? jsonBlock(selectedEvent.payload)}</pre></div></div>
       </Panel>
@@ -736,6 +816,7 @@
       </Panel>
     {/if}
   {/if}
+  <ConfirmationModal bind:this={confirmationModal} />
 </section>
 
 <style>

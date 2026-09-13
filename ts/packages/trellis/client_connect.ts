@@ -46,26 +46,69 @@ import {
   type TrellisConnection,
 } from "./connection.ts";
 import {
+  bindApiRoutes,
   type GeneratedParticipant,
   getParticipantRuntime,
   participantAvailability,
-  participantEvidence,
+  refreshApiRoutes,
 } from "./participant_runtime/participant.ts";
 import type { ContractResourceBindings } from "./participant_runtime/schemas.ts";
 import type { RuntimeApi } from "./participant_runtime/api.ts";
 import { TransportError } from "./errors/index.ts";
+import { type ResourceMigrations, TypedKV } from "./kv.ts";
 import {
   DEFAULT_RUNTIME_MAX_RECONNECT_ATTEMPTS,
   type RuntimeTransport,
 } from "./runtime_transport.ts";
 import {
+  ResourceUnavailableError,
   type RuntimeStateStores,
   Trellis,
   type TrellisOpts,
 } from "./session.ts";
+import { TypedStore } from "./store.ts";
 import { recordTrellisDuration } from "./telemetry/mod.ts";
 
 type ClientContract = GeneratedParticipant;
+
+type ResourceMigrationsFor<
+  TContract extends ClientContract,
+  TKind extends "state" | "kv",
+> =
+  & Readonly<
+    Partial<
+      {
+        [
+          Name in keyof TContract[
+            "resources"
+          ] as TContract["resources"][Name] extends { kind: TKind } ? Name
+            : never
+        ]: TContract["resources"][Name] extends {
+          codec: { decode(value: unknown): infer TValue };
+        } ? ResourceMigrations<TValue>
+          : never;
+      }
+    >
+  >
+  & Readonly<Record<string, ResourceMigrations<unknown> | undefined>>;
+
+/** Direct State and KV migrations supplied by the application at connection time. */
+export type ClientResourceMigrations<
+  TContract extends ClientContract = ClientContract,
+> = Readonly<{
+  state?: ResourceMigrationsFor<TContract, "state">;
+  kv?: ResourceMigrationsFor<TContract, "kv">;
+}>;
+
+type InstalledClientResources = Readonly<{
+  generation: number;
+  signature: string;
+  active: { value: boolean };
+  kv: Readonly<Record<string, TypedKV<unknown> | undefined>>;
+  store: Readonly<Record<string, TypedStore | undefined>>;
+}>;
+
+type ClientResourceState = { current: InstalledClientResources };
 
 /** Browser caller runtime whose lifecycle owner can revoke and end its session. */
 export type ConnectedTrellisClient<TContract extends ClientContract> =
@@ -88,6 +131,9 @@ function createConnectedClient(args: {
     noResponderRetry: ClientOpts["noResponderRetry"];
     api: RuntimeApi;
     state: TrellisOpts<RuntimeApi>["state"];
+    stateMigrations: TrellisOpts<RuntimeApi>["stateMigrations"];
+    resourceGeneration: TrellisOpts<RuntimeApi>["resourceGeneration"];
+    resourceAvailability: TrellisOpts<RuntimeApi>["resourceAvailability"];
     onSessionNotFound?: TrellisOpts<RuntimeApi>["onSessionNotFound"];
   };
 }): Trellis<RuntimeApi, "client", RuntimeStateStores> {
@@ -201,10 +247,92 @@ type ClientConnectArgsFor<TContract extends ClientContract> =
     trellisUrl: string;
     participant: TContract;
     auth?: ClientAuthOptions;
+    resourceMigrations?: ClientResourceMigrations<TContract>;
     onAuthRequired?: (
       ctx: ClientAuthRequiredContext,
     ) => Promise<ClientAuthContinuation> | ClientAuthContinuation;
   };
+
+async function resolveClientResources(args: {
+  nc: NatsConnection;
+  participant: ClientContract;
+  participantDigest: string;
+  bindings: ContractResourceBindings;
+  previous?: InstalledClientResources;
+  migrations?: ClientResourceMigrations;
+}): Promise<InstalledClientResources> {
+  const signature = JSON.stringify({
+    participantDigest: args.participantDigest,
+    bindings: args.bindings,
+  });
+  if (args.previous?.signature === signature) return args.previous;
+
+  const generation = (args.previous?.generation ?? 0) + 1;
+  const active = { value: true };
+  const isCurrent = () => active.value;
+  const kv: Record<string, TypedKV<unknown> | undefined> = {};
+  const store: Record<string, TypedStore | undefined> = {};
+  for (const [name, descriptor] of Object.entries(args.participant.resources)) {
+    if (descriptor.kind === "kv") {
+      const binding = args.bindings.kv?.[name];
+      if (!binding) {
+        if (descriptor.availability === "required") {
+          throw new Error(`Required KV resource '${name}' is unavailable`);
+        }
+        kv[name] = undefined;
+        continue;
+      }
+      kv[name] = await TypedKV.open(
+        args.nc,
+        binding.bucket,
+        descriptor,
+        {
+          bindOnly: true,
+          history: binding.history,
+          ttl: binding.ttlMs,
+          maxValueBytes: binding.maxValueBytes,
+          migrations: args.migrations?.kv?.[name],
+          isCurrent,
+        },
+      ).orThrow();
+    } else if (descriptor.kind === "store") {
+      const binding = args.bindings.store?.[name];
+      if (!binding) {
+        if (descriptor.availability === "required") {
+          throw new Error(`Required Store resource '${name}' is unavailable`);
+        }
+        store[name] = undefined;
+        continue;
+      }
+      store[name] = await TypedStore.open(args.nc, binding.name, {
+        bindOnly: true,
+        ttlMs: binding.ttlMs,
+        maxObjectBytes: binding.maxObjectBytes,
+        maxTotalBytes: binding.maxTotalBytes,
+        isCurrent,
+      }).orThrow();
+    }
+  }
+  return { generation, signature, active, kv, store };
+}
+
+function clientResourceFacades(state: ClientResourceState) {
+  const facade = (kind: "kv" | "store") => {
+    const result: Record<string, unknown> = {};
+    for (const name of Object.keys(state.current[kind])) {
+      Object.defineProperty(result, name, {
+        enumerable: true,
+        get: () => {
+          const handle = state.current[kind][name];
+          if (!handle) throw new ResourceUnavailableError(kind, name);
+          return handle;
+        },
+      });
+    }
+    return result;
+  };
+  return { kv: facade("kv"), store: facade("store") };
+}
 
 export type TrellisClientConnectArgs<
   TContract extends ClientContract = ClientContract,
@@ -234,12 +362,15 @@ type RuntimeTransports = StaticDecode<typeof ClientTransportsSchema>;
 type ClientConnectDeps = {
   loadTransport(): Promise<RuntimeTransport>;
   now(): number;
+  initialBootstrap?: ClientBootstrapReady;
+  runtimeSessionKeySeed?: string;
 };
 
 const ClientBootstrapReadySchema = Type.Object({
   status: Type.Literal("ready"),
   serverNow: Type.Integer(),
   connectInfo: Type.Object({
+    connectionId: Type.Optional(Type.String({ minLength: 1 })),
     sessionId: Type.String({ minLength: 1 }),
     participantId: Type.String({ minLength: 1 }),
     participantDigest: Type.String({ minLength: 1 }),
@@ -428,13 +559,19 @@ async function createSessionKeyRuntimeIdentity(
   sessionId?: string,
   mode: "browser" | "session_key" = "session_key",
   browserCredential?: BrowserSessionCredential,
+  runtimeSessionKeySeed?: string,
 ): Promise<ClientRuntimeIdentity> {
   const seed = base64urlDecode(sessionKeySeed);
+  const runtimeSeed = runtimeSessionKeySeed
+    ? base64urlDecode(runtimeSessionKeySeed)
+    : crypto.getRandomValues(new Uint8Array(32));
   const privateKey = await importEd25519PrivateKeyFromSeedBase64url(
-    sessionKeySeed,
+    base64urlEncode(runtimeSeed),
   );
-  const sessionKey = publicKeyBase64urlFromSeed(seed);
-  const auth = await createAuth({ sessionKeySeed });
+  const sessionKey = publicKeyBase64urlFromSeed(runtimeSeed);
+  const runtimeAuth = await createAuth({
+    sessionKeySeed: base64urlEncode(runtimeSeed),
+  });
   const sign = async (data: Uint8Array): Promise<Uint8Array> => {
     const signature = await crypto.subtle.sign(
       "Ed25519",
@@ -447,9 +584,9 @@ async function createSessionKeyRuntimeIdentity(
   const identity: ClientRuntimeIdentity = {
     mode,
     sessionKey,
-    sessionNkey: auth.sessionNkey,
+    sessionNkey: runtimeAuth.sessionNkey,
     seed,
-    auth,
+    auth: runtimeAuth,
     sessionId,
     ...(browserCredential === undefined ? {} : { browserCredential }),
     sign,
@@ -612,7 +749,7 @@ async function recoverClientBootstrapWithRetry(args: {
     };
   }
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
     const attemptStartedAt = performance.now();
     const requestStartedAtMs = args.deps.now();
     try {
@@ -620,6 +757,7 @@ async function recoverClientBootstrapWithRetry(args: {
         trellisUrl: args.trellisUrl,
         sessionId: args.identity.sessionId,
         auth: args.identity.auth,
+        sessionKey: args.identity.sessionKey,
         cache: args.cache,
         requiredTransport: "websocket",
       });
@@ -679,6 +817,13 @@ async function recoverClientBootstrapWithRetry(args: {
           status: "auth_required",
           serverNow: args.deps.now() / 1_000,
         };
+      }
+      if (
+        error instanceof AuthorizationContextRefreshError &&
+        attempt < 9
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        continue;
       }
       if (attempt === 0) {
         continue;
@@ -783,7 +928,6 @@ async function buildSessionKeyLoginUrl(args: {
     issuedAt,
     sessionPublicKey: args.identity.sessionKey,
     participantId: args.participant.identity,
-    ...participantEvidence(args.participant),
     redirectTarget: args.redirectTo,
   };
   const response = await fetch(`${args.trellisUrl}/auth/requests`, {
@@ -865,7 +1009,15 @@ export async function connectClientWithDeps<
       trustScope,
       args.auth?.persistence ?? "remembered",
     );
-  let identity = await resolveClientIdentity(args.auth, browserInstallation);
+  let identity = deps.runtimeSessionKeySeed && args.auth?.mode === "session_key"
+    ? await createSessionKeyRuntimeIdentity(
+      args.auth.sessionKeySeed,
+      args.auth.sessionId,
+      "session_key",
+      undefined,
+      deps.runtimeSessionKeySeed,
+    )
+    : await resolveClientIdentity(args.auth, browserInstallation);
   const currentUrl = resolveCurrentUrl(args.auth);
   const browserAuth = args.auth?.mode === "session_key" ? undefined : args.auth;
   const callbackFlowId = args.auth?.mode === "session_key"
@@ -945,7 +1097,7 @@ export async function connectClientWithDeps<
   }
 
   const initialBootstrapStartedAt = performance.now();
-  const initialBootstrap = callbackBootstrap ??
+  const initialBootstrap = deps.initialBootstrap ?? callbackBootstrap ??
     await recoverClientBootstrapWithRetry({
       trellisUrl,
       identity,
@@ -1040,6 +1192,24 @@ export async function connectClientWithDeps<
   authorizationContexts.setServerClockOffsetMs(
     offsetState.serverClockOffsetMs,
   );
+  if (deps.initialBootstrap) {
+    await authorizationContexts.install(
+      bootstrap.connectInfo.authorizationContext,
+      {
+        bootstrapJwt: bootstrap.connectInfo.transport.jwt,
+        bootstrapJwtExpiresAt: bootstrap.connectInfo.transport.jwtExpiresAt,
+      },
+      bootstrap.serverNow,
+      undefined,
+      {
+        connectionId: bootstrap.connectInfo.connectionId!,
+        loginSessionId: bootstrap.connectInfo.sessionId,
+        participantId: bootstrap.connectInfo.participantId,
+        inboxPrefix: bootstrap.connectInfo.transport.inboxPrefix,
+        transports: bootstrap.connectInfo.transports,
+      },
+    );
+  }
   selectClientRuntimeTransportServers(bootstrap.connectInfo.transports);
   identity.sessionId = bootstrap.connectInfo.sessionId;
   if (callbackFlowId && currentUrl) cleanupBrowserCallbackUrl(currentUrl);
@@ -1110,9 +1280,10 @@ export async function connectClientWithDeps<
     );
     authorizationProviderCache.start();
     await authorizationProviderCache.waitReady();
-    void connectedNats.closed().finally(() => {
-      authorizationProviderCache?.stop();
-    });
+    void connectedNats.closed().then(
+      () => authorizationProviderCache?.stop(),
+      () => authorizationProviderCache?.stop(),
+    );
     recordTrellisDuration(
       "trellis.connect.duration",
       performance.now() - natsStartedAt,
@@ -1138,7 +1309,7 @@ export async function connectClientWithDeps<
   if (!nc || !authorizationProviderCache) {
     throw new Error("Trellis client runtime connection was not established");
   }
-  void nc.closed().finally(() => runtimeAuth.stop());
+  void nc.closed().then(() => runtimeAuth.stop(), () => runtimeAuth.stop());
 
   const clientOpts: ClientOpts = {
     ...(typeof args.name === "string" ? { name: args.name } : {}),
@@ -1157,6 +1328,7 @@ export async function connectClientWithDeps<
       args.participant,
       bootstrap.apiBindings,
       bootstrap.resourceBindings,
+      authorizationContexts.current().context.grants.permissions,
     ),
     ...(args.log
       ? {
@@ -1170,27 +1342,61 @@ export async function connectClientWithDeps<
   connection.subscribe((status) =>
     authorizationProviderCache.observeConnectionPhase(status.phase)
   );
+  const api = bindApiRoutes(
+    getParticipantRuntime(args.participant).usedApi,
+    bootstrap.apiBindings,
+  ) as RuntimeApi;
+  const resourceState: ClientResourceState = {
+    current: await resolveClientResources({
+      nc,
+      participant: args.participant,
+      participantDigest: runtimeState.participantDigest,
+      bindings: bootstrap.resourceBindings,
+      migrations: args.resourceMigrations,
+    }),
+  };
+  const resourceFacades = clientResourceFacades(resourceState);
   const stopContextRefresh = startAuthorizationContextRefresh({
     trellisUrl: args.trellisUrl,
     sessionId: runtimeState.sessionId,
     auth: identity.auth,
+    sessionKey: identity.sessionKey,
     cache: authorizationContexts,
     refresh: async (shouldInstall) => {
       const result = await refreshAuthorizationContextWithMetadata({
         trellisUrl: args.trellisUrl,
         sessionId: runtimeState.sessionId,
         auth: identity.auth,
+        sessionKey: identity.sessionKey,
         cache: authorizationContexts,
         shouldInstall,
+        prepareInstall: async (response) => {
+          const nextResources = await resolveClientResources({
+            nc,
+            participant: args.participant,
+            participantDigest: response.authorization.participantDigest,
+            bindings: response.authorization.resourceRuntime,
+            previous: resourceState.current,
+            migrations: args.resourceMigrations,
+          });
+          return (verified) => {
+            if (nextResources !== resourceState.current) {
+              resourceState.current.active.value = false;
+              resourceState.current = nextResources;
+            }
+            installConnectionAvailability(
+              connection,
+              participantAvailability(
+                args.participant,
+                response.apiBindings,
+                response.authorization.resourceRuntime,
+                verified.context.grants.permissions,
+              ),
+            );
+            refreshApiRoutes(api, response.apiBindings);
+          };
+        },
       });
-      installConnectionAvailability(
-        connection,
-        participantAvailability(
-          args.participant,
-          result.response.apiBindings,
-          result.response.authorization.resourceRuntime,
-        ),
-      );
       return result.context;
     },
     onRefresh: () => {
@@ -1199,18 +1405,21 @@ export async function connectClientWithDeps<
           authorizationContexts.runtimeBinding().transports,
         ),
       );
-      return connection.status.phase !== "connected"
-        ? nc.reconnect()
-        : undefined;
+      return nc.reconnect();
     },
     onTerminalFailure: async () => {
-      if (!nc.isClosed()) await nc.close();
+      if (!nc.isClosed()) {
+        try {
+          await nc.close();
+        } catch {
+          await nc.closed().catch(() => undefined);
+        }
+      }
       await handleSessionNotFound?.();
     },
   });
   void nc.closed().then(stopContextRefresh, stopContextRefresh);
 
-  const api = getParticipantRuntime(args.participant).usedApi as RuntimeApi;
   const state = getParticipantRuntime(args.participant).state as TrellisOpts<
     RuntimeApi
   >["state"];
@@ -1231,6 +1440,10 @@ export async function connectClientWithDeps<
       noResponderRetry: clientOpts.noResponderRetry,
       api,
       state,
+      stateMigrations: args.resourceMigrations?.state,
+      resourceGeneration: () => resourceState.current.generation,
+      resourceAvailability: (name) =>
+        connection.availability().resources[name] ?? true,
       onSessionNotFound: handleSessionNotFound,
     },
   });
@@ -1243,12 +1456,12 @@ export async function connectClientWithDeps<
       outcome: "ok",
     },
   );
-  const caller = createCallerRuntime(client, args.participant);
+  const caller = createCallerRuntime(client, args.participant, resourceFacades);
   return Object.assign(caller, {
     logout: async () => {
       endingSession = true;
       try {
-        const logout = Reflect.get(caller, "authSessionsLogout");
+        const logout = Reflect.get(caller, "sessionsLogout");
         if (typeof logout !== "function") {
           throw new Error(
             "the participant contract must use Auth.Sessions.Logout",

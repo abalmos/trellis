@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 
+use async_nats::jetstream::{self, stream};
 use serde_json::Value;
 use trellis_local_nats::{
     LocalNats, LocalNatsPorts, NatsBinarySource, NatsOutput, NatsServerBinary,
@@ -440,7 +441,7 @@ async fn cli_server_managed_nats() {
         "platform.sqlite",
         "jobs.sqlite",
         "health.sqlite",
-        "eventlog.sqlite",
+        "events.sqlite",
     ] {
         assert!(
             effective_root.join("data").join(database).is_file(),
@@ -543,10 +544,200 @@ async fn cli_server_managed_nats() {
         })
         .start()
         .expect("spawn test-owned managed nats-server");
+    let nats = async_nats::ConnectOptions::new()
+        .credentials_file(bundle.join("nats/creds/trellis-auth.creds"))
+        .await
+        .expect("load Trellis NATS credentials")
+        .connect(external.nats_url())
+        .await
+        .expect("connect to external NATS");
+    let jetstream = jetstream::new(nats);
     let external_config = config_toml
         .replace(BOGUS_NATS_URL, &format!("nats://127.0.0.1:{NATS_PORT}"))
         .replace(BOGUS_WS_URL, "ws://localhost:8080");
     fs::write(&config_path, external_config).expect("write external NATS config");
+
+    for (name, subjects, max_messages_per_subject, discard_new_per_subject) in [
+        ("trellis_consumer_dlq", "_trellis.consumer.dlq.>", -1, false),
+        (
+            "trellis_consumer_replays",
+            "_trellis.consumer.replay.>",
+            1,
+            true,
+        ),
+    ] {
+        for stream_name in [
+            "trellis",
+            "trellis_consumer_dlq",
+            "trellis_consumer_replays",
+            "JOBS_ADVISORIES",
+            "JOBS",
+            "JOBS_WORK",
+            "TRELLIS_HEALTH",
+        ] {
+            let _ = jetstream.delete_stream(stream_name).await;
+        }
+        jetstream
+            .create_stream(stream::Config {
+                name: name.to_owned(),
+                subjects: vec![subjects.to_owned()],
+                retention: stream::RetentionPolicy::Limits,
+                storage: stream::StorageType::Memory,
+                discard: stream::DiscardPolicy::New,
+                max_messages: -1,
+                max_messages_per_subject,
+                max_bytes: -1,
+                discard_new_per_subject,
+                allow_direct: true,
+                ..Default::default()
+            })
+            .await
+            .expect("create incompatible evidence stream");
+        jetstream
+            .publish(subjects.replace('>', "record"), "preserve me".into())
+            .await
+            .expect("publish evidence record")
+            .await
+            .expect("store evidence record");
+        let before = jetstream
+            .get_stream(name)
+            .await
+            .expect("evidence stream exists")
+            .info()
+            .await
+            .expect("read evidence stream")
+            .clone();
+        let failure_stderr = workdir.0.join(format!("{name}-startup.stderr.log"));
+        let mut failure_command = server_command(&workdir.0);
+        let mut failure = ChildGuard::spawn(
+            failure_command
+                .args([
+                    "all",
+                    "--config",
+                    config_path.to_str().expect("UTF-8 config path"),
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::from(
+                    fs::File::create(&failure_stderr).expect("create failed startup log"),
+                )),
+            "trellis-server incompatible stream startup",
+        );
+        let status = failure
+            .wait_for_exit(SHUTDOWN_TIMEOUT)
+            .expect("incompatible startup must exit");
+        assert!(
+            !status.success(),
+            "incompatible startup unexpectedly succeeded"
+        );
+        assert!(
+            fs::read_to_string(&failure_stderr)
+                .expect("read failed startup log")
+                .contains(&format!("incompatible runtime stream {name}")),
+            "startup must report the incompatible stream"
+        );
+        let after = jetstream
+            .get_stream(name)
+            .await
+            .expect("evidence stream remains")
+            .info()
+            .await
+            .expect("read preserved evidence stream")
+            .clone();
+        assert_eq!(after.config, before.config);
+        assert_eq!(after.state.messages, 1);
+    }
+
+    for stream_name in [
+        "trellis",
+        "trellis_consumer_dlq",
+        "trellis_consumer_replays",
+        "JOBS_ADVISORIES",
+        "JOBS",
+        "JOBS_WORK",
+        "TRELLIS_HEALTH",
+    ] {
+        let _ = jetstream.delete_stream(stream_name).await;
+    }
+    jetstream
+        .create_stream(stream::Config {
+            name: "trellis_consumer_dlq".to_owned(),
+            subjects: vec!["_trellis.consumer.dlq.>".to_owned()],
+            retention: stream::RetentionPolicy::Limits,
+            storage: stream::StorageType::File,
+            discard: stream::DiscardPolicy::New,
+            max_messages: 10,
+            max_messages_per_subject: -1,
+            max_bytes: -1,
+            allow_direct: true,
+            ..Default::default()
+        })
+        .await
+        .expect("create finite DLQ stream");
+    jetstream
+        .publish("_trellis.consumer.dlq.record", "preserve me".into())
+        .await
+        .expect("publish DLQ record")
+        .await
+        .expect("store DLQ record");
+    jetstream
+        .create_stream(stream::Config {
+            name: "trellis_consumer_replays".to_owned(),
+            subjects: vec!["_trellis.consumer.replay.>".to_owned()],
+            retention: stream::RetentionPolicy::Limits,
+            storage: stream::StorageType::Memory,
+            discard: stream::DiscardPolicy::New,
+            max_messages: -1,
+            max_messages_per_subject: 1,
+            max_bytes: -1,
+            discard_new_per_subject: true,
+            allow_direct: true,
+            ..Default::default()
+        })
+        .await
+        .expect("create incompatible replay stream");
+    let expansion_stderr = workdir.0.join("safe-expansion-startup.stderr.log");
+    let mut expansion_command = server_command(&workdir.0);
+    let mut expansion = ChildGuard::spawn(
+        expansion_command
+            .args([
+                "all",
+                "--config",
+                config_path.to_str().expect("UTF-8 config path"),
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::from(
+                fs::File::create(&expansion_stderr).expect("create expansion startup log"),
+            )),
+        "trellis-server safe stream expansion",
+    );
+    assert!(
+        !expansion
+            .wait_for_exit(SHUTDOWN_TIMEOUT)
+            .expect("startup must reach incompatible replay stream")
+            .success(),
+        "startup unexpectedly accepted incompatible replay stream"
+    );
+    let expanded = jetstream
+        .get_stream("trellis_consumer_dlq")
+        .await
+        .expect("DLQ remains")
+        .info()
+        .await
+        .expect("read expanded DLQ")
+        .clone();
+    assert_eq!(expanded.config.max_messages, -1);
+    assert_eq!(expanded.state.messages, 1);
+    for stream_name in [
+        "trellis",
+        "trellis_consumer_dlq",
+        "trellis_consumer_replays",
+        "JOBS_ADVISORIES",
+        "JOBS",
+        "JOBS_WORK",
+        "TRELLIS_HEALTH",
+    ] {
+        let _ = jetstream.delete_stream(stream_name).await;
+    }
     let external_stdout = workdir.0.join("cli-external.stdout.log");
     let external_stderr = workdir.0.join("cli-external.stderr.log");
     let mut external_command = server_command(&workdir.0);

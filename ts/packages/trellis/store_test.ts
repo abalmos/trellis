@@ -1,13 +1,14 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 
 import {
+  ensureExistingStoreOptions,
   type StoreInfo,
   type StoreListOptions,
   type StorePutOptions,
   type StoreStatus,
   type StoreWaitOptions,
 } from "./store.ts";
-import type { PageResponse } from "./participant.ts";
+import type { StoreListPage } from "./store.ts";
 
 Deno.test("Store public types compile", () => {
   const _putOptions: StorePutOptions = {
@@ -40,16 +41,47 @@ Deno.test("Store public types compile", () => {
 
   const _listOptions: StoreListOptions = {
     prefix: "incoming/",
-    offset: 0,
+    cursor: "opaque",
     limit: 10,
   };
-  const _listPage: PageResponse<StoreInfo> = {
+  const _listPage: StoreListPage = {
     entries: [_info],
-    count: 1,
-    offset: 0,
-    limit: 10,
-    nextOffset: 10,
+    nextCursor: "opaque",
   };
 
   assertEquals(true, true);
+});
+
+Deno.test("existing Store options require exact TTL and ignore advisory sizes", async () => {
+  const check = (
+    ttlMs: number,
+    options: {
+      ttlMs?: number;
+      maxObjectBytes?: number;
+      maxTotalBytes?: number;
+    },
+  ) =>
+    ensureExistingStoreOptions(
+      {
+        status: () =>
+          Promise.resolve({
+            ttl: ttlMs * 1_000_000,
+          }),
+      },
+      "files",
+      options,
+    );
+
+  await check(1_000, {
+    ttlMs: 1_000,
+    maxObjectBytes: 1,
+    maxTotalBytes: 4_096,
+  });
+  await check(0, { maxObjectBytes: 1 });
+  await assertRejects(() => check(999, { ttlMs: 1_000, maxTotalBytes: 4_096 }));
+  await assertRejects(() =>
+    check(1_001, { ttlMs: 1_000, maxTotalBytes: 4_096 })
+  );
+  await check(1_000, { ttlMs: 1_000, maxTotalBytes: 4_095 });
+  await check(1_000, { ttlMs: 1_000, maxTotalBytes: 4_096 });
 });

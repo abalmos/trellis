@@ -293,7 +293,10 @@ function prepared(id: string): PreparedOutboxRecord {
     name: "Thing.Changed",
     subject: "events.v1.Thing.Changed.user.123",
     payload,
-    headers: { "Nats-Msg-Id": id },
+    headers: {
+      "Nats-Msg-Id": id,
+      "Trellis-Event-Descriptor": "v1.dGVzdEB2MQ.Q29ubmVjdGlvbnMuT3BlbmVk.0",
+    },
   };
 }
 

@@ -44,8 +44,8 @@ export type FieldOpsDeps = {
 };
 
 export type FieldOpsService = ConnectedTrellisService<
-  typeof participants.demoService.participant
+  typeof participants.Service.participant
 >;
 export type FieldOpsHandlerClient = Parameters<
-  RpcHandler<typeof participants.demoService.participant, "Assignments.List">
+  RpcHandler<typeof participants.Service.participant, "Assignments.List">
 >[0]["client"];

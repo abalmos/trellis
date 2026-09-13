@@ -204,10 +204,7 @@ pub enum DevResourceAction {
 
 #[derive(Debug, Clone, Eq, PartialEq, Args)]
 /// Create one service deployment.
-pub struct SvcCreateArgs {
-    #[arg(long = "namespace", value_delimiter = ',')]
-    pub namespaces: Vec<String>,
-}
+pub struct SvcCreateArgs {}
 
 #[derive(Debug, Clone, Eq, PartialEq, Args)]
 /// Create one device deployment.
@@ -230,9 +227,25 @@ pub struct ApplyArgs {
     #[arg(long)]
     pub participant: Option<String>,
 
-    /// Optional capability selection passed unchanged to Auth.
-    #[arg(long = "optional-capability")]
-    pub optional_capability: Vec<String>,
+    /// Approve one qualified capability and its current consent digest.
+    #[arg(long = "approve-capability")]
+    pub approve_capability: Vec<String>,
+
+    /// Approve one participant resource at its authored commitment.
+    #[arg(long = "approve-resource")]
+    pub approve_resource: Vec<String>,
+
+    /// Approve the participant's named companion.
+    #[arg(long)]
+    pub approve_companion: bool,
+
+    /// Confirm the exact server-presented approval decision digest.
+    #[arg(long = "confirm-digest")]
+    pub confirm_digest: Option<String>,
+
+    /// Confirm the displayed request non-interactively.
+    #[arg(long)]
+    pub yes: bool,
 
     /// Expected current GrantBinding revision; omitted reads it once.
     #[arg(long)]

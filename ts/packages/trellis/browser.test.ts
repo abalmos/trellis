@@ -11,17 +11,17 @@ import {
   AuthError,
   FileInfoSchema,
   KVError,
+  type KvWatchItem,
   RemoteError,
+  type ResourceRevision,
   StoreError,
   TransferError,
   type TrellisAuth,
   type TrellisErrorInstance,
-  TypedKVEntry,
+  type TypedKvEntry,
   TypedStoreEntry,
   UnexpectedError,
   ValidationError,
-  type WatchEvent,
-  type WatchOptions,
 } from "./index.ts";
 import * as browser from "./index.ts";
 
@@ -47,15 +47,6 @@ Deno.test("browser exports exclude raw runtime constructors", () => {
   assertEquals("TypedKV" in browser, false);
   assertEquals("TypedStore" in browser, false);
   assertEquals("createTransferHandle" in browser, false);
-});
-
-Deno.test("browser exports - TypedKVEntry class is exported", () => {
-  assertExists(TypedKVEntry, "TypedKVEntry class should be exported");
-  assertEquals(
-    typeof TypedKVEntry,
-    "function",
-    "TypedKVEntry should be a constructor",
-  );
 });
 
 Deno.test("browser exports - TypedStoreEntry class is exported", () => {
@@ -175,18 +166,14 @@ Deno.test("browser exports - types compile correctly", () => {
     sign: async (_data: Uint8Array) => new Uint8Array(),
   };
 
-  // WatchEvent and WatchOptions are type-only exports, so we just verify they compile
-  const _watchEvent: WatchEvent<typeof import("typebox").Type.String> = {
-    type: "update",
+  const _entry: TypedKvEntry<string> = {
+    operation: "put",
     key: "test",
     value: "value",
-    revision: 1,
+    revision: 1 as ResourceRevision,
     timestamp: new Date(),
   };
-
-  const _watchOpts: WatchOptions = {
-    includeDeletes: true,
-  };
+  const _watchItem: KvWatchItem<string> = Result.ok(_entry);
 
   assertEquals(true, true, "Types should compile without errors");
 });

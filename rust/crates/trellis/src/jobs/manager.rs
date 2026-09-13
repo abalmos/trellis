@@ -728,7 +728,7 @@ where
         *update_gate.lock().await = false;
         match process_result {
             Ok(result) => {
-                if cancellation.is_host_shutdown() {
+                if cancellation.is_host_shutdown() || cancellation.is_lease_lost() {
                     self.run_terminal_cleanup(&terminal_cleanup, &job.updated_at)
                         .await?;
                     return Ok(JobProcessOutcome::Interrupted { tries });
@@ -766,7 +766,7 @@ where
                 Ok(JobProcessOutcome::Completed { tries, result })
             }
             Err(JobProcessError::Retryable(error)) => {
-                if cancellation.is_host_shutdown() {
+                if cancellation.is_host_shutdown() || cancellation.is_lease_lost() {
                     self.run_terminal_cleanup(&terminal_cleanup, &job.updated_at)
                         .await?;
                     return Ok(JobProcessOutcome::Interrupted { tries });
@@ -804,7 +804,7 @@ where
                 Ok(JobProcessOutcome::Retry { tries, error })
             }
             Err(JobProcessError::Failed(error)) => {
-                if cancellation.is_host_shutdown() {
+                if cancellation.is_host_shutdown() || cancellation.is_lease_lost() {
                     self.run_terminal_cleanup(&terminal_cleanup, &job.updated_at)
                         .await?;
                     return Ok(JobProcessOutcome::Interrupted { tries });
@@ -899,12 +899,6 @@ where
         progress: JobProgress,
     ) -> Result<(), JobManagerError<P::Error>> {
         let queue = self.queue_binding_for_job(job)?;
-        if !queue.progress {
-            return Err(JobManagerError::FeatureDisabled {
-                queue_type: queue.queue_type.clone(),
-                feature: "progress",
-            });
-        }
         if job.state != JobState::Active {
             return Err(JobManagerError::InvalidTransition {
                 job_id: job.id.clone(),
@@ -993,12 +987,6 @@ where
         log: JobLogEntry,
     ) -> Result<(), JobManagerError<P::Error>> {
         let queue = self.queue_binding_for_job(job)?;
-        if !queue.logs {
-            return Err(JobManagerError::FeatureDisabled {
-                queue_type: queue.queue_type.clone(),
-                feature: "logs",
-            });
-        }
         if job.state != JobState::Active {
             return Err(JobManagerError::InvalidTransition {
                 job_id: job.id.clone(),

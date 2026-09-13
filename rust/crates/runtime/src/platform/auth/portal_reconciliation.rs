@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use tokio::sync::{Mutex, Notify};
 
 use super::{
-    browser_consent_proposal, portal_policy_snapshot, resolve_portal_authority_selection,
-    AccountRepository, AuthService, AuthorizationStateError, CapabilityGroupRecord, GrantBinding,
+    portal_policy_snapshot, resolve_portal_authority_selection, AccountRepository, ApprovalMode,
+    AuthService, AuthorizationStateError, CapabilityGroupRecord, GrantBinding,
     GrantBindingReplacement, GrantBindingState, GrantOwnerKind, GrantRepository,
     IdempotencyResultRecord, LoginPortalRecord, LoginSettingsRecord, PortalGrantOverrideRecord,
     PortalGrantProvenance, PortalPolicySnapshot, PortalRepository, ProviderLoginAttributes,
@@ -170,31 +170,73 @@ where
         }
         let mut work = Vec::new();
         for ((portal_id, participant_id), bindings) in grouped {
-            let (portal, settings) = self
-                .service
-                .repository()
-                .get_login_portal(&portal_id)
-                .await?
-                .ok_or_else(|| {
-                    AuthorizationStateError::InvalidRecord(format!(
-                        "portal-managed authority references missing portal {portal_id}"
-                    ))
-                })?;
-            let policy = self
+            let portal = self.service.repository().get_login_portal(&portal_id).await;
+            let (portal, settings) = match portal {
+                Ok(Some(portal)) => portal,
+                Ok(None) => {
+                    tracing::warn!(
+                        portal_id,
+                        participant_id,
+                        binding_count = bindings.len(),
+                        error = "portal-managed authority references a missing portal",
+                        "skipping invalid portal authority reconciliation batch"
+                    );
+                    continue;
+                }
+                Err(error @ AuthorizationStateError::InvalidRecord(_)) => {
+                    tracing::warn!(
+                        portal_id,
+                        participant_id,
+                        binding_count = bindings.len(),
+                        error = %error,
+                        "skipping invalid portal authority reconciliation batch"
+                    );
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let policy = match self
                 .service
                 .repository()
                 .get_portal_grant_override(&portal_id, &participant_id)
-                .await?;
-            let snapshot = portal_policy_snapshot(
+                .await
+            {
+                Ok(policy) => policy,
+                Err(error @ AuthorizationStateError::InvalidRecord(_)) => {
+                    tracing::warn!(
+                        portal_id,
+                        participant_id,
+                        binding_count = bindings.len(),
+                        error = %error,
+                        "skipping invalid portal authority reconciliation batch"
+                    );
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+            let snapshot = match portal_policy_snapshot(
                 &portal,
                 &settings,
                 &participant_id,
                 policy.as_ref(),
                 &groups,
-            )?;
+            ) {
+                Ok(snapshot) => snapshot,
+                Err(error @ AuthorizationStateError::InvalidRecord(_)) => {
+                    tracing::warn!(
+                        portal_id,
+                        participant_id,
+                        binding_count = bindings.len(),
+                        error = %error,
+                        "skipping invalid portal authority reconciliation batch"
+                    );
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             let mut current_bindings = Vec::new();
             for binding in bindings {
-                if let Some(current) = self
+                match self
                     .service
                     .repository()
                     .get_grant_binding(
@@ -202,9 +244,20 @@ where
                         binding.principal_id.clone(),
                         binding.participant_id.clone(),
                     )
-                    .await?
+                    .await
                 {
-                    current_bindings.push((binding, current));
+                    Ok(Some(current)) => current_bindings.push((binding, current)),
+                    Ok(None) => {}
+                    Err(error @ AuthorizationStateError::InvalidRecord(_)) => {
+                        tracing::warn!(
+                            principal_id = binding.principal_id,
+                            participant_id = binding.participant_id,
+                            portal_id = binding.portal_id,
+                            error = %error,
+                            "skipping invalid portal authority binding reconciliation"
+                        );
+                    }
+                    Err(error) => return Err(error),
                 }
             }
             let batch = Arc::new(PortalPolicyBatch {
@@ -222,11 +275,39 @@ where
         }
         let mut reconciliations = stream::iter(work)
             .map(|(binding, current, batch)| {
-                self.reconcile_binding(binding, current, batch, materialize_immediately)
+                let principal_id = binding.principal_id.clone();
+                let participant_id = binding.participant_id.clone();
+                let portal_id = binding.portal_id.clone();
+                async move {
+                    (
+                        principal_id,
+                        participant_id,
+                        portal_id,
+                        self.reconcile_binding(binding, current, batch, materialize_immediately)
+                            .await,
+                    )
+                }
             })
             .buffer_unordered(16);
-        while let Some(result) = reconciliations.next().await {
-            result?;
+        while let Some((principal_id, participant_id, portal_id, result)) =
+            reconciliations.next().await
+        {
+            match result {
+                Ok(()) => {}
+                Err(
+                    error @ (AuthorizationStateError::InvalidRecord(_)
+                    | AuthorizationStateError::ParticipantMissing),
+                ) => {
+                    tracing::warn!(
+                        principal_id,
+                        participant_id,
+                        portal_id,
+                        error = %error,
+                        "skipping invalid portal authority binding reconciliation"
+                    );
+                }
+                Err(error) => return Err(error),
+            }
         }
         Ok(())
     }
@@ -294,14 +375,13 @@ where
                 )
                 .await?
                 .ok_or(AuthorizationStateError::ParticipantMissing)?;
-            let consent = browser_consent_proposal(&participant)?;
             let Some(policy) = batch.policy.as_ref() else {
                 unreachable!("portal policy was checked above")
             };
             let selection = resolve_portal_authority_selection(
                 policy,
                 &batch.groups,
-                &consent,
+                &participant,
                 &ProviderLoginAttributes {
                     provider_id: binding.provider_id.clone(),
                     roles: binding.roles.clone(),
@@ -313,22 +393,28 @@ where
                 roles: binding.roles.clone(),
                 effective_policy_digest: selection.effective_policy_digest.clone(),
             };
-            let grants = trellis_protocol::GrantSet::new(
-                selection
-                    .grant_set
-                    .permissions()
-                    .iter()
-                    .filter(|permission| current.grants.permissions().contains(permission))
-                    .cloned()
-                    .collect(),
-            );
-            let platform_privileges = selection
-                .platform_privileges
-                .into_iter()
-                .filter(|privilege| current.platform_privileges.contains(privilege))
-                .collect::<Vec<_>>();
+            let mut delegation_ceiling =
+                super::policy::participant_delegation_ceiling(&participant)?;
+            delegation_ceiling
+                .capabilities
+                .retain(|capability| selection.ceiling.capabilities.contains(capability));
+            delegation_ceiling.platform_privileges = selection.ceiling.platform_privileges.clone();
+            let approved_capabilities = delegation_ceiling.capabilities.clone();
+            let resolved = super::policy::resolve_authority(
+                &participant,
+                ApprovalMode::Capabilities,
+                &approved_capabilities,
+                &current.approved_resources,
+                &current.platform_privileges,
+                &delegation_ceiling,
+                (&[], true),
+            )?;
+            let grants = resolved.exact_grants;
+            let platform_privileges = resolved.platform_privileges;
             if current.grants == grants
                 && current.platform_privileges == platform_privileges
+                && current.approved_capabilities == approved_capabilities
+                && current.delegation_ceiling == delegation_ceiling
                 && current.provenance.as_ref() == Some(&provenance)
             {
                 return Ok(());
@@ -350,6 +436,12 @@ where
                         participant_id: binding.participant_id,
                         installed_revision: current.installed_revision,
                         grants,
+                        approval_mode: ApprovalMode::Capabilities,
+                        approved_capabilities,
+                        approved_resources: current.approved_resources,
+                        delegation_ceiling,
+                        approval_decision_digest: request_digest.clone(),
+                        companion_approved: current.companion_approved,
                         platform_privileges,
                         state: GrantBindingState::Active,
                         expires_at: current.expires_at,
@@ -409,14 +501,15 @@ mod tests {
         AccountCreation, LoginPortalMutation, PortalRepository,
     };
     use crate::platform::auth::{
-        builtins, AuthServiceConfig, GrantBindingReplacement, LocalCredentialRecord, PrincipalKind,
-        PrincipalRecord, PrincipalState, SqliteAuthorizationStore, UserProfileRecord,
+        builtins, policy::resolve_authority, AuthServiceConfig, DelegationCeiling,
+        GrantBindingReplacement, LocalCredentialRecord, PrincipalKind, PrincipalRecord,
+        PrincipalState, SqliteAuthorizationStore, UserProfileRecord,
     };
     use serde_json::json;
-    use trellis_protocol::PlatformPrivilege;
+    use trellis_protocol::{GrantSet, PlatformPrivilege};
 
     #[tokio::test]
-    async fn reconciliation_only_narrows_matching_portal_authority() {
+    async fn mixed_startup_and_pending_reconciliation_isolate_invalid_binding() {
         const NOW: i64 = 1_700_000_000_000;
         let proof = |purpose: &str| IdempotencyResultRecord {
             scope_key: trellis_protocol::digest_json(&json!([purpose])).unwrap(),
@@ -430,15 +523,17 @@ mod tests {
         };
         let store = SqliteAuthorizationStore::open_in_memory().unwrap();
         store.ensure_admin_capability_group(NOW).await.unwrap();
-        let participant = builtins::cli_participant_binding(NOW).unwrap();
+        let mut participant = builtins::cli_participant_binding(NOW).unwrap();
+        participant.projection.optional_capability_definitions = participant
+            .projection
+            .referenced_apis
+            .values()
+            .flat_map(|api| api.capabilities.iter())
+            .take(2)
+            .map(|(id, capability)| (id.clone(), GrantSet::new(capability.allows.clone())))
+            .collect();
         let participant_id = participant.participant_id.clone();
-        store
-            .run(move |connection| {
-                super::super::sqlite::grants::install_participant(connection, &participant, None)?;
-                Ok(())
-            })
-            .await
-            .unwrap();
+        store.put_participant_binding(participant).await.unwrap();
         store
             .create_user_account(AccountCreation {
                 principal: PrincipalRecord {
@@ -463,6 +558,34 @@ mod tests {
                 credential: None::<LocalCredentialRecord>,
                 identity: None,
                 idempotency: proof("account.create"),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        store
+            .create_user_account(AccountCreation {
+                principal: PrincipalRecord {
+                    principal_id: "usr_invalid_reconcile".to_owned(),
+                    kind: PrincipalKind::User,
+                    state: PrincipalState::Active,
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                    disabled_at: None,
+                    revoked_at: None,
+                },
+                profile: UserProfileRecord {
+                    principal_id: "usr_invalid_reconcile".to_owned(),
+                    display_name: None,
+                    email: None,
+                    image_url: None,
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                },
+                credential: None::<LocalCredentialRecord>,
+                identity: None,
+                idempotency: proof("invalid.account.create"),
                 actions: Vec::new(),
             })
             .await
@@ -505,8 +628,9 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let consent = browser_consent_proposal(&installed).unwrap();
-        let mut optional = consent
+        let mut optional = installed
+            .resolve()
+            .unwrap()
             .optional_capability_definitions
             .keys()
             .take(2)
@@ -539,11 +663,21 @@ mod tests {
         let selection = resolve_portal_authority_selection(
             &policy,
             &groups,
-            &consent,
+            &installed,
             &ProviderLoginAttributes {
                 provider_id: "oidc".to_owned(),
                 roles: Vec::new(),
             },
+        )
+        .unwrap();
+        let initial = resolve_authority(
+            &installed,
+            ApprovalMode::Capabilities,
+            &selection.ceiling.capabilities,
+            &[],
+            &selection.ceiling.platform_privileges,
+            &selection.ceiling,
+            (&[], true),
         )
         .unwrap();
         let expires_at = Some(NOW + 30_000);
@@ -554,8 +688,44 @@ mod tests {
                     owner_id: "usr_reconcile".to_owned(),
                     participant_id: participant_id.clone(),
                     installed_revision: 1,
-                    grants: selection.grant_set.clone(),
-                    platform_privileges: selection.platform_privileges.clone(),
+                    grants: initial.exact_grants.clone(),
+                    approval_mode: ApprovalMode::Capabilities,
+                    approved_capabilities: selection.ceiling.capabilities.clone(),
+                    approved_resources: Vec::new(),
+                    delegation_ceiling: selection.ceiling.clone(),
+                    approval_decision_digest: "A".repeat(43),
+                    companion_approved: false,
+                    platform_privileges: initial.platform_privileges.clone(),
+                    state: GrantBindingState::Active,
+                    expires_at,
+                    provenance: Some(PortalGrantProvenance {
+                        portal_id: "portal".to_owned(),
+                        provider_id: "oidc".to_owned(),
+                        roles: Vec::new(),
+                        effective_policy_digest: selection.effective_policy_digest.clone(),
+                    }),
+                    expected_revision: 0,
+                    expected_current_installed_revision: None,
+                },
+                proof("binding.create"),
+            )
+            .await
+            .unwrap();
+        store
+            .set_grant_binding(
+                GrantBindingReplacement {
+                    owner_kind: GrantOwnerKind::User,
+                    owner_id: "usr_invalid_reconcile".to_owned(),
+                    participant_id: participant_id.clone(),
+                    installed_revision: 1,
+                    grants: initial.exact_grants.clone(),
+                    approval_mode: ApprovalMode::Capabilities,
+                    approved_capabilities: selection.ceiling.capabilities.clone(),
+                    approved_resources: Vec::new(),
+                    delegation_ceiling: selection.ceiling.clone(),
+                    approval_decision_digest: "A".repeat(43),
+                    companion_approved: false,
+                    platform_privileges: initial.platform_privileges.clone(),
                     state: GrantBindingState::Active,
                     expires_at,
                     provenance: Some(PortalGrantProvenance {
@@ -567,12 +737,33 @@ mod tests {
                     expected_revision: 0,
                     expected_current_installed_revision: None,
                 },
-                proof("binding.create"),
+                proof("invalid.binding.create"),
             )
             .await
             .unwrap();
+        store
+            .run(|connection| {
+                connection
+                    .execute(
+                        "UPDATE auth_grant_bindings SET provenance_json = json_set(provenance_json, '$.portalId', 'missing_portal') WHERE owner_id = 'usr_invalid_reconcile'",
+                        [],
+                    )
+                    .map(|_| ())
+                    .map_err(|error| AuthorizationStateError::Storage(error.to_string()))
+            })
+            .await
+            .unwrap();
+        let invalid = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                "usr_invalid_reconcile".to_owned(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
         let service = AuthService::new(store.clone(), AuthServiceConfig::default()).unwrap();
-        let (_, worker) = portal_policy_reconciliation(service);
+        let (handle, worker) = portal_policy_reconciliation(service);
 
         policy.direct_capabilities.insert(1, second);
         policy.updated_at += 1;
@@ -591,10 +782,22 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(widened.grants, selection.grant_set);
+        assert!(widened.grants.permissions().len() > initial.exact_grants.permissions().len());
+        assert_eq!(widened.approved_capabilities.len(), 2);
         assert_eq!(widened.platform_privileges, [PlatformPrivilege::Admin]);
         assert_eq!(widened.installed_revision, 1);
         assert_eq!(widened.expires_at, expires_at);
+        assert_eq!(
+            store
+                .get_grant_binding(
+                    GrantOwnerKind::User,
+                    "usr_invalid_reconcile".to_owned(),
+                    participant_id.clone(),
+                )
+                .await
+                .unwrap(),
+            Some(invalid.clone())
+        );
 
         policy.direct_capabilities.clear();
         policy.updated_at += 1;
@@ -603,7 +806,8 @@ mod tests {
             .put_portal_grant_override(policy.clone(), Some(2), proof("policy.3"))
             .await
             .unwrap();
-        worker.reconcile_startup().await.unwrap();
+        handle.notify_portal("portal").await;
+        worker.reconcile_pending().await.unwrap();
         let narrowed = store
             .get_grant_binding(
                 GrantOwnerKind::User,
@@ -617,6 +821,17 @@ mod tests {
         assert_eq!(narrowed.platform_privileges, [PlatformPrivilege::Admin]);
         assert_eq!(narrowed.installed_revision, 1);
         assert_eq!(narrowed.expires_at, expires_at);
+        assert_eq!(
+            store
+                .get_grant_binding(
+                    GrantOwnerKind::User,
+                    "usr_invalid_reconcile".to_owned(),
+                    participant_id.clone(),
+                )
+                .await
+                .unwrap(),
+            Some(invalid)
+        );
 
         store
             .run(|connection| {
@@ -721,6 +936,16 @@ mod tests {
                     participant_id: participant_id.clone(),
                     installed_revision: 1,
                     grants: without_admin.grants.clone(),
+                    approval_mode: ApprovalMode::Exact,
+                    approved_capabilities: Vec::new(),
+                    approved_resources: without_admin.approved_resources.clone(),
+                    delegation_ceiling: DelegationCeiling {
+                        capabilities: Vec::new(),
+                        exact_restrictions: Some(without_admin.grants.clone()),
+                        platform_privileges: Vec::new(),
+                    },
+                    approval_decision_digest: "A".repeat(43),
+                    companion_approved: false,
                     platform_privileges: Vec::new(),
                     state: GrantBindingState::Active,
                     expires_at,

@@ -128,7 +128,7 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
             retention_days: None,
             ttl_ms: None,
         }),
-        eventlog: Some(SubsystemConfig {
+        events: Some(SubsystemConfig {
             storage: Some(sqlite_storage()),
             history_retention_days: None,
             transport_retention_hours: None,

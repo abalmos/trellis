@@ -1,3 +1,13 @@
-format = 1
-manifest-digest = "ZrieFQJCAsDned-pxpY0tFe2vpG9_IfPn8T3jiv1LGM"
-api = []
+format = 2
+root = "trellis"
+
+[[packages]]
+name = "trellis"
+version = "0.12.0"
+digest = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY"
+distribution-digest = "sha256:cc15320aca48e1019f205d4ab4f31de0780b27d27480169913d30b30f3677721"
+dependencies = []
+
+[packages.source]
+kind = "path"
+path = "."

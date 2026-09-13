@@ -18,13 +18,19 @@ user logins only; services and devices authenticate without a login row.
 ## Installed participants
 
 Every participant is installed in Auth before it can be granted access. An
-installed revision contains the exact canonical `trellis.participant.v1`
-artifact and all resolved `trellis.api.v1` artifacts. Revisions are immutable,
+installed revision identifies verified source-package evidence, its semantic
+digest, and the participant's exact lexical path. Revisions are immutable,
 so Auth can always explain the exact API surface behind an issued context.
 
 The CLI (`trellis-app.cli@v1`), Console (`trellis-app.console@v1`), activation
 Portal (`trellis-app.portal@v1`), and Auth runtime are installed built-ins.
 Their IDs do not grant access by themselves.
+
+## Capabilities
+
+Capabilities are approval and explanation groups. Approval is constrained by
+current policy and is converted to exact selected grants; it is not itself a
+runtime permission token.
 
 ## GrantBinding
 
@@ -32,13 +38,21 @@ A `GrantBinding` is the only current authority record. It is scoped to one
 identity and one participant and contains:
 
 - the installed participant revision;
-- exact permission atoms; and
+- exact derived permission atoms;
+- approval mode, approved capability fingerprints, approved resource
+  commitments, and delegation ceiling; and
 - finite platform privileges such as `Admin`.
 
 Grant writes use an expected revision and reject atoms absent from the installed
 participant. `Admin` authorizes administrative APIs but does not imply arbitrary
-application permissions. There are no authority proposals, desired/materialized
-states, or reconciliation workers.
+application permissions. Capability approvals are policy inputs, not a second
+current GrantSet. Resource desires are hints, not approval; provisioning runs
+post-commit and exposes bindings only after validating actual configuration.
+
+## Session keys
+
+Each live installation proves possession of its session key. The key identifies
+the installation cryptographically but does not grant authority by itself.
 
 ## Authorization contexts
 
@@ -60,7 +74,7 @@ cache hit.
 ## Bootstrap and NATS
 
 Services and devices send identity/proof inputs only. Auth resolves assignment,
-participant/API artifacts, grants, resources, route JWT, inbox, and exact NATS
+package/participant evidence, exact grants, resources, route JWT, inbox, and NATS
 endpoints server-side. The runtime verifies that complete response before its
 first CONNECT.
 
@@ -69,7 +83,7 @@ context, redundant fields, and current issuable state. It derives short-lived
 publish/subscribe permissions from structured grants and exact evidence.
 Subjects never create authority.
 
-## Browser login
+## Browser login and the portal
 
 Browser authentication starts with a proof-bound request for an installed app
 participant. The portal performs local-password or OIDC authentication and
@@ -97,6 +111,24 @@ revocation invalidates proofs. Ordinary expiry, connection closure, login
 revocation, grant replacement, and issuer rotation retain signed contexts for
 historical event validation.
 
-Event Log stores context-digest references rather than duplicate contexts or
-grant sets. Events signed inside their validity window may remain historically
+Events history stores context-digest references rather than duplicate contexts
+or grant sets. Events signed inside their validity window may remain historically
 valid after ordinary expiry, but never after an applicable explicit revocation.
+
+## Device companions
+
+A device may declare one named app or agent companion as its lexical child. The
+child cannot start a standalone browser or native bootstrap; the parent device's
+activation flow is its only admission path.
+
+The activation operation returns server-computed `companionConsent`. The
+approving user submits a separate child `Approval` fenced by its decision
+digest, installed revision, expected grant revision, and exact eligible
+capability and resource selections. Changed consent or authority makes that
+approval stale and Auth rejects it. Auth commits the approval and device
+authority before creating the child login session.
+
+The companion then runs as the user with its own `GrantBinding`, login session,
+authorization context, resources, and connection. Parent and child grants,
+connections, expiry, and revocation remain separate; device credentials never
+substitute for unavailable user authority.

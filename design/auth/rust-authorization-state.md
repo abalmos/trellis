@@ -16,7 +16,7 @@ Auth SQL stores:
 - user-login sessions only;
 - deployments, service instances, devices, and one-use provisioning secrets;
 - immutable installed participant revisions with exact participant and resolved
-  API artifacts;
+  source-package semantic evidence;
 - one current `GrantBinding` per identity and participant;
 - resource declarations, assignments, and exact runtime evidence;
 - online issuer lifecycle state;
@@ -67,7 +67,7 @@ replacement, login revocation, and issuer rotation never delete them. Explicit
 revocation is separate associated state. Startup rebuilds the NATS KV context
 mirror from all SQL rows before readiness.
 
-Event Log stores only context-digest references and useful projections. It
+The Events journal stores only context-digest references and useful projections. It
 resolves immutable context history from Auth when validating old events.
 
 ## Transactions And Events

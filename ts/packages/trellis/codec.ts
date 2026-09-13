@@ -191,7 +191,10 @@ function parseWithSchema(schema: TSchema, data: JsonValue): unknown {
 }
 
 function encodeWithSchema(schema: TSchema, data: unknown): string {
-  return JSON.stringify(Value.Encode(schema, data));
+  return JSON.stringify(
+    Value.Encode(schema, data),
+    (_key, value) => typeof value === "bigint" ? value.toString() : value,
+  );
 }
 
 export function parse<T extends TSchema>(

@@ -94,17 +94,45 @@ pub(in crate::platform::auth) fn sqlite_issuance_snapshot(
                 &identity.principal_id,
                 &identity.deployment_id,
             )?;
+            let delegation_session = delegation
+                .as_ref()
+                .and_then(|delegation| delegation.user_login_session_id.as_deref())
+                .map(|session_id| load_session(connection, session_id))
+                .transpose()?
+                .flatten();
+            let delegation_binding = delegation_session
+                .as_ref()
+                .map(|session| {
+                    super::grants::load_grant_binding(
+                        connection,
+                        GrantOwnerKind::User,
+                        &session.principal_id,
+                        &session.participant_id,
+                    )
+                })
+                .transpose()?
+                .flatten();
+            let delegation_principal = delegation_session
+                .as_ref()
+                .map(|session| load_principal(connection, &session.principal_id))
+                .transpose()?
+                .flatten();
             let principal_id = identity.principal_id.clone();
             let owner_id = deployment.deployment_id.clone();
             let participant_id = deployment.participant_id.clone();
             (
-                IssuanceCredentialRecord::Native {
-                    identity: Box::new(identity),
-                    instance,
-                    deployment,
-                    device,
-                    delegation,
-                },
+                IssuanceCredentialRecord::Native(Box::new(
+                    super::super::authority::NativeIssuanceCredentialRecord {
+                        identity: Box::new(identity),
+                        instance,
+                        deployment,
+                        device,
+                        delegation,
+                        delegation_session,
+                        delegation_principal,
+                        delegation_binding,
+                    },
+                )),
                 principal_id,
                 super::super::GrantOwnerKind::Deployment,
                 owner_id,
@@ -195,7 +223,7 @@ pub(in crate::platform::auth) fn load_resource_bindings(
     let mut statement = connection
         .prepare(
             "SELECT resource_kind, local_name, binding_id, participant_id, provider_identity,
-                state, materialized_at, error FROM auth_resource_binding_evidence
+                actual_json, state, materialized_at, error FROM auth_resource_binding_evidence
          WHERE owner_kind = ?1 AND owner_id = ?2 AND participant_id = ?3 AND installed_revision = ?4
          ORDER BY resource_kind, local_name",
         )
@@ -225,8 +253,12 @@ pub(in crate::platform::auth) fn decode_resource(
         binding_id: row.get(2)?,
         owner_participant_id: row.get(3)?,
         provider_identity: decode_json(row.get(4)?)?,
-        state: decode_enum(row.get::<_, String>(5)?)?,
-        materialized_at: row.get(6)?,
-        error: row.get(7)?,
+        actual: row
+            .get::<_, Option<String>>(5)?
+            .map(decode_json)
+            .transpose()?,
+        state: decode_enum(row.get::<_, String>(6)?)?,
+        materialized_at: row.get(7)?,
+        error: row.get(8)?,
     })
 }

@@ -1,4 +1,4 @@
-import type { TSchema } from "typebox";
+import type { KvRepresentation } from "../kv.ts";
 import type { SchemaLike } from "./api.ts";
 
 export const PARTICIPANT_JOBS_METADATA = Symbol.for(
@@ -9,9 +9,6 @@ export const PARTICIPANT_KV_METADATA = Symbol.for(
 );
 export const PARTICIPANT_STORE_METADATA = Symbol.for(
   "@qlever-llc/trellis/participant/store",
-);
-export const PARTICIPANT_STATE_METADATA = Symbol.for(
-  "@qlever-llc/trellis/participant/state",
 );
 export const PARTICIPANT_EVENT_CONSUMERS_METADATA = Symbol.for(
   "@qlever-llc/trellis/participant/event-consumers",
@@ -26,17 +23,9 @@ export type ParticipantJobsMetadata = Record<string, {
 export type ParticipantKvMetadata = Record<string, {
   required: boolean;
   value: unknown;
-  schema: TSchema;
+  schema: KvRepresentation<unknown>;
 }>;
 export type ParticipantStoreMetadata = Record<string, { required: boolean }>;
-export type ParticipantStateMetadata = Record<string, {
-  kind: "value" | "map";
-  value: unknown;
-  schema: unknown;
-  stateVersion: string;
-  acceptedVersions: Record<string, unknown>;
-}>;
-
 export type TrellisValidationIssueHint = {
   code: string;
   message: string;

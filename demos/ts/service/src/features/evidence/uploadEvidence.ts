@@ -3,11 +3,10 @@ import { participants } from "../../../trellis/index.js";
 import { recordActivity } from "../activity/index.ts";
 
 export const uploadEvidence: OperationHandler<
-  typeof participants.demoService.participant,
+  typeof participants.Service.participant,
   "Evidence.Upload"
 > = async ({ input, op, transfer, client }) => {
   const transferred = await transfer.completed().orThrow();
-  const uploads = await client.store.uploads.open().orThrow();
 
   await op.started().orThrow();
   await op.progress({
@@ -16,7 +15,10 @@ export const uploadEvidence: OperationHandler<
       `Staged ${transferred.size} bytes of ${input.evidenceType} evidence`,
   }).orThrow();
 
-  const entry = await uploads.get(transferred.key).orThrow();
+  const entry = await (await client.store.uploads.open().orThrow()).get(
+    transferred.key,
+  )
+    .orThrow();
   const reader = (await entry.stream().orThrow()).getReader();
   let chunkCount = 0;
   let byteCount = 0;
@@ -48,7 +50,7 @@ export const uploadEvidence: OperationHandler<
   const output = {
     evidenceId: input.metadata?.evidenceId ?? input.key,
     key: transferred.key,
-    size: byteCount,
+    size: BigInt(byteCount),
     ...(input.contentType ? { contentType: input.contentType } : {}),
     ...(input.metadata?.fileName ? { fileName: input.metadata.fileName } : {}),
     disposition: "ready-for-review",

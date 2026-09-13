@@ -98,12 +98,12 @@ export type AuthorizationProviderRequest = {
 export type AuthorizationProviderEvent = {
   contextDigest: string;
   sessionKey: string;
+  descriptorIdentity: string;
   subject: string;
   payload: Uint8Array;
   eventId: string;
   eventTime: string;
   proof: string;
-  requiredPermissions: PermissionAtom[];
   requiredCapabilities: string[];
 };
 

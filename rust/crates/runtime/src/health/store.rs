@@ -62,6 +62,8 @@ pub(crate) enum HealthStoreError {
     DeadlineOverflow,
     #[error("health timestamp is outside the supported range")]
     TimestampRange,
+    #[error("health pagination cursor or limit is invalid")]
+    InvalidPagination,
 }
 
 #[derive(Debug)]
@@ -866,12 +868,9 @@ pub(super) fn rfc3339(timestamp_ns: i64) -> Result<String, HealthStoreError> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
+    use trellis_runtime_apis::__types::CursorQuery;
     use trellis_runtime_apis::types::{
-        HealthHeartbeatSampleChecksItem, HealthHeartbeatSampleParticipant,
-        HealthHeartbeatSampleSample, HealthInspectRequest, HealthMetricsRequest,
-        HealthQueryRequest,
+        HealthInspectRequest, HealthMetricsRequest, HealthQueryRequest,
     };
 
     use super::*;
@@ -898,35 +897,23 @@ mod tests {
     }
 
     fn sample(id: &str) -> HealthHeartbeatSample {
-        HealthHeartbeatSample {
-            sample: HealthHeartbeatSampleSample {
-                id: id.to_string(),
-                time: "2026-01-01T00:00:00Z".to_string(),
+        serde_json::from_value(serde_json::json!({
+            "sample": { "id": id, "time": "2026-01-01T00:00:00Z" },
+            "participant": {
+                "contractDigest": "digest",
+                "contractId": "example.worker@v1",
+                "info": {},
+                "instanceId": "worker-1",
+                "kind": "service",
+                "name": "Worker",
+                "publishIntervalMs": "30000",
+                "runtime": "rust",
+                "startedAt": "2026-01-01T00:00:00Z"
             },
-            participant: HealthHeartbeatSampleParticipant {
-                contract_digest: "digest".to_string(),
-                contract_id: "example.worker@v1".to_string(),
-                info: Some(BTreeMap::new()),
-                instance_id: "worker-1".to_string(),
-                kind: wire("service").unwrap(),
-                name: "Worker".to_string(),
-                publish_interval_ms: 30_000,
-                runtime: wire("rust").unwrap(),
-                runtime_version: None,
-                started_at: "2026-01-01T00:00:00Z".to_string(),
-                version: None,
-            },
-            reported_status: wire("healthy").unwrap(),
-            summary: None,
-            checks: vec![HealthHeartbeatSampleChecksItem {
-                error: None,
-                info: None,
-                latency_ms: 1.0,
-                name: "nats".to_string(),
-                status: wire("ok").unwrap(),
-                summary: None,
-            }],
-        }
+            "reportedStatus": "healthy",
+            "checks": [{ "latencyMs": 1.0, "name": "nats", "status": "ok" }]
+        }))
+        .expect("valid heartbeat sample")
     }
 
     #[test]
@@ -969,8 +956,10 @@ mod tests {
                 &HealthQueryRequest {
                     contract_ids: None,
                     deployment_ids: None,
-                    limit: None,
-                    offset: None,
+                    page: Some(CursorQuery {
+                        cursor: None,
+                        limit: Some(50),
+                    }),
                     participant_kinds: None,
                     search: None,
                     statuses: None,
@@ -978,13 +967,13 @@ mod tests {
                 observed + 62_000_000_000,
             )
             .expect("query health projection");
-        assert_eq!(query.entries.len(), 1);
-        assert_eq!(query.entries[0].effective_status, "healthy");
+        assert_eq!(query.items.len(), 1);
+        assert_eq!(query.items[0].effective_status.as_str(), "healthy");
 
         let inspect = store
             .inspect(
                 &HealthInspectRequest {
-                    contract_id: "example.worker@v1".to_string(),
+                    contract_id: "example.worker@v1".to_string().into(),
                     history_limit: None,
                     history_since: None,
                     instance_id: None,
@@ -1000,19 +989,19 @@ mod tests {
             .metrics(
                 &HealthMetricsRequest {
                     check_names: None,
-                    contract_id: "example.worker@v1".to_string(),
+                    contract_id: "example.worker@v1".to_string().into(),
                     end: rfc3339(observed + 120_000_000_000).expect("format end"),
                     instance_ids: None,
                     participant_kind: wire("service").unwrap(),
                     start: rfc3339(observed).expect("format start"),
-                    step_ms: 300_000,
+                    step_ms: wire("300000").unwrap(),
                 },
                 observed + 120_000_000_000,
             )
             .expect("query health metrics");
         assert_eq!(metrics.series.len(), 1);
-        assert_eq!(metrics.summary.sample_count, 2);
-        assert_eq!(metrics.series[0].buckets[0].offline_ms, 1_000);
+        assert_eq!(metrics.summary.sample_count.0, 2);
+        assert_eq!(metrics.series[0].buckets[0].offline_ms.0, 1_000);
 
         let connection = store.connection.lock().expect("lock health store");
         let intervals: i64 = connection

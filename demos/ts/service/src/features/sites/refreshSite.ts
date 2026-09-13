@@ -1,7 +1,6 @@
-import { Value } from "typebox/value";
 import { UnexpectedError } from "@qlever-llc/trellis";
 import type { OperationHandler } from "@qlever-llc/trellis/service";
-import { apis, participants } from "../../../trellis/index.js";
+import { participants } from "../../../trellis/index.js";
 
 import { recordActivity } from "../activity/index.ts";
 
@@ -10,7 +9,7 @@ function pause(ms: number): Promise<void> {
 }
 
 export const refreshSite: OperationHandler<
-  typeof participants.demoService.participant,
+  typeof participants.Service.participant,
   "Sites.Refresh"
 > = async ({ input, op, client }) => {
   await op.started().orThrow();
@@ -44,10 +43,7 @@ export const refreshSite: OperationHandler<
 
   await pause(700);
 
-  const result = Value.Parse(
-    apis.demoService.SitesRefreshResponseSchema,
-    completedJob.result,
-  );
+  const result = completedJob.result;
   const completed = await op.complete(result).orThrow();
 
   await client.publishSitesRefreshed({

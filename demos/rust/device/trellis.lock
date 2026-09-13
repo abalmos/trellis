@@ -1,14 +1,44 @@
-format = 1
-manifest-digest = "YtTGZYV-5V8QI_Y4dH8POlc0Rr4HEV9iO8EBxzgfZ_o"
+format = 2
+root = "demo-device"
 
-[[api]]
-id = "demo.service@v1"
+[[packages]]
+name = "demo-device"
 version = "1.0.0"
-api-digest = "qu_P04zYsryJycTKpriGBJIOAZ9N0xDwYZj8p9BR8eg"
-path = "../service"
+digest = "s9lk3YuCGEV3g0CLd4gz4XnDENhHEly_ud58fAG_nRs"
+distribution-digest = "sha256:0c8a5e2f815d0b108d61590787f67f65e18f877821f1bd7297418c7b0bf58291"
 
-[[api]]
-id = "trellis.state@v1"
+[[packages.dependencies]]
+name = "demo-service"
 version = "1.0.0"
-api-digest = "1WHxeF9WLJh3v-mmHiV5mql3a67tmPNpEUFxxUIF9-Y"
-path = "../../../rust/crates/runtime"
+digest = "xSE-gdBFo_5s8gRCS9_IkNFYJsVpl2OC_o98Xr6s-jw"
+
+[[packages.dependencies]]
+name = "trellis"
+version = "0.12.0"
+digest = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY"
+
+[packages.source]
+kind = "path"
+path = "."
+
+[[packages]]
+name = "demo-service"
+version = "1.0.0"
+digest = "xSE-gdBFo_5s8gRCS9_IkNFYJsVpl2OC_o98Xr6s-jw"
+distribution-digest = "sha256:783e1d499f1b909b0f13a3689c57c5e45a64e21efa7634f55e926e4628fa0be7"
+dependencies = []
+
+[packages.source]
+kind = "path"
+path = "./../../ts/service"
+
+[[packages]]
+name = "trellis"
+version = "0.12.0"
+digest = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY"
+distribution-digest = "sha256:cc15320aca48e1019f205d4ab4f31de0780b27d27480169913d30b30f3677721"
+dependencies = []
+
+[packages.source]
+kind = "path"
+path = "./../../../rust/crates/runtime"

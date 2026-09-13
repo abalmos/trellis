@@ -37,8 +37,15 @@ The test package is only needed to run the live test.
 Create `trellis.toml`:
 
 ```toml
-format = 1
-name = "orders-trellis"
+[package]
+name = "orders"
+version = "1.0.0"
+
+[sources]
+orders = "contract.trellis"
+
+[generate.typescript]
+output = "trellis"
 ```
 
 The tutorial defines its provider and caller API in the same project, so no

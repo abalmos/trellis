@@ -1,5 +1,6 @@
 {
   "imports": {
     "@qlever-llc/trellis": "../../../ts/packages/trellis/index.ts"
-  }
+  },
+  "compilerOptions": { "lib": ["deno.ns", "dom", "dom.iterable", "esnext"] }
 }

@@ -59,7 +59,7 @@ impl AuthorizationContextCache {
             context: bundle,
             routing,
             runtime,
-            api_bindings: _,
+            api_bindings,
             server_clock_offset_ms,
             authorization,
         } = installation;
@@ -86,7 +86,9 @@ impl AuthorizationContextCache {
                     && context.identity_key_id.as_deref() == Some(identity.key_id().as_str())
                     && context.login_session_id.is_none()
             }
-            AuthorizationCredential::User { login_session_id } => {
+            AuthorizationCredential::User {
+                login_session_id, ..
+            } => {
                 context.principal_kind == trellis_protocol::AuthorizationPrincipalKind::User
                     && context.login_session_id.as_deref() == Some(login_session_id.as_str())
                     && context.identity_key_id.is_none()
@@ -139,9 +141,10 @@ impl AuthorizationContextCache {
             .map(serde_json::from_value)
             .transpose()?
             .unwrap_or_default();
-        let availability = crate::generated::AvailabilitySnapshot::new(
+        let availability = crate::generated::AvailabilitySnapshot::replacing(
             context.grants.permissions().to_vec(),
             resources,
+            &self.availability.borrow(),
         );
         let current = CurrentContext {
             context_digest: verified.context_digest().to_owned(),
@@ -158,6 +161,7 @@ impl AuthorizationContextCache {
             current: Some(current),
             runtime: Some(runtime),
             routing: Some(routing),
+            api_bindings,
             server_clock_offset_ms,
             authorization,
         };
@@ -173,6 +177,7 @@ impl AuthorizationContextCache {
             .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))?;
         state.current = None;
         state.routing = None;
+        state.api_bindings.clear();
         Ok(())
     }
 
@@ -269,6 +274,21 @@ impl AuthorizationContextCache {
         self.state_snapshot()?.runtime.ok_or_else(|| {
             TrellisClientError::Bootstrap("authorization runtime unavailable".into())
         })
+    }
+
+    pub(crate) fn provider_deployment_id(
+        &self,
+        api_id: &str,
+    ) -> Result<String, TrellisClientError> {
+        self.state_snapshot()?
+            .api_bindings
+            .get(api_id)
+            .map(|binding| binding.provider_deployment_id.clone())
+            .ok_or_else(|| {
+                TrellisClientError::AuthorizationUnavailable(format!(
+                    "bootstrap did not bind API '{api_id}' to a provider deployment"
+                ))
+            })
     }
 
     pub(crate) fn corrected_now_seconds(&self) -> Result<i64, TrellisClientError> {

@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use trellis_idl::{
-    api_digest, compile_evidence, participant_digest, selected_permission_atoms, ActionDefinition,
-    ActionKind, PackageEvidence, ResourceDefinition,
+    api_digest, capability_consent_digest, compile_evidence, participant_digest,
+    selected_permission_atoms, ActionDefinition, ActionKind, PackageEvidence, ResourceDefinition,
 };
 use trellis_protocol::{
     GrantSet, ParticipantKind, ParticipantResourceKind, PermissionAction, PermissionAtom,
@@ -99,6 +99,9 @@ pub(crate) struct ParticipantRuntimeProjection {
     pub optional_grant_bundles: BTreeMap<String, GrantSet>,
     pub required_capabilities: Vec<String>,
     pub optional_capability_definitions: BTreeMap<String, GrantSet>,
+    pub companion_participant_id: Option<String>,
+    pub companion_participant_kind: Option<ParticipantKind>,
+    pub companion_required: bool,
 }
 
 impl ParticipantRuntimeProjection {
@@ -133,6 +136,9 @@ pub(crate) struct ApiRuntimeProjection {
 pub(crate) struct CapabilityRuntimeProjection {
     pub display_name: String,
     pub description: String,
+    pub consequence: String,
+    pub consent_digest: String,
+    pub public: bool,
     pub allows: Vec<PermissionAtom>,
 }
 
@@ -159,6 +165,9 @@ pub(crate) enum RuntimeActionKind {
 pub(crate) struct ResourceRuntimeProjection {
     pub kind: ParticipantResourceKind,
     pub optional: bool,
+    pub title: String,
+    pub description: String,
+    pub representation: Option<ResourceRepresentationRuntimeProjection>,
     pub history: Option<u64>,
     pub ttl_ms: Option<u64>,
     pub desired_max_value: Option<u64>,
@@ -168,11 +177,21 @@ pub(crate) struct ResourceRuntimeProjection {
     pub payload_schema: Option<String>,
     pub result_schema: Option<String>,
     pub update_schema: Option<String>,
+    pub job_key_path: Option<Vec<String>>,
+    pub job_key_policy: Option<String>,
     pub retry_attempts: Option<u32>,
     pub retry_backoff_ms: Vec<u64>,
     pub consumer_events: BTreeMap<String, Vec<String>>,
     pub consumer_concurrency: Option<u32>,
     pub consumer_replay_all: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ResourceRepresentationRuntimeProjection {
+    pub schema: serde_json::Value,
+    pub version: u32,
+    pub accepts: BTreeMap<u32, serde_json::Value>,
 }
 
 pub(crate) fn verify_package_evidence(
@@ -206,12 +225,7 @@ pub(crate) fn verify_package_evidence(
             ))
         })?;
     let participant_id = participant.identity().as_str().to_owned();
-    let participant_kind = match participant.kind() {
-        trellis_idl::ParticipantKind::Service => ParticipantKind::Service,
-        trellis_idl::ParticipantKind::Device => ParticipantKind::Device,
-        trellis_idl::ParticipantKind::App => ParticipantKind::App,
-        trellis_idl::ParticipantKind::Agent => ParticipantKind::Agent,
-    };
+    let participant_kind = project_participant_kind(participant.kind());
     let mut referenced_apis = BTreeMap::new();
     for api_id in participant
         .implements()
@@ -261,12 +275,32 @@ pub(crate) fn verify_package_evidence(
         .collect::<BTreeSet<_>>();
     let mut resources = BTreeMap::new();
     for (name, resource) in participant.resources() {
-        let (projection, _) = project_resource(resource);
+        let (projection, _) = project_resource(&graph, resource)?;
         resources.insert(name.as_str().to_owned(), projection);
     }
     let optional_grant_bundles = needs.optional_grants().clone();
     let participant_digest = participant_digest(&graph, participant.identity())
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let companion = participant
+        .companion()
+        .map(|companion| {
+            let nested = graph
+                .packages()
+                .values()
+                .find_map(|package| package.participants().get(&companion.participant))
+                .ok_or_else(|| {
+                    AuthorizationStateError::InvalidRecord(format!(
+                        "companion participant '{}' is absent from package evidence",
+                        companion.participant
+                    ))
+                })?;
+            Ok::<_, AuthorizationStateError>((
+                companion.participant.as_str().to_owned(),
+                project_participant_kind(nested.kind()),
+                !companion.optional,
+            ))
+        })
+        .transpose()?;
     Ok((
         participant_digest,
         needs.digest().to_owned(),
@@ -289,6 +323,9 @@ pub(crate) fn verify_package_evidence(
                 .iter()
                 .map(|capability| capability.as_str().to_owned())
                 .collect(),
+            companion_participant_id: companion.as_ref().map(|value| value.0.clone()),
+            companion_participant_kind: companion.as_ref().map(|value| value.1),
+            companion_required: companion.is_some_and(|value| value.2),
         },
         evidence_json,
     ))
@@ -339,6 +376,11 @@ fn project_api(
                     CapabilityRuntimeProjection {
                         display_name: capability.title.clone(),
                         description: capability.description.clone(),
+                        consequence: capability.consequence.clone(),
+                        consent_digest: capability_consent_digest(graph, id).map_err(|error| {
+                            AuthorizationStateError::InvalidRecord(error.to_string())
+                        })?,
+                        public: capability.public,
                         allows: capability
                             .allows
                             .iter()
@@ -359,11 +401,15 @@ fn project_api(
 }
 
 fn project_resource(
+    graph: &trellis_idl::PackageGraph,
     resource: &ResourceDefinition,
-) -> (ResourceRuntimeProjection, Vec<PermissionAction>) {
+) -> Result<(ResourceRuntimeProjection, Vec<PermissionAction>), AuthorizationStateError> {
     let mut projection = ResourceRuntimeProjection {
         kind: ParticipantResourceKind::State,
         optional: false,
+        title: String::new(),
+        description: String::new(),
+        representation: None,
         history: None,
         ttl_ms: None,
         desired_max_value: None,
@@ -373,6 +419,8 @@ fn project_resource(
         payload_schema: None,
         result_schema: None,
         update_schema: None,
+        job_key_path: None,
+        job_key_policy: None,
         retry_attempts: None,
         retry_backoff_ms: Vec::new(),
         consumer_events: BTreeMap::new(),
@@ -380,8 +428,18 @@ fn project_resource(
         consumer_replay_all: false,
     };
     let actions = match resource {
-        ResourceDefinition::State { optional, .. } => {
+        ResourceDefinition::State {
+            optional,
+            docs,
+            schema,
+            version,
+            accepts,
+        } => {
             projection.optional = *optional;
+            projection.title.clone_from(&docs.title);
+            projection.description.clone_from(&docs.description);
+            projection.representation =
+                Some(project_representation(graph, schema, *version, accepts)?);
             vec![
                 PermissionAction::Read,
                 PermissionAction::Write,
@@ -390,6 +448,10 @@ fn project_resource(
         }
         ResourceDefinition::Kv {
             optional,
+            docs,
+            schema,
+            version,
+            accepts,
             history,
             ttl_ms,
             desired_max_value,
@@ -397,6 +459,10 @@ fn project_resource(
         } => {
             projection.kind = ParticipantResourceKind::Kv;
             projection.optional = *optional;
+            projection.title.clone_from(&docs.title);
+            projection.description.clone_from(&docs.description);
+            projection.representation =
+                Some(project_representation(graph, schema, *version, accepts)?);
             projection.history = Some(*history);
             projection.ttl_ms = Some(*ttl_ms);
             projection.desired_max_value = *desired_max_value;
@@ -408,6 +474,7 @@ fn project_resource(
         }
         ResourceDefinition::Store {
             optional,
+            docs,
             ttl_ms,
             desired_max_object,
             desired_max_total,
@@ -415,6 +482,8 @@ fn project_resource(
         } => {
             projection.kind = ParticipantResourceKind::Store;
             projection.optional = *optional;
+            projection.title.clone_from(&docs.title);
+            projection.description.clone_from(&docs.description);
             projection.ttl_ms = Some(*ttl_ms);
             projection.desired_max_object = *desired_max_object;
             projection.desired_max_total = *desired_max_total;
@@ -426,27 +495,35 @@ fn project_resource(
         }
         ResourceDefinition::Job {
             optional,
+            docs,
             payload,
             result,
             update,
-            deadline_ms,
-            retry,
-            ..
+            key_concurrency,
         } => {
             projection.kind = ParticipantResourceKind::JobQueue;
             projection.optional = *optional;
-            projection.deadline_ms = *deadline_ms;
+            projection.title.clone_from(&docs.title);
+            projection.description.clone_from(&docs.description);
             projection.payload_schema = Some(payload.id.as_str().to_owned());
             projection.result_schema = result.as_ref().map(|value| value.id.as_str().to_owned());
             projection.update_schema = update.as_ref().map(|value| value.id.as_str().to_owned());
-            if let Some(retry) = retry {
-                projection.retry_attempts = Some(retry.attempts);
-                projection.retry_backoff_ms = retry.backoff_ms.clone();
+            if let Some(key_concurrency) = key_concurrency {
+                projection.job_key_path = Some(key_concurrency.path.clone());
+                projection.job_key_policy = Some(
+                    match key_concurrency.policy {
+                        trellis_idl::KeyConcurrencyPolicy::Queue => "queue",
+                        trellis_idl::KeyConcurrencyPolicy::Reject => "reject",
+                        trellis_idl::KeyConcurrencyPolicy::Supersede => "supersede",
+                    }
+                    .to_owned(),
+                );
             }
             vec![PermissionAction::Submit, PermissionAction::Process]
         }
         ResourceDefinition::Consumer {
             optional,
+            docs,
             events,
             concurrency,
             replay,
@@ -455,6 +532,8 @@ fn project_resource(
         } => {
             projection.kind = ParticipantResourceKind::EventConsumer;
             projection.optional = *optional;
+            projection.title.clone_from(&docs.title);
+            projection.description.clone_from(&docs.description);
             projection.consumer_concurrency = Some(*concurrency);
             projection.consumer_replay_all = matches!(replay, trellis_idl::Replay::All);
             for (api, event) in events {
@@ -471,7 +550,31 @@ fn project_resource(
             vec![PermissionAction::Consume]
         }
     };
-    (projection, actions)
+    Ok((projection, actions))
+}
+
+fn project_representation(
+    graph: &trellis_idl::PackageGraph,
+    schema: &trellis_idl::TypeRef,
+    version: u32,
+    accepts: &[trellis_idl::HistoricRepresentation],
+) -> Result<ResourceRepresentationRuntimeProjection, AuthorizationStateError> {
+    Ok(ResourceRepresentationRuntimeProjection {
+        schema: trellis_idl::json_schema(graph, schema)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+        version,
+        accepts: accepts
+            .iter()
+            .map(|accepted| {
+                Ok((
+                    accepted.version,
+                    trellis_idl::json_schema(graph, &accepted.ty).map_err(|error| {
+                        AuthorizationStateError::InvalidRecord(error.to_string())
+                    })?,
+                ))
+            })
+            .collect::<Result<_, AuthorizationStateError>>()?,
+    })
 }
 
 fn action_kind(kind: ActionKind) -> &'static str {
@@ -483,13 +586,24 @@ fn action_kind(kind: ActionKind) -> &'static str {
     }
 }
 
-fn protocol(error: trellis_protocol::ProtocolError) -> AuthorizationStateError {
-    AuthorizationStateError::InvalidRecord(error.to_string())
+fn project_participant_kind(kind: trellis_idl::ParticipantKind) -> ParticipantKind {
+    match kind {
+        trellis_idl::ParticipantKind::Service => ParticipantKind::Service,
+        trellis_idl::ParticipantKind::Device => ParticipantKind::Device,
+        trellis_idl::ParticipantKind::App => ParticipantKind::App,
+        trellis_idl::ParticipantKind::Agent => ParticipantKind::Agent,
+    }
+}
+
+fn invalid<T>(message: impl Into<String>) -> Result<T, AuthorizationStateError> {
+    Err(AuthorizationStateError::InvalidRecord(message.into()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use trellis_idl::{canonical_package, compile_project, CanonicalMode, SourceUnit};
     use trellis_rs::generated::ParticipantDescriptor;
 
     fn generated_platform_evidence() -> PackageEvidenceInput {
@@ -500,6 +614,70 @@ mod tests {
             trellis_runtime_apis::participants::trellis_platform::PARTICIPANT_PATH,
         )
         .expect("decode native evidence")
+    }
+
+    fn resource_evidence() -> PackageEvidenceInput {
+        let manifest: trellis_idl::project::PackageManifest = toml::from_str(
+            r#"
+[package]
+name = "evidence-test"
+version = "1.0.0"
+
+[sources]
+main = "main.trellis"
+"#,
+        )
+        .expect("manifest");
+        let graph = compile_project(
+            &manifest,
+            vec![SourceUnit {
+                alias: "main".into(),
+                path: PathBuf::from("main.trellis"),
+                source: r#"
+type Previous = string;
+type Current = string(min_length=1);
+device Sensor {
+  state settings {
+    title "Settings";
+    description "Stored settings.";
+    schema Current;
+    version 2;
+    accepts { 1: Previous; }
+  }
+  kv cache {
+    title "Cache";
+    description "Stored cache entries.";
+    schema Current;
+    version 3;
+    accepts { 1: Previous; 2: Current; }
+    history 4;
+    ttl 5m;
+  }
+  app Operator {}
+}
+"#
+                .into(),
+            }],
+            BTreeMap::new(),
+        )
+        .expect("compile package");
+        let source = canonical_package(&graph, graph.root(), CanonicalMode::Presentation)
+            .expect("canonical source");
+        let digest = graph.root_digest().to_owned();
+        PackageEvidenceInput {
+            package_evidence: PackageEvidence {
+                root_package: manifest.package.name.clone(),
+                root_digest: digest.clone(),
+                packages: vec![trellis_idl::PackageSourceEvidence {
+                    name: manifest.package.name,
+                    version: manifest.package.version,
+                    digest: digest.clone(),
+                    source,
+                }],
+            },
+            participant_path: "Sensor".into(),
+            package_digest: digest,
+        }
     }
 
     #[test]
@@ -547,8 +725,48 @@ mod tests {
             .replacen("package \"trellis\";", "package \"forged\";", 1);
         assert!(verify_package_evidence(&evidence).is_err());
     }
-}
 
-fn invalid<T>(message: impl Into<String>) -> Result<T, AuthorizationStateError> {
-    Err(AuthorizationStateError::InvalidRecord(message.into()))
+    #[test]
+    fn verified_projection_round_trips_resource_representations_and_companion() {
+        let (_, _, projection, _) =
+            verify_package_evidence(&resource_evidence()).expect("verify evidence");
+        let projection: ParticipantRuntimeProjection =
+            serde_json::from_value(serde_json::to_value(projection).expect("serialize projection"))
+                .expect("deserialize projection");
+
+        let state = projection.resources["settings"]
+            .representation
+            .as_ref()
+            .expect("State representation");
+        assert_eq!(state.version, 2);
+        assert_eq!(state.accepts.keys().copied().collect::<Vec<_>>(), [1]);
+        assert_ne!(state.schema, state.accepts[&1]);
+
+        let kv = projection.resources["cache"]
+            .representation
+            .as_ref()
+            .expect("KV representation");
+        assert_eq!(kv.version, 3);
+        assert_eq!(kv.accepts.keys().copied().collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(
+            projection.companion_participant_id.as_deref(),
+            Some("evidence-test.Sensor.Operator")
+        );
+        assert_eq!(
+            projection.companion_participant_kind,
+            Some(ParticipantKind::App)
+        );
+        assert!(projection.companion_required);
+    }
+
+    #[test]
+    fn package_digest_and_participant_path_are_verified_as_one_pair() {
+        let mut evidence = resource_evidence();
+        evidence.participant_path = "Other".into();
+        assert!(verify_package_evidence(&evidence).is_err());
+
+        let mut evidence = resource_evidence();
+        evidence.package_digest = "x".repeat(43);
+        assert!(verify_package_evidence(&evidence).is_err());
+    }
 }

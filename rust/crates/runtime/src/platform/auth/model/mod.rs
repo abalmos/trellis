@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 mod validation;
 use serde_json::Value;
+use trellis_rs::client::EventDescriptor;
 pub(crate) use validation::{validate_provisioned_identity, validate_user_account_replacement};
 
 use super::domain::PrincipalKind;
@@ -487,9 +488,11 @@ pub enum PostCommitActionKind {
     ContextPublish,
     /// Publish one authorization-context revocation entry.
     ContextRevoke,
+    /// Reconcile one committed resource approval with its physical provider.
+    ResourceReconcile,
 }
 
-/// Durable post-commit event or connection-kick intent.
+/// Durable post-commit side-effect intent.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostCommitActionRecord {
@@ -513,6 +516,68 @@ pub struct PostCommitActionRecord {
     pub last_error: Option<String>,
 }
 
+pub(crate) fn auth_event_subject<D: EventDescriptor>(
+    payload: &Value,
+) -> Result<String, AuthorizationStateError> {
+    trellis_rs::client::resolve_subject(D::SUBJECT, payload)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
+}
+
+pub(crate) fn connection_event_action<D: EventDescriptor>(
+    connection: &super::AuthConnectionPresence,
+    event_type: &str,
+    suffix: &str,
+    reason: Option<&str>,
+    now: i64,
+) -> Result<PostCommitActionRecord, AuthorizationStateError> {
+    let action_id = trellis_protocol::digest_json(&serde_json::json!({
+        "connectionId": connection.connection_id,
+        "event": suffix,
+    }))
+    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let mut payload = serde_json::json!({
+        "eventType": event_type,
+        "eventId": format!("evt_{action_id}"),
+        "occurredAt": now.to_string(),
+        "connectionId": connection.connection_id,
+        "sessionId": connection.runtime_connection_id,
+        "principalId": connection.principal_id,
+        "participantId": connection.participant_id,
+        "reason": reason,
+    });
+    if event_type == "Auth.Connections.Opened" {
+        payload
+            .as_object_mut()
+            .expect("connection event payload is an object")
+            .extend([
+                (
+                    "serverId".to_owned(),
+                    serde_json::json!(connection.server_id),
+                ),
+                (
+                    "clientId".to_owned(),
+                    serde_json::json!(connection.client_id),
+                ),
+            ]);
+        payload
+            .as_object_mut()
+            .expect("connection event payload is an object")
+            .remove("reason");
+    }
+    payload["eventSubject"] = serde_json::json!(auth_event_subject::<D>(&payload)?);
+    Ok(PostCommitActionRecord {
+        predecessor_action_id: None,
+        action_id,
+        kind: PostCommitActionKind::Event,
+        payload,
+        created_at: now,
+        attempts: 0,
+        next_attempt_at: now,
+        claimed_until: None,
+        last_error: None,
+    })
+}
+
 pub(crate) fn activation_review_event_action_id(
     review_id: &str,
     event: &str,
@@ -533,7 +598,6 @@ pub(crate) fn activation_review_event(
 ) -> Result<PostCommitActionRecord, AuthorizationStateError> {
     let mut payload = serde_json::json!({
         "eventType": event_type,
-        "eventSubject": format!("events.v1.{event_type}.{}", review.deployment_id),
         "eventId": format!("evt_{}_{}", review.review_id, suffix),
         "occurredAt": now,
         "deploymentId": review.deployment_id,
@@ -552,6 +616,9 @@ pub(crate) fn activation_review_event(
                 })?
                 .clone(),
         );
+    payload["eventSubject"] = serde_json::json!(auth_event_subject::<
+        trellis_runtime_apis::apis::trellis_auth_v1::events::DeviceUserAuthoritiesResolved,
+    >(&payload)?);
     Ok(PostCommitActionRecord {
         predecessor_action_id: None,
         action_id: activation_review_event_action_id(&review.review_id, suffix)?,
@@ -563,4 +630,53 @@ pub(crate) fn activation_review_event(
         claimed_until: None,
         last_error: None,
     })
+}
+
+#[cfg(test)]
+mod event_subject_tests {
+    use super::*;
+    use trellis_runtime_apis::apis::trellis_auth_v1::events::{
+        ConnectionsClosed, ConnectionsKicked, ConnectionsOpened, DeviceUserAuthoritiesApproved,
+        DeviceUserAuthoritiesRequested, DeviceUserAuthoritiesResolved,
+        DeviceUserAuthoritiesReviewRequested, GrantsChanged, IssuersRevoked, SessionsRevoked,
+    };
+
+    #[test]
+    fn auth_post_commit_subjects_are_qualified_and_parameter_tokens_are_canonical() {
+        let payload = serde_json::json!({ "deploymentId": "dep.one~* >" });
+        let qualified = "events.v1.dHJlbGxpcy5hdXRoQHYx";
+        assert_eq!(
+            auth_event_subject::<GrantsChanged>(&payload).unwrap(),
+            format!("{qualified}.Grants.Changed")
+        );
+        assert_eq!(
+            auth_event_subject::<IssuersRevoked>(&payload).unwrap(),
+            format!("{qualified}.Issuers.Revoked")
+        );
+        assert_eq!(
+            auth_event_subject::<SessionsRevoked>(&payload).unwrap(),
+            format!("{qualified}.Sessions.Revoked")
+        );
+        assert_eq!(
+            auth_event_subject::<ConnectionsOpened>(&payload).unwrap(),
+            format!("{qualified}.Connections.Opened")
+        );
+        assert_eq!(
+            auth_event_subject::<ConnectionsClosed>(&payload).unwrap(),
+            format!("{qualified}.Connections.Closed")
+        );
+        assert_eq!(
+            auth_event_subject::<ConnectionsKicked>(&payload).unwrap(),
+            format!("{qualified}.Connections.Kicked")
+        );
+        for subject in [
+            auth_event_subject::<DeviceUserAuthoritiesApproved>(&payload).unwrap(),
+            auth_event_subject::<DeviceUserAuthoritiesRequested>(&payload).unwrap(),
+            auth_event_subject::<DeviceUserAuthoritiesResolved>(&payload).unwrap(),
+            auth_event_subject::<DeviceUserAuthoritiesReviewRequested>(&payload).unwrap(),
+        ] {
+            assert!(subject.starts_with(&format!("{qualified}.DeviceUserAuthorities.")));
+            assert!(subject.ends_with("ZGVwLm9uZX4qID4"));
+        }
+    }
 }

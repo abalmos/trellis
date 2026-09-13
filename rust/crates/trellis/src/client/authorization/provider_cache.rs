@@ -155,6 +155,21 @@ pub struct AuthorizationProviderCache {
 }
 
 impl AuthorizationProviderCache {
+    pub(crate) fn current_context_allows(
+        &self,
+        digest: &str,
+        permission: &trellis_protocol::PermissionAtom,
+    ) -> bool {
+        self.health().is_ok()
+            && self.revocation_time(digest).ok().flatten().is_none()
+            && self
+                .lease_cached_context(digest, false)
+                .ok()
+                .flatten()
+                .is_some_and(|context| context.allows(permission))
+            && self.revocation_time(digest).ok().flatten().is_none()
+    }
+
     pub(crate) async fn attach(
         nats: async_nats::Client,
         binding: &AuthorizationRegistryBinding,

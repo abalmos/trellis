@@ -55,7 +55,7 @@ podman run --rm \
 Bootstrap proves the identity and a fresh session key. Trellis resolves the
 deployment/instance assignment, exact installed participant/APIs, current
 grant, resource evidence, signed context, route JWT, inbox, and NATS endpoints.
-Do not mount NATS administrator credentials, participant digests, deployment
+Do not mount NATS administrator credentials, semantic digests, deployment
 IDs, instance IDs, resource bindings, or authorization-context files.
 
 ## 5. Upgrade

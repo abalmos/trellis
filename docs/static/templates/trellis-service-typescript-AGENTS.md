@@ -16,17 +16,17 @@ Current public APIs are linked from `/api` on the Trellis docs site.
 
 - Author native IDL and use `trellis update`, `trellis install`, and
   `trellis generate` for dependency resolution, reproduction, and generation.
-- Set `format = 1` and a local package `name` in `trellis.toml`. One TypeScript
-  package defaults to `trellis/`, with executable ESM JavaScript, declarations,
-  and `apis` and `participants` namespaces. Its version is `0.0.0` and its
-  published runtime dependency matches the CLI.
+- Set `[package]`, `[sources]`, and `[generate.typescript].output`. One
+  TypeScript package defaults to `trellis/`, with executable ESM JavaScript,
+  declarations, and `apis` and `participants` namespaces. Its version is the
+  source package version and its published runtime dependency matches the CLI.
 - Commit IDL, `trellis.toml`, and `trellis.lock`. Commit generated output when
-  ordinary clones must build without the CLI or API cache; regenerate rather
-  than hand-editing it. No consumer transpiler or generated Deno config is
-  needed.
-- Services connect with `TrellisService` from `/service/deno` or `/service/node`
-  and their generated participant. Generated flat `handle...`, `publish...`,
-  `on...`, and caller methods depend on the declared actions.
+  ordinary clones must build without the CLI or source-package cache; regenerate
+  rather than hand-editing it. No consumer transpiler or generated Deno config
+  is needed.
+- Services connect with `TrellisService` from `/service` and their generated
+  participant. Generated flat `handle...`, `publish...`, `on...`, and caller
+  methods depend on the declared actions.
 - Use resolved `service.kv`, `service.store`, and `service.jobs` handles for
   Trellis resources, not handwritten binding or transport payloads.
 - Handlers receive Trellis-owned arguments. Application dependencies can be

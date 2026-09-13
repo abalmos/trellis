@@ -22,13 +22,15 @@ use trellis_rs::service::{
     internal::run_builtin_authenticated_router, DeclaredRpcError, Router, ServerError,
 };
 use trellis_runtime_apis::__types::trellis::HealthHeartbeatSample;
+use trellis_runtime_apis::apis::trellis_health_v1::events::StatusChanged as HealthStatusChangedEvent;
 use trellis_runtime_apis::apis::trellis_health_v1::feeds::Watch as HealthWatchFeedDescriptor;
 use trellis_runtime_apis::apis::trellis_health_v1::rpc::{
     Inspect as HealthInspectRpc, Metrics as HealthMetricsRpc, Query as HealthQueryRpc,
+    Summary as HealthSummaryRpc,
 };
 use trellis_runtime_apis::types::{
-    Bytes as WireBytes, HealthQueryRequestLimit, HealthWatchFrame,
-    HealthWatchRequest as HealthWatchInput, Int64, Uint64,
+    Bytes as WireBytes, HealthSummaryRequest, HealthWatchFrame,
+    HealthWatchRequest as HealthWatchInput,
 };
 use ulid::Ulid;
 
@@ -41,7 +43,6 @@ use self::store::{HealthStore, HeartbeatIdentity, ProjectionCommit};
 
 pub(crate) const HEALTH_STREAM: &str = "TRELLIS_HEALTH";
 pub(crate) const HEALTH_SUBJECT: &str = "health.v1.heartbeat.>";
-const STATUS_CHANGED_SUBJECT: &str = "events.v1.Health.StatusChanged";
 const INVALIDATION_PREFIX: &str = "health.v1.invalidation";
 const EVENT_TIME_HEADER: &str = "Trellis-Event-Time";
 pub(crate) const DEFAULT_TRANSPORT_RETENTION_HOURS: u64 = 24;
@@ -51,6 +52,7 @@ const RPC_SUBJECTS: &[&str] = &[
     "rpc.v1.Health.Query",
     "rpc.v1.Health.Inspect",
     "rpc.v1.Health.Metrics",
+    "rpc.v1.Health.Summary",
     "feed.v1.Health.Watch",
 ];
 
@@ -191,10 +193,16 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
 
 fn build_router(store: HealthStore, invalidations: broadcast::Sender<Invalidation>) -> Router {
     let mut router = Router::new();
+    router.set_provider_deployment_id("dep_trellis_health_runtime");
     let query_store = store.clone();
     router.register_rpc::<HealthQueryRpc, _, _>(move |_context, input| {
         let store = query_store.clone();
         async move { store.query(&input, now_ns()).map_err(map_store_error) }
+    });
+    let summary_store = store.clone();
+    router.register_rpc::<HealthSummaryRpc, _, _>(move |_context, input| {
+        let store = summary_store.clone();
+        async move { store.summary(&input, now_ns()).map_err(map_store_error) }
     });
     let inspect_store = store.clone();
     router.register_rpc::<HealthInspectRpc, _, _>(move |_context, input| {
@@ -508,7 +516,7 @@ async fn publish_outbox(
         let headers = transition_headers(auth, context_digest, &transition)?;
         match jetstream
             .publish_with_headers(
-                STATUS_CHANGED_SUBJECT.to_string(),
+                HealthStatusChangedEvent::SUBJECT.to_string(),
                 headers,
                 Bytes::from(transition.payload),
             )
@@ -539,12 +547,17 @@ fn transition_headers(
     let mut headers = HeaderMap::new();
     headers.insert("Nats-Msg-Id", transition.event_id.as_str());
     headers.insert(EVENT_TIME_HEADER, event_time.as_str());
+    let descriptor_identity =
+        <HealthStatusChangedEvent as trellis_rs::client::EventDescriptor>::descriptor_identity()
+            .map_err(|error| RuntimeError::Health(error.to_string()))?;
+    headers.insert("Trellis-Event-Descriptor", descriptor_identity.as_str());
     headers.insert("authorization-context", context_digest);
     headers.insert(
         "proof",
         auth.create_event_proof(
             context_digest,
-            STATUS_CHANGED_SUBJECT,
+            &descriptor_identity,
+            HealthStatusChangedEvent::SUBJECT,
             &transition.payload,
             &transition.event_id,
             &event_time,
@@ -630,12 +643,10 @@ fn decode_token(token: &str) -> Result<String, String> {
 
 fn current_revision(store: &HealthStore) -> Result<i64, RuntimeError> {
     let response = store
-        .query(
-            &trellis_runtime_apis::types::HealthQueryRequest {
+        .summary(
+            &HealthSummaryRequest {
                 contract_ids: None,
                 deployment_ids: None,
-                limit: Some(HealthQueryRequestLimit(Int64(1))),
-                offset: Some(Uint64(0)),
                 participant_kinds: None,
                 search: None,
                 statuses: None,
@@ -647,7 +658,15 @@ fn current_revision(store: &HealthStore) -> Result<i64, RuntimeError> {
 }
 
 fn map_store_error(error: store::HealthStoreError) -> ServerError {
-    ServerError::Nats(error.to_string())
+    if matches!(error, store::HealthStoreError::InvalidPagination) {
+        ServerError::DeclaredRpc(DeclaredRpcError::new(
+            "ValidationError",
+            error.to_string(),
+            std::iter::empty::<(&str, Value)>(),
+        ))
+    } else {
+        ServerError::Nats(error.to_string())
+    }
 }
 
 fn map_runtime_store_error(error: store::HealthStoreError) -> RuntimeError {
@@ -661,7 +680,7 @@ fn now_ns() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use trellis_rs::client::verify_event_proof;
+    use trellis_rs::client::{verify_event_proof, VerifyEventProofInput};
 
     #[test]
     fn heartbeat_subject_identity_is_authoritative() {
@@ -674,7 +693,7 @@ mod tests {
                 "contractId": "trellis.jobs@v1",
                 "contractDigest": "digest-alpha",
                 "startedAt": "2026-01-01T00:00:00Z",
-                "publishIntervalMs": 30000,
+                "publishIntervalMs": "30000",
                 "runtime": "rust"
             },
             "reportedStatus": "healthy",
@@ -713,15 +732,19 @@ mod tests {
         let event_time = headers.get(EVENT_TIME_HEADER).expect("event time").as_str();
         let proof = headers.get("proof").expect("proof").as_str();
 
-        assert!(verify_event_proof(
-            &auth.session_key,
+        assert!(verify_event_proof(VerifyEventProofInput {
+            public_session_key: &auth.session_key,
             context_digest,
-            STATUS_CHANGED_SUBJECT,
-            &transition.payload,
-            &transition.event_id,
+            descriptor_identity: headers
+                .get("Trellis-Event-Descriptor")
+                .expect("event descriptor")
+                .as_str(),
+            subject: HealthStatusChangedEvent::SUBJECT,
+            payload: &transition.payload,
+            event_id: &transition.event_id,
             event_time,
-            proof,
-        )
+            proof_base64url: proof,
+        })
         .expect("verify event proof"));
     }
 }

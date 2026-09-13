@@ -15,7 +15,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Deployment = apis.auth.AuthDeploymentsListOutput["entries"][number];
+  type Deployment = apis.auth.DeploymentsListOutput["items"][number];
 
   const trellis = getTrellis();
   const notifications = getNotifications();
@@ -34,9 +34,9 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDeploymentsList({ kind: "device", state: "active", limit: 100 }).take();
+      const response = await trellis.deploymentsList({ kind: "device", state: "active", limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
-      const loadedDeployments = (response.entries ?? []).filter((deployment): deployment is Deployment => deployment.kind === "device");
+      const loadedDeployments = (response.items ?? []).filter((deployment): deployment is Deployment => deployment.kind === "device");
       const loadedActiveDeployments = loadedDeployments.filter((deployment) => deployment.state === "active");
       deployments = loadedDeployments;
       if (selectedDeploymentId && !loadedActiveDeployments.some((deployment) => deployment.deploymentId === selectedDeploymentId)) {
@@ -57,12 +57,12 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authDeploymentsDisable({
+      const response = await trellis.deploymentsDisable({
         deploymentId: selectedDeployment.deploymentId,
         expectedVersion: selectedDeployment.version,
         idempotencyKey: ulid(),
         reason: null,
-      } satisfies apis.auth.AuthDeploymentsDisableInput,
+      } satisfies apis.auth.DeploymentsDisableInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device deployment ${selectedDeployment.deploymentId} disabled.`, "Disabled");

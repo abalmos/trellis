@@ -21,10 +21,10 @@
   import { bulkExpectedCount, bulkTargetDetails, runBulk, toggleAll, toggleId } from "$lib/bulk.ts";
   import { getTrellis } from "$lib/trellis";
 
-  type DeviceDeployment = apis.auth.AuthDeploymentsListOutput["entries"][number];
-  type DeviceInstance = apis.auth.AuthDevicesListOutput["entries"][number];
-  type Activation = apis.auth.AuthDeviceUserAuthoritiesListOutput["entries"][number];
-  type Review = apis.auth.AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
+  type DeviceDeployment = apis.auth.DeploymentsListOutput["items"][number];
+  type DeviceInstance = apis.auth.DevicesListOutput["items"][number];
+  type Activation = apis.auth.DeviceUserAuthoritiesListOutput["items"][number];
+  type Review = apis.auth.DeviceUserAuthoritiesReviewsListOutput["items"][number];
   type Tab = "instances" | "activations" | "reviews";
   type StatusVariant = "healthy" | "degraded" | "unhealthy" | "offline";
 
@@ -145,7 +145,7 @@
     bulkBusy = true;
     bulkResult = null;
     const outcome = await runBulk(targets, async (instance) => {
-      const response = await trellis.authDevicesDisable({
+      const response = await trellis.devicesDisable({
         expectedVersion: instance.version,
         idempotencyKey: ulid(),
         instanceId: instance.instanceId,
@@ -200,10 +200,10 @@
     error = null;
     try {
       const [deploymentsResponse, instancesResponse, activationsResponse, reviewsResponse] = await Promise.all([
-        trellis.authDeploymentsList({ kind: "device", limit: 100 }).take(),
-        trellis.authDevicesList({ limit: 100 }).take(),
-        trellis.authDeviceUserAuthoritiesList({ limit: 100 }).take(),
-        trellis.authDeviceUserAuthoritiesReviewsList({ limit: 100 }).take(),
+        trellis.deploymentsList({ kind: "device", limit: 100 }).take(),
+        trellis.devicesList({ limit: 100 }).take(),
+        trellis.deviceUserAuthoritiesList({ limit: 100 }).take(),
+        trellis.deviceUserAuthoritiesReviewsList({ limit: 100 }).take(),
       ]);
 
       if (isErr(deploymentsResponse)) { error = errorMessage(deploymentsResponse); return; }
@@ -211,10 +211,10 @@
       if (isErr(activationsResponse)) { error = errorMessage(activationsResponse); return; }
       if (isErr(reviewsResponse)) { error = errorMessage(reviewsResponse); return; }
 
-      deployments = (deploymentsResponse.entries ?? []).filter((deployment): deployment is DeviceDeployment => deployment.kind === "device");
-      instances = instancesResponse.entries ?? [];
-      activations = activationsResponse.entries ?? [];
-      reviews = reviewsResponse.entries ?? [];
+      deployments = (deploymentsResponse.items ?? []).filter((deployment): deployment is DeviceDeployment => deployment.kind === "device");
+      instances = instancesResponse.items ?? [];
+      activations = activationsResponse.items ?? [];
+      reviews = reviewsResponse.items ?? [];
       syncSelectedDeployment(deployments);
       if (selectedReviewId && !reviews.some((review) => review.reviewId === selectedReviewId)) selectedReviewId = null;
     } catch (cause) {

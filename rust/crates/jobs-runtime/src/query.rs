@@ -1,6 +1,7 @@
 //! SQLite-backed query and mutation helpers for the Jobs admin service.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::json;
@@ -35,7 +36,7 @@ use trellis_runtime_apis::types::{
     JobsQueryResponseentriesItem as JobsQueryResponseEntriesItem,
     JobsQueryResponsegroupsItem as JobsQueryResponseGroupsItem,
     JobsQueryResponsestats as JobsQueryResponseStats, JobsReplayDLQRequest, JobsReplayDLQResponse,
-    JobsRetryRequest, JobsRetryResponse,
+    JobsRetryRequest, JobsRetryResponse, JobsSummaryRequest, JobsSummaryResponse,
 };
 
 mod resources;
@@ -49,6 +50,7 @@ use crate::storage::{
     SqliteJobsStoreError,
 };
 use crate::worker_presence::WORKER_PRESENCE_FRESH_FOR;
+use crate::JobResourceResolver;
 
 pub use resources::jobs_admin_resources;
 pub use resources::JobsAdminResources;
@@ -91,14 +93,20 @@ pub enum JobsQueryError {
 pub struct JobsQuery {
     jobs_runtime: JobsRuntime,
     store: SqliteJobsStore,
+    resource_resolver: Arc<dyn JobResourceResolver>,
 }
 
 impl JobsQuery {
     /// Create a SQLite-backed Jobs query adapter with an already-open store.
-    pub fn with_store(jobs_runtime: JobsRuntime, store: SqliteJobsStore) -> Self {
+    pub fn with_store(
+        jobs_runtime: JobsRuntime,
+        store: SqliteJobsStore,
+        resource_resolver: Arc<dyn JobResourceResolver>,
+    ) -> Self {
         Self {
             jobs_runtime,
             store,
+            resource_resolver,
         }
     }
 
@@ -121,9 +129,34 @@ impl JobsQuery {
         request: &JobsListServicesRequest,
     ) -> Result<JobsListServicesResponse, JobsQueryError> {
         let started = Instant::now();
-        let (offset, limit) =
-            parse_page_request(request.offset.map(|value| value.0), request.limit.0 .0)?;
-        tracing::debug!(offset, limit, "jobs rpc list_services started");
+        let query_digest = pagination_digest("jobs.ListServices", request)?;
+        let limit = u64::from(
+            request
+                .page
+                .as_ref()
+                .and_then(|page| page.limit)
+                .unwrap_or(100),
+        );
+        if limit == 0 || limit > 500 {
+            return Err(JobsQueryError::Validation {
+                field: "page.limit",
+                details: "must be between 1 and 500".to_owned(),
+            });
+        }
+        let after = request
+            .page
+            .as_ref()
+            .and_then(|page| page.cursor.as_deref())
+            .map(|cursor| {
+                trellis_protocol::decode_pagination_cursor::<String>(cursor, &query_digest).map_err(
+                    |_| JobsQueryError::Validation {
+                        field: "page.cursor",
+                        details: "invalid pagination".to_owned(),
+                    },
+                )
+            })
+            .transpose()?;
+        tracing::debug!(after = ?after, limit, "jobs rpc list_services started");
         let now = OffsetDateTime::now_utc();
         let workers = self
             .with_projection(move |store| {
@@ -154,16 +187,27 @@ impl JobsQuery {
                 "jobs list services entry",
             )?);
         }
-        let count = u64::try_from(services.len()).unwrap_or(u64::MAX);
-        let services: Vec<_> = services
+        let mut services: Vec<_> = services
             .into_iter()
-            .skip(usize::try_from(offset).unwrap_or(usize::MAX))
-            .take(usize::try_from(limit).unwrap_or(usize::MAX))
+            .filter(|service| after.as_ref().is_none_or(|after| &service.name.0 > after))
+            .take(usize::try_from(limit + 1).unwrap_or(usize::MAX))
             .collect();
-        let next_offset = offset.checked_add(limit).filter(|next| *next < count);
+        let next_cursor = if services.len() > limit as usize {
+            services.pop();
+            services
+                .last()
+                .map(|service| {
+                    trellis_protocol::encode_pagination_cursor(&query_digest, &service.name.0)
+                })
+                .transpose()
+                .map_err(|_| JobsQueryError::Validation {
+                    field: "page.cursor",
+                    details: "invalid pagination".to_owned(),
+                })?
+        } else {
+            None
+        };
         tracing::debug!(
-            count,
-            offset,
             limit,
             elapsed_ms = started.elapsed().as_millis(),
             "jobs rpc list_services completed"
@@ -171,11 +215,8 @@ impl JobsQuery {
 
         wire::decode_wire(
             json!({
-                "count": count,
-                "entries": services,
-                "limit": limit,
-                "nextOffset": next_offset,
-                "offset": offset,
+                "items": services,
+                "page": { "nextCursor": next_cursor },
             }),
             "jobs list services response",
         )
@@ -187,8 +228,38 @@ impl JobsQuery {
         request: &JobsQueryRequest,
     ) -> Result<JobsQueryResponse, JobsQueryError> {
         let started = Instant::now();
-        let (offset, limit) =
-            parse_page_request(request.offset.map(|value| value.0), request.limit.0 .0)?;
+        let query_digest = pagination_digest("jobs.Query", request)?;
+        let limit = u64::from(
+            request
+                .page
+                .as_ref()
+                .and_then(|page| page.limit)
+                .unwrap_or(100),
+        );
+        if limit == 0 || limit > 500 {
+            return Err(JobsQueryError::Validation {
+                field: "page.limit",
+                details: "must be between 1 and 500".to_owned(),
+            });
+        }
+        let after = request
+            .page
+            .as_ref()
+            .and_then(|page| page.cursor.as_deref())
+            .map(|cursor| {
+                trellis_protocol::decode_pagination_cursor::<(
+                    Option<i64>,
+                    i64,
+                    String,
+                    String,
+                    String,
+                )>(cursor, &query_digest)
+                .map_err(|_| JobsQueryError::Validation {
+                    field: "page.cursor",
+                    details: "invalid pagination".to_owned(),
+                })
+            })
+            .transpose()?;
         let since = parse_window_filter(request.window.as_ref().map(AsRef::as_ref))?;
         tracing::debug!(
             service = ?request.service,
@@ -197,7 +268,7 @@ impl JobsQuery {
             window = ?request.window,
             group_by = ?request.group_by,
             search = request.search.is_some(),
-            offset,
+            after = ?after,
             limit,
             "jobs rpc query started"
         );
@@ -212,18 +283,24 @@ impl JobsQuery {
             trigger: request.trigger.clone(),
             sort: parse_workbench_sort(request.sort.as_ref())?,
             group_by: parse_group_by(request.group_by.as_ref().map(wire_token).as_deref())?,
-            offset,
+            after,
             limit,
         };
-        let (page, groups) = self
-            .with_projection(move |store| {
-                Ok((store.query_jobs(&filter)?, store.query_job_groups(&filter)?))
-            })
+        let page = self
+            .with_projection(move |store| Ok(store.query_jobs(&filter)?))
             .await?;
+        let next_cursor = page
+            .next_after
+            .as_ref()
+            .map(|after| trellis_protocol::encode_pagination_cursor(&query_digest, after))
+            .transpose()
+            .map_err(|_| JobsQueryError::Validation {
+                field: "page.cursor",
+                details: "invalid pagination".to_owned(),
+            })?;
         tracing::debug!(
             count = page.count,
             entries = page.entries.len(),
-            groups = groups.len(),
             elapsed_ms = started.elapsed().as_millis(),
             "jobs rpc query completed"
         );
@@ -233,21 +310,47 @@ impl JobsQuery {
             .iter()
             .map(workbench_entry_to_wire)
             .collect::<Result<Vec<_>, _>>()?;
-        let groups = groups
-            .iter()
-            .map(workbench_group_to_wire)
-            .collect::<Result<Vec<_>, _>>()?;
+        wire::decode_wire(
+            json!({
+                "items": entries,
+                "page": { "nextCursor": next_cursor },
+            }),
+            "jobs query response",
+        )
+    }
+
+    /// Summarize all projected jobs matching the generated `Jobs.Summary` filters.
+    pub async fn summary(
+        &self,
+        request: &JobsSummaryRequest,
+    ) -> Result<JobsSummaryResponse, JobsQueryError> {
+        let filter = JobsWorkbenchFilter {
+            service: request.service.as_ref().map(|value| value.0.clone()),
+            job_type: request.r#type.as_ref().map(|value| value.0.clone()),
+            states: parse_state_filter(request.state.as_ref())?,
+            since: parse_window_filter(request.window.as_deref())?,
+            search: request.search.clone(),
+            queue_key: request.queue_key.clone(),
+            runtime_band: request.runtime_band.as_ref().map(wire_token),
+            trigger: request.trigger.clone(),
+            sort: JobsWorkbenchSort::default(),
+            group_by: parse_group_by(request.group_by.as_ref().map(wire_token).as_deref())?,
+            after: None,
+            limit: 1,
+        };
+        let (page, groups) = self
+            .with_projection(move |store| {
+                Ok((store.query_jobs(&filter)?, store.query_job_groups(&filter)?))
+            })
+            .await?;
         wire::decode_wire(
             json!({
                 "count": page.count,
-                "entries": entries,
-                "groups": groups,
-                "limit": page.limit,
-                "nextOffset": page.next_offset,
-                "offset": page.offset,
+                "groups": groups.iter().map(workbench_group_to_wire)
+                    .collect::<Result<Vec<_>, _>>()?,
                 "stats": workbench_stats_to_wire(&page.stats)?,
             }),
-            "jobs query response",
+            "jobs summary response",
         )
     }
 
@@ -393,11 +496,7 @@ impl JobsQuery {
         )
     }
 
-    /// Fetch projection-backed keyed-concurrency state by service, job type, and display key.
-    ///
-    /// This path currently reads SQLite projection state only. The Jobs admin binding does not yet
-    /// expose a `JOBS_KEYS` KV handle here, so very recent runtime coordinator updates may be newer
-    /// than this response until lifecycle events are projected.
+    /// Fetch horizon-consistent keyed-concurrency state by service, job type, and display key.
     pub async fn get_key(
         &self,
         request: &JobsGetKeyRequest,
@@ -409,21 +508,23 @@ impl JobsQuery {
             key = %request.key.0,
             "jobs rpc get_key started"
         );
-        let service = request.service.0.clone();
-        let job_type = request.r#type.0.clone();
-        let request_key = request.key.0.clone();
-        let key = self
-            .with_projection(move |store| {
-                store
-                    .get_projected_key(&service, &job_type, &request_key)?
-                    .ok_or_else(|| JobsQueryError::JobNotFound {
-                        key: format!("{service}/{job_type}/{request_key}"),
-                    })
-            })
+        let service = request.service.0.as_str();
+        let job_type = request.r#type.0.as_str();
+        let request_key = request.key.0.as_str();
+        let snapshot = self
+            .resource_resolver
+            .key_snapshot(service, job_type, request_key)
+            .await
+            .map_err(|details| JobsQueryError::ProjectionStore { details })?
+            .ok_or_else(|| JobsQueryError::JobNotFound {
+                key: format!("{service}/{job_type}/{request_key}"),
+            })?;
+        let (key, projected) = self
+            .await_key_projection(service, job_type, request_key, &snapshot)
             .await?;
         let now = OffsetDateTime::now_utc();
         tracing::debug!(
-            service = %key.service,
+            service,
             job_type = %key.job_type,
             key = %key.key,
             active = key.active.len(),
@@ -435,18 +536,15 @@ impl JobsQuery {
         let active = key
             .active
             .iter()
-            .filter_map(|active| {
-                let started_at = active.started_at.clone()?;
-                let heartbeat_at = active.heartbeat_at.clone()?;
-                let lease_expires_at = active.lease_expires_at.clone()?;
-                Some(json!({
-                    "heartbeatAgeMs": heartbeat_age_ms(&heartbeat_at, now),
-                    "heartbeatAt": heartbeat_at,
-                    "instanceId": active.instance_id.clone().unwrap_or_default(),
+            .map(|active| {
+                json!({
+                    "heartbeatAgeMs": heartbeat_age_ms(&active.heartbeat_at, now),
+                    "heartbeatAt": active.heartbeat_at,
+                    "instanceId": active.instance_id,
                     "jobId": active.job_id,
-                    "leaseExpiresAt": lease_expires_at,
-                    "startedAt": started_at,
-                }))
+                    "leaseExpiresAt": active.lease_expires_at,
+                    "startedAt": active.started_at,
+                })
             })
             .collect::<Vec<_>>();
         let queued = key
@@ -459,15 +557,85 @@ impl JobsQuery {
                 "active": active,
                 "key": key.key,
                 "keyHash": key.key_hash,
-                "latestPolicyReason": key.latest_policy_reason,
+                "latestPolicyReason": projected.and_then(|key| key.latest_policy_reason),
                 "queuedDepth": key.queued.len(),
                 "queued": queued,
-                "service": key.service,
+                "service": service,
                 "staleTakeoverCount": key.stale_takeover_count,
-                "type": key.job_type,
+                "type": job_type,
             }),
             "jobs get key response",
         )
+    }
+
+    async fn await_key_projection(
+        &self,
+        service: &str,
+        job_type: &str,
+        key: &str,
+        snapshot: &crate::JobKeySnapshot,
+    ) -> Result<
+        (
+            trellis_rs::jobs::keys::JobKeyState,
+            Option<crate::storage::ProjectedJobKey>,
+        ),
+        JobsQueryError,
+    > {
+        let started = Instant::now();
+        let mut horizon = snapshot.jobs_horizon;
+        loop {
+            let query_service = service.to_owned();
+            let query_job_type = job_type.to_owned();
+            let query_key = key.to_owned();
+            let (projected_sequence, projected) = self
+                .with_projection(move |store| {
+                    Ok((
+                        store.projected_sequence()?,
+                        store.get_projected_key(&query_service, &query_job_type, &query_key)?,
+                    ))
+                })
+                .await?;
+            let projected_ids = projected
+                .as_ref()
+                .map(|key| {
+                    key.active
+                        .iter()
+                        .map(|job| (&job.job_id, true))
+                        .chain(key.queued.iter().map(|job| (&job.job_id, false)))
+                        .collect::<BTreeMap<_, _>>()
+                })
+                .unwrap_or_default();
+            if projected_sequence >= horizon {
+                let snapshot = self
+                    .resource_resolver
+                    .key_snapshot(service, job_type, key)
+                    .await
+                    .map_err(|details| JobsQueryError::ProjectionStore { details })?
+                    .ok_or_else(|| JobsQueryError::JobNotFound {
+                        key: format!("{service}/{job_type}/{key}"),
+                    })?;
+                let coordinator_ids = snapshot
+                    .state
+                    .active
+                    .iter()
+                    .map(|job| (&job.job_id, true))
+                    .chain(snapshot.state.queued.iter().map(|job| (&job.job_id, false)))
+                    .collect::<BTreeMap<_, _>>();
+                if projected_ids == coordinator_ids {
+                    return Ok((snapshot.state, projected));
+                }
+                horizon = snapshot.jobs_horizon;
+            }
+            if started.elapsed() >= Duration::from_secs(5) {
+                return Err(JobsQueryError::ProjectionStore {
+                    details: format!(
+                        "Jobs projection did not reach coordinator horizon {}",
+                        horizon
+                    ),
+                });
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
     }
 
     /// Cancel a projected job by publishing a `cancelled` event.
@@ -571,14 +739,21 @@ impl JobsQuery {
         request: &JobsListDLQRequest,
     ) -> Result<JobsListDLQResponse, JobsQueryError> {
         let started = Instant::now();
-        let (offset, limit) =
-            parse_page_request(request.offset.map(|value| value.0), request.limit.0 .0)?;
+        let query_digest = pagination_digest("jobs.ListDLQ", request)?;
+        let (after, limit) = parse_page_request_for_query(
+            request
+                .page
+                .as_ref()
+                .and_then(|page| page.cursor.as_deref()),
+            request.page.as_ref().and_then(|page| page.limit),
+            &query_digest,
+        )?;
         let since = parse_since_filter(request.since.as_deref())?;
         tracing::debug!(
             service = ?request.service,
             job_type = ?request.r#type,
             since = ?request.since,
-            offset,
+            after = ?after,
             limit,
             "jobs rpc list_dlq started"
         );
@@ -591,7 +766,7 @@ impl JobsQuery {
                     job_type,
                     states: Some(vec![JobState::Dead]),
                     since,
-                    offset: Some(offset),
+                    after,
                     limit,
                 })?)
             })
@@ -604,18 +779,17 @@ impl JobsQuery {
         tracing::debug!(
             count = page.count,
             entries = entries.len(),
-            offset = page.offset,
             limit = page.limit,
             elapsed_ms = started.elapsed().as_millis(),
             "jobs rpc list_dlq completed"
         );
         wire::decode_wire(
             json!({
-                "count": page.count,
-                "entries": entries,
-                "limit": page.limit,
-                "nextOffset": page.next_offset,
-                "offset": page.offset,
+                "items": entries,
+                "page": { "nextCursor": page.next_after
+                    .map(|after| trellis_protocol::encode_pagination_cursor(&query_digest, &after))
+                    .transpose()
+                    .map_err(|_| JobsQueryError::Validation { field: "page.cursor", details: "invalid pagination".to_owned() })? },
             }),
             "jobs list DLQ response",
         )
@@ -951,10 +1125,45 @@ impl From<SqliteJobsStoreError> for JobsQueryError {
     }
 }
 
-fn parse_page_request(offset: Option<u64>, limit: i64) -> Result<(u64, u64), JobsQueryError> {
-    let offset = offset.unwrap_or_default();
-    let limit = parse_positive_integer("limit", limit)?;
-    Ok((offset, limit))
+type JobQueryPage = (Option<(i64, String, String, String)>, u64);
+
+fn parse_page_request_for_query(
+    cursor: Option<&str>,
+    limit: Option<u32>,
+    query_digest: &str,
+) -> Result<JobQueryPage, JobsQueryError> {
+    let after = cursor
+        .map(|cursor| trellis_protocol::decode_pagination_cursor(cursor, query_digest))
+        .transpose()
+        .map_err(|_| JobsQueryError::Validation {
+            field: "page.cursor",
+            details: "invalid pagination".to_owned(),
+        })?;
+    let limit = u64::from(limit.unwrap_or(100));
+    if limit == 0 || limit > 500 {
+        return Err(JobsQueryError::Validation {
+            field: "page.limit",
+            details: "must be positive".to_owned(),
+        });
+    }
+    Ok((after, limit))
+}
+
+fn pagination_digest<T: serde::Serialize>(
+    endpoint: &str,
+    request: &T,
+) -> Result<String, JobsQueryError> {
+    let mut query = serde_json::to_value(request).map_err(|error| JobsQueryError::Validation {
+        field: "page.cursor",
+        details: error.to_string(),
+    })?;
+    query.as_object_mut().map(|query| query.remove("page"));
+    trellis_protocol::pagination_query_digest(endpoint, &query).map_err(|_| {
+        JobsQueryError::Validation {
+            field: "page.cursor",
+            details: "invalid pagination".to_owned(),
+        }
+    })
 }
 
 fn parse_since_filter(value: Option<&str>) -> Result<Option<OffsetDateTime>, JobsQueryError> {
@@ -1239,23 +1448,6 @@ fn timeline_error_detail(
     .map(Some)
 }
 
-fn decode_optional_json<T>(
-    json: &Option<String>,
-    model: &'static str,
-) -> Result<Option<T>, JobsQueryError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    json.as_ref()
-        .map(|json| {
-            serde_json::from_str(json).map_err(|error| JobsQueryError::ConvertWireModel {
-                model,
-                details: error.to_string(),
-            })
-        })
-        .transpose()
-}
-
 fn workbench_group_to_wire(
     group: &JobsWorkbenchGroup,
 ) -> Result<JobsQueryResponseGroupsItem, JobsQueryError> {
@@ -1289,6 +1481,23 @@ fn workbench_stats_to_wire(
         }),
         "job query stats",
     )
+}
+
+fn decode_optional_json<T>(
+    json: &Option<String>,
+    model: &'static str,
+) -> Result<Option<T>, JobsQueryError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    json.as_ref()
+        .map(|json| {
+            serde_json::from_str(json).map_err(|error| JobsQueryError::ConvertWireModel {
+                model,
+                details: error.to_string(),
+            })
+        })
+        .transpose()
 }
 
 fn metrics_latency_to_summary_wire(
@@ -1402,19 +1611,6 @@ fn heartbeat_age_ms(heartbeat_at: &str, now: OffsetDateTime) -> i64 {
     }
 }
 
-fn parse_positive_integer(field: &'static str, value: i64) -> Result<u64, JobsQueryError> {
-    if value < 1 {
-        return Err(JobsQueryError::ConvertWireModel {
-            model: field,
-            details: "must be at least 1".to_string(),
-        });
-    }
-    u64::try_from(value).map_err(|error| JobsQueryError::ConvertWireModel {
-        model: field,
-        details: error.to_string(),
-    })
-}
-
 fn projection_key(job: &Job) -> String {
     format!("{}/{}/{}", job.service, job.job_type, job.id)
 }
@@ -1433,10 +1629,18 @@ fn sibling_event_subject(subject: &str, event_type: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use async_nats::jetstream::{kv, stream};
     use serde_json::json;
-    use trellis_rs::jobs::events::{cancelled, dismissed, retried, EventMeta};
+    use trellis_rs::jobs::events::{
+        cancelled, created, created_with_policy, dismissed, retried, EventMeta,
+    };
+    use trellis_rs::jobs::keys::JobKeyQueuedEntry;
     use trellis_rs::jobs::types::{
-        Job, JobContext, JobEvent, JobState, JobWaitEdge, JobWaitTarget, JobWaitTargetKind,
+        Job, JobConcurrency, JobContext, JobEvent, JobState, JobWaitEdge, JobWaitTarget,
+        JobWaitTargetKind,
     };
 
     use super::parse_since_filter;
@@ -1445,6 +1649,11 @@ mod tests {
         workbench_entry_to_wire, JobsQueryError, MutationResponsePlan,
     };
     use crate::storage::{JobTimelineEvent, JobsWorkbenchEntry};
+    use crate::test_nats::TestNats;
+    use crate::{
+        start_jobs_projector, JobResourceResolver, JobsQuery, SqliteJobResourceResolver,
+        SqliteJobsStore,
+    };
 
     #[test]
     fn jobs_admin_resources_use_builtin_stream_names() {
@@ -1697,5 +1906,193 @@ mod tests {
             error,
             JobsQueryError::Validation { field: "since", .. }
         ));
+    }
+
+    #[tokio::test]
+    async fn get_key_stabilizes_a_concurrent_transition_after_projection_catches_up() {
+        let nats = TestNats::start().await;
+        let jetstream = async_nats::jetstream::new(nats.client.clone());
+        jetstream
+            .create_stream(stream::Config {
+                name: "JOBS".to_owned(),
+                subjects: vec!["trellis.jobs.>".to_owned()],
+                ..Default::default()
+            })
+            .await
+            .expect("Jobs stream should be created");
+        let keys = jetstream
+            .create_key_value(kv::Config {
+                bucket: "JOBS_KEYS_documents".to_owned(),
+                ..Default::default()
+            })
+            .await
+            .expect("key bucket should be created");
+        let key_state = trellis_rs::jobs::keys::JobKeyState {
+            version: 1,
+            service: "documents".to_owned(),
+            job_type: "import".to_owned(),
+            key: "customer-42".to_owned(),
+            key_hash: "hash-42".to_owned(),
+            max_active: 1,
+            max_queued_per_key: Some(1),
+            active: Vec::new(),
+            queued: Vec::new(),
+            stale_takeover_count: 3,
+            updated_at: "2026-03-28T12:00:00Z".to_owned(),
+        };
+        keys.put(
+            "documents.import.hash-42",
+            serde_json::to_vec(&key_state)
+                .expect("key state should encode")
+                .into(),
+        )
+        .await
+        .expect("key state should persist");
+        let unrelated = sample_job(JobState::Pending);
+        let horizon_event = created(
+            EventMeta {
+                service: "other-service",
+                job_type: "other-job",
+                job_id: "horizon-job",
+                context: &unrelated.context,
+                timestamp: "2026-03-28T12:00:00Z",
+            },
+            json!({}),
+            1,
+            None,
+        );
+        jetstream
+            .publish(
+                "trellis.jobs.other-service.other-job.horizon-job.created",
+                serde_json::to_vec(&horizon_event)
+                    .expect("horizon event should encode")
+                    .into(),
+            )
+            .await
+            .expect("horizon should publish")
+            .await
+            .expect("horizon should persist");
+
+        let catalog = tempfile::NamedTempFile::new().expect("catalog path should exist");
+        let connection = rusqlite::Connection::open(catalog.path()).expect("catalog should open");
+        connection
+            .execute_batch(
+                "CREATE TABLE auth_resource_binding_evidence (
+                    participant_id TEXT NOT NULL,
+                    local_name TEXT NOT NULL,
+                    provider_identity TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    resource_kind TEXT NOT NULL
+                );",
+            )
+            .expect("catalog schema should initialize");
+        connection
+            .execute(
+                "INSERT INTO auth_resource_binding_evidence VALUES (?1,?2,?3,'available','jobQueue')",
+                rusqlite::params![
+                    "documents",
+                    "import",
+                    json!({
+                        "namespace": "documents",
+                        "work_stream": "JOBS_WORK",
+                        "consumer": "documents-import"
+                    })
+                    .to_string()
+                ],
+            )
+            .expect("catalog binding should insert");
+        drop(connection);
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        let resolver: Arc<dyn JobResourceResolver> = Arc::new(SqliteJobResourceResolver::new(
+            catalog.path().to_owned(),
+            nats.client.clone(),
+            "JOBS".to_owned(),
+        ));
+        let query = JobsQuery::with_store(
+            trellis_rs::jobs::JobsRuntime::from_nats(nats.client.clone()),
+            store.clone(),
+            resolver,
+        );
+        let request = serde_json::from_value(json!({
+            "service": "documents",
+            "type": "import",
+            "key": "customer-42"
+        }))
+        .expect("request should decode");
+        let mut response = tokio::spawn(async move { query.get_key(&request).await });
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(150), &mut response)
+                .await
+                .is_err()
+        );
+        let mut transitioned_key_state = key_state;
+        transitioned_key_state.queued.push(JobKeyQueuedEntry {
+            job_id: "queued-job".to_owned(),
+            created_at: "2026-03-28T12:00:01Z".to_owned(),
+            request_id: "request-queued-job".to_owned(),
+            context: None,
+        });
+        transitioned_key_state.stale_takeover_count = 4;
+        transitioned_key_state.updated_at = "2026-03-28T12:00:01Z".to_owned();
+        keys.put(
+            "documents.import.hash-42",
+            serde_json::to_vec(&transitioned_key_state)
+                .expect("transitioned key state should encode")
+                .into(),
+        )
+        .await
+        .expect("transitioned key state should persist");
+        let transitioned_job = sample_job(JobState::Pending);
+        let transition_event = created_with_policy(
+            EventMeta {
+                service: "documents",
+                job_type: "import",
+                job_id: "queued-job",
+                context: &transitioned_job.context,
+                timestamp: "2026-03-28T12:00:01Z",
+            },
+            json!({}),
+            1,
+            None,
+            Some(JobConcurrency {
+                key: "customer-42".to_owned(),
+                key_hash: "hash-42".to_owned(),
+                instance_id: None,
+                slot_token: None,
+                heartbeat_at: None,
+                lease_expires_at: None,
+                stale_takeover_count: Some(4),
+            }),
+            None,
+        );
+        jetstream
+            .publish(
+                "trellis.jobs.documents.import.queued-job.created",
+                serde_json::to_vec(&transition_event)
+                    .expect("transition event should encode")
+                    .into(),
+            )
+            .await
+            .expect("transition should publish")
+            .await
+            .expect("transition should persist");
+        let projector = start_jobs_projector(
+            trellis_rs::jobs::JobsRuntime::from_nats(nats.client.clone()),
+            store,
+            "JOBS".to_owned(),
+        )
+        .await
+        .expect("projector should start");
+        let response = tokio::time::timeout(Duration::from_secs(2), response)
+            .await
+            .expect("query should finish after projection catches up")
+            .expect("query task should succeed")
+            .expect("get key should succeed");
+        let response = serde_json::to_value(response).expect("response should encode");
+        assert_eq!(response["keyHash"], "hash-42");
+        assert_eq!(response["queued"][0]["jobId"], "queued-job");
+        assert_eq!(response["staleTakeoverCount"], "4");
+        projector.stop().await;
     }
 }

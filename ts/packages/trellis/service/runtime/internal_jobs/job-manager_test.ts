@@ -71,9 +71,6 @@ Deno.test("JobManager creates and publishes job context", async () => {
           maxDeliver: 3,
           backoffMs: [],
           ackWaitMs: 1_000,
-          progress: false,
-          logs: false,
-          dlq: false,
         },
       },
     },
@@ -150,9 +147,6 @@ Deno.test("JobManager preserves structured failure error string", async () => {
           maxDeliver: 1,
           backoffMs: [],
           ackWaitMs: 1_000,
-          progress: false,
-          logs: false,
-          dlq: false,
         },
       },
     },
@@ -222,9 +216,6 @@ Deno.test("JobManager child jobs inherit active job lineage", async () => {
           maxDeliver: 3,
           backoffMs: [],
           ackWaitMs: 1_000,
-          progress: false,
-          logs: false,
-          dlq: false,
         },
       },
     },
@@ -304,9 +295,6 @@ Deno.test("JobManager active waitFor publishes wait edge and preserves result or
           maxDeliver: 3,
           backoffMs: [],
           ackWaitMs: 1_000,
-          progress: false,
-          logs: false,
-          dlq: false,
         },
       },
     },
@@ -406,7 +394,7 @@ Deno.test("JobRef wait inside active job uses active wait edge", async () => {
   assertEquals(calls, ["job:svc:refresh:child-1"]);
 });
 
-Deno.test("JobManager marks retryable failure dead at max tries", async () => {
+Deno.test("JobManager leaves max-delivery exhaustion to the advisory", async () => {
   const published: PublishedMessage[] = [];
   const manager = new JobManager<{ siteId: string }, { ok: boolean }>({
     nc: {
@@ -428,9 +416,6 @@ Deno.test("JobManager marks retryable failure dead at max tries", async () => {
           maxDeliver: 1,
           backoffMs: [],
           ackWaitMs: 1_000,
-          progress: false,
-          logs: false,
-          dlq: false,
         },
       },
     },
@@ -450,14 +435,14 @@ Deno.test("JobManager marks retryable failure dead at max tries", async () => {
     },
   );
 
-  assertEquals(outcome, { outcome: "dead", tries: 1, error: "try again" });
-  const deadEvent = JSON.parse(
+  assertEquals(outcome, { outcome: "retry", tries: 1, error: "try again" });
+  const retryEvent = JSON.parse(
     new TextDecoder().decode(published[published.length - 1]!.payload),
   ) as { eventType?: string; state?: string; tries?: number; error?: string };
-  assertEquals(deadEvent.eventType, "dead");
-  assertEquals(deadEvent.state, "dead");
-  assertEquals(deadEvent.tries, 1);
-  assertEquals(deadEvent.error, "try again");
+  assertEquals(retryEvent.eventType, "retry");
+  assertEquals(retryEvent.state, "retry");
+  assertEquals(retryEvent.tries, 1);
+  assertEquals(retryEvent.error, "try again");
 });
 
 Deno.test("JobManager keyed create rejects and prepared create publishes skipped", async () => {
@@ -493,9 +478,6 @@ Deno.test("JobManager keyed create rejects and prepared create publishes skipped
           maxDeliver: 3,
           backoffMs: [],
           ackWaitMs: 1_000,
-          progress: false,
-          logs: false,
-          dlq: false,
           keyConcurrency: {
             key: ["/tenant"],
             maxActive: 1,
@@ -809,7 +791,7 @@ Deno.test("JobManager removes queued reservation when created publish fails", as
   assertEquals(removed, 1);
 });
 
-Deno.test("JobManager keyed process acquires renews and releases slot", async () => {
+Deno.test("JobManager renews keyed leases independently from delivery progress", async () => {
   const published: PublishedMessage[] = [];
   let renewed = 0;
   let released = 0;
@@ -833,13 +815,15 @@ Deno.test("JobManager keyed process acquires renews and releases slot", async ()
       return Promise.resolve({ kind: "released", state: emptyKeyState() });
     },
   };
+  const binding = keyedJobsBinding();
+  binding.queues.sync!.keyConcurrency!.heartbeatIntervalMs = 1;
   const manager = new JobManager<{ tenant: string }, { ok: boolean }>({
     nc: {
       publish(subject, payload, opts) {
         published.push({ subject, payload, headers: opts?.headers });
       },
     },
-    jobs: keyedJobsBinding(),
+    jobs: binding,
     keyCoordinator: coordinator,
     meta: {
       nextJobId: () => "unused",
@@ -857,6 +841,7 @@ Deno.test("JobManager keyed process acquires renews and releases slot", async ()
     },
     async (job) => {
       await job.heartbeat();
+      await new Promise((resolve) => setTimeout(resolve, 5));
       return { ok: true };
     },
     { instanceId: "worker-1" },
@@ -864,7 +849,7 @@ Deno.test("JobManager keyed process acquires renews and releases slot", async ()
 
   assertEquals(outcome.outcome, "completed");
   assertEquals(jetstreamHeartbeats, 1);
-  assertEquals(renewed, 1);
+  assertEquals(renewed > 0, true);
   assertEquals(released, 1);
   assertEquals(published.map(eventType), ["started", "completed"]);
 });
@@ -1041,9 +1026,6 @@ function keyedJobsBinding(): JobsBinding {
         maxDeliver: 3,
         backoffMs: [],
         ackWaitMs: 1_000,
-        progress: false,
-        logs: false,
-        dlq: false,
         keyConcurrency: {
           key: ["/tenant"],
           maxActive: 1,

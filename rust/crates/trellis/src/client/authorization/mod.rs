@@ -21,7 +21,6 @@ pub use provider_cache::AuthorizationProviderCache;
 #[cfg(feature = "runtime-internals")]
 pub use provider_cache::{RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrust};
 pub(crate) use refresh::spawn_authorization_context_refresh_task;
-pub(super) use types::AuthorizationCredential;
 #[cfg(feature = "runtime-internals")]
 pub use types::AuthorizationRegistryBinding;
 pub use types::{
@@ -29,3 +28,4 @@ pub use types::{
     AuthorizationInstallation, AuthorizationNativeTransport, AuthorizationRoutingMaterial,
     AuthorizationRuntimeBinding, AuthorizationRuntimeTransports,
 };
+pub(super) use types::{AuthorizationCredential, NativeCompanionCredential};

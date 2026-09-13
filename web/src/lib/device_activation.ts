@@ -28,7 +28,7 @@ function createPortalAuthState(
       ).toString();
       await TrellisClient.connect({
         trellisUrl,
-        participant: participants.appPortal.participant,
+        participant: participants.Portal.participant,
         auth: { redirectTo, context: options?.context },
         onAuthRequired: ({ loginUrl }) => {
           window.location.href = loginUrl;
@@ -59,13 +59,13 @@ export function createPortalDeviceActivationController() {
           flowId: callbackFlowId,
         },
         onAuthRequired: () => ({ status: "handled" }),
-        participant: participants.appPortal.participant,
+        participant: participants.Portal.participant,
       }).orThrow();
       callbackFlowId = undefined;
 
       return {
         async activateDevice(input): Promise<DeviceActivationOperationRef> {
-          return await trellis.authDeviceUserAuthoritiesResolve(input)
+          return await trellis.deviceUserAuthoritiesResolve(input)
             .start()
             .orThrow();
         },

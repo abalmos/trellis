@@ -1,145 +1,49 @@
 ---
 title: KV Resource Patterns
-description: Trellis KV bucket naming, key-shape, TTL, and projection patterns.
-order: 40
+description: Typed KV history, commitments, CAS, and representation evolution.
 ---
 
-# Design: KV Resource Patterns
+# KV Resource Patterns
 
-## Prerequisites
+KV is participant-owned typed keyed storage. Service resources belong to the
+deployment; device resources belong to the device principal. Applications use
+generated handles from the connected runtime rather than raw bucket names or
+binding payloads.
 
-- [trellis-patterns.md](./trellis-patterns.md) - Trellis architecture and
-  communication model
+Declarations include title, description, value type, history, TTL, optional
+capacity desires, and optional status. Desired capacities are planning hints
+only: they do not grant approval, gate readiness, configure the provider, or
+become reported actual limits. Approved hard commitments control provisioning.
+History must be supported by the backend (currently 1..64). Capacity absence
+means no finite committed application limit, not zero.
 
-## Scope
+Handles support create, current value/entry reads, put, replace, checked or
+unconditional delete, bounded ordered history, and watch. Revisions are explicit
+opaque CAS tokens. History and watch include tombstones and preserve backend
+revision/time.
 
-This document defines the Trellis KV resource pattern for service-requested NATS
-KV stores: contract declaration, bucket naming, key shape, TTL, and
-stream-derived projections.
+Every value uses the `TRKV` envelope, format byte 1, big-endian positive u32
+representation version, and generated-codec UTF-8 JSON. There is no raw JSON
+fallback. For accepted representations written by this architecture, SDKs run a
+direct historical-to-current migration and validate the result. Migration is per
+revision, fallible, and never writes back. Corrupt or unsupported data fails
+visibly rather than appearing absent or deleted.
 
-## NATS KV
+Resource identity is stable for owner/participant/kind/name. Approved increases
+to hard history or TTL retention can reconcile the owned provider in place.
+Reductions that could discard retained data fail rather than mutate, destroy, or
+recreate storage.
 
-### Contract Declaration
+Omission performs Detach: it removes runtime authority while preserving the
+allocation and its data. A compatible approved re-add reattaches it. A provider
+resource found at the deterministic name is accepted only when its ownership
+marker proves that it belongs to the same catalog resource; foreign resources
+are rejected and are never adopted, purged, or destroyed. Explicit Destroy is
+available only for a detached catalog resource and deletes an allocation only
+after that ownership proof succeeds.
 
-Service-owned KV resources are schema-backed needs declared with `kv({...})` in
-the participant. `Auth.Deployments.Apply` validates and creates, updates,
-removes, or adopts the corresponding buckets and exact resource bindings.
-
-Example:
-
-```ts
-uses: [kv({
-  activity: {
-    purpose: "Store normalized activity entries",
-    schema: ref.schema("AuditEntry"),
-    required: true,
-    history: 1,
-    ttlMs: 0,
-  },
-})];
-```
-
-Rules:
-
-- each `kv({...})` alias must declare `schema: ref.schema("...")`
-- the referenced schema must exist in the contract's top-level `schemas` map
-- `required` defaults to `true`; it controls whether generated service code sees
-  the alias as required or optional
-- required resources must have current exact evidence before context issuance;
-  unavailable optional resources omit only their affected optional grants
-- Trellis validates KV declarations from the installed participant revision;
-  physical bucket identity is scoped to deployment/profile and participant
-  lineage rather than an artifact digest so compatible service updates preserve
-  data
-- service bootstrap resolves `service.kv.<alias>` and injected handler
-  `client.kv.<alias>` as direct typed KV stores; service code does not call
-  `.open(schema)`
-
-### Deployment Apply Classification
-
-Compatible KV deployment updates include:
-
-- increasing `history` or `maxValueBytes`
-- changing `purpose` without changing runtime behavior
-- changing `required` when it does not remove active required access
-
-Explicit additions include:
-
-- adding a new KV alias
-
-Breaking replacements include:
-
-- removing or renaming a KV alias
-- reducing `history`, `ttlMs`, or `maxValueBytes`
-- changing the schema in a way that may reject existing values or change their
-  meaning
-- adopting an existing bucket with incompatible ownership, retention, or schema
-  expectations
-
-### Bucket Naming
-
-Use service-scoped names with lowercase underscores. Contract-requested service
-KV buckets use `svc_<service>_<alias>` (or an equivalent Trellis-assigned
-physical name with that scope) rather than shared `trellis_*` names. Bucket
-names should describe the service-owned resource purpose rather than an
-implementation table or domain model that belongs behind a service boundary.
-
-Examples:
-
-- `svc_activity_activity`
-- `svc_billing_job_cache`
-- `svc_documents_upload_index`
-
-### Key Structure
-
-Use `.` delimiters for wildcard support:
-
-```text
-<domain>.<qualifiers...>.<identifier>
-```
-
-Rules:
-
-- key segments must be NATS subject-safe
-- encode binary-derived segments into a subject-safe representation, such as
-  base64url without padding
-- identifier format is application-owned, subject to the key character rules
-
-Examples:
-
-- `github.12345.abc123`
-- `graph.transcription.01ARZ3NDEK`
-
-Design keys for expected query patterns:
-
-| Query need               | Key pattern          | Lookup                    |
-| ------------------------ | -------------------- | ------------------------- |
-| By ID only               | `<id>`               | direct get                |
-| By owner + ID            | `<owner>.<id>`       | `keys("<owner>.*")`       |
-| By category + owner + ID | `<cat>.<owner>.<id>` | `keys("<cat>.<owner>.*")` |
-| By ID with qualifiers    | `<cat>.<owner>.<id>` | `keys("*.*.<id>")`        |
-
-### TTL Tiers
-
-| Tier      | TTL     | Use case                                                      |
-| --------- | ------- | ------------------------------------------------------------- |
-| Ephemeral | minutes | OAuth state, pending auth, browser flows, short-lived indexes |
-| Presence  | hours   | Active connection or worker presence records                  |
-| Permanent | None    | Reference data or derived views that are refreshed explicitly |
-
-Set `max_age` at bucket creation and rewrite the full value on update when the
-TTL must refresh.
-
-### Projections
-
-| Pattern           | Use when                                                |
-| ----------------- | ------------------------------------------------------- |
-| Direct write      | Simple CRUD, no audit trail needed                      |
-| Stream projection | Need event history, replay, or cross-service visibility |
-
-Projection rule:
-
-- the stream is the source of truth
-- KV is the read-optimized derived view
-
-Consume the stream with a durable consumer and write the reduced state to KV.
+Trellis-owned runtime streams follow the same non-destructive startup rule. The
+runtime creates a missing stream, accepts an exact existing configuration, and
+may apply only safe subject or retention-limit expansions. Startup rejects any
+existing stream whose identity, storage, retention, discard policy, sources, or
+limits are incompatible or would reduce retained data.

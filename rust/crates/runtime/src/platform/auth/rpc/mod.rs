@@ -18,26 +18,29 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use trellis_protocol::AuthorizationPrincipalKind;
 use trellis_rs::service::Router;
+use trellis_runtime_apis::apis::trellis_auth_v1::events::{
+    DeviceUserAuthoritiesApproved, DeviceUserAuthoritiesResolved, SessionsRevoked,
+};
 use ulid::Ulid;
 
 use super::context::AuthorizationContextRepository;
 use super::{
-    activation_review_event_action_id, validate_connection_kick_response, AccountFlowKind,
-    AccountRepository, AuthConnectionPresence, AuthEphemeralRepository, AuthService,
-    AuthorityEvidenceRepository, AuthorizationStateError, CapabilityGroupRecord,
-    ChangePasswordInput, CreateAccountFlowInput, CreateUserInput, DecideActivationReviewInput,
-    DeploymentProfileCreation, DeploymentProfileMutation, DeploymentProfileRecord,
-    DeploymentProfileState, DeploymentRepository, DeviceActivationReviewRecord,
-    DeviceActivationReviewState, DeviceDelegationMutation, DeviceDelegationRecord,
-    DeviceDelegationState, DeviceReviewMode, GrantOwnerKind, IdempotencyResultRecord,
-    IdempotentOutcome, LoginPortalMutation, LoginPortalRecord, LoginSettingsRecord,
-    NatsAuthEphemeralRepository, PortalGrantOverrideRecord, PortalPolicyReconciliationHandle,
-    PortalRepository, PortalRoleMapping, PortalRouteMutation, PortalRouteRecord,
-    PortalRouteRemoval, PostCommitActionKind, PostCommitActionRecord, PrincipalKind,
-    PrincipalState, ProviderIdentityUnlink, ProvisionDeviceInput, ProvisionServiceIdentityInput,
-    ProvisionedIdentityKind, ProvisionedIdentityRecord, ProvisionedIdentityState,
-    ProvisionedInstanceMutation, ProvisioningRepository, RuntimeInstanceState, SessionRecord,
-    SessionRepository, SessionState, SqliteAuthorizationStore, UpdateUserInput, UserAccount,
+    activation_review_event_action_id, auth_event_subject, AccountFlowKind, AccountRepository,
+    AuthConnectionPresence, AuthEphemeralRepository, AuthService, AuthorityEvidenceRepository,
+    AuthorizationStateError, CapabilityGroupRecord, ChangePasswordInput, CreateAccountFlowInput,
+    CreateUserInput, DecideActivationReviewInput, DeploymentProfileCreation,
+    DeploymentProfileMutation, DeploymentProfileRecord, DeploymentProfileState,
+    DeploymentRepository, DeviceActivationReviewRecord, DeviceActivationReviewState,
+    DeviceDelegationMutation, DeviceDelegationState, DeviceReviewMode, GrantOwnerKind,
+    IdempotencyResultRecord, IdempotentOutcome, LoginPortalMutation, LoginPortalRecord,
+    LoginSettingsRecord, NatsAuthEphemeralRepository, PortalGrantOverrideRecord,
+    PortalPolicyReconciliationHandle, PortalRepository, PortalRoleMapping, PortalRouteMutation,
+    PortalRouteRecord, PortalRouteRemoval, PostCommitActionKind, PostCommitActionRecord,
+    PrincipalKind, PrincipalState, ProviderIdentityUnlink, ProvisionDeviceInput,
+    ProvisionServiceIdentityInput, ProvisionedIdentityKind, ProvisionedIdentityRecord,
+    ProvisionedIdentityState, ProvisionedInstanceMutation, ProvisioningRepository,
+    RuntimeInstanceState, SessionRecord, SessionRepository, SessionState, SqliteAuthorizationStore,
+    UpdateUserInput, UserAccount,
 };
 use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
@@ -45,14 +48,13 @@ use crate::supervisor::RuntimeError;
 const MAX_CONCURRENT_REQUESTS: usize = 64;
 
 pub(crate) struct AuthRpcRuntime {
-    subscriber: async_nats::Subscriber,
+    subscriber: futures_util::stream::SelectAll<async_nats::Subscriber>,
     processor: AuthRpcProcessor,
 }
 
 #[derive(Clone)]
 pub(crate) struct AuthRpcProcessor {
     pub(crate) client: async_nats::Client,
-    pub(crate) system_client: async_nats::Client,
     pub(crate) service: AuthService<SqliteAuthorizationStore>,
     pub(crate) ephemeral: NatsAuthEphemeralRepository,
     pub(crate) public_origin: String,
@@ -86,11 +88,39 @@ impl AuthRpcRuntime {
     pub(crate) async fn start(
         processor: AuthRpcProcessor,
     ) -> Result<Self, AuthorizationStateError> {
-        let subscriber = processor
+        let auth_subject = trellis_protocol::derive_bound_rpc_subject(
+            trellis_runtime_apis::apis::trellis_auth_v1::API_ID,
+            "dep_trellis_auth_runtime",
+            "Route",
+        )
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
+        .strip_suffix("Route")
+        .expect("derived subject contains action")
+        .to_owned()
+            + ">";
+        let core_subject = trellis_protocol::derive_bound_rpc_subject(
+            trellis_runtime_apis::apis::trellis_core_v1::API_ID,
+            "dep_trellis_auth_runtime",
+            "Route",
+        )
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
+        .strip_suffix("Route")
+        .expect("derived subject contains action")
+        .to_owned()
+            + ">";
+        let auth = processor
             .client
-            .queue_subscribe("rpc.v1.Auth.>", "trellis-auth-rpc".to_owned())
+            .queue_subscribe(auth_subject, "trellis-auth-rpc".to_owned())
             .await
             .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
+        let resources = processor
+            .client
+            .queue_subscribe(core_subject, "trellis-resource-rpc".to_owned())
+            .await
+            .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
+        let mut subscriber = futures_util::stream::SelectAll::new();
+        subscriber.push(auth);
+        subscriber.push(resources);
         Ok(Self {
             subscriber,
             processor,
@@ -144,12 +174,16 @@ impl AuthRpcProcessor {
             "finished Auth RPC dispatch"
         );
         let (headers, payload) = match result {
-            Ok(value) => (HeaderMap::new(), serde_json::to_vec(&value)),
+            Ok(mut value) => {
+                encode_generated_scalars(&mut value);
+                (HeaderMap::new(), serde_json::to_vec(&value))
+            }
             Err(error) => {
                 tracing::warn!(subject, %error, "Auth RPC request failed");
                 let mut headers = HeaderMap::new();
                 headers.insert("status", "error");
-                let error = public_rpc_error(subject, &error);
+                let mut error = public_rpc_error(subject, &error);
+                encode_generated_scalars(&mut error);
                 (headers, serde_json::to_vec(&error))
             }
         };
@@ -186,6 +220,9 @@ impl AuthRpcProcessor {
     ) -> Result<Value, AuthorizationStateError> {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        let wire: trellis_runtime_apis::apis::trellis_auth_v1::rpc::DeploymentsCreateInput =
+            serde_json::from_slice(payload)
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let kind = match required_string(&input, "kind")? {
             "service" => PrincipalKind::Service,
             "device" => PrincipalKind::Device,
@@ -195,7 +232,17 @@ impl AuthRpcProcessor {
                 ));
             }
         };
-        let review_mode = match (kind, nullable_string(&input, "reviewMode")?.as_deref()) {
+        let review_mode = match wire.review_mode {
+            trellis_runtime_apis::__types::Nullable::Null => None,
+            trellis_runtime_apis::__types::Nullable::Value(bytes) => {
+                Some(serde_json::from_slice::<String>(&bytes.0).map_err(|_| {
+                    AuthorizationStateError::InvalidRecord(
+                        "deployment reviewMode bytes are invalid".to_owned(),
+                    )
+                })?)
+            }
+        };
+        let review_mode = match (kind, review_mode.as_deref()) {
             (PrincipalKind::Device, Some("none")) => Some(DeviceReviewMode::None),
             (PrincipalKind::Device, Some("required")) => Some(DeviceReviewMode::Required),
             (PrincipalKind::Service, None) => None,
@@ -268,7 +315,7 @@ impl AuthRpcProcessor {
             }
             entries.push(self.deployment_value(profile).await?);
         }
-        Ok(paginate_values(entries, &input))
+        paginate_values(entries, &input, "auth.Deployments.List", &["/deploymentId"])
     }
 
     async fn deployments_get(
@@ -410,15 +457,15 @@ impl AuthRpcProcessor {
             "displayName": profile.display_name,
             "state": deployment_state_wire(profile.state),
             "participantId": profile.participant_id,
-            "expiresAt": profile.expires_at,
+            "expiresAt": profile.expires_at.map(|value| value.to_string()),
             "reviewMode": profile.review_mode,
             "requiresDeviceDelegation": profile.requires_device_delegation,
             "portalId": profile.portal_id,
-            "createdAt": profile.created_at,
-            "updatedAt": profile.updated_at,
-            "disabledAt": principal.disabled_at,
-            "revokedAt": principal.revoked_at,
-            "version": profile.version,
+            "createdAt": profile.created_at.to_string(),
+            "updatedAt": profile.updated_at.to_string(),
+            "disabledAt": principal.disabled_at.map(|value| value.to_string()),
+            "revokedAt": principal.revoked_at.map(|value| value.to_string()),
+            "version": profile.version.to_string(),
             "disabled": profile.state != DeploymentProfileState::Active,
         });
         if profile.kind == PrincipalKind::Service {
@@ -540,6 +587,7 @@ impl AuthRpcProcessor {
                     .ok_or(AuthorizationStateError::StorageConflict)?
             }
         };
+        super::resources::ensure_operation_store(&self.client, deployment_id).await?;
         let instance = self
             .service
             .repository()
@@ -597,7 +645,12 @@ impl AuthRpcProcessor {
                 .ok_or(AuthorizationStateError::StorageConflict)?;
             entries.push(service_instance_value(instance, identity, &profile));
         }
-        Ok(paginate_values(entries, &input))
+        paginate_values(
+            entries,
+            &input,
+            "auth.ServiceInstances.List",
+            &["/instanceId"],
+        )
     }
 
     async fn devices_provision(
@@ -691,7 +744,12 @@ impl AuthRpcProcessor {
             }
             entries.push(value);
         }
-        Ok(paginate_values(entries, &input))
+        paginate_values(
+            entries,
+            &input,
+            "auth.Devices.List",
+            &["/principalId", "/instanceId"],
+        )
     }
 
     async fn provisioned_instance_set_state(
@@ -939,7 +997,12 @@ impl AuthRpcProcessor {
                 "device": self.device_value(&device.principal_id, instance_id, &profile).await?,
             }));
         }
-        Ok(paginate_values(entries, &input))
+        paginate_values(
+            entries,
+            &input,
+            "auth.DeviceUserAuthorities.List",
+            &["/device/principalId", "/device/instanceId"],
+        )
     }
 
     async fn device_user_authorities_revoke(
@@ -966,6 +1029,7 @@ impl AuthRpcProcessor {
                 AuthorizationStateError::InvalidRecord("device delegation not found".to_owned())
             })?;
         let expected_version = device.version;
+        let companion_session_id = delegation.user_login_session_id.clone();
         let now = now_millis()?;
         device.updated_at = now;
         device.version += 1;
@@ -998,6 +1062,25 @@ impl AuthRpcProcessor {
             claimed_until: None,
             last_error: None,
         };
+        let mut event_payload = json!({
+            "eventType": "Auth.DeviceUserAuthorities.Resolved",
+            "eventId": format!("evt_{}", digest_parts(&[principal_id, deployment_id, idempotency_key])),
+            "occurredAt": now,
+            "deploymentId": deployment_id,
+            "instanceId": identity.instance_id.clone(),
+            "state": "revoked",
+        });
+        event_payload["eventSubject"] = json!(auth_event_subject::<DeviceUserAuthoritiesResolved>(
+            &event_payload
+        )?);
+        let mut actions = vec![action(PostCommitActionKind::Event, "event", event_payload)];
+        if let Some(session_id) = &companion_session_id {
+            actions.push(action(
+                PostCommitActionKind::Kick,
+                "kick",
+                json!({ "sessionId": session_id }),
+            ));
+        }
         self.service
             .repository()
             .mutate_device_delegation(DeviceDelegationMutation {
@@ -1011,31 +1094,7 @@ impl AuthRpcProcessor {
                     &input,
                     now,
                 )?,
-                actions: vec![
-                    action(
-                        PostCommitActionKind::Event,
-                        "event",
-                        json!({
-                            "eventType": "Auth.DeviceUserAuthorities.Resolved",
-                            "eventSubject": format!(
-                                "events.v1.Auth.DeviceUserAuthorities.Resolved.{deployment_id}"
-                            ),
-                            "eventId": format!(
-                                "evt_{}",
-                                digest_parts(&[principal_id, deployment_id, idempotency_key])
-                            ),
-                            "occurredAt": now,
-                            "deploymentId": deployment_id,
-                            "instanceId": identity.instance_id.clone(),
-                            "state": "revoked",
-                        }),
-                    ),
-                    action(
-                        PostCommitActionKind::Kick,
-                        "kick",
-                        json!({ "principalId": principal_id }),
-                    ),
-                ],
+                actions,
             })
             .await?;
         let profile = self
@@ -1044,17 +1103,7 @@ impl AuthRpcProcessor {
             .get_deployment_profile(deployment_id)
             .await?
             .ok_or(AuthorizationStateError::StorageConflict)?;
-        let kicked_session_count = self
-            .service
-            .repository()
-            .list_sessions()
-            .await?
-            .into_iter()
-            .filter(|session| {
-                session.principal_id == principal_id
-                    && session.state == crate::platform::auth::SessionState::Active
-            })
-            .count();
+        let kicked_session_count = usize::from(companion_session_id.is_some());
         Ok(json!({
             "device": self.device_value(&device.principal_id, &identity.instance_id, &profile).await?,
             "kickedSessionCount": kicked_session_count,
@@ -1088,7 +1137,12 @@ impl AuthRpcProcessor {
             })
             .map(activation_review_value)
             .collect();
-        Ok(paginate_values(entries, &input))
+        paginate_values(
+            entries,
+            &input,
+            "auth.DeviceUserAuthorities.Reviews.List",
+            &["/reviewId"],
+        )
     }
 
     async fn activation_reviews_decide(
@@ -1133,32 +1187,31 @@ impl AuthRpcProcessor {
             "resolved"
         };
         let event_payload = if state == DeviceActivationReviewState::Approved {
-            json!({
+            let mut payload = json!({
                 "eventType": "Auth.DeviceUserAuthorities.Approved",
-                "eventSubject": format!(
-                    "events.v1.Auth.DeviceUserAuthorities.Approved.{}",
-                    review.deployment_id,
-                ),
                 "eventId": format!("evt_{}", digest_parts(&[review_id, event_suffix])),
                 "occurredAt": now,
                 "deploymentId": review.deployment_id,
                 "instanceId": review.instance_id,
                 "approvedBy": caller.principal_id,
-                "approvedAt": now,
-            })
+            });
+            payload["eventSubject"] = json!(auth_event_subject::<DeviceUserAuthoritiesApproved>(
+                &payload
+            )?);
+            payload
         } else {
-            json!({
+            let mut payload = json!({
                 "eventType": "Auth.DeviceUserAuthorities.Resolved",
-                "eventSubject": format!(
-                    "events.v1.Auth.DeviceUserAuthorities.Resolved.{}",
-                    review.deployment_id,
-                ),
                 "eventId": format!("evt_{}", digest_parts(&[review_id, event_suffix])),
                 "occurredAt": now,
                 "deploymentId": review.deployment_id,
                 "instanceId": review.instance_id,
                 "state": "rejected",
-            })
+            });
+            payload["eventSubject"] = json!(auth_event_subject::<DeviceUserAuthoritiesResolved>(
+                &payload
+            )?);
+            payload
         };
         let mut actions = vec![PostCommitActionRecord {
             predecessor_action_id: Some(activation_review_event_action_id(
@@ -1179,9 +1232,21 @@ impl AuthRpcProcessor {
             last_error: None,
         }];
         let activation_ready = state == DeviceActivationReviewState::Approved
-            && (!profile.requires_device_delegation
+            && (!(profile.requires_device_delegation
+                || review.payload["companionRequired"].as_bool() == Some(true))
                 || review.activated_by_user_principal_id.is_some());
         if activation_ready {
+            let mut payload = json!({
+                "eventType": "Auth.DeviceUserAuthorities.Resolved",
+                "eventId": format!("evt_{}", digest_parts(&[review_id, "resolved"])),
+                "occurredAt": now,
+                "deploymentId": review.deployment_id,
+                "instanceId": review.instance_id,
+                "state": "active",
+            });
+            payload["eventSubject"] = json!(auth_event_subject::<DeviceUserAuthoritiesResolved>(
+                &payload
+            )?);
             actions.push(PostCommitActionRecord {
                 predecessor_action_id: Some(activation_review_event_action_id(
                     review_id,
@@ -1189,18 +1254,7 @@ impl AuthRpcProcessor {
                 )?),
                 action_id: activation_review_event_action_id(review_id, "resolved")?,
                 kind: PostCommitActionKind::Event,
-                payload: json!({
-                    "eventType": "Auth.DeviceUserAuthorities.Resolved",
-                    "eventSubject": format!(
-                        "events.v1.Auth.DeviceUserAuthorities.Resolved.{}",
-                        review.deployment_id,
-                    ),
-                    "eventId": format!("evt_{}", digest_parts(&[review_id, "resolved"])),
-                    "occurredAt": now,
-                    "deploymentId": review.deployment_id,
-                    "instanceId": review.instance_id,
-                    "state": "active",
-                }),
+                payload,
                 created_at: now,
                 attempts: 0,
                 next_attempt_at: now,
@@ -1208,6 +1262,21 @@ impl AuthRpcProcessor {
                 last_error: None,
             });
         }
+        let (delegation, companion_session) = if state == DeviceActivationReviewState::Approved {
+            if let Some(user_principal_id) = review.activated_by_user_principal_id.as_deref() {
+                crate::platform::auth_operation::companion_activation(
+                    &self.service,
+                    &review,
+                    user_principal_id,
+                    now,
+                )
+                .await?
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
         let outcome = self
             .service
             .decide_activation_review(DecideActivationReviewInput {
@@ -1216,16 +1285,8 @@ impl AuthRpcProcessor {
                 state,
                 decided_by: caller.principal_id.clone(),
                 reason: nullable_string(&input, "reason")?,
-                delegation: (state == DeviceActivationReviewState::Approved
-                    && profile.requires_device_delegation
-                    && review.activated_by_user_principal_id.is_some())
-                .then(|| DeviceDelegationRecord {
-                    principal_id: review.principal_id.clone(),
-                    deployment_id: review.deployment_id.clone(),
-                    required: true,
-                    state: DeviceDelegationState::Active,
-                    expires_at: None,
-                }),
+                delegation,
+                companion_session,
                 activate_device: activation_ready,
                 decided_at: now,
                 idempotency: rpc_idempotency(
@@ -1266,7 +1327,12 @@ impl AuthRpcProcessor {
             .into_iter()
             .map(|group| serde_json::to_value(group).expect("group serializes"))
             .collect();
-        Ok(offset_page(entries, &input))
+        paginate_values(
+            entries,
+            &input,
+            "auth.CapabilityGroups.List",
+            &["/groupKey"],
+        )
     }
 
     async fn capability_groups_get(
@@ -1408,7 +1474,12 @@ impl AuthRpcProcessor {
             .into_iter()
             .map(|entry| serde_json::to_value(entry).expect("policy serializes"))
             .collect();
-        Ok(offset_page(entries, &input))
+        paginate_values(
+            entries,
+            &input,
+            "auth.Portals.GrantOverrides.List",
+            &["/portalId", "/participantId"],
+        )
     }
 
     async fn portal_grant_overrides_put(
@@ -1615,26 +1686,14 @@ impl AuthRpcProcessor {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let session_id = input.get("sessionId").and_then(Value::as_str);
-        let mut entries = self.ephemeral.list_connection_presence(session_id).await?;
-        entries.sort_by(|left, right| left.connection_id.cmp(&right.connection_id));
-        let limit = input
-            .get("limit")
-            .and_then(Value::as_i64)
-            .unwrap_or(100)
-            .clamp(1, 500) as usize;
-        let offset = input
-            .get("cursor")
-            .and_then(Value::as_str)
-            .and_then(|cursor| cursor.parse::<usize>().ok())
-            .unwrap_or(0);
-        let next_cursor = (offset + limit < entries.len()).then(|| (offset + limit).to_string());
-        let entries = entries
+        let entries = self
+            .ephemeral
+            .list_connection_presence(session_id)
+            .await?
             .into_iter()
-            .skip(offset)
-            .take(limit)
             .map(connection_value)
             .collect::<Vec<_>>();
-        Ok(json!({ "entries": entries, "nextCursor": next_cursor }))
+        paginate_values(entries, &input, "auth.Connections.List", &["/connectionId"])
     }
 
     async fn portals_list(&self, payload: &[u8]) -> Result<Value, AuthorizationStateError> {
@@ -1653,7 +1712,7 @@ impl AuthRpcProcessor {
                 .ok_or(AuthorizationStateError::StorageConflict)?;
             entries.push(portal_value(portal, settings));
         }
-        Ok(paginate_values(entries, &input))
+        paginate_values(entries, &input, "auth.Portals.List", &["/portalId"])
     }
 
     async fn portals_get(&self, payload: &[u8]) -> Result<Value, AuthorizationStateError> {
@@ -1839,7 +1898,12 @@ impl AuthRpcProcessor {
         } else {
             Vec::new()
         };
-        Ok(paginate_values(entries, &input))
+        paginate_values(
+            entries,
+            &input,
+            "auth.Capabilities.List",
+            &["/sourceApi", "/capability"],
+        )
     }
 
     async fn portal_settings_get(&self, payload: &[u8]) -> Result<Value, AuthorizationStateError> {
@@ -2033,9 +2097,10 @@ impl AuthRpcProcessor {
             serde_json::from_slice(payload)
                 .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         if request
-            .limit
+            .page
             .as_ref()
-            .is_some_and(|limit| !(1..=100).contains(&limit.0 .0))
+            .and_then(|page| page.limit)
+            .is_some_and(|limit| !(1..=100).contains(&limit))
         {
             return Err(AuthorizationStateError::InvalidRecord(
                 "invalid page limit".into(),
@@ -2073,7 +2138,7 @@ impl AuthRpcProcessor {
                     })
         });
         entries.sort_by(|left, right| left.session_id.cmp(&right.session_id));
-        Ok(paginate_sessions(entries, &input))
+        paginate_sessions(entries, &input)
     }
 
     async fn sessions_logout(
@@ -2129,6 +2194,11 @@ impl AuthRpcProcessor {
             .map_err(|_| AuthorizationStateError::StorageConflict)?
             .unwrap_or(session.version);
         let now = now_millis()?;
+        let connections = self
+            .ephemeral
+            .list_connection_presence(Some(session_id))
+            .await?;
+        let kicked_connections = connections.len();
         let request_digest = trellis_protocol::digest_json(&input)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let action = |kind, suffix: &str, payload| PostCommitActionRecord {
@@ -2142,6 +2212,18 @@ impl AuthRpcProcessor {
             claimed_until: None,
             last_error: None,
         };
+        let mut event_payload = json!({
+            "eventType": "Auth.Sessions.Revoked",
+            "eventId": format!("evt_{}", digest_parts(&[session_id, idempotency_key])),
+            "occurredAt": now,
+            "sessionId": session_id,
+            "principalId": session.principal_id.clone(),
+            "participantId": session.participant_id.clone(),
+            "reason": input.get("reason"),
+            "revokedBy": caller.map(|caller| &caller.principal_id),
+        });
+        event_payload["eventSubject"] =
+            json!(auth_event_subject::<SessionsRevoked>(&event_payload)?);
         let outcome = self
             .service
             .revoke_session(
@@ -2161,27 +2243,15 @@ impl AuthRpcProcessor {
                     expires_at: now.saturating_add(86_400_000),
                 },
                 vec![
-                    action(
-                        PostCommitActionKind::Event,
-                        "event",
-                        json!({
-                            "eventType": "Auth.Sessions.Revoked",
-                            "eventId": format!(
-                                "evt_{}",
-                            digest_parts(&[session_id, idempotency_key])
-                            ),
-                            "occurredAt": now,
-                            "sessionId": session_id,
-                            "principalId": session.principal_id.clone(),
-                            "participantId": session.participant_id.clone(),
-                            "reason": input.get("reason"),
-                            "revokedBy": caller.map(|caller| &caller.principal_id),
-                        }),
-                    ),
+                    action(PostCommitActionKind::Event, "event", event_payload),
                     action(
                         PostCommitActionKind::Kick,
                         "kick",
-                        json!({ "sessionId": session_id }),
+                        json!({
+                            "sessionId": session_id,
+                            "connections": connections,
+                            "reason": input.get("reason").and_then(Value::as_str),
+                        }),
                     ),
                 ],
             )
@@ -2195,19 +2265,22 @@ impl AuthRpcProcessor {
                 .await?
                 .ok_or(AuthorizationStateError::SessionMissing)?,
         };
-        let kicked_connections = self.kick_session_connections(session_id).await;
         Ok(json!({
             "session": session,
             "kickedConnections": kicked_connections,
         }))
     }
 
-    async fn connections_kick(&self, payload: &[u8]) -> Result<Value, AuthorizationStateError> {
+    async fn connections_kick(
+        &self,
+        payload: &[u8],
+        caller: &ValidatedRequest,
+    ) -> Result<Value, AuthorizationStateError> {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let connection_id = required_string(&input, "connectionId")?;
-        let connection = self
-            .ephemeral
+        let idempotency_key = required_string(&input, "idempotencyKey")?;
+        self.ephemeral
             .list_connection_presence(None)
             .await?
             .into_iter()
@@ -2215,47 +2288,43 @@ impl AuthRpcProcessor {
             .ok_or_else(|| {
                 AuthorizationStateError::InvalidRecord("connection not found".to_owned())
             })?;
-        self.kick_connection(&connection).await?;
-        Ok(json!({ "connectionId": connection_id, "kicked": true }))
-    }
-
-    async fn kick_session_connections(&self, session_id: &str) -> usize {
-        let Ok(connections) = self
-            .ephemeral
-            .list_connection_presence(Some(session_id))
-            .await
-        else {
-            return 0;
-        };
-        let mut kicked = 0;
-        for connection in connections {
-            if self.kick_connection(&connection).await.is_ok() {
-                kicked += 1;
-            }
-        }
-        kicked
-    }
-
-    async fn kick_connection(
-        &self,
-        connection: &AuthConnectionPresence,
-    ) -> Result<(), AuthorizationStateError> {
-        let client_id = connection
-            .client_id
-            .parse::<u64>()
-            .map_err(|_| AuthorizationStateError::InvalidRecord("invalid client id".to_owned()))?;
-        let response = self
-            .system_client
-            .request(
-                format!("$SYS.REQ.SERVER.{}.KICK", connection.server_id),
-                Bytes::from(
-                    serde_json::to_vec(&json!({ "cid": client_id }))
-                        .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?,
-                ),
+        let now = now_millis()?;
+        let request_digest = trellis_protocol::digest_json(&input)
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+        self.service
+            .repository()
+            .enqueue_idempotent_post_commit_actions(
+                IdempotencyResultRecord {
+                    scope_key: digest_parts(&["Auth.Connections.Kick", connection_id]),
+                    purpose: "Auth.Connections.Kick".to_owned(),
+                    signer_id: caller.principal_id.clone(),
+                    request_id: idempotency_key.to_owned(),
+                    request_digest,
+                    result: json!({ "connectionId": connection_id, "kicked": true }),
+                    created_at: now,
+                    expires_at: now.saturating_add(86_400_000),
+                },
+                vec![PostCommitActionRecord {
+                    predecessor_action_id: None,
+                    action_id: digest_parts(&[
+                        "Auth.Connections.Kick",
+                        connection_id,
+                        idempotency_key,
+                    ]),
+                    kind: PostCommitActionKind::Kick,
+                    payload: json!({
+                        "connectionId": connection_id,
+                        "reason": input.get("reason").and_then(Value::as_str),
+                    }),
+                    created_at: now,
+                    attempts: 0,
+                    next_attempt_at: now,
+                    claimed_until: None,
+                    last_error: None,
+                }],
             )
-            .await
-            .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
-        validate_connection_kick_response(&response.payload)
+            .await?;
+        Ok(json!({ "connectionId": connection_id, "kicked": true }))
     }
 
     async fn users_create(
@@ -2500,7 +2569,12 @@ impl AuthRpcProcessor {
                 })
             })
             .collect();
-        Ok(paginate_values(entries, &input))
+        paginate_values(
+            entries,
+            &input,
+            "auth.UserIdentities.List",
+            &["/providerId", "/subject"],
+        )
     }
 
     async fn user_identities_unlink(
@@ -2584,24 +2658,49 @@ impl AuthRpcProcessor {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let limit = input
-            .get("limit")
+            .pointer("/page/limit")
             .and_then(Value::as_u64)
-            .unwrap_or(100)
-            .clamp(1, 100) as usize;
+            .unwrap_or(50);
+        if limit == 0 || limit > 200 {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "invalid pagination limit".to_owned(),
+            ));
+        }
+        let limit = limit as usize;
+        let mut query = input.clone();
+        query.as_object_mut().map(|query| query.remove("page"));
+        let query_digest = trellis_protocol::pagination_query_digest("auth.Users.List", &query)
+            .map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))?;
+        let after = input
+            .pointer("/page/cursor")
+            .and_then(Value::as_str)
+            .map(|cursor| {
+                trellis_protocol::decode_pagination_cursor::<(i64, String)>(cursor, &query_digest)
+            })
+            .transpose()
+            .map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))?;
         let state = input.get("state").and_then(Value::as_str);
+        let search = input.get("search").and_then(Value::as_str);
         let mut accounts = self
             .service
-            .users(input.get("cursor").and_then(Value::as_str), limit + 1)
+            .users(after.as_ref(), state, search, limit + 1)
             .await?;
-        if let Some(state) = state {
-            accounts.retain(|account| principal_state(&account.principal) == state);
-        }
-        let next_cursor =
-            (accounts.len() > limit).then(|| accounts[limit - 1].principal.principal_id.clone());
+        let next_cursor = (accounts.len() > limit)
+            .then(|| {
+                let account = &accounts[limit - 1];
+                (
+                    account.principal.created_at,
+                    account.principal.principal_id.clone(),
+                )
+            })
+            .map(|after| trellis_protocol::encode_pagination_cursor(&query_digest, &after))
+            .transpose()
+            .map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))?;
         accounts.truncate(limit);
+        let page = next_cursor.map_or_else(|| json!({}), |cursor| json!({"nextCursor": cursor}));
         Ok(json!({
-            "entries": accounts.into_iter().map(user_value).collect::<Vec<_>>(),
-            "nextCursor": next_cursor,
+            "items": accounts.into_iter().map(user_value).collect::<Vec<_>>(),
+            "page": page,
         }))
     }
 
@@ -2672,6 +2771,40 @@ impl AuthRpcProcessor {
         }
         Ok(admin_target)
     }
+}
+
+fn encode_generated_scalars(value: &mut Value) {
+    match value {
+        Value::Number(number) if number.is_i64() || number.is_u64() => {
+            *value = Value::String(number.to_string());
+        }
+        Value::Array(values) => values.iter_mut().for_each(encode_generated_scalars),
+        Value::Object(values) => {
+            for value in values.values_mut() {
+                encode_generated_scalars(value);
+            }
+            if values.contains_key("action") {
+                if let Some(target) = values.get_mut("target") {
+                    encode_generated_bytes(target);
+                }
+            }
+            if let Some(review_mode) = values.get_mut("reviewMode") {
+                if !review_mode.is_null() {
+                    encode_generated_bytes(review_mode);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn encode_generated_bytes(value: &mut Value) {
+    use base64::Engine as _;
+
+    *value = Value::String(
+        base64::engine::general_purpose::STANDARD
+            .encode(serde_json::to_vec(value).expect("JSON value")),
+    );
 }
 
 fn connection_value(connection: AuthConnectionPresence) -> Value {
@@ -2745,68 +2878,87 @@ fn deployment_state_wire(state: DeploymentProfileState) -> &'static str {
     }
 }
 
-fn paginate_values(entries: Vec<Value>, input: &Value) -> Value {
+fn paginate_values(
+    mut entries: Vec<Value>,
+    input: &Value,
+    endpoint: &str,
+    key_paths: &[&str],
+) -> Result<Value, AuthorizationStateError> {
     let limit = input
-        .get("limit")
-        .and_then(|value| {
-            value
-                .as_i64()
-                .or_else(|| value.as_str()?.parse::<i64>().ok())
-        })
-        .unwrap_or(100)
-        .clamp(1, 500) as usize;
-    let offset = input
-        .get("cursor")
-        .and_then(Value::as_str)
-        .and_then(|cursor| cursor.parse::<usize>().ok())
-        .unwrap_or(0);
-    let next_cursor = (offset + limit < entries.len()).then(|| (offset + limit).to_string());
-    json!({
-        "entries": entries.into_iter().skip(offset).take(limit).collect::<Vec<_>>(),
-        "nextCursor": next_cursor,
-    })
-}
-
-fn offset_page(entries: Vec<Value>, input: &Value) -> Value {
-    let limit = input
-        .get("limit")
+        .pointer("/page/limit")
         .and_then(Value::as_u64)
-        .unwrap_or(100)
-        .min(500) as usize;
-    let offset = input.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
-    let count = entries.len();
-    let mut page = json!({
-        "entries": entries.into_iter().skip(offset).take(limit).collect::<Vec<_>>(),
-        "count": count,
-        "offset": offset,
-        "limit": limit,
-    });
-    if offset + limit < count {
-        page["nextOffset"] = json!(offset + limit);
+        .unwrap_or(50);
+    if limit == 0 || limit > 200 {
+        return Err(AuthorizationStateError::InvalidRecord(
+            "invalid pagination limit".to_owned(),
+        ));
     }
-    page
+    let limit = limit as usize;
+    let mut query = input.clone();
+    query.as_object_mut().map(|query| query.remove("page"));
+    let query_digest = trellis_protocol::pagination_query_digest(endpoint, &query)
+        .map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))?;
+    let after = input
+        .pointer("/page/cursor")
+        .and_then(Value::as_str)
+        .map(|cursor| {
+            trellis_protocol::decode_pagination_cursor::<Vec<String>>(cursor, &query_digest)
+        })
+        .transpose()
+        .map_err(|_| AuthorizationStateError::InvalidRecord("invalid pagination".to_owned()))?;
+    let key = |entry: &Value| {
+        key_paths
+            .iter()
+            .map(|path| {
+                entry
+                    .pointer(path)
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+    };
+    entries.sort_by_key(&key);
+    if let Some(after) = after {
+        if after.len() != key_paths.len() || after.iter().any(String::is_empty) {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "invalid pagination".to_owned(),
+            ));
+        }
+        entries.retain(|entry| key(entry) > after);
+    }
+    let mut entries = entries.into_iter().take(limit + 1).collect::<Vec<_>>();
+    let next_cursor = if entries.len() > limit {
+        entries.pop();
+        let after = entries.last().map(key).ok_or_else(|| {
+            AuthorizationStateError::InvalidRecord("invalid pagination".to_owned())
+        })?;
+        Some(
+            trellis_protocol::encode_pagination_cursor(&query_digest, &after).map_err(|_| {
+                AuthorizationStateError::InvalidRecord("invalid pagination".to_owned())
+            })?,
+        )
+    } else {
+        None
+    };
+    let page = next_cursor.map_or_else(|| json!({}), |cursor| json!({"nextCursor": cursor}));
+    Ok(json!({ "items": entries, "page": page }))
 }
 
-fn paginate_sessions(entries: Vec<SessionRecord>, input: &Value) -> Value {
-    let limit = input
-        .get("limit")
-        .and_then(|value| {
-            value
-                .as_i64()
-                .or_else(|| value.as_str()?.parse::<i64>().ok())
-        })
-        .unwrap_or(100)
-        .clamp(1, 500) as usize;
-    let offset = input
-        .get("cursor")
-        .and_then(Value::as_str)
-        .and_then(|cursor| cursor.parse::<usize>().ok())
-        .unwrap_or(0);
-    let next_cursor = (offset + limit < entries.len()).then(|| (offset + limit).to_string());
-    json!({
-        "entries": entries.into_iter().skip(offset).take(limit).collect::<Vec<_>>(),
-        "nextCursor": next_cursor,
-    })
+fn paginate_sessions(
+    entries: Vec<SessionRecord>,
+    input: &Value,
+) -> Result<Value, AuthorizationStateError> {
+    paginate_values(
+        entries
+            .into_iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?,
+        input,
+        "auth.Sessions.List",
+        &["/sessionId"],
+    )
 }
 
 fn require_admin(caller: &ValidatedRequest) -> Result<(), AuthorizationStateError> {
@@ -2840,7 +2992,7 @@ fn millis_rfc3339(value: i64) -> Result<String, AuthorizationStateError> {
 
 fn nullable_string(value: &Value, key: &str) -> Result<Option<String>, AuthorizationStateError> {
     match value.get(key) {
-        Some(Value::Null) => Ok(None),
+        None | Some(Value::Null) => Ok(None),
         Some(Value::String(value)) => Ok(Some(value.clone())),
         _ => Err(AuthorizationStateError::InvalidRecord(format!(
             "{key} must be a string or null"
@@ -2851,14 +3003,16 @@ fn nullable_string(value: &Value, key: &str) -> Result<Option<String>, Authoriza
 fn required_u64(value: &Value, key: &str) -> Result<u64, AuthorizationStateError> {
     value
         .get(key)
-        .and_then(Value::as_u64)
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse().ok())
         .ok_or_else(|| AuthorizationStateError::InvalidRecord(format!("{key} is required")))
 }
 
 fn required_i64(value: &Value, key: &str) -> Result<i64, AuthorizationStateError> {
     value
         .get(key)
-        .and_then(Value::as_i64)
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse().ok())
         .ok_or_else(|| AuthorizationStateError::InvalidRecord(format!("{key} is required")))
 }
 
@@ -3021,9 +3175,86 @@ mod tests {
     use super::*;
 
     #[test]
-    fn offset_page_omits_exhausted_next_offset() {
-        let page = offset_page(vec![json!({ "id": 1 })], &json!({ "limit": 1 }));
-        assert_eq!(page.get("nextOffset"), None);
+    fn cursor_page_omits_exhausted_next_cursor() {
+        let response = paginate_values(
+            vec![json!({ "id": 1 })],
+            &json!({"page": {"limit": 1}}),
+            "test",
+            &["/id"],
+        )
+        .unwrap();
+        assert_eq!(response["items"], json!([{ "id": 1 }]));
+        assert_eq!(response.pointer("/page/nextCursor"), None);
+    }
+
+    #[test]
+    fn cursor_page_survives_preceding_insert_and_delete_and_rejects_query_reuse() {
+        let first = paginate_values(
+            vec![json!({"id":"b"}), json!({"id":"c"}), json!({"id":"d"})],
+            &json!({"state":"active", "page":{"limit":2}}),
+            "test.List",
+            &["/id"],
+        )
+        .unwrap();
+        let cursor = first
+            .pointer("/page/nextCursor")
+            .and_then(Value::as_str)
+            .unwrap();
+        let second = paginate_values(
+            vec![json!({"id":"a"}), json!({"id":"c"}), json!({"id":"d"})],
+            &json!({"state":"active", "page":{"limit":2, "cursor":cursor}}),
+            "test.List",
+            &["/id"],
+        )
+        .unwrap();
+        assert_eq!(second["items"], json!([{"id":"d"}]));
+        assert!(paginate_values(
+            vec![json!({"id":"d"})],
+            &json!({"state":"revoked", "page":{"cursor":cursor}}),
+            "test.List",
+            &["/id"],
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn users_cursor_binds_state_and_search_filters() {
+        let query = json!({"state":"active", "search":"needle"});
+        let digest = trellis_protocol::pagination_query_digest("auth.Users.List", &query).unwrap();
+        let cursor = trellis_protocol::encode_pagination_cursor(
+            &digest,
+            &(1_700_000_000_000_i64, "usr_target".to_owned()),
+        )
+        .unwrap();
+        let changed_digest = trellis_protocol::pagination_query_digest(
+            "auth.Users.List",
+            &json!({"state":"disabled", "search":"needle"}),
+        )
+        .unwrap();
+
+        assert!(trellis_protocol::decode_pagination_cursor::<(i64, String)>(
+            &cursor,
+            &changed_digest,
+        )
+        .is_err());
+        let changed_digest = trellis_protocol::pagination_query_digest(
+            "auth.Users.List",
+            &json!({"state":"active", "search":"haystack"}),
+        )
+        .unwrap();
+        assert!(trellis_protocol::decode_pagination_cursor::<(i64, String)>(
+            &cursor,
+            &changed_digest,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn generated_integer_inputs_use_decimal_strings() {
+        let input = json!({ "positive": "42", "signed": "-42" });
+        assert_eq!(required_u64(&input, "positive").unwrap(), 42);
+        assert_eq!(required_i64(&input, "signed").unwrap(), -42);
+        assert!(required_u64(&json!({ "value": 42 }), "value").is_err());
     }
 
     #[test]
@@ -3052,7 +3283,7 @@ mod tests {
     fn public_rpc_errors_never_serialize_internal_causes() {
         let secret = "postgres://admin:secret@internal/auth";
         let payload = public_rpc_error(
-            "rpc.v1.Auth.Users.List",
+            "rpc.v1.auth.Users.List",
             &AuthorizationStateError::Storage(secret.to_owned()),
         );
         let encoded = serde_json::to_string(&payload).unwrap();
@@ -3060,11 +3291,25 @@ mod tests {
         assert_eq!(payload["type"], "UnexpectedError");
         assert_eq!(payload["context"]["code"], "internal_error");
         let invalid = public_rpc_error(
-            "rpc.v1.Auth.Grants.Set",
+            "rpc.v1.auth.Grants.Set",
             &AuthorizationStateError::InvalidRecord(secret.to_owned()),
         );
         assert_eq!(invalid["type"], "AuthError");
         assert_eq!(invalid["reason"], "invalid_request");
         assert!(!serde_json::to_string(&invalid).unwrap().contains(secret));
+    }
+
+    #[test]
+    fn generated_bytes_are_padded_standard_base64() {
+        let mut value = serde_json::json!({
+            "action": "call",
+            "target": { "kind": "apiSurface" },
+            "reviewMode": "required"
+        });
+
+        super::encode_generated_scalars(&mut value);
+
+        assert_eq!(value["target"], "eyJraW5kIjoiYXBpU3VyZmFjZSJ9");
+        assert_eq!(value["reviewMode"], "InJlcXVpcmVkIg==");
     }
 }

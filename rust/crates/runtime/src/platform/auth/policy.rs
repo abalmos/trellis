@@ -1,13 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
-use serde_json::json;
-use trellis_protocol::{GrantSet, PlatformPrivilege};
+use serde::{Deserialize, Serialize};
+use trellis_protocol::{
+    GrantSet, ParticipantResourceKind, PermissionAtom, PermissionTarget, PlatformPrivilege,
+};
 
 use super::{
-    ephemeral::BrowserConsentProposal, AuthorizationStateError, CapabilityGroupRecord,
+    ephemeral::{
+        ConsentCapability, ConsentCompanion, ConsentOwnerKind, ConsentRequest, ConsentResource,
+        ConsentResourceActualEntry, ConsentResourceChange,
+    },
+    ApprovalMode, ApprovedCapability, ApprovedResource, AuthorizationResourceKind,
+    AuthorizationStateError, CapabilityGroupRecord, DelegationCeiling, GrantBinding,
     LoginPortalRecord, LoginSettingsRecord, ParticipantBindingRecord, PortalGrantOverrideRecord,
-    PortalPolicySnapshot,
+    PortalPolicySnapshot, ResourceBindingEvidence, ResourceBindingState, ResourceCommitment,
 };
 
 pub(crate) fn portal_allows_authenticated_provider(
@@ -90,56 +96,539 @@ pub(super) fn policy_record_fingerprint<T: Serialize>(
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
 }
 
-pub(crate) fn browser_consent_proposal(
+pub(crate) fn consent_request(
     binding: &ParticipantBindingRecord,
-) -> Result<BrowserConsentProposal, AuthorizationStateError> {
+    installed_revision: u64,
+    current: Option<&GrantBinding>,
+    ceiling: &DelegationCeiling,
+    actuals: &[ConsentResourceActualEntry],
+    companion_binding: Option<(
+        &ParticipantBindingRecord,
+        Option<&GrantBinding>,
+        &[ConsentResourceActualEntry],
+    )>,
+) -> Result<ConsentRequest, AuthorizationStateError> {
     let resolved = binding.resolve()?;
-    let consent_view = json!({
-        "participant": {
-            "id": binding.participant_id,
-            "digest": binding.participant_digest,
-            "displayName": resolved.display_name,
-            "description": "Trellis participant",
-        },
-        "required": {
-            "permissions": resolved.required_grants.permissions(),
-            "capabilities": resolved.required_capabilities,
-        },
-        "optionalBundles": resolved.optional_grant_bundles.iter().map(|(id, grant)| json!({
-            "id": id,
-            "permissions": grant.permissions(),
-        })).collect::<Vec<_>>(),
-    });
-    let required_grant_set = resolved.required_grants.clone();
-    let optional_grant_bundles = resolved.optional_grant_bundles.clone();
-    let required_capabilities = resolved.required_capabilities.clone();
-    let optional_capability_definitions = resolved.optional_capability_definitions.clone();
-    let consent_view_digest = trellis_protocol::digest_json(&consent_view)
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let proposal_digest = trellis_protocol::digest_json(&json!({
-        "participantId": binding.participant_id,
-        "participantDigest": binding.participant_digest,
-        "participantNeedsDigest": binding.needs_digest,
-        "requiredGrantSet": required_grant_set,
-        "optionalGrantBundles": optional_grant_bundles,
-        "requiredCapabilities": required_capabilities,
-        "optionalCapabilityDefinitions": optional_capability_definitions,
-    }))
-    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-    let consent = BrowserConsentProposal {
-        participant_id: binding.participant_id.clone(),
-        participant_digest: binding.participant_digest.clone(),
-        participant_needs_digest: binding.needs_digest.clone(),
-        consent_view,
-        consent_view_digest,
-        proposal_digest,
-        required_grant_set,
-        optional_grant_bundles,
-        required_capabilities,
-        optional_capability_definitions,
+    let ceiling_capabilities = ceiling.capabilities.iter().collect::<BTreeSet<_>>();
+    let approved_capabilities = current
+        .into_iter()
+        .flat_map(|current| current.approved_capabilities.iter())
+        .collect::<BTreeSet<_>>();
+    let mut capabilities = resolved
+        .referenced_apis
+        .values()
+        .flat_map(|api| api.capabilities.iter())
+        .filter(|(id, capability)| {
+            selected_permissions(resolved).any(|permission| capability.allows.contains(permission))
+                || resolved.required_capabilities.contains(id)
+                || resolved.optional_capability_definitions.contains_key(*id)
+        })
+        .map(|(id, capability)| {
+            let fingerprint = ApprovedCapability {
+                id: id.clone(),
+                consent_digest: capability.consent_digest.clone(),
+            };
+            ConsentCapability {
+                id: id.clone(),
+                title: capability.display_name.clone(),
+                description: capability.description.clone(),
+                consequence: capability.consequence.clone(),
+                consent_digest: capability.consent_digest.clone(),
+                required: !resolved.optional_capability_definitions.contains_key(id),
+                eligible: capability.public || ceiling_capabilities.contains(&fingerprint),
+                already_approved: approved_capabilities.contains(&fingerprint),
+            }
+        })
+        .collect::<Vec<_>>();
+    capabilities.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut resources = resolved
+        .resources
+        .iter()
+        .map(|(name, resource)| {
+            let requested_commitment = resource_commitment(resource);
+            let approved = current.and_then(|current| {
+                current
+                    .approved_resources
+                    .iter()
+                    .find(|approved| approved.name == *name)
+            });
+            let kind = AuthorizationResourceKind::from(resource.kind);
+            let already_approved = approved.is_some_and(|approved| {
+                approved.kind == kind
+                    && hard_commitment_eq(&approved.commitment, &requested_commitment)
+            });
+            let change = classify_resource_change(approved, kind, &requested_commitment);
+            ConsentResource {
+                kind,
+                name: name.clone(),
+                title: resource.title.clone(),
+                description: resource.description.clone(),
+                required: !resource.optional,
+                requested_commitment,
+                change,
+                actual: actuals
+                    .iter()
+                    .find(|actual| actual.kind == kind && actual.name == *name)
+                    .map(|actual| actual.actual.clone()),
+                eligible: true,
+                already_approved,
+            }
+        })
+        .collect::<Vec<_>>();
+    if let Some(current) = current {
+        resources.extend(
+            current
+                .approved_resources
+                .iter()
+                .filter(|approved| !resolved.resources.contains_key(&approved.name))
+                .map(|approved| ConsentResource {
+                    kind: approved.kind,
+                    name: approved.name.clone(),
+                    title: approved.name.clone(),
+                    description: String::new(),
+                    required: false,
+                    requested_commitment: approved.commitment.clone(),
+                    actual: None,
+                    change: ConsentResourceChange::Detached,
+                    eligible: false,
+                    already_approved: true,
+                }),
+        );
+    }
+    resources.sort_by(|left, right| (left.kind, &left.name).cmp(&(right.kind, &right.name)));
+    let companion = if let Some(participant_id) = &resolved.companion_participant_id {
+        let (child, current, child_actuals) = companion_binding.ok_or_else(|| {
+            AuthorizationStateError::InvalidRecord(
+                "companion participant definition is missing".to_owned(),
+            )
+        })?;
+        if child.participant_id != *participant_id {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "companion participant definition does not match".to_owned(),
+            ));
+        }
+        let child_ceiling = participant_delegation_ceiling(child)?;
+        let child_consent = consent_request(
+            child,
+            installed_revision,
+            current,
+            &child_ceiling,
+            child_actuals,
+            None,
+        )?;
+        Some(ConsentCompanion {
+            participant_id: participant_id.clone(),
+            kind: resolved
+                .companion_participant_kind
+                .map(ConsentOwnerKind::from)
+                .ok_or_else(|| {
+                    AuthorizationStateError::InvalidRecord(
+                        "companion participant kind is missing".to_owned(),
+                    )
+                })?,
+            required: resolved.companion_required,
+            capabilities: child_consent.capabilities,
+            resources: child_consent.resources,
+        })
+    } else {
+        None
     };
+    let mut consent = ConsentRequest {
+        participant_id: binding.participant_id.clone(),
+        package_digest: binding.package_digest.clone(),
+        installed_revision,
+        expected_grant_revision: current.map_or(0, |current| current.revision),
+        capabilities,
+        resources,
+        companion,
+        decision_digest: String::new(),
+    };
+    consent.decision_digest = consent.computed_decision_digest()?;
     consent.validate()?;
     Ok(consent)
+}
+
+fn classify_resource_change(
+    current: Option<&ApprovedResource>,
+    requested_kind: AuthorizationResourceKind,
+    requested: &ResourceCommitment,
+) -> ConsentResourceChange {
+    let Some(current) = current else {
+        return ConsentResourceChange::New;
+    };
+    if current.kind != requested_kind {
+        ConsentResourceChange::Incompatible
+    } else if hard_commitment_eq(&current.commitment, requested) {
+        ConsentResourceChange::Unchanged
+    } else if commitment_is_reduced(&current.commitment, requested) {
+        ConsentResourceChange::Reduced
+    } else {
+        ConsentResourceChange::Expanded
+    }
+}
+
+fn commitment_is_reduced(current: &ResourceCommitment, requested: &ResourceCommitment) -> bool {
+    let limit = |current: Option<u64>, requested: Option<u64>| match (current, requested) {
+        (Some(current), Some(requested)) => requested <= current,
+        (None, None) => true,
+        _ => false,
+    };
+    limit(current.history, requested.history) && limit(current.ttl_ms, requested.ttl_ms)
+}
+
+fn hard_commitment_eq(current: &ResourceCommitment, requested: &ResourceCommitment) -> bool {
+    current.history == requested.history && current.ttl_ms == requested.ttl_ms
+}
+
+fn selected_permissions(
+    participant: &super::evidence::ParticipantRuntimeProjection,
+) -> impl Iterator<Item = &PermissionAtom> {
+    participant.required_grants.permissions().iter().chain(
+        participant
+            .optional_grant_bundles
+            .values()
+            .flat_map(|grants| grants.permissions()),
+    )
+}
+
+pub(crate) fn participant_delegation_ceiling(
+    binding: &ParticipantBindingRecord,
+) -> Result<DelegationCeiling, AuthorizationStateError> {
+    let participant = binding.resolve()?;
+    let mut capabilities = participant
+        .referenced_apis
+        .values()
+        .flat_map(|api| api.capabilities.iter())
+        .filter(|(_, capability)| {
+            selected_permissions(participant)
+                .any(|permission| capability.allows.contains(permission))
+        })
+        .map(|(id, capability)| ApprovedCapability {
+            id: id.clone(),
+            consent_digest: capability.consent_digest.clone(),
+        })
+        .collect::<Vec<_>>();
+    capabilities.sort();
+    capabilities.dedup();
+    Ok(DelegationCeiling {
+        capabilities,
+        exact_restrictions: None,
+        platform_privileges: Vec::new(),
+    })
+}
+
+pub(crate) fn participant_resource_commitments(
+    participant: &ParticipantBindingRecord,
+) -> Result<Vec<ApprovedResource>, AuthorizationStateError> {
+    Ok(participant
+        .resolve()?
+        .resources
+        .iter()
+        .map(|(name, resource)| ApprovedResource {
+            kind: resource.kind.into(),
+            name: name.clone(),
+            commitment: resource_commitment(resource),
+        })
+        .collect())
+}
+
+fn resource_commitment(
+    resource: &super::evidence::ResourceRuntimeProjection,
+) -> ResourceCommitment {
+    ResourceCommitment {
+        desired_max_object_bytes: resource.desired_max_object,
+        desired_max_total_bytes: resource.desired_max_total,
+        desired_max_value_bytes: resource.desired_max_value,
+        history: resource.history,
+        ttl_ms: resource.ttl_ms,
+    }
+}
+
+/// Why an approved capability or resource is currently unavailable.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AvailabilityReason {
+    NotApproved,
+    NotDelegable,
+    ProviderUnavailable,
+    ProviderIncompatible,
+    ResourceUnavailable,
+    CompanionUnavailable,
+    NotSelected,
+}
+
+/// Current availability of one approved surface.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Availability {
+    pub available: bool,
+    pub reason: Option<AvailabilityReason>,
+}
+
+/// Pure result used by consent, reconciliation, and issuance.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ResolvedAuthority {
+    pub exact_grants: GrantSet,
+    pub platform_privileges: Vec<PlatformPrivilege>,
+    pub capabilities: BTreeMap<String, Availability>,
+    pub resources: BTreeMap<String, Availability>,
+    pub apis: BTreeMap<String, Availability>,
+    pub companion: Option<Availability>,
+    pub readiness: bool,
+    pub missing_required: Vec<String>,
+}
+
+pub(crate) fn resolve_authority(
+    participant: &ParticipantBindingRecord,
+    approval_mode: ApprovalMode,
+    approved_capabilities: &[ApprovedCapability],
+    approved_resources: &[ApprovedResource],
+    approved_platform_privileges: &[PlatformPrivilege],
+    ceiling: &DelegationCeiling,
+    availability: (&[ResourceBindingEvidence], bool),
+) -> Result<ResolvedAuthority, AuthorizationStateError> {
+    let (usable_resources, companion_available) = availability;
+    let resolved = participant.resolve()?;
+    let selected = selected_permissions(resolved).cloned().collect::<Vec<_>>();
+    let capabilities = resolved
+        .referenced_apis
+        .values()
+        .flat_map(|api| api.capabilities.iter())
+        .collect::<BTreeMap<_, _>>();
+    let implicated = capabilities
+        .iter()
+        .filter(|(_, capability)| {
+            capability
+                .allows
+                .iter()
+                .any(|permission| selected.contains(permission))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let ceiling_capabilities = ceiling.capabilities.iter().collect::<BTreeSet<_>>();
+    let approved_capabilities = approved_capabilities.iter().collect::<BTreeSet<_>>();
+    let exact_restrictions = ceiling
+        .exact_restrictions
+        .as_ref()
+        .map(|grants| grants.permissions().to_vec());
+    if approved_capabilities
+        .iter()
+        .chain(&ceiling_capabilities)
+        .any(|approved| {
+            capabilities
+                .get(&approved.id)
+                .is_none_or(|capability| capability.consent_digest != approved.consent_digest)
+        })
+        || approved_resources.iter().any(|approved| {
+            resolved
+                .resources
+                .get(&approved.name)
+                .is_none_or(|resource| {
+                    AuthorizationResourceKind::from(resource.kind) != approved.kind
+                        || resource_commitment(resource) != approved.commitment
+                })
+        })
+        || exact_restrictions
+            .as_ref()
+            .is_some_and(|restrictions| restrictions.iter().any(|atom| !selected.contains(atom)))
+    {
+        return Err(AuthorizationStateError::InvalidRecord(
+            "approval or delegation ceiling is outside the installed participant definitions"
+                .to_owned(),
+        ));
+    }
+    let mut capability_availability = BTreeMap::new();
+    let mut allowed = if approval_mode == ApprovalMode::Exact {
+        exact_restrictions
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|permission| selected.contains(permission))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let mut missing_required = Vec::new();
+    for (id, capability) in implicated {
+        let fingerprint = ApprovedCapability {
+            id: (*id).clone(),
+            consent_digest: capability.consent_digest.clone(),
+        };
+        let approved = capability.public || approved_capabilities.contains(&fingerprint);
+        let delegable = capability.public || ceiling_capabilities.contains(&fingerprint);
+        let available = if approval_mode == ApprovalMode::Exact {
+            capability
+                .allows
+                .iter()
+                .filter(|permission| selected.contains(*permission))
+                .all(|permission| {
+                    exact_restrictions
+                        .as_ref()
+                        .is_some_and(|restrictions| restrictions.contains(permission))
+                })
+        } else {
+            approved && delegable
+        };
+        capability_availability.insert(
+            (*id).clone(),
+            Availability {
+                available,
+                reason: (!available).then_some(if approved {
+                    AvailabilityReason::NotDelegable
+                } else {
+                    AvailabilityReason::NotApproved
+                }),
+            },
+        );
+        if available {
+            allowed.extend(
+                capability
+                    .allows
+                    .iter()
+                    .filter(|permission| selected.contains(*permission))
+                    .cloned(),
+            );
+        } else if approval_mode == ApprovalMode::Capabilities
+            && !capability.public
+            && !resolved.optional_capability_definitions.contains_key(*id)
+        {
+            missing_required.push(format!("capability:{id}"));
+        }
+    }
+    if approval_mode == ApprovalMode::Capabilities {
+        for permission in &selected {
+            if !capabilities
+                .values()
+                .any(|capability| capability.allows.contains(permission))
+                && !allowed.contains(permission)
+            {
+                allowed.push(permission.clone());
+            }
+        }
+    }
+    if let Some(restrictions) = &exact_restrictions {
+        allowed.retain(|permission| restrictions.contains(permission));
+    }
+    allowed.retain(|permission| {
+        !matches!(
+            permission.target(),
+            PermissionTarget::ParticipantResource { .. }
+        )
+    });
+
+    let mut resource_availability = BTreeMap::new();
+    for (name, declaration) in &resolved.resources {
+        let commitment = resource_commitment(declaration);
+        let approval = approved_resources.iter().find(|approval| {
+            approval.name == *name
+                && approval.kind == declaration.kind.into()
+                && approval.commitment == commitment
+        });
+        let usable = usable_resources.iter().find(|resource| {
+            resource.local_name == *name
+                && resource.resource_kind == resource_kind_name(declaration.kind)
+                && resource.owner_participant_id == resolved.participant_id
+                && resource.state == ResourceBindingState::Available
+        });
+        let available = approval.is_some() && usable.is_some();
+        resource_availability.insert(
+            name.clone(),
+            Availability {
+                available,
+                reason: (!available).then_some(if approval.is_none() {
+                    AvailabilityReason::NotApproved
+                } else {
+                    AvailabilityReason::ResourceUnavailable
+                }),
+            },
+        );
+        if available {
+            allowed.extend(selected.iter().filter(|permission| matches!(permission.target(), PermissionTarget::ParticipantResource { participant, resource, name: resource_name } if participant == &resolved.participant_id && *resource == declaration.kind && resource_name == name)).cloned());
+        }
+        if !available && !declaration.optional {
+            missing_required.push(format!(
+                "resource:{}:{name}",
+                resource_kind_name(declaration.kind)
+            ));
+        }
+    }
+    if resolved
+        .required_grants
+        .permissions()
+        .iter()
+        .any(|permission| {
+            !matches!(
+                permission.target(),
+                PermissionTarget::ParticipantResource { .. }
+            ) && !allowed.contains(permission)
+        })
+    {
+        missing_required.push("authority".to_owned());
+    }
+    let mut platform_privileges = approved_platform_privileges
+        .iter()
+        .filter(|privilege| ceiling.platform_privileges.contains(privilege))
+        .copied()
+        .collect::<Vec<_>>();
+    platform_privileges.sort_unstable();
+    platform_privileges.dedup();
+    let companion = resolved
+        .companion_participant_id
+        .as_ref()
+        .map(|_| Availability {
+            available: companion_available,
+            reason: (!companion_available).then_some(AvailabilityReason::CompanionUnavailable),
+        });
+    if resolved.companion_required && !companion_available {
+        missing_required.push("companion".to_owned());
+    }
+    missing_required.sort();
+    missing_required.dedup();
+    let apis = resolved
+        .referenced_apis
+        .keys()
+        .map(|id| {
+            let permissions = selected
+                .iter()
+                .filter(|permission| match permission.target() {
+                    PermissionTarget::ApiSurface { api, .. }
+                    | PermissionTarget::OperationSignal { api, .. } => api == id,
+                    PermissionTarget::ParticipantResource { .. } => false,
+                });
+            let (count, available) =
+                permissions.fold((0, true), |(count, available), permission| {
+                    (count + 1, available && allowed.contains(permission))
+                });
+            (
+                id.clone(),
+                Availability {
+                    available: count > 0 && available,
+                    reason: (count == 0)
+                        .then_some(AvailabilityReason::NotSelected)
+                        .or_else(|| (!available).then_some(AvailabilityReason::NotApproved)),
+                },
+            )
+        })
+        .collect();
+    Ok(ResolvedAuthority {
+        exact_grants: GrantSet::new(allowed),
+        platform_privileges,
+        capabilities: capability_availability,
+        resources: resource_availability,
+        apis,
+        companion,
+        readiness: missing_required.is_empty(),
+        missing_required,
+    })
+}
+
+fn resource_kind_name(kind: ParticipantResourceKind) -> &'static str {
+    match kind {
+        ParticipantResourceKind::Kv => "kv",
+        ParticipantResourceKind::Store => "store",
+        ParticipantResourceKind::JobQueue => "jobQueue",
+        ParticipantResourceKind::EventConsumer => "eventConsumer",
+        ParticipantResourceKind::State => "state",
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -150,9 +639,7 @@ pub(crate) struct ProviderLoginAttributes {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PortalAuthoritySelection {
-    pub grant_set: GrantSet,
-    pub capabilities: Vec<String>,
-    pub platform_privileges: Vec<PlatformPrivilege>,
+    pub ceiling: DelegationCeiling,
     pub effective_policy_digest: String,
 }
 
@@ -164,17 +651,17 @@ struct EffectivePortalAuthority<'a> {
     participant_id: &'a str,
     participant_digest: &'a str,
     participant_needs_digest: &'a str,
-    grant_set: &'a GrantSet,
-    capabilities: &'a [String],
+    capabilities: &'a [ApprovedCapability],
+    platform_privileges: &'a [PlatformPrivilege],
 }
 
 pub(crate) fn resolve_portal_authority_selection(
     policy: &PortalGrantOverrideRecord,
     groups: &BTreeMap<String, CapabilityGroupRecord>,
-    consent: &BrowserConsentProposal,
+    participant: &ParticipantBindingRecord,
     attributes: &ProviderLoginAttributes,
 ) -> Result<PortalAuthoritySelection, AuthorizationStateError> {
-    if policy.participant_id != consent.participant_id {
+    if policy.participant_id != participant.participant_id {
         return Err(AuthorizationStateError::InvalidRecord(
             "portal policy participant does not match consent proposal".to_owned(),
         ));
@@ -184,54 +671,62 @@ pub(crate) fn resolve_portal_authority_selection(
         .iter()
         .cloned()
         .collect::<BTreeSet<_>>();
+    let roles = attributes
+        .roles
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
     expand_groups(&policy.capability_group_keys, groups, &mut selected)?;
     for mapping in &policy.role_mappings {
-        if mapping.provider_id == attributes.provider_id
-            && attributes.roles.binary_search(&mapping.role).is_ok()
-        {
+        if mapping.provider_id == attributes.provider_id && roles.contains(mapping.role.as_str()) {
             selected.extend(mapping.direct_capabilities.iter().cloned());
             expand_groups(&mapping.capability_group_keys, groups, &mut selected)?;
         }
     }
 
-    let mut permissions = consent.required_grant_set.permissions().to_vec();
-    let mut capabilities = consent.required_capabilities.clone();
+    let resolved = participant.resolve()?;
+    let mut capabilities = Vec::new();
     // The admin marker is platform classification, not participant permission
     // evidence, so it bypasses proposal bounding; only admins can write the
     // policy that selects it.
     let admin_marker_selected = selected.contains("trellis.auth::admin");
     for capability in selected {
-        if let Some(grants) = consent.optional_capability_definitions.get(&capability) {
-            permissions.extend_from_slice(grants.permissions());
-            capabilities.push(capability);
+        if let Some(definition) = resolved
+            .referenced_apis
+            .values()
+            .find_map(|api| api.capabilities.get(&capability))
+        {
+            capabilities.push(ApprovedCapability {
+                id: capability,
+                consent_digest: definition.consent_digest.clone(),
+            });
         }
-    }
-    if admin_marker_selected {
-        capabilities.push("trellis.auth::admin".to_owned());
     }
     capabilities.sort();
     capabilities.dedup();
-    let grant_set = GrantSet::new(permissions);
+    let platform_privileges = admin_marker_selected
+        .then_some(PlatformPrivilege::Admin)
+        .into_iter()
+        .collect::<Vec<_>>();
     let digest_value = serde_json::to_value(EffectivePortalAuthority {
         format: "trellis.portal-effective-authority.v1",
         portal_id: &policy.portal_id,
         participant_id: &policy.participant_id,
-        participant_digest: &consent.participant_digest,
-        participant_needs_digest: &consent.participant_needs_digest,
-        grant_set: &grant_set,
+        participant_digest: &participant.participant_digest,
+        participant_needs_digest: &participant.needs_digest,
         capabilities: &capabilities,
+        platform_privileges: &platform_privileges,
     })
     .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
     let effective_policy_digest = trellis_protocol::digest_json(&digest_value)
         .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
 
     Ok(PortalAuthoritySelection {
-        grant_set,
-        capabilities,
-        platform_privileges: admin_marker_selected
-            .then_some(PlatformPrivilege::Admin)
-            .into_iter()
-            .collect(),
+        ceiling: DelegationCeiling {
+            capabilities,
+            exact_restrictions: None,
+            platform_privileges,
+        },
         effective_policy_digest,
     })
 }
@@ -259,7 +754,9 @@ fn expand_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::platform::auth::evidence::{
+        ApiRuntimeProjection, CapabilityRuntimeProjection, ParticipantRuntimeProjection,
+    };
     use trellis_protocol::{ApiSurfaceKind, PermissionAction, PermissionAtom, PermissionTarget};
 
     fn atom(name: &str) -> PermissionAtom {
@@ -270,204 +767,161 @@ mod tests {
         .unwrap()
     }
 
-    fn grant(name: &str) -> GrantSet {
-        GrantSet::new(vec![atom(name)])
-    }
-
-    fn group(key: &str, capabilities: &[&str], included: &[&str]) -> CapabilityGroupRecord {
-        CapabilityGroupRecord {
-            group_key: key.to_owned(),
-            display_name: key.to_owned(),
-            description: String::new(),
-            capabilities: capabilities
-                .iter()
-                .map(|value| (*value).to_owned())
-                .collect(),
-            included_groups: included.iter().map(|value| (*value).to_owned()).collect(),
-            created_at: 1,
-            updated_at: 1,
-            version: 1,
+    fn participant() -> ParticipantBindingRecord {
+        let read = atom("Read");
+        ParticipantBindingRecord {
+            participant_id: "example.app".to_owned(),
+            participant_kind: trellis_protocol::ParticipantKind::App,
+            participant_digest: "A".repeat(43),
+            needs_digest: "B".repeat(43),
+            package_digest: "A".repeat(43),
+            participant_path: "app".to_owned(),
+            projection: ParticipantRuntimeProjection {
+                participant_id: "example.app".to_owned(),
+                participant_kind: trellis_protocol::ParticipantKind::App,
+                display_name: "Example".to_owned(),
+                implemented_apis: BTreeMap::new(),
+                referenced_apis: BTreeMap::from([(
+                    "app@v1".to_owned(),
+                    ApiRuntimeProjection {
+                        digest: "A".repeat(43),
+                        major: 1,
+                        actions: BTreeMap::new(),
+                        capabilities: BTreeMap::from([
+                            (
+                                "app::first".to_owned(),
+                                CapabilityRuntimeProjection {
+                                    display_name: "First".to_owned(),
+                                    description: String::new(),
+                                    consequence: String::new(),
+                                    consent_digest: "A".repeat(43),
+                                    public: false,
+                                    allows: vec![read.clone()],
+                                },
+                            ),
+                            (
+                                "app::overlap".to_owned(),
+                                CapabilityRuntimeProjection {
+                                    display_name: "Overlap".to_owned(),
+                                    description: String::new(),
+                                    consequence: String::new(),
+                                    consent_digest: "A".repeat(43),
+                                    public: false,
+                                    allows: vec![read.clone()],
+                                },
+                            ),
+                        ]),
+                    },
+                )]),
+                resources: BTreeMap::new(),
+                required_grants: GrantSet::new(vec![read]),
+                optional_grant_bundles: BTreeMap::new(),
+                required_capabilities: vec!["app::first".to_owned(), "app::overlap".to_owned()],
+                optional_capability_definitions: BTreeMap::new(),
+                companion_participant_id: None,
+                companion_participant_kind: None,
+                companion_required: false,
+            },
+            resolved_at: 1,
+            state: super::super::ParticipantBindingState::Resolved,
+            error: None,
         }
     }
 
     #[test]
-    fn expands_nested_provider_scoped_roles_without_optional_bundles() {
-        let consent = BrowserConsentProposal {
-            participant_id: "app".to_owned(),
-            participant_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            participant_needs_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            consent_view: json!({}),
-            consent_view_digest: String::new(),
-            proposal_digest: String::new(),
-            required_grant_set: grant("Required"),
-            optional_grant_bundles: BTreeMap::from([("bundle".to_owned(), grant("Bundle"))]),
-            required_capabilities: vec!["required".to_owned()],
-            optional_capability_definitions: BTreeMap::from([
-                ("app::read".to_owned(), grant("Read")),
-                ("app::write".to_owned(), grant("Write")),
-            ]),
+    fn overlap_grants_once_but_all_required_capabilities_gate_readiness() {
+        let participant = participant();
+        let approved = ApprovedCapability {
+            id: "app::first".to_owned(),
+            consent_digest: "A".repeat(43),
         };
-        let policy = PortalGrantOverrideRecord {
-            portal_id: "portal".to_owned(),
-            participant_id: "app".to_owned(),
-            direct_capabilities: vec!["app::unknown".to_owned()],
-            capability_group_keys: vec!["nested".to_owned()],
-            role_mappings: vec![super::super::PortalRoleMapping {
-                provider_id: "oidc".to_owned(),
-                role: "Admin".to_owned(),
-                direct_capabilities: vec!["app::write".to_owned()],
-                capability_group_keys: vec![],
-            }],
-            created_at: 1,
-            updated_at: 1,
-            version: 1,
+        let ceiling = DelegationCeiling {
+            capabilities: vec![approved.clone()],
+            exact_restrictions: None,
+            platform_privileges: Vec::new(),
         };
-        let groups = BTreeMap::from([
-            ("base".to_owned(), group("base", &["app::read"], &[])),
-            ("nested".to_owned(), group("nested", &[], &["base"])),
-        ]);
-        let selection = resolve_portal_authority_selection(
-            &policy,
-            &groups,
-            &consent,
-            &ProviderLoginAttributes {
-                provider_id: "oidc".to_owned(),
-                roles: vec!["Admin".to_owned()],
-            },
+        let resolved = resolve_authority(
+            &participant,
+            ApprovalMode::Capabilities,
+            &[approved],
+            &[],
+            &[],
+            &ceiling,
+            (&[], true),
         )
         .unwrap();
+        assert_eq!(resolved.exact_grants, GrantSet::new(vec![atom("Read")]));
+        assert!(!resolved.readiness);
+        assert_eq!(resolved.missing_required, ["capability:app::overlap"]);
+    }
+
+    #[test]
+    fn exact_mode_never_auto_expands_beyond_the_explicit_atom_set() {
+        let participant = participant();
+        let resolved = resolve_authority(
+            &participant,
+            ApprovalMode::Exact,
+            &[],
+            &[],
+            &[],
+            &DelegationCeiling {
+                capabilities: Vec::new(),
+                exact_restrictions: Some(GrantSet::new(Vec::new())),
+                platform_privileges: Vec::new(),
+            },
+            (&[], true),
+        )
+        .unwrap();
+        assert!(resolved.exact_grants.permissions().is_empty());
+        assert!(!resolved.readiness);
+    }
+
+    #[test]
+    fn consent_digest_binds_revisions_and_resource_change_classification() {
+        let participant = participant();
+        let ceiling = participant_delegation_ceiling(&participant).unwrap();
+        let first = consent_request(&participant, 1, None, &ceiling, &[], None).unwrap();
+        let second = consent_request(&participant, 2, None, &ceiling, &[], None).unwrap();
+        assert_ne!(first.decision_digest, second.decision_digest);
         assert_eq!(
-            selection.capabilities,
-            ["app::read", "app::write", "required"]
+            classify_resource_change(
+                Some(&ApprovedResource {
+                    kind: AuthorizationResourceKind::Kv,
+                    name: "cache".to_owned(),
+                    commitment: ResourceCommitment {
+                        desired_max_value_bytes: Some(100),
+                        history: Some(10),
+                        ttl_ms: Some(100),
+                        ..ResourceCommitment::default()
+                    },
+                }),
+                AuthorizationResourceKind::Kv,
+                &ResourceCommitment {
+                    desired_max_value_bytes: Some(50),
+                    history: Some(5),
+                    ttl_ms: Some(50),
+                    ..ResourceCommitment::default()
+                },
+            ),
+            ConsentResourceChange::Reduced
         );
-        assert!(selection.grant_set.permissions().contains(&atom("Read")));
-        assert!(!selection.grant_set.permissions().contains(&atom("Bundle")));
-        let other = resolve_portal_authority_selection(
-            &policy,
-            &groups,
-            &consent,
-            &ProviderLoginAttributes {
-                provider_id: "other".to_owned(),
-                roles: vec!["Admin".to_owned()],
-            },
-        )
-        .unwrap();
-        assert_eq!(other.capabilities, ["app::read", "required"]);
-    }
-
-    #[test]
-    fn roles_are_exact_and_order_independent() {
-        let consent = BrowserConsentProposal {
-            participant_id: "app".to_owned(),
-            participant_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            participant_needs_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            consent_view: json!({}),
-            consent_view_digest: String::new(),
-            proposal_digest: String::new(),
-            required_grant_set: grant("Required"),
-            optional_grant_bundles: BTreeMap::new(),
-            required_capabilities: vec!["required".to_owned()],
-            optional_capability_definitions: BTreeMap::from([(
-                "app::write".to_owned(),
-                grant("Write"),
-            )]),
-        };
-        let policy = PortalGrantOverrideRecord {
-            portal_id: "portal".to_owned(),
-            participant_id: "app".to_owned(),
-            direct_capabilities: vec![],
-            capability_group_keys: vec![],
-            role_mappings: vec![
-                super::super::PortalRoleMapping {
-                    provider_id: "oidc".to_owned(),
-                    role: "Admin".to_owned(),
-                    direct_capabilities: vec!["app::write".to_owned()],
-                    capability_group_keys: vec![],
+        assert_eq!(
+            classify_resource_change(
+                Some(&ApprovedResource {
+                    kind: AuthorizationResourceKind::Kv,
+                    name: "cache".to_owned(),
+                    commitment: ResourceCommitment {
+                        desired_max_value_bytes: Some(100),
+                        ..ResourceCommitment::default()
+                    },
+                }),
+                AuthorizationResourceKind::Kv,
+                &ResourceCommitment {
+                    desired_max_value_bytes: Some(50),
+                    ..ResourceCommitment::default()
                 },
-                super::super::PortalRoleMapping {
-                    provider_id: "oidc".to_owned(),
-                    role: "*".to_owned(),
-                    direct_capabilities: vec!["app::write".to_owned()],
-                    capability_group_keys: vec![],
-                },
-            ],
-            created_at: 1,
-            updated_at: 1,
-            version: 1,
-        };
-        let first = resolve_portal_authority_selection(
-            &policy,
-            &BTreeMap::new(),
-            &consent,
-            &ProviderLoginAttributes {
-                provider_id: "oidc".to_owned(),
-                roles: vec!["Reader".to_owned(), "Admin".to_owned()],
-            },
-        )
-        .unwrap();
-        let reordered = resolve_portal_authority_selection(
-            &policy,
-            &BTreeMap::new(),
-            &consent,
-            &ProviderLoginAttributes {
-                provider_id: "oidc".to_owned(),
-                roles: vec!["Admin".to_owned(), "Reader".to_owned()],
-            },
-        )
-        .unwrap();
-        assert_eq!(first, reordered);
-        assert_eq!(first.capabilities, ["app::write", "required"]);
-
-        let wildcard_only = resolve_portal_authority_selection(
-            &policy,
-            &BTreeMap::new(),
-            &consent,
-            &ProviderLoginAttributes {
-                provider_id: "oidc".to_owned(),
-                roles: vec!["Operator".to_owned()],
-            },
-        )
-        .unwrap();
-        assert_eq!(wildcard_only.capabilities, ["required"]);
-    }
-
-    #[test]
-    fn rejects_reserved_capabilities_outside_platform_administration() {
-        let consent = BrowserConsentProposal {
-            participant_id: "app".to_owned(),
-            participant_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            participant_needs_digest: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_owned(),
-            consent_view: json!({}),
-            consent_view_digest: String::new(),
-            proposal_digest: String::new(),
-            required_grant_set: grant("Required"),
-            optional_grant_bundles: BTreeMap::new(),
-            required_capabilities: vec![],
-            optional_capability_definitions: BTreeMap::from([(
-                "trellis.auth::users.mutate".to_owned(),
-                grant("Admin"),
-            )]),
-        };
-        let policy = PortalGrantOverrideRecord {
-            portal_id: "portal".to_owned(),
-            participant_id: "app".to_owned(),
-            direct_capabilities: vec!["trellis.auth::users.mutate".to_owned()],
-            capability_group_keys: vec![],
-            role_mappings: vec![],
-            created_at: 1,
-            updated_at: 1,
-            version: 1,
-        };
-
-        assert!(resolve_portal_authority_selection(
-            &policy,
-            &BTreeMap::new(),
-            &consent,
-            &ProviderLoginAttributes {
-                provider_id: "local".to_owned(),
-                roles: vec![],
-            },
-        )
-        .is_ok());
+            ),
+            ConsentResourceChange::Unchanged
+        );
     }
 }

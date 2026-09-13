@@ -24,11 +24,44 @@ export declare class ValidationError extends TrellisError<ValidationErrorData> {
 	static fromSerializable(data: unknown): ValidationError;
 	toSerializable(): ValidationErrorData;
 }
+export type ResourcesDestroyInput = Types0.ResourcesDestroyRequest;
+export type ResourcesDestroyOutput = Types0.ResourcesDestroyResponse;
+export type ResourcesInspectInput = Types0.ResourcesInspectRequest;
+export type ResourcesInspectOutput = Types0.ResourcesInspectResponse;
+export type ResourcesQueryInput = Types0.ResourcesQueryRequest;
+export type ResourcesQueryOutput = Types0.ResourcesQueryResponse;
 export type SurfaceStatusInput = Types0.TrellisSurfaceStatusRequest;
 export type SurfaceStatusOutput = Types0.TrellisSurfaceStatusResponse;
 declare const __api: {
 	readonly identity: "trellis.core@v1";
 	readonly actions: {
+		readonly "rpc:Resources.Destroy": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:Resources.Destroy";
+			readonly input: typeof Types0.ResourcesDestroyRequestCodec;
+			readonly output: typeof Types0.ResourcesDestroyResponseCodec;
+			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: undefined;
+		};
+		readonly "rpc:Resources.Inspect": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:Resources.Inspect";
+			readonly input: typeof Types0.ResourcesInspectRequestCodec;
+			readonly output: typeof Types0.ResourcesInspectResponseCodec;
+			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: undefined;
+		};
+		readonly "rpc:Resources.Query": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:Resources.Query";
+			readonly input: typeof Types0.ResourcesQueryRequestCodec;
+			readonly output: typeof Types0.ResourcesQueryResponseCodec;
+			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: "cursor";
+		};
 		readonly "rpc:Surface.Status": {
 			readonly kind: "rpc";
 			readonly descriptorName: "rpc:Surface.Status";
@@ -42,5 +75,5 @@ declare const __api: {
 	readonly packageEvidence: unknown;
 };
 export declare const API: typeof __api;
-export declare const API_DIGEST: "fXmSRF8ZanEn015Qk-M3WvUGzQ-7kguhGdItKunXQyo";
+export declare const API_DIGEST: "aUohKUjAdrsQhEPqCsJQkF0Ehqmva2xK1Kju1yLRDxM";
 export {};

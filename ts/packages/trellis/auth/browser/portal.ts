@@ -99,21 +99,45 @@ const BrowserFlowWireProperties = {
   registrationEnabled: Type.Boolean(),
   federatedRegistrationEnabled: Type.Boolean(),
   consentView: Type.Object({
-    participant: Type.Object({
+    participantId: Type.String({ minLength: 1 }),
+    packageDigest: Type.String({ minLength: 1 }),
+    installedRevision: Type.Integer({ minimum: 1 }),
+    expectedGrantRevision: Type.Integer({ minimum: 0 }),
+    capabilities: Type.Array(Type.Object({
       id: Type.String({ minLength: 1 }),
-      digest: Type.String({ minLength: 1 }),
-      displayName: Type.String({ minLength: 1 }),
+      title: Type.String(),
       description: Type.String(),
-    }),
-    required: Type.Object({
-      permissions: Type.Array(Type.Unknown()),
-      capabilities: Type.Array(Type.String({ minLength: 1 })),
-    }),
-    optionalBundles: Type.Optional(Type.Array(Type.Object({
-      id: Type.String({ minLength: 1 }),
-      apiId: Type.String({ minLength: 1 }),
-      permissions: Type.Array(Type.Record(Type.String(), Type.Unknown())),
-    }))),
+      consequence: Type.String(),
+      consentDigest: Type.String({ minLength: 1 }),
+      required: Type.Boolean(),
+      eligible: Type.Boolean(),
+      alreadyApproved: Type.Boolean(),
+    })),
+    resources: Type.Array(Type.Object({
+      kind: Type.Union([
+        Type.Literal("kv"),
+        Type.Literal("state"),
+        Type.Literal("store"),
+      ]),
+      name: Type.String({ minLength: 1 }),
+      title: Type.String(),
+      description: Type.String(),
+      required: Type.Boolean(),
+      requestedCommitment: Type.Record(Type.String(), Type.Unknown()),
+      actual: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+      change: Type.Union([
+        Type.Literal("new"),
+        Type.Literal("unchanged"),
+        Type.Literal("reduced"),
+        Type.Literal("expanded"),
+        Type.Literal("incompatible"),
+        Type.Literal("detached"),
+      ]),
+      eligible: Type.Boolean(),
+      alreadyApproved: Type.Boolean(),
+    })),
+    companion: Type.Optional(Type.Unknown()),
+    decisionDigest: Type.String({ minLength: 1 }),
   }),
   redirectTarget: Type.Optional(Type.Union([
     Type.Null(),
@@ -123,7 +147,7 @@ const BrowserFlowWireProperties = {
 const BrowserFlowWireSchema = Type.Object(BrowserFlowWireProperties);
 const PortalFlowWireSchema = Type.Object({
   ...BrowserFlowWireProperties,
-  consentViewDigest: Type.String({ minLength: 1 }),
+  decisionDigest: Type.String({ minLength: 1 }),
   user: Type.Object({
     origin: Type.String({ minLength: 1 }),
     id: Type.String({ minLength: 1 }),
@@ -140,23 +164,23 @@ function approval(wire: BrowserFlowWire) {
     string,
     { displayName: string; description: string }
   > = {};
-  for (const name of wire.consentView.required.capabilities) {
-    capabilities[`capability:${name}`] = {
-      displayName: name,
-      description: "Required by this application.",
+  for (const capability of wire.consentView.capabilities) {
+    capabilities[`capability:${capability.id}`] = {
+      displayName: capability.title || capability.id,
+      description: capability.description,
     };
   }
-  wire.consentView.required.permissions.forEach((permission, index) => {
-    capabilities[`permission:${index}`] = {
-      displayName: "Required permission",
-      description: JSON.stringify(permission),
+  for (const resource of wire.consentView.resources) {
+    capabilities[`resource:${resource.kind}:${resource.name}`] = {
+      displayName: resource.title || resource.name,
+      description: resource.description,
     };
-  });
+  }
   return {
-    contractId: wire.consentView.participant.id,
-    contractDigest: wire.consentView.participant.digest,
-    displayName: wire.consentView.participant.displayName,
-    description: wire.consentView.participant.description,
+    contractId: wire.consentView.participantId,
+    contractDigest: wire.consentView.packageDigest,
+    displayName: wire.consentView.participantId,
+    description: "",
     capabilities,
   };
 }
@@ -190,20 +214,14 @@ function portalState(wire: BrowserFlowWire | PortalFlowWire): PortalFlowState {
   } else if (wire.state === "authenticated") {
     state = { status: "processing", flowId: wire.flowId };
   } else if (wire.state === "approval_required") {
-    if (!("user" in wire) || !("consentViewDigest" in wire)) {
+    if (!("user" in wire) || !("decisionDigest" in wire)) {
       throw new Error("Authenticated portal flow requires portal binding");
     }
     state = {
       status: "approval_required",
       flowId: wire.flowId,
-      consentViewDigest: wire.consentViewDigest,
-      optionalBundles: (wire.consentView.optionalBundles ?? []).map((
-        bundle,
-      ) => ({
-        id: bundle.id,
-        apiId: bundle.apiId,
-        permissions: bundle.permissions,
-      })),
+      consentViewDigest: wire.decisionDigest,
+      optionalBundles: [],
       user: wire.user,
       approval: evidence,
     };
@@ -243,6 +261,25 @@ async function fetchBrowserFlowWire(
   return Value.Parse(BrowserFlowWireSchema, await response.json());
 }
 
+async function fetchBoundPortalFlowWire(
+  config: AuthConfig,
+  flowId: string,
+  binding: PortalBinding,
+): Promise<PortalFlowWire> {
+  const response = await fetch(
+    `${authBaseUrl(config)}/auth/flow/${encodeURIComponent(flowId)}/portal`,
+    {
+      method: "POST",
+      headers: {
+        ...(config.portalOrigin ? { origin: config.portalOrigin } : {}),
+        [PORTAL_BINDING_HEADER]: binding.secret,
+      },
+    },
+  );
+  if (!response.ok) throw await decodeTrellisHttpError(response);
+  return Value.Parse(PortalFlowWireSchema, await response.json());
+}
+
 export function portalFlowIdFromUrl(url: URL): string | null {
   return url.searchParams.get("flowId");
 }
@@ -256,20 +293,7 @@ export async function fetchPortalFlowState(
   if (flow.state !== "authenticated" && flow.state !== "approval_required") {
     return portalState(flow);
   }
-  const response = await fetch(
-    `${authBaseUrl(config)}/auth/flow/${encodeURIComponent(flowId)}/portal`,
-    {
-      method: "POST",
-      headers: {
-        ...(config.portalOrigin ? { origin: config.portalOrigin } : {}),
-        [PORTAL_BINDING_HEADER]: binding.secret,
-      },
-    },
-  );
-  if (!response.ok) {
-    throw await decodeTrellisHttpError(response);
-  }
-  return portalState(Value.Parse(PortalFlowWireSchema, await response.json()));
+  return portalState(await fetchBoundPortalFlowWire(config, flowId, binding));
 }
 
 export function portalProviderLoginUrl(
@@ -293,10 +317,13 @@ export async function submitPortalApproval(
   flowId: string,
   binding: PortalBinding,
   decision: ApprovalDecision,
-  selectedOptionalBundles: readonly string[] = [],
 ): Promise<PortalFlowState> {
-  const flow = await fetchPortalFlowState(config, flowId, binding);
-  if (flow.status !== "approval_required") {
+  const flow = await fetchBrowserFlowWire(config, flowId);
+  const wire =
+    flow.state === "authenticated" || flow.state === "approval_required"
+      ? await fetchBoundPortalFlowWire(config, flowId, binding)
+      : null;
+  if (wire?.state !== "approval_required") {
     throw new Error("Portal flow is not awaiting approval");
   }
   const response = await fetch(
@@ -309,9 +336,29 @@ export async function submitPortalApproval(
         [PORTAL_BINDING_HEADER]: binding.secret,
       },
       body: JSON.stringify({
-        approved: decision === "approved",
-        consentViewDigest: flow.consentViewDigest,
-        selectedOptionalBundles,
+        decision: decision === "approved" ? "approve" : "reject",
+        approval: decision === "approved"
+          ? {
+            mode: "capabilities",
+            installedRevision: wire.consentView.installedRevision,
+            expectedGrantRevision: wire.consentView.expectedGrantRevision,
+            decisionDigest: wire.consentView.decisionDigest,
+            approvedCapabilities: wire.consentView.capabilities.filter((item) =>
+              item.required && item.eligible
+            ).map((item) => ({
+              id: item.id,
+              consentDigest: item.consentDigest,
+            })),
+            approvedResources: wire.consentView.resources.filter((item) =>
+              item.required && item.eligible
+            ).map((item) => ({
+              kind: item.kind,
+              name: item.name,
+              commitment: item.requestedCommitment,
+            })),
+            companionApproved: wire.consentView.companion != null,
+          }
+          : undefined,
       }),
     },
   );

@@ -29,7 +29,7 @@
     error = null;
     try {
       const nextDeploymentId = deploymentId.trim();
-      const response = await trellis.authDeploymentsCreate({
+      const response = await trellis.deploymentsCreate({
         displayName: nextDeploymentId,
         expiresAt: null,
         idempotencyKey: ulid(),

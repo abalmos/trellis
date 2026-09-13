@@ -1,9 +1,9 @@
 <script lang="ts">
   import { type apis } from "trellis-web-generated";
-  import { compactDuration } from "../format";
+  import { boundedNumber, compactDuration } from "../format";
 
-  type SummaryGroup = apis.jobs.JobsMetricsOutput["summary"][number];
-  type Bucket = apis.jobs.JobsMetricsOutput["buckets"][number];
+  type SummaryGroup = apis.jobs.MetricsOutput["summary"][number];
+  type Bucket = apis.jobs.MetricsOutput["buckets"][number];
 
   type Props = {
     summary: SummaryGroup[];
@@ -18,7 +18,7 @@
     const values: Record<string, number[]> = {};
     for (const bucket of buckets) {
       for (const group of bucket.groups) {
-        const failures = group.failed + group.dead + group.retried;
+        const failures = boundedNumber(group.failed + group.dead + group.retried);
         values[group.key] = [...(values[group.key] ?? []), failures];
       }
     }
@@ -27,21 +27,21 @@
 
   const sortedSummary = $derived.by(() =>
     [...summary].sort((left, right) => {
-      const leftPressure = (left.failed ?? 0) + (left.dead ?? 0) * 2 + (left.queued ?? 0) / 20;
-      const rightPressure = (right.failed ?? 0) + (right.dead ?? 0) * 2 + (right.queued ?? 0) / 20;
-      return rightPressure - leftPressure || right.total - left.total;
+      const leftPressure = boundedNumber(left.failed ?? 0n) + boundedNumber(left.dead ?? 0n) * 2 + boundedNumber(left.queued ?? 0n) / 20;
+      const rightPressure = boundedNumber(right.failed ?? 0n) + boundedNumber(right.dead ?? 0n) * 2 + boundedNumber(right.queued ?? 0n) / 20;
+      return rightPressure - leftPressure || boundedNumber(right.total - left.total);
     }),
   );
 
   function severity(group: SummaryGroup): string {
-    const failures = (group.failed ?? 0) + (group.dead ?? 0);
-    if (failures > 0) return "danger";
-    if ((group.queued ?? 0) > 0 || (group.slow ?? 0) > 0) return "warning";
+    const failures = (group.failed ?? 0n) + (group.dead ?? 0n);
+    if (failures > 0n) return "danger";
+    if ((group.queued ?? 0n) > 0n || (group.slow ?? 0n) > 0n) return "warning";
     return "healthy";
   }
 
-  function formatMs(value: number | undefined): string {
-    return value === undefined ? "—" : compactDuration(value);
+  function formatMs(value: bigint | undefined): string {
+    return value === undefined ? "—" : compactDuration(boundedNumber(value));
   }
 
   function sparkPoints(values: number[]): string {

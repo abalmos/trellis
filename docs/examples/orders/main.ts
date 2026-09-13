@@ -10,7 +10,7 @@ function requiredEnv(name: string): string {
 }
 
 const service = await TrellisService.connect({
-  participant: participants.acmeOrdersService.participant,
+  participant: participants.OrdersService.participant,
   trellisUrl: requiredEnv("TRELLIS_URL"),
   seed: requiredEnv("TRELLIS_IDENTITY_SEED"),
 }).orThrow();
@@ -21,7 +21,7 @@ const stop = () => {
 Deno.addSignalListener("SIGINT", stop);
 Deno.addSignalListener("SIGTERM", stop);
 try {
-  await service.handleOrdersCreate(createOrder);
+  await service.handleCreate(createOrder);
   console.log("Orders service connected; press Ctrl-C to stop.");
   await service.wait();
 } finally {

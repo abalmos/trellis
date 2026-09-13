@@ -730,7 +730,7 @@ fn parse_upload_ack(message: async_nats::Message) -> Result<UploadAck, TrellisCl
 
 #[cfg(test)]
 mod tests {
-    use crate::client::proof::verify_event_proof;
+    use crate::client::proof::{verify_event_proof, VerifyEventProofInput};
     use ed25519_dalek::{Signature, Verifier as _, VerifyingKey};
     use trellis_protocol::build_authorization_request_proof_input;
 
@@ -976,27 +976,36 @@ mod tests {
         let event_id = "evt_doc_1";
         let event_time = "1970-01-01T00:19:10Z";
         let proof = auth
-            .create_event_proof(TEST_CONTEXT_DIGEST, subject, payload, event_id, event_time)
+            .create_event_proof(
+                TEST_CONTEXT_DIGEST,
+                "test-event-descriptor",
+                subject,
+                payload,
+                event_id,
+                event_time,
+            )
             .expect("event proof");
-        assert!(verify_event_proof(
-            &auth.session_key,
-            TEST_CONTEXT_DIGEST,
+        assert!(verify_event_proof(VerifyEventProofInput {
+            public_session_key: &auth.session_key,
+            context_digest: TEST_CONTEXT_DIGEST,
+            descriptor_identity: "test-event-descriptor",
             subject,
             payload,
             event_id,
             event_time,
-            proof.as_str(),
-        )
+            proof_base64url: proof.as_str(),
+        })
         .expect("event proof verifies"));
-        assert!(!verify_event_proof(
-            &auth.session_key,
-            TEST_CONTEXT_DIGEST,
+        assert!(!verify_event_proof(VerifyEventProofInput {
+            public_session_key: &auth.session_key,
+            context_digest: TEST_CONTEXT_DIGEST,
+            descriptor_identity: "test-event-descriptor",
             subject,
             payload,
-            "evt_other",
+            event_id: "evt_other",
             event_time,
-            proof.as_str(),
-        )
+            proof_base64url: proof.as_str(),
+        })
         .expect("changed event id rejects"));
     }
 }

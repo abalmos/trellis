@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::future::Future;
 
 use bytes::Bytes;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -229,19 +230,53 @@ pub enum UploadTransferAck {
 /// Provider-side completion signal for a spawned upload endpoint.
 #[derive(Debug)]
 pub struct UploadTransferCompletion {
-    pub(super) receiver: oneshot::Receiver<Result<FileTransferInfo, ServerError>>,
+    pub(super) receiver: oneshot::Receiver<UploadTransferCompletionResult>,
 }
+
+pub(super) type UploadTransferCompletionResult = (
+    Result<FileTransferInfo, ServerError>,
+    Option<oneshot::Sender<Result<(), ServerError>>>,
+);
 
 impl UploadTransferCompletion {
     /// Wait for durable object metadata or the terminal transfer failure.
     pub async fn completed(self) -> Result<FileTransferInfo, ServerError> {
-        self.receiver.await.map_err(|_| {
+        let (result, persisted) = self.receiver.await.map_err(|_| {
             ServerError::Nats("upload transfer completion channel closed".to_string())
-        })?
+        })?;
+        if let Some(persisted) = persisted {
+            let _ = persisted.send(Ok(()));
+        }
+        result
+    }
+
+    pub(crate) async fn completed_after<F, Fut>(
+        self,
+        persist: F,
+    ) -> Result<FileTransferInfo, ServerError>
+    where
+        F: FnOnce(FileTransferInfo) -> Fut,
+        Fut: Future<Output = Result<(), ServerError>>,
+    {
+        let (result, persisted) = self.receiver.await.map_err(|_| {
+            ServerError::Nats("upload transfer completion channel closed".to_string())
+        })?;
+        let info = result?;
+        let result = persist(info.clone()).await;
+        if let Some(persisted) = persisted {
+            let _ = persisted.send(
+                result
+                    .as_ref()
+                    .map(|_| ())
+                    .map_err(|error| ServerError::Nats(error.to_string())),
+            );
+        }
+        result?;
+        Ok(info)
     }
 }
 
-pub(super) fn upload_subject_prefix() -> &'static str {
+pub(crate) fn upload_subject_prefix() -> &'static str {
     UPLOAD_SUBJECT_PREFIX
 }
 

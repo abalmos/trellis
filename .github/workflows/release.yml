@@ -883,7 +883,7 @@ jobs:
           cargo build --manifest-path rust/Cargo.toml --locked --package trellis-cli
           trellis="$GITHUB_WORKSPACE/rust/target/debug/trellis"
           for project in \
-            rust/crates/eventlog-runtime \
+            rust/crates/events-runtime \
             rust/crates/jobs-runtime \
             rust/crates/runtime \
             ts/packages/trellis

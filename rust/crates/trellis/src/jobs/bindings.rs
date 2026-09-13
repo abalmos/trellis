@@ -67,12 +67,6 @@ pub struct JobsQueueBinding {
     /// Declared update schema name, when live updates are enabled.
     #[doc = concat!("The `", stringify!(update), "` value.")]
     pub update: Option<String>,
-    /// Whether progress events are enabled for the queue.
-    #[doc = concat!("The `", stringify!(progress), "` value.")]
-    pub progress: bool,
-    /// Whether log events are enabled for the queue.
-    #[doc = concat!("The `", stringify!(logs), "` value.")]
-    pub logs: bool,
     /// Optional normalized keyed concurrency policy.
     #[doc = concat!("The `", stringify!(key_concurrency), "` value.")]
     pub key_concurrency: Option<JobKeyConcurrencyBinding>,
@@ -164,8 +158,6 @@ struct JobsQueueBindingValue {
     ack_wait_ms: u64,
     default_deadline_ms: Option<u64>,
     update: Option<JobUpdateBindingValue>,
-    progress: bool,
-    logs: bool,
     key_concurrency: Option<JobKeyConcurrencyBindingValue>,
     queue: Option<JobQueueDepthBindingValue>,
 }
@@ -219,8 +211,6 @@ struct NormalizedJobsQueueBinding {
     ack_wait_ms: u64,
     default_deadline_ms: Option<u64>,
     update: Option<String>,
-    progress: bool,
-    logs: bool,
     key_concurrency: Option<JobKeyConcurrencyBinding>,
     queue: Option<JobQueueDepthBinding>,
 }
@@ -275,8 +265,6 @@ impl TryFrom<&ServiceResourceBindings> for JobsRuntimeBinding {
                         .map(|value| i64_to_u64(value, queue_type, "defaultDeadlineMs"))
                         .transpose()?,
                     update: queue.update.as_ref().map(|update| update.schema.clone()),
-                    progress: queue.progress,
-                    logs: queue.logs,
                     key_concurrency: queue.key_concurrency.clone(),
                     queue: queue.queue.clone(),
                 })
@@ -329,8 +317,6 @@ fn jobs_queue_binding_from_normalized(queue: NormalizedJobsQueueBinding) -> Jobs
         ack_wait_ms: queue.ack_wait_ms,
         default_deadline_ms: queue.default_deadline_ms,
         update: queue.update,
-        progress: queue.progress,
-        logs: queue.logs,
         key_concurrency: queue.key_concurrency,
         queue: queue.queue,
     }
@@ -363,8 +349,6 @@ fn normalize_json_queue_binding(
         ack_wait_ms: parsed.ack_wait_ms,
         default_deadline_ms: parsed.default_deadline_ms,
         update: parsed.update.map(|update| update.schema),
-        progress: parsed.progress,
-        logs: parsed.logs,
         key_concurrency: parsed.key_concurrency.map(job_key_concurrency_from_value),
         queue: parsed.queue.map(job_queue_depth_from_value),
     })

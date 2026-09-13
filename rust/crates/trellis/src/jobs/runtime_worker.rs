@@ -42,11 +42,12 @@ const JOBS_STREAM: &str = "JOBS";
 const CANCELLATION_NONE: u8 = 0;
 const CANCELLATION_HOST_SHUTDOWN: u8 = 1;
 const CANCELLATION_JOB: u8 = 2;
+const CANCELLATION_LEASE_LOST: u8 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkerAckAction {
     Ack,
-    Nak,
+    Nak(Duration),
     AwaitMaxDeliver,
 }
 
@@ -87,6 +88,16 @@ impl JobCancellationToken {
         self.notify.notify_waiters();
     }
 
+    fn cancel_for_lease_loss(&self) {
+        let _ = self.cancelled.compare_exchange(
+            CANCELLATION_NONE,
+            CANCELLATION_LEASE_LOST,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
+        self.notify.notify_waiters();
+    }
+
     /// Return whether cancellation has been requested.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst) != CANCELLATION_NONE
@@ -100,6 +111,10 @@ impl JobCancellationToken {
     /// Return whether cancellation came from worker-host shutdown.
     pub fn is_host_shutdown(&self) -> bool {
         self.cancelled.load(Ordering::SeqCst) == CANCELLATION_HOST_SHUTDOWN
+    }
+
+    pub(crate) fn is_lease_lost(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst) == CANCELLATION_LEASE_LOST
     }
 
     pub(crate) fn is_same_token(&self, other: &Self) -> bool {
@@ -451,7 +466,7 @@ where
             details: error.to_string(),
         })?;
 
-    loop {
+    'work: loop {
         let next_message = tokio::select! {
             _ = cancellation.cancelled() => break,
             next_message = messages.next() => next_message,
@@ -511,23 +526,33 @@ where
             cancellation_registry.register(job_key.clone(), job_cancellation.clone());
         let handler = handler.clone();
         let heartbeat_message = message.clone();
-        let active_key = acquire_key_slot_for_work(
-            key_coordinator.as_ref(),
-            &queue,
-            manager.bindings().namespace.as_str(),
-            &parsed_job,
-            &manager.now_iso(),
-            delivery_attempt,
-        )
-        .await?;
-        if queue.key_concurrency.is_some() && active_key.is_none() {
-            cancellation_registry.clear_pending(&job_key);
+        let active_key = loop {
+            let active_key = acquire_key_slot_for_work(
+                key_coordinator.as_ref(),
+                &queue,
+                manager.bindings().namespace.as_str(),
+                &parsed_job,
+                &manager.now_iso(),
+                delivery_attempt,
+            )
+            .await?;
+            if queue.key_concurrency.is_none() || active_key.is_some() {
+                break active_key;
+            }
             message
-                .ack_with(AckKind::Nak(None))
+                .ack_with(AckKind::Progress)
                 .await
                 .map_err(map_ack_error)?;
-            continue;
-        }
+            tokio::select! {
+                _ = cancellation.cancelled() => {
+                    cancellation_registry.clear_pending(&job_key);
+                    message.ack_with(AckKind::Nak(Some(Duration::from_secs(5))))
+                        .await.map_err(map_ack_error)?;
+                    continue 'work;
+                }
+                _ = tokio::time::sleep(progress_ack_interval(&queue)) => {}
+            }
+        };
         if let Some(active_key) = active_key.as_ref() {
             for stale_slot in &active_key.stale_slots {
                 manager
@@ -549,36 +574,53 @@ where
             })
         };
         let heartbeat_hook: Arc<dyn Fn() -> BoxFuture<'static, Result<(), String>> + Send + Sync> = {
-            let active_key = active_key.clone();
-            let key_coordinator = key_coordinator.clone();
             Arc::new(move || {
                 let heartbeat_message = heartbeat_message.clone();
-                let active_key = active_key.clone();
-                let key_coordinator = key_coordinator.clone();
                 Box::pin(async move {
                     heartbeat_message
                         .ack_with(AckKind::Progress)
                         .await
-                        .map_err(|error| error.to_string())?;
-                    if let (Some(coordinator), Some(active_key)) = (key_coordinator, active_key) {
-                        renew_key_lease(&coordinator, &active_key)
-                            .await
-                            .map_err(|error| error.to_string())?;
-                    }
-                    Ok(())
+                        .map_err(|error| error.to_string())
                 }) as BoxFuture<'static, Result<(), String>>
             })
         };
-        let auto_heartbeat = active_key.as_ref().map(|active_key| {
-            let heartbeat_interval = active_key.heartbeat_interval;
+        let auto_heartbeat = {
+            let heartbeat_interval = progress_ack_interval(&queue);
             let heartbeat_hook = Arc::clone(&heartbeat_hook);
-            tokio::spawn(async move {
+            let job_cancellation = job_cancellation.clone();
+            Some(tokio::spawn(async move {
                 let mut interval = tokio::time::interval(heartbeat_interval);
+                interval.tick().await;
                 loop {
                     interval.tick().await;
-                    let _ = heartbeat_hook().await;
+                    if heartbeat_hook().await.is_err() {
+                        job_cancellation.cancel_for_lease_loss();
+                        break;
+                    }
                 }
-            })
+            }))
+        };
+        let auto_key_heartbeat = active_key.as_ref().and_then(|active_key| {
+            let coordinator = key_coordinator.clone()?;
+            let heartbeat_interval = active_key.heartbeat_interval;
+            let active_key = active_key.clone();
+            let job_cancellation = job_cancellation.clone();
+            Some(tokio::spawn(async move {
+                let mut interval = tokio::time::interval(heartbeat_interval);
+                interval.tick().await;
+                loop {
+                    interval.tick().await;
+                    match renew_key_lease(&coordinator, &active_key).await {
+                        Ok(LeaseMutationOutcome::Renewed { .. }) => {}
+                        Ok(LeaseMutationOutcome::Lost { .. })
+                        | Ok(LeaseMutationOutcome::Released { .. })
+                        | Err(_) => {
+                            job_cancellation.cancel_for_lease_loss();
+                            break;
+                        }
+                    }
+                }
+            }))
         });
         let terminal_guard = {
             let active_key = active_key.clone();
@@ -643,13 +685,21 @@ where
             auto_heartbeat.abort();
             let _ = auto_heartbeat.await;
         }
+        if let Some(auto_key_heartbeat) = auto_key_heartbeat {
+            auto_key_heartbeat.abort();
+            let _ = auto_key_heartbeat.await;
+        }
         forward_cancellation.abort();
         let _ = forward_cancellation.await;
         let process_result = process_result?;
-        match ack_action_for_outcome(Some(&process_result), parsed_job.max_tries) {
+        match ack_action_for_outcome(
+            Some(&process_result),
+            parsed_job.max_tries,
+            &queue.backoff_ms,
+        ) {
             WorkerAckAction::Ack => message.ack().await.map_err(map_ack_error)?,
-            WorkerAckAction::Nak => message
-                .ack_with(AckKind::Nak(None))
+            WorkerAckAction::Nak(delay) => message
+                .ack_with(AckKind::Nak(Some(delay)))
                 .await
                 .map_err(map_ack_error)?,
             WorkerAckAction::AwaitMaxDeliver => {}
@@ -1141,10 +1191,15 @@ fn expected_consumer_ack_wait(queue: &JobsQueueBinding) -> Duration {
     Duration::from_millis(
         queue
             .backoff_ms
-            .first()
+            .iter()
             .copied()
+            .min()
             .unwrap_or(queue.ack_wait_ms),
     )
+}
+
+fn progress_ack_interval(queue: &JobsQueueBinding) -> Duration {
+    Duration::from_millis((expected_consumer_ack_wait(queue).as_millis() as u64 / 3).max(1))
 }
 
 async fn lifecycle_stream(
@@ -1274,19 +1329,37 @@ fn is_terminal_lifecycle_event(event_type: JobEventType) -> bool {
 fn ack_action_for_outcome<TResult>(
     outcome: Option<&JobProcessOutcome<TResult>>,
     max_tries: u64,
+    backoff_ms: &[u64],
 ) -> WorkerAckAction {
     match outcome {
         Some(JobProcessOutcome::Retry { tries, .. }) if *tries >= max_tries => {
             WorkerAckAction::AwaitMaxDeliver
         }
-        Some(JobProcessOutcome::Retry { .. }) => WorkerAckAction::Nak,
-        Some(JobProcessOutcome::Interrupted { .. }) => WorkerAckAction::Nak,
+        Some(JobProcessOutcome::Retry { tries, .. }) => {
+            WorkerAckAction::Nak(Duration::from_millis(retry_delay_ms(*tries, backoff_ms)))
+        }
+        Some(JobProcessOutcome::Interrupted { .. }) => WorkerAckAction::Nak(Duration::from_secs(5)),
         Some(JobProcessOutcome::Completed { .. })
         | Some(JobProcessOutcome::Cancelled { .. })
         | Some(JobProcessOutcome::Failed { .. })
         | Some(JobProcessOutcome::StaleCompletionIgnored { .. })
         | None => WorkerAckAction::Ack,
     }
+}
+
+fn retry_delay_ms(delivery: u64, backoff_ms: &[u64]) -> u64 {
+    const DEFAULT_BACKOFF_MS: [u64; 4] = [5_000, 30_000, 120_000, 600_000];
+    let schedule = if backoff_ms.is_empty() {
+        DEFAULT_BACKOFF_MS.as_slice()
+    } else {
+        backoff_ms
+    };
+    let index = usize::try_from(delivery.saturating_sub(1)).unwrap_or(usize::MAX);
+    schedule
+        .get(index)
+        .copied()
+        .or_else(|| schedule.last().copied())
+        .unwrap_or(5_000)
 }
 
 async fn latest_lifecycle_message(
@@ -1341,9 +1414,10 @@ mod tests {
     use super::JobCancellationToken;
 
     use super::{
-        ack_action_for_outcome, lifecycle_work_decision, ProjectedWorkDecision, WorkerAckAction,
-        WorkerHostOptions,
+        ack_action_for_outcome, lifecycle_work_decision, progress_ack_interval,
+        ProjectedWorkDecision, WorkerAckAction, WorkerHostOptions,
     };
+    use crate::jobs::bindings::JobsQueueBinding;
     use crate::jobs::events::{cancelled, completed, created, started, EventMeta};
     use crate::jobs::manager::JobProcessOutcome;
     use crate::jobs::types::{Job, JobContext, JobState};
@@ -1358,6 +1432,33 @@ mod tests {
             ..WorkerHostOptions::default()
         };
         assert_eq!(options.queue_concurrency["documents"], 4);
+    }
+
+    #[test]
+    fn progress_ack_interval_uses_shortest_retry_window() {
+        let queue = JobsQueueBinding {
+            queue_type: "work".to_owned(),
+            publish_prefix: "jobs.work".to_owned(),
+            updates_prefix: None,
+            work_subject: "jobs.work.run".to_owned(),
+            consumer_name: "work".to_owned(),
+            max_deliver: 3,
+            backoff_ms: vec![30_000, 3_000, 10_000],
+            ack_wait_ms: 60_000,
+            default_deadline_ms: None,
+            update: None,
+            key_concurrency: None,
+            queue: None,
+        };
+        assert_eq!(progress_ack_interval(&queue), Duration::from_millis(1_000));
+
+        let mut queue = queue;
+        queue.backoff_ms = vec![1];
+        assert_eq!(progress_ack_interval(&queue), Duration::from_millis(1));
+        queue.backoff_ms = vec![2];
+        assert_eq!(progress_ack_interval(&queue), Duration::from_millis(1));
+        queue.backoff_ms = vec![5];
+        assert_eq!(progress_ack_interval(&queue), Duration::from_millis(1));
     }
 
     fn sample_context() -> JobContext {
@@ -1403,8 +1504,9 @@ mod tests {
             ack_action_for_outcome(
                 Some(&JobProcessOutcome::<Value>::Interrupted { tries: 1 }),
                 2,
+                &[5_000],
             ),
-            WorkerAckAction::Nak
+            WorkerAckAction::Nak(Duration::from_secs(5))
         );
     }
 
@@ -1417,6 +1519,7 @@ mod tests {
                     error: "retry requested".to_string(),
                 }),
                 2,
+                &[5_000],
             ),
             WorkerAckAction::AwaitMaxDeliver
         );

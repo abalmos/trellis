@@ -1,227 +1,256 @@
 import { type KV, type KvEntry, Kvm } from "@nats-io/kv";
-import { jetstreamManager } from "@nats-io/jetstream";
 import type { NatsConnection } from "@nats-io/nats-core/internal";
-import { AsyncResult, Result } from "@qlever-llc/result";
-import type { StaticDecode, TSchema } from "typebox";
-import Value, { ParseError } from "typebox/value";
+import { AsyncResult, type BaseError, Result } from "@qlever-llc/result";
+
+import type { Codec } from "./generated.ts";
 import { KVError, ValidationError } from "./errors/index.ts";
 import { decodeSubject, escapeKvKey } from "./helpers.ts";
 
-function externalizeValue(value: unknown): unknown {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (Array.isArray(value)) {
-    return value.map(externalizeValue);
-  }
-  if (value !== null && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      if (entry !== undefined) {
-        out[key] = externalizeValue(entry);
-      }
-    }
-    return out;
-  }
-  return value;
+const KV_MAGIC = new Uint8Array([0x54, 0x52, 0x4b, 0x56]);
+const KV_ENVELOPE_FORMAT = 1;
+const KV_ENVELOPE_HEADER_BYTES = 9;
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder("utf-8", { fatal: true });
+
+declare const resourceRevisionBrand: unique symbol;
+
+/** Opaque storage revision returned by State and KV resources. */
+export type ResourceRevision = number & {
+  readonly [resourceRevisionBrand]: "ResourceRevision";
+};
+
+function revisionFromBackend(revision: number): ResourceRevision {
+  return revision as ResourceRevision;
 }
 
-function parseExternalValue(schema: TSchema, value: unknown): unknown {
-  if (Value.HasCodec(schema)) {
-    return Value.Decode(schema, value);
-  }
-  return Value.Parse(schema, value);
-}
+/** A direct historical-to-current representation migration. */
+export type KvMigration<TCurrent, THistoric = unknown> = (
+  value: THistoric,
+) =>
+  | TCurrent
+  | Result<TCurrent, BaseError>
+  | Promise<TCurrent | Result<TCurrent, BaseError>>;
 
-function serializeValue(schema: TSchema, value: unknown): string {
-  return JSON.stringify(Value.Parse(schema, externalizeValue(value)));
-}
+/** Runtime representation metadata emitted by a generated participant. */
+export type KvRepresentation<T> = Readonly<{
+  codec: Codec<T>;
+  version: number;
+  migrations: Readonly<Record<number, Codec<unknown>>>;
+}>;
 
-function serializeExternalValue(schema: TSchema, value: unknown): string {
-  return serializeValue(schema, value);
-}
+/** Caller-supplied direct migrations keyed by historical representation version. */
+export type ResourceMigrations<T> = Readonly<Record<number, KvMigration<T>>>;
 
-async function ensureExistingBucketOptions(
-  nats: NatsConnection,
+/** The operation represented by one retained KV revision. */
+export type KvOperation = "put" | "delete";
+
+/** Immutable value and storage metadata for one KV revision. */
+export type TypedKvEntry<T> = Readonly<{
+  key: string;
+  value?: T;
+  revision: ResourceRevision;
+  timestamp: Date;
+  operation: KvOperation;
+}>;
+
+/** A fallible entry yielded by a KV watcher. */
+export type KvWatchItem<T> = Result<TypedKvEntry<T>, KVError | ValidationError>;
+
+/** Options used to open a typed KV resource. */
+export type KvOpenOptions<T = unknown> = Readonly<{
+  history?: number;
+  ttl?: number;
+  bindOnly?: boolean;
+  maxValueBytes?: number;
+  replicas?: number;
+  migrations?: ResourceMigrations<T>;
+  isCurrent?: () => boolean;
+}>;
+
+type ExistingBucketStatus = Pick<
+  Awaited<ReturnType<KV["status"]>>,
+  "bucket" | "history" | "ttl" | "maxValueSize" | "max_bytes"
+>;
+
+/** Verifies that an existing physical bucket satisfies the requested limits. */
+export async function ensureExistingBucketOptions(
+  kv: { status(): Promise<ExistingBucketStatus> },
   name: string,
-  options: { ttl?: number },
+  options: KvOpenOptions,
 ): Promise<void> {
-  const desiredTtlMs = options.ttl ?? 0;
-  if (desiredTtlMs <= 0) return;
-
-  const jsm = await jetstreamManager(nats);
-  const streamName = `KV_${name}`;
-  const info = await jsm.streams.info(streamName);
-  const desiredMaxAge = desiredTtlMs * 1_000_000;
-  if (info.config.max_age >= desiredMaxAge) return;
-
-  await jsm.streams.update(info.config.name, {
-    ...info.config,
-    max_age: desiredMaxAge,
-  });
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function mergeUnknown(target: unknown, source: unknown): unknown {
-  if (!isPlainObject(target) || !isPlainObject(source)) {
-    return source;
+  const status = await kv.status();
+  const history = options.history ?? 1;
+  const ttl = options.ttl ?? 0;
+  if (status.bucket !== name) {
+    throw new Error(
+      `KV bucket '${name}' opened physical bucket '${status.bucket}'`,
+    );
   }
-
-  const out: Record<string, unknown> = { ...target };
-  for (const [key, entry] of Object.entries(source)) {
-    if (entry === undefined) continue;
-    out[key] = mergeUnknown(target[key], entry);
+  if (status.history < history) {
+    throw new Error(
+      `KV bucket '${name}' history ${status.history} is less than requested ${history}`,
+    );
   }
-  return out;
-}
-
-type KvFailureReason = "exists" | "revision mismatch";
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-}
-
-function collectFailureText(value: unknown, depth = 0): string {
-  if (depth > 2) return "";
-  const parts: string[] = [];
-
-  if (value instanceof Error) {
-    parts.push(value.name, value.message);
-    if (value.cause !== undefined) {
-      parts.push(collectFailureText(value.cause, depth + 1));
-    }
+  if (status.ttl !== ttl) {
+    throw new Error(`KV bucket '${name}' TTL does not match requested TTL`);
   }
-
-  if (typeof value === "string" || typeof value === "number") {
-    parts.push(String(value));
+  if (status.max_bytes > 0) {
+    throw new Error(
+      `KV bucket '${name}' has an uncommitted provider total size limit`,
+    );
   }
-
-  const record = asRecord(value);
-  if (record) {
-    for (const key of ["name", "message", "description", "code", "err_code"]) {
-      const field = record[key];
-      if (typeof field === "string" || typeof field === "number") {
-        parts.push(String(field));
-      }
-    }
-    if (record.api_error !== undefined) {
-      parts.push(collectFailureText(record.api_error, depth + 1));
-    }
-    if (record.cause !== undefined) {
-      parts.push(collectFailureText(record.cause, depth + 1));
-    }
-  }
-
-  return parts.join(" ").toLowerCase();
-}
-
-function inferKvFailureReason(
-  operation: "create" | "put" | "delete",
-  cause: unknown,
-): KvFailureReason | undefined {
-  const text = collectFailureText(cause);
-  if (
-    text.includes("wrong last sequence") ||
-    text.includes("revision mismatch") ||
-    text.includes("sequence mismatch")
-  ) {
-    return operation === "create" ? "exists" : "revision mismatch";
+  const maxValueBytes = options.maxValueBytes;
+  if (maxValueBytes === undefined && status.maxValueSize > 0) {
+    throw new Error(
+      `KV bucket '${name}' has an uncommitted provider value size limit`,
+    );
   }
   if (
-    operation === "create" &&
-    (text.includes("already exists") || text.includes("key exists"))
+    maxValueBytes !== undefined &&
+    status.maxValueSize > 0 && status.maxValueSize < maxValueBytes
   ) {
-    return "exists";
+    throw new Error(
+      `KV bucket '${name}' provider size limit is less than requested`,
+    );
   }
-  return undefined;
 }
 
 function kvError(
-  operation: "create" | "put" | "delete",
-  key: string,
+  operation: string,
+  key: string | undefined,
   cause: unknown,
 ): KVError {
-  const reason = inferKvFailureReason(operation, cause);
   return new KVError({
     operation,
     cause,
-    context: reason === undefined ? { key } : { key, reason },
+    context: key === undefined ? undefined : { key },
   });
 }
 
-function kvNotFound(operation: "get", key: string): KVError {
-  return new KVError({
-    operation,
-    context: { key, reason: "not found" },
+function validationError(
+  entry: KvEntry,
+  message: string,
+  cause?: unknown,
+): ValidationError {
+  return new ValidationError({
+    errors: [{ path: "", message }],
+    cause,
+    context: {
+      key: decodeSubject(entry.key),
+      revision: entry.revision,
+    },
   });
 }
 
-/**
- * Represents a watch event emitted when a KV entry changes.
- */
-export type WatchEvent<S extends TSchema> =
-  & {
-    /** The key that changed */
-    key: string;
-    /** The revision number of this change */
-    revision: number;
-    /** The timestamp when this change occurred */
-    timestamp: Date;
+/** Encode a current value in the strict TRKV envelope. */
+export function encodeResourceValue<T>(
+  representation: KvRepresentation<T>,
+  value: T,
+) {
+  if (
+    !Number.isInteger(representation.version) || representation.version <= 0 ||
+    representation.version > 0xffff_ffff
+  ) {
+    throw new RangeError("KV representation version must be a positive u32");
   }
-  & (
-    | {
-      /** The type of change: "update" for new/modified values */
-      type: "update";
-      value: StaticDecode<S>;
-    }
-    | {
-      /** The type of change: "delete" for deletions */
-      type: "delete";
-      value?: undefined;
-    }
-    | {
-      /** The type of change: "error" for invalid stored values */
-      type: "error";
-      error: ValidationError;
-      value?: undefined;
-    }
+  const body = textEncoder.encode(
+    JSON.stringify(representation.codec.encode(value)),
   );
+  const bytes = new Uint8Array(KV_ENVELOPE_HEADER_BYTES + body.length);
+  bytes.set(KV_MAGIC);
+  bytes[4] = KV_ENVELOPE_FORMAT;
+  new DataView(bytes.buffer).setUint32(5, representation.version);
+  bytes.set(body, KV_ENVELOPE_HEADER_BYTES);
+  return bytes;
+}
 
-/**
- * Options for the watch() method.
- */
-export type WatchOptions = {
-  /** If true, include delete events in the watch stream. Defaults to false. */
-  includeDeletes?: boolean;
-};
+/** Decode and optionally migrate one envelope without writing it back. */
+export async function decodeResourceValue<T>(
+  representation: KvRepresentation<T>,
+  migrations: ResourceMigrations<T>,
+  bytes: Uint8Array,
+): Promise<T> {
+  if (
+    bytes.length < KV_ENVELOPE_HEADER_BYTES ||
+    KV_MAGIC.some((byte, index) => bytes[index] !== byte) ||
+    bytes[4] !== KV_ENVELOPE_FORMAT
+  ) throw new Error("Invalid TRKV envelope");
+  const version = new DataView(
+    bytes.buffer,
+    bytes.byteOffset,
+    bytes.byteLength,
+  ).getUint32(5);
+  const encoded = JSON.parse(
+    textDecoder.decode(bytes.subarray(KV_ENVELOPE_HEADER_BYTES)),
+  );
+  if (version === representation.version) {
+    return representation.codec.decode(encoded);
+  }
+  const historicCodec = representation.migrations[version];
+  const migrate = migrations[version];
+  if (!historicCodec || !migrate) {
+    throw new Error(`Unsupported resource representation version ${version}`);
+  }
+  const migrated = await migrate(historicCodec.decode(encoded));
+  if (migrated instanceof Result) {
+    if (migrated.isErr()) throw migrated.error;
+    return representation.codec.decode(representation.codec.encode(
+      migrated.unwrapOrElse(() => {
+        throw new Error("Resource migration unexpectedly failed");
+      }),
+    ));
+  }
+  return representation.codec.decode(representation.codec.encode(migrated));
+}
 
-export class TypedKV<S extends TSchema> {
+async function decodeEntry<T>(
+  representation: KvRepresentation<T>,
+  migrations: ResourceMigrations<T>,
+  entry: KvEntry,
+): Promise<Result<TypedKvEntry<T>, ValidationError>> {
+  const base = {
+    key: decodeSubject(entry.key),
+    revision: revisionFromBackend(entry.revision),
+    timestamp: entry.created,
+  };
+  if (entry.operation === "DEL" || entry.operation === "PURGE") {
+    return Result.ok({ ...base, operation: "delete" });
+  }
+
+  const bytes = entry.value;
+  if (
+    bytes.length < KV_ENVELOPE_HEADER_BYTES ||
+    KV_MAGIC.some((byte, index) => bytes[index] !== byte) ||
+    bytes[4] !== KV_ENVELOPE_FORMAT
+  ) {
+    return Result.err(validationError(entry, "Invalid TRKV envelope"));
+  }
+  try {
+    const value = await decodeResourceValue(representation, migrations, bytes);
+    return Result.ok({ ...base, operation: "put", value });
+  } catch (cause) {
+    return Result.err(
+      validationError(entry, "Failed to decode or migrate KV value", cause),
+    );
+  }
+}
+
+/** Typed access to a generated, versioned KV resource. */
+export class TypedKV<T> {
   private constructor(
-    readonly schema: S,
+    readonly representation: KvRepresentation<T>,
     readonly kv: KV,
+    readonly migrations: ResourceMigrations<T>,
+    readonly isCurrent: () => boolean,
   ) {}
 
-  private static fromParts<S extends TSchema>(schema: S, kv: KV): TypedKV<S> {
-    return new TypedKV<S>(schema, kv);
-  }
-
-  static open<S extends TSchema>(
+  /** Opens or creates a typed KV bucket. */
+  static open<T>(
     nats: NatsConnection,
     name: string,
-    schema: S,
-    options: {
-      history?: number;
-      ttl?: number;
-      bindOnly?: boolean;
-      maxValueBytes?: number;
-      replicas?: number;
-    },
-  ): AsyncResult<TypedKV<S>, KVError> {
+    representation: KvRepresentation<T>,
+    options: KvOpenOptions<T> = {},
+  ): AsyncResult<TypedKV<T>, KVError> {
     return AsyncResult.from((async () => {
       try {
         const kvm = new Kvm(nats);
@@ -230,85 +259,132 @@ export class TypedKV<S extends TSchema> {
           : await kvm.create(name, {
             history: options.history ?? 1,
             ttl: options.ttl ?? 0,
-            ...(options.replicas !== undefined
-              ? { replicas: options.replicas }
-              : {}),
-            ...(options.maxValueBytes
-              ? { maxValueSize: options.maxValueBytes }
-              : {}),
+            ...(options.replicas === undefined
+              ? {}
+              : { replicas: options.replicas }),
+            ...(options.maxValueBytes === undefined
+              ? {}
+              : { maxValueSize: options.maxValueBytes }),
           });
-
-        if (!options.bindOnly) {
-          await ensureExistingBucketOptions(nats, name, options);
-        }
-
-        const typedKv = TypedKV.fromParts(schema, kv);
-        return Result.ok<TypedKV<S>, KVError>(typedKv);
-      } catch (cause) {
-        return Result.err(new KVError({ operation: "open", cause }));
-      }
-    })());
-  }
-
-  get(
-    key: string,
-  ): AsyncResult<TypedKVEntry<S>, KVError | ValidationError> {
-    return AsyncResult.from((async () => {
-      let s: KvEntry | null;
-      try {
-        s = await this.kv.get(escapeKvKey(key));
-      } catch (cause) {
-        return Result.err(
-          new KVError({ operation: "get", cause, context: { key } }),
+        await ensureExistingBucketOptions(kv, name, options);
+        return Result.ok(
+          new TypedKV(
+            representation,
+            kv,
+            options.migrations ?? {},
+            options.isCurrent ?? (() => true),
+          ),
         );
+      } catch (cause) {
+        return Result.err(kvError("open", undefined, cause));
       }
-      if (!s) {
-        return Result.err(kvNotFound("get", key));
-      }
-      if (s.operation === "DEL" || s.operation === "PURGE") {
-        return Result.err(kvNotFound("get", key));
-      }
-      const result = await createTypedKvEntry(this.schema, this.kv, s);
-      return result as Result<TypedKVEntry<S>, KVError | ValidationError>;
     })());
   }
 
-  private serialize(value: unknown): string {
-    return serializeExternalValue(this.schema, value);
+  /** Returns the current value, or `undefined` when absent or deleted. */
+  get(key: string): AsyncResult<T | undefined, KVError | ValidationError> {
+    return this.getEntry(key).map((entry) =>
+      entry?.operation === "put" ? entry.value : undefined
+    );
   }
 
-  create(
+  /** Returns the latest value or tombstone with authoritative revision metadata. */
+  getEntry(
     key: string,
-    value: unknown,
-  ): AsyncResult<void, KVError> {
+  ): AsyncResult<TypedKvEntry<T> | undefined, KVError | ValidationError> {
     return AsyncResult.from((async () => {
       try {
-        await this.kv.create(escapeKvKey(key), this.serialize(value));
-        return Result.ok(undefined);
+        this.#assertCurrent();
+        const entry = await this.kv.get(escapeKvKey(key));
+        return entry
+          ? await decodeEntry(this.representation, this.migrations, entry)
+          : Result.ok(undefined);
+      } catch (cause) {
+        return Result.err(kvError("get", key, cause));
+      }
+    })());
+  }
+
+  /** Creates a value only when the key has no current value. */
+  create(key: string, value: T): AsyncResult<TypedKvEntry<T>, KVError> {
+    return AsyncResult.from((async () => {
+      try {
+        this.#assertCurrent();
+        const revision = await this.kv.create(
+          escapeKvKey(key),
+          encodeResourceValue(this.representation, value),
+        );
+        return Result.ok({
+          key,
+          value,
+          revision: revisionFromBackend(revision),
+          timestamp: new Date(),
+          operation: "put",
+        });
       } catch (cause) {
         return Result.err(kvError("create", key, cause));
       }
     })());
   }
 
-  put(
-    key: string,
-    value: unknown,
-  ): AsyncResult<void, KVError> {
+  /** Writes a value without a revision precondition. */
+  put(key: string, value: T): AsyncResult<TypedKvEntry<T>, KVError> {
     return AsyncResult.from((async () => {
       try {
-        await this.kv.put(escapeKvKey(key), this.serialize(value));
-        return Result.ok(undefined);
+        this.#assertCurrent();
+        const revision = await this.kv.put(
+          escapeKvKey(key),
+          encodeResourceValue(this.representation, value),
+        );
+        return Result.ok({
+          key,
+          value,
+          revision: revisionFromBackend(revision),
+          timestamp: new Date(),
+          operation: "put",
+        });
       } catch (cause) {
         return Result.err(kvError("put", key, cause));
       }
     })());
   }
 
-  delete(key: string): AsyncResult<void, KVError> {
+  /** Replaces a value only when its current revision matches. */
+  replace(
+    key: string,
+    revision: ResourceRevision,
+    value: T,
+  ): AsyncResult<TypedKvEntry<T>, KVError> {
     return AsyncResult.from((async () => {
       try {
-        await this.kv.delete(escapeKvKey(key));
+        this.#assertCurrent();
+        const nextRevision = await this.kv.update(
+          escapeKvKey(key),
+          encodeResourceValue(this.representation, value),
+          revision,
+        );
+        return Result.ok({
+          key,
+          value,
+          revision: revisionFromBackend(nextRevision),
+          timestamp: new Date(),
+          operation: "put",
+        });
+      } catch (cause) {
+        return Result.err(kvError("replace", key, cause));
+      }
+    })());
+  }
+
+  /** Deletes a key, optionally requiring its current revision. */
+  delete(key: string, revision?: ResourceRevision): AsyncResult<void, KVError> {
+    return AsyncResult.from((async () => {
+      try {
+        this.#assertCurrent();
+        await this.kv.delete(
+          escapeKvKey(key),
+          revision === undefined ? {} : { previousSeq: revision },
+        );
         return Result.ok(undefined);
       } catch (cause) {
         return Result.err(kvError("delete", key, cause));
@@ -316,249 +392,96 @@ export class TypedKV<S extends TSchema> {
     })());
   }
 
+  /** Returns all retained revisions for a key, including tombstones. */
+  history(
+    key: string,
+  ): AsyncResult<readonly TypedKvEntry<T>[], KVError | ValidationError> {
+    return AsyncResult.from((async () => {
+      try {
+        this.#assertCurrent();
+        const history = await this.kv.history({ key: escapeKvKey(key) });
+        const entries: TypedKvEntry<T>[] = [];
+        for await (const entry of history) {
+          this.#assertCurrent();
+          const decoded = await decodeEntry(
+            this.representation,
+            this.migrations,
+            entry,
+          );
+          if (decoded.isErr()) return decoded;
+          entries.push(decoded.unwrapOrElse(() => {
+            throw new Error("KV history decode unexpectedly failed");
+          }));
+        }
+        entries.sort((left, right) => left.revision - right.revision);
+        return Result.ok(entries);
+      } catch (cause) {
+        return Result.err(kvError("history", key, cause));
+      }
+    })());
+  }
+
+  /** Watches retained initialization and subsequent revisions for one key. */
+  watch(
+    key: string,
+  ): AsyncResult<AsyncIterable<KvWatchItem<T>>, KVError> {
+    return AsyncResult.from((async () => {
+      try {
+        this.#assertCurrent();
+        const watcher = await this.kv.watch({
+          key: escapeKvKey(key),
+          include: "history",
+        });
+        const representation = this.representation;
+        const migrations = this.migrations;
+        const isCurrent = this.isCurrent;
+        return Result.ok({
+          async *[Symbol.asyncIterator]() {
+            try {
+              for await (const entry of watcher) {
+                if (!isCurrent()) {
+                  throw new Error("KV resource binding is stale");
+                }
+                yield await decodeEntry(representation, migrations, entry);
+              }
+            } finally {
+              watcher.stop();
+            }
+          },
+        });
+      } catch (cause) {
+        return Result.err(kvError("watch", key, cause));
+      }
+    })());
+  }
+
+  /** Lists live keys using the backend's bounded iterator. */
   keys(
     filter: string | string[] = ">",
   ): AsyncResult<AsyncIterable<string>, KVError> {
     return AsyncResult.from((async () => {
       try {
+        this.#assertCurrent();
         return Result.ok(await this.kv.keys(filter));
       } catch (cause) {
-        return Result.err(
-          new KVError({ operation: "keys", cause, context: { filter } }),
-        );
+        return Result.err(kvError("keys", undefined, cause));
       }
     })());
   }
 
+  /** Returns the backend live-value count. */
   status(): AsyncResult<{ values: number }, KVError> {
     return AsyncResult.from((async () => {
       try {
-        const status = await this.kv.status();
-        return Result.ok({ values: status.values });
+        this.#assertCurrent();
+        return Result.ok({ values: (await this.kv.status()).values });
       } catch (cause) {
-        return Result.err(new KVError({ operation: "status", cause }));
-      }
-    })());
-  }
-}
-
-export class TypedKVEntry<S extends TSchema> {
-  readonly #value: unknown;
-
-  constructor(
-    private schema: S,
-    private kv: KV,
-    private entry: KvEntry,
-    value: unknown,
-  ) {
-    this.#value = value;
-  }
-
-  get value(): StaticDecode<S> {
-    return this.#value as StaticDecode<S>;
-  }
-
-  static create<S extends TSchema>(
-    schema: S,
-    kv: KV,
-    entry: KvEntry,
-  ): AsyncResult<TypedKVEntry<S>, ValidationError> {
-    return AsyncResult.from((async () => {
-      const result = await createTypedKvEntry(schema, kv, entry);
-      return result as Result<TypedKVEntry<S>, ValidationError>;
-    })());
-  }
-
-  get key() {
-    return decodeSubject(this.entry.key);
-  }
-
-  get revision() {
-    return this.entry.revision;
-  }
-
-  get createdAt() {
-    return this.entry.created;
-  }
-
-  /**
-   * Watch this KV entry for changes.
-   *
-   * @param callback - Function called when the entry changes
-   * @param opts - Watch options (e.g., includeDeletes)
-   * @returns A function to stop watching
-   */
-  async watch(
-    callback: (event: WatchEvent<S>) => void,
-    opts?: WatchOptions,
-  ): Promise<() => void> {
-    const watcher = await this.kv.watch({
-      key: this.entry.key,
-      include: opts?.includeDeletes ? "history" : "updates",
-    });
-
-    const abortController = new AbortController();
-
-    // Start the async iteration in the background
-    (async () => {
-      for await (const entry of watcher) {
-        if (abortController.signal.aborted) break;
-
-        if (entry.operation === "DEL" || entry.operation === "PURGE") {
-          if (opts?.includeDeletes) {
-            callback({
-              type: "delete",
-              key: decodeSubject(entry.key),
-              revision: entry.revision,
-              timestamp: entry.created,
-            });
-          }
-        } else {
-          try {
-            const json = entry.json();
-            const validated = parseExternalValue(this.schema, json);
-            callback({
-              type: "update",
-              key: decodeSubject(entry.key),
-              value: validated as StaticDecode<S>,
-              revision: entry.revision,
-              timestamp: entry.created,
-            });
-          } catch (cause) {
-            callback({
-              type: "error",
-              key: decodeSubject(entry.key),
-              error: createValidationError(this.schema, entry, cause),
-              revision: entry.revision,
-              timestamp: entry.created,
-            });
-          }
-        }
-      }
-    })();
-
-    return () => {
-      abortController.abort();
-      watcher.stop();
-    };
-  }
-
-  merge(
-    value: unknown,
-    vcc?: boolean,
-  ): AsyncResult<void, KVError | ValidationError> {
-    const mergedData = mergeUnknown(this.#value, value);
-    const mergeResult = Result.try(() =>
-      serializeExternalValue(this.schema, mergedData)
-    );
-    if (mergeResult.isErr()) {
-      const cause = mergeResult.error.cause;
-      if (cause instanceof ParseError) {
-        const errors = Value.Errors(this.schema, externalizeValue(mergedData));
-        return AsyncResult.err(new ValidationError({ errors, cause }));
-      }
-      return AsyncResult.err(
-        new KVError({
-          operation: "merge",
-          cause: mergeResult.error,
-          context: { key: this.key },
-        }),
-      );
-    }
-    return this.put(mergedData, vcc);
-  }
-
-  put(
-    value: unknown,
-    vcc?: boolean,
-  ): AsyncResult<void, KVError> {
-    return AsyncResult.from((async () => {
-      const serialized = serializeValue(this.schema, value);
-      try {
-        await this.kv.put(this.entry.key, serialized, {
-          previousSeq: vcc ? this.entry.revision : undefined,
-        });
-        return Result.ok(undefined);
-      } catch (cause) {
-        return Result.err(kvError("put", this.key, cause));
+        return Result.err(kvError("status", undefined, cause));
       }
     })());
   }
 
-  delete(vcc?: boolean): AsyncResult<void, KVError> {
-    return AsyncResult.from((async () => {
-      try {
-        await this.kv.delete(this.entry.key, {
-          previousSeq: vcc ? this.entry.revision : undefined,
-        });
-        return Result.ok(undefined);
-      } catch (cause) {
-        return Result.err(kvError("delete", this.key, cause));
-      }
-    })());
+  #assertCurrent(): void {
+    if (!this.isCurrent()) throw new Error("KV resource binding is stale");
   }
-}
-
-async function createTypedKvEntry<S extends TSchema>(
-  schema: S,
-  kv: KV,
-  entry: KvEntry,
-): Promise<Result<TypedKVEntry<S>, ValidationError>> {
-  const jsonResult = Result.try(() => entry.json());
-  if (jsonResult.isErr()) {
-    return Result.err(
-      createValidationError(schema, entry, jsonResult.error),
-    );
-  }
-  const json = jsonResult.take();
-  const parseResult = Result.try<unknown>(() => {
-    if (Value.HasCodec(schema)) {
-      return Value.Decode(schema, json);
-    }
-    return Value.Parse(schema, json);
-  });
-  if (parseResult.isErr()) {
-    return Result.err(
-      createValidationError(schema, entry, parseResult.error, json),
-    );
-  }
-
-  const typedEntry = new TypedKVEntry(
-    schema,
-    kv,
-    entry,
-    parseResult.take() as StaticDecode<S>,
-  );
-  return Result.ok<TypedKVEntry<S>, ValidationError>(typedEntry);
-}
-
-function createValidationError(
-  schema: TSchema,
-  entry: KvEntry,
-  cause: unknown,
-  json?: unknown,
-): ValidationError {
-  if (cause instanceof ParseError) {
-    return new ValidationError({
-      errors: Value.Errors(schema, json),
-      cause,
-      context: {
-        key: decodeSubject(entry.key),
-        revision: entry.revision,
-      },
-    });
-  }
-
-  const error = cause instanceof Error ? cause : new Error(String(cause));
-  return new ValidationError({
-    errors: [{
-      path: "",
-      message: `Failed to decode KV value: ${error.message}`,
-    }],
-    cause: error,
-    context: {
-      key: decodeSubject(entry.key),
-      revision: entry.revision,
-    },
-  });
 }

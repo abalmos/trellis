@@ -1,6 +1,6 @@
 //! Generated API `trellis.health@v1`.
 pub const API_ID: &str = "trellis.health@v1";
-pub const API_DIGEST: &str = "JU0A9xciAKdsoOrnsOES61Q99KyP31_NuVNNbf29sF8";
+pub const API_DIGEST: &str = "850itezlC9qjm-ndTCwrmkEQBCkVmnLqSguqNkYVgaA";
 pub struct Api;
 impl trellis_rs::generated::ApiDescriptor for Api {
     const ID: &'static str = API_ID;
@@ -113,6 +113,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -169,6 +170,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -189,7 +191,7 @@ pub mod rpc {
             "trellis.health@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum QueryError {
@@ -225,10 +227,68 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
             QueryError::decode(value)
+        }
+    }
+    pub type SummaryInput = crate::__types::trellis::HealthSummaryRequest;
+    pub type SummaryOutput = crate::__types::trellis::HealthSummaryResponse;
+    pub struct Summary;
+    impl Summary {
+        pub const API_ID: &'static str = super::API_ID;
+        pub const DESCRIPTOR_NAME: &'static str = "rpc.Summary";
+        pub const KEY: &'static str = "health.Summary";
+        pub const SUBJECT: &'static str = "rpc.v1.health.Summary";
+        pub const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.health@v1::read"];
+        pub const ERRORS: &'static [&'static str] = &[
+            "trellis.health@v1::UnexpectedError",
+            "trellis.health@v1::ValidationError",
+        ];
+        pub const DOWNLOAD: bool = false;
+        pub const CURSOR_PAGINATION: bool = false;
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum SummaryError {
+        UnexpectedError(super::errors::UnexpectedError),
+        ValidationError(super::errors::ValidationError),
+    }
+    impl SummaryError {
+        pub fn decode(value: serde_json::Value) -> Result<Option<Self>, serde_json::Error> {
+            let error_type = value.get("type").and_then(serde_json::Value::as_str);
+            match error_type {
+                Some("trellis.health@v1::UnexpectedError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::UnexpectedError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::UnexpectedError))
+                }
+                Some("trellis.health@v1::ValidationError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::ValidationError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::ValidationError))
+                }
+                _ => Ok(None),
+            }
+        }
+    }
+    impl trellis_rs::generated::RpcDescriptor for Summary {
+        type Input = SummaryInput;
+        type Output = SummaryOutput;
+        type Error = SummaryError;
+        const API_ID: &'static str = super::API_ID;
+        const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME;
+        const SUBJECT: &'static str = Self::SUBJECT;
+        const KEY: &'static str = Self::KEY;
+        const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
+        fn decode_error(
+            value: serde_json::Value,
+        ) -> Result<Option<Self::Error>, serde_json::Error> {
+            SummaryError::decode(value)
         }
     }
 }
@@ -240,8 +300,9 @@ pub mod events {
         pub const API_ID: &'static str = super::API_ID;
         pub const DESCRIPTOR_NAME: &'static str = "event.StatusChanged";
         pub const KEY: &'static str = "health.StatusChanged";
-        pub const SUBJECT: &'static str = "events.v1.health.StatusChanged";
-        pub const SUBSCRIBE_SUBJECT: &'static str = "events.v1.health.StatusChanged";
+        pub const SUBJECT: &'static str = "events.v1.dHJlbGxpcy5oZWFsdGhAdjE.StatusChanged";
+        pub const SUBSCRIBE_SUBJECT: &'static str =
+            "events.v1.dHJlbGxpcy5oZWFsdGhAdjE.StatusChanged";
         pub const PUBLISH_CAPABILITIES: &'static [&'static str] = &["trellis.health@v1::public"];
         pub const DELEGATED_PUBLISH: bool = true;
         pub const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &["trellis.health@v1::read"];
@@ -281,9 +342,11 @@ pub mod feeds {
 }
 /// Registers metadata for every RPC in this API.
 pub fn register_rpc_metadata(router: &mut trellis_rs::service::Router) {
+    let _ = router;
     router.register_rpc_metadata::<rpc::Inspect>();
     router.register_rpc_metadata::<rpc::Metrics>();
     router.register_rpc_metadata::<rpc::Query>();
+    router.register_rpc_metadata::<rpc::Summary>();
 }
 #[derive(Clone)]
 pub struct Client {
@@ -310,6 +373,102 @@ impl Client {
         input: &rpc::QueryInput,
     ) -> Result<rpc::QueryOutput, trellis_rs::client::CallError<rpc::QueryError>> {
         self.inner.call::<rpc::Query>(input).await
+    }
+    pub fn query_pages(
+        &self,
+        input: rpc::QueryInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::QueryOutput, crate::PaginationError<rpc::QueryError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .query(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn query_items(
+        &self,
+        input: rpc::QueryInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::HealthQueryResponseentriesItem,
+            crate::PaginationError<rpc::QueryError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::HealthQueryResponseentriesItem>::new().into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .query(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
+    }
+    pub async fn summary(
+        &self,
+        input: &rpc::SummaryInput,
+    ) -> Result<rpc::SummaryOutput, trellis_rs::client::CallError<rpc::SummaryError>> {
+        self.inner.call::<rpc::Summary>(input).await
     }
     pub async fn publish_status_changed(
         &self,
@@ -384,6 +543,18 @@ impl<'a, P: trellis_rs::generated::ParticipantDescriptor> Provider<'a, P> {
             + 'static,
     {
         self.runtime.register_rpc::<rpc::Query, _, _>(handler);
+    }
+    pub fn register_summary<F, Fut>(&mut self, handler: F)
+    where
+        F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::SummaryInput) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: std::future::Future<Output = trellis_rs::service::HandlerResult<rpc::SummaryOutput>>
+            + Send
+            + 'static,
+    {
+        self.runtime.register_rpc::<rpc::Summary, _, _>(handler);
     }
     pub fn register_watch<F, S>(&mut self, handler: F)
     where

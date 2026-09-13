@@ -20,17 +20,134 @@ pub const fn assert_abi(version: u32) {
 pub struct AvailabilitySnapshot {
     permissions: Arc<[trellis_protocol::PermissionAtom]>,
     resources: Arc<crate::service::ServiceResourceBindings>,
+    resource_generations: Arc<std::collections::BTreeMap<(ResourceKind, String), u64>>,
 }
 
 impl AvailabilitySnapshot {
+    #[cfg(test)]
     pub(crate) fn new(
         permissions: Vec<trellis_protocol::PermissionAtom>,
         resources: crate::service::ServiceResourceBindings,
     ) -> Self {
-        Self {
+        Self::replacing(permissions, resources, &Self::default())
+    }
+
+    pub(crate) fn replacing(
+        permissions: Vec<trellis_protocol::PermissionAtom>,
+        resources: crate::service::ServiceResourceBindings,
+        previous: &Self,
+    ) -> Self {
+        let mut generations = (*previous.resource_generations).clone();
+        let next = generations.values().copied().max().unwrap_or(0) + 1;
+        let candidate = Self {
             permissions: permissions.into(),
             resources: Arc::new(resources),
+            resource_generations: Arc::default(),
+        };
+        for kind in [
+            ResourceKind::State,
+            ResourceKind::Kv,
+            ResourceKind::Store,
+            ResourceKind::Job,
+            ResourceKind::Consumer,
+        ] {
+            let names = candidate.resource_names(kind);
+            for name in names {
+                let unchanged = previous.has_resource(kind, &name)
+                    && candidate.same_binding(previous, kind, &name);
+                if !unchanged {
+                    generations.insert((kind, name), next);
+                }
+            }
         }
+        candidate.with_resource_generations(generations)
+    }
+
+    fn with_resource_generations(
+        mut self,
+        generations: std::collections::BTreeMap<(ResourceKind, String), u64>,
+    ) -> Self {
+        self.resource_generations = Arc::new(generations);
+        self
+    }
+
+    fn resource_names(&self, kind: ResourceKind) -> Vec<String> {
+        match kind {
+            ResourceKind::State => self
+                .permissions
+                .iter()
+                .filter_map(|permission| match permission.target() {
+                    trellis_protocol::PermissionTarget::ParticipantResource {
+                        resource: trellis_protocol::ParticipantResourceKind::State,
+                        name,
+                        ..
+                    } => Some(name.clone()),
+                    _ => None,
+                })
+                .collect(),
+            ResourceKind::Kv => self.resources.kv.keys().cloned().collect(),
+            ResourceKind::Store => self.resources.store.keys().cloned().collect(),
+            ResourceKind::Job => self
+                .resources
+                .jobs
+                .as_ref()
+                .map_or_else(Vec::new, |jobs| jobs.queues.keys().cloned().collect()),
+            ResourceKind::Consumer => self.resources.event_consumers.keys().cloned().collect(),
+        }
+    }
+
+    fn same_binding(&self, previous: &Self, kind: ResourceKind, name: &str) -> bool {
+        match kind {
+            ResourceKind::State => true,
+            ResourceKind::Kv => self.resources.kv.get(name) == previous.resources.kv.get(name),
+            ResourceKind::Store => {
+                self.resources.store.get(name) == previous.resources.store.get(name)
+            }
+            ResourceKind::Job => {
+                self.resources
+                    .jobs
+                    .as_ref()
+                    .and_then(|jobs| jobs.queues.get(name))
+                    == previous
+                        .resources
+                        .jobs
+                        .as_ref()
+                        .and_then(|jobs| jobs.queues.get(name))
+            }
+            ResourceKind::Consumer => {
+                self.resources.event_consumers.get(name)
+                    == previous.resources.event_consumers.get(name)
+            }
+        }
+    }
+
+    /// Return the current installation generation for an available resource.
+    #[doc(hidden)]
+    pub fn resource_generation(&self, kind: ResourceKind, name: &str) -> Option<u64> {
+        self.has_resource(kind, name).then(|| {
+            self.resource_generations
+                .get(&(kind, name.to_owned()))
+                .copied()
+                .unwrap_or(0)
+        })
+    }
+
+    pub(crate) fn kv_binding(&self, name: &str) -> Option<&crate::service::KvResourceBinding> {
+        self.resources.kv.get(name)
+    }
+
+    pub(crate) fn store_binding(
+        &self,
+        name: &str,
+    ) -> Option<&crate::service::StoreResourceBinding> {
+        self.resources.store.get(name)
+    }
+
+    pub(crate) fn consumer_binding(
+        &self,
+        name: &str,
+    ) -> Option<&crate::service::EventConsumerResourceBinding> {
+        self.resources.event_consumers.get(name)
     }
 
     /// Test exact installed authority for an API action.
@@ -62,7 +179,17 @@ impl AvailabilitySnapshot {
     #[doc(hidden)]
     pub fn has_resource(&self, kind: ResourceKind, name: &str) -> bool {
         match kind {
-            ResourceKind::State | ResourceKind::Kv => self.resources.kv.contains_key(name),
+            ResourceKind::State => self.permissions.iter().any(|permission| {
+                matches!(
+                    permission.target(),
+                    trellis_protocol::PermissionTarget::ParticipantResource {
+                        resource: trellis_protocol::ParticipantResourceKind::State,
+                        name: resource_name,
+                        ..
+                    } if resource_name == name
+                )
+            }),
+            ResourceKind::Kv => self.resources.kv.contains_key(name),
             ResourceKind::Store => self.resources.store.contains_key(name),
             ResourceKind::Job => self
                 .resources
@@ -71,6 +198,28 @@ impl AvailabilitySnapshot {
                 .is_some_and(|jobs| jobs.queues.contains_key(name)),
             ResourceKind::Consumer => self.resources.event_consumers.contains_key(name),
         }
+    }
+
+    /// Test whether a cached KV handle still names the exact current binding.
+    #[doc(hidden)]
+    pub fn has_kv_binding(&self, name: &str, binding: &crate::service::KvResourceBinding) -> bool {
+        self.resources
+            .kv
+            .get(name)
+            .is_some_and(|current| current.bucket == binding.bucket)
+    }
+
+    /// Test whether a cached Store handle still names the exact physical binding.
+    #[doc(hidden)]
+    pub fn has_store_binding(
+        &self,
+        name: &str,
+        binding: &crate::service::StoreResourceBinding,
+    ) -> bool {
+        self.resources
+            .store
+            .get(name)
+            .is_some_and(|current| current.name == binding.name)
     }
 }
 
@@ -136,7 +285,7 @@ impl OptionalAction {
 }
 
 /// Participant resource family used by generated availability projections.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ResourceKind {
     /// Participant-local State resource.
     State,
@@ -199,6 +348,8 @@ pub trait RpcDescriptor {
     const KEY: &'static str;
     /// Capability requirements declared for callers.
     const CALLER_CAPABILITIES: &'static [&'static str];
+    /// Whether the success value may carry a runtime-issued download grant.
+    const DOWNLOAD: bool;
 
     /// Decode a matching generated error, or return `None` for an unknown error type.
     fn decode_error(value: serde_json::Value) -> Result<Option<Self::Error>, serde_json::Error>;
@@ -225,6 +376,19 @@ pub trait EventDescriptor {
     const DELEGATED_PUBLISH: bool = false;
     /// Capability requirements declared for subscribers.
     const SUBSCRIBE_CAPABILITIES: &'static [&'static str];
+
+    /// Return the canonical identity cryptographically bound to publications.
+    fn descriptor_identity() -> Result<String, crate::client::SubjectError> {
+        trellis_protocol::encode_event_descriptor_identity(
+            Self::API_ID,
+            action_name(Self::DESCRIPTOR_NAME),
+            Self::SUBSCRIBE_SUBJECT
+                .split('.')
+                .filter(|token| *token == "*")
+                .count(),
+        )
+        .map_err(|error| crate::client::SubjectError::InvalidTemplate(error.to_string()))
+    }
 
     /// Resolve any typed subject placeholders from the event payload.
     fn publish_subject(event: &Self::Event) -> Result<String, crate::client::SubjectError> {
@@ -262,6 +426,10 @@ pub trait OperationDescriptor: Send + Sync + 'static {
     type Output: Codec + Serialize + DeserializeOwned + Send + 'static;
     /// Durable progress payload, or `serde_json::Value` when none is declared.
     type Progress: Codec + Serialize + DeserializeOwned + Send + 'static;
+    /// Live-only update payload, or `serde_json::Value` when none is declared.
+    type Update: Codec + Serialize + DeserializeOwned + Send + 'static;
+    /// Compile-time evidence for whether live updates are declared.
+    type UpdateEvidence: crate::client::OperationUpdateEvidence;
     /// Generated union of errors declared by this Operation.
     type Error: OperationDeclaredError;
 
@@ -279,10 +447,14 @@ pub trait OperationDescriptor: Send + Sync + 'static {
     const ERRORS: &'static [&'static str];
     /// Exact declared signal names.
     const SIGNALS: &'static [&'static str];
+    /// JSON Schemas keyed by exact declared signal name.
+    const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = "{}";
     /// Whether the Operation accepts an upload transfer.
     const UPLOAD: bool;
     /// Whether a typed progress payload is declared.
     const HAS_PROGRESS: bool;
+    /// JSON Schema for live-only updates when declared.
+    const UPDATE_SCHEMA_JSON: Option<&'static str>;
 
     /// Decode a matching declared error, or return `None` for an unknown type.
     fn decode_error(value: serde_json::Value) -> Result<Option<Self::Error>, serde_json::Error>;
@@ -322,10 +494,11 @@ where
     type Input = D::Input;
     type Progress = D::Progress;
     type Output = D::Output;
-    type Update = serde_json::Value;
-    type UpdateEvidence = crate::client::NoOperationUpdates;
+    type Update = D::Update;
+    type UpdateEvidence = D::UpdateEvidence;
     type Error = DeclaredOperationFailure<D::Error>;
 
+    const API_ID: &'static str = D::API_ID;
     const KEY: &'static str = D::KEY;
     const SUBJECT: &'static str = D::SUBJECT;
     const CALLER_CAPABILITIES: &'static [&'static str] = D::CALLER_CAPABILITIES;
@@ -333,28 +506,14 @@ where
     const CANCEL_CAPABILITIES: &'static [&'static str] = D::CALLER_CAPABILITIES;
     const CONTROL_CAPABILITIES: &'static [&'static str] = D::CALLER_CAPABILITIES;
     const CANCELABLE: bool = true;
+    const UPLOAD: bool = D::UPLOAD;
+    const UPDATE_SCHEMA_JSON: Option<&'static str> = D::UPDATE_SCHEMA_JSON;
     const ERRORS: &'static [&'static str] = D::ERRORS;
     const INPUT_SCHEMA_JSON: &'static str = "{}";
     const PROGRESS_SCHEMA_JSON: Option<&'static str> =
         if D::HAS_PROGRESS { Some("{}") } else { None };
     const OUTPUT_SCHEMA_JSON: &'static str = "{}";
-    const UPDATE_SCHEMA_JSON: Option<&'static str> = None;
-    const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = "{}";
-}
-
-/// Typed provider accepted by generated service registration facades.
-pub trait OperationProvider<D>:
-    crate::service::ServiceOperationProvider<OperationAdapter<D>>
-where
-    D: OperationDescriptor,
-{
-}
-
-impl<D, P> OperationProvider<D> for P
-where
-    D: OperationDescriptor,
-    P: crate::service::ServiceOperationProvider<OperationAdapter<D>>,
-{
+    const SIGNAL_INPUT_SCHEMAS_JSON: &'static str = D::SIGNAL_INPUT_SCHEMAS_JSON;
 }
 
 /// Provider-side wrapper preserving a generated declared Operation error.
@@ -443,6 +602,13 @@ impl Client {
         )))
     }
 
+    /// Return the independently authenticated companion client, when available.
+    pub fn companion(&self) -> Option<Self> {
+        self.client
+            .companion()
+            .map(|inner| Self::from_client(inner).with_optional_actions(self.optional_actions))
+    }
+
     /// Invoke one generated RPC descriptor.
     pub async fn call<D>(
         &self,
@@ -461,7 +627,15 @@ impl Client {
         })?;
         let output = self
             .client
-            .request_json_value(D::SUBJECT, &input)
+            .request_json_value(
+                &self
+                    .client
+                    .bound_api_subject("rpc", D::API_ID, D::KEY)
+                    .map_err(|error| {
+                        crate::client::CallError::from_client(error, D::decode_error)
+                    })?,
+                &input,
+            )
             .await
             .map_err(|error| crate::client::CallError::from_client(error, D::decode_error))?;
         D::Output::decode(output).map_err(|error| {
@@ -554,6 +728,98 @@ impl Client {
     /// Watch subsequent atomic availability replacements.
     pub fn watch_availability(&self) -> tokio::sync::watch::Receiver<AvailabilitySnapshot> {
         self.client.watch_availability()
+    }
+
+    /// Construct a generated typed State resource handle.
+    #[doc(hidden)]
+    pub fn state_handle<T>(
+        &self,
+        name: &str,
+        codec: crate::client::ResourceCodec<T>,
+    ) -> Option<crate::client::ConnectedStateHandle<T>>
+    where
+        T: Codec + Send + 'static,
+    {
+        self.client
+            .availability()
+            .has_resource(ResourceKind::State, name)
+            .then(|| {
+                crate::client::StateHandle::from_generated(
+                    name,
+                    codec,
+                    crate::client::BoundStateResourceClient::new(self.client.clone()),
+                    self.client.watch_availability(),
+                )
+            })
+    }
+
+    /// Open a generated typed KV resource handle from its current installation binding.
+    #[doc(hidden)]
+    pub async fn kv_handle<T>(
+        &self,
+        name: &str,
+        codec: crate::client::ResourceCodec<T>,
+    ) -> Result<Option<crate::service::KvHandle<T>>, crate::service::ServerError>
+    where
+        T: Codec + Send + 'static,
+    {
+        let availability = self.client.availability();
+        let Some(binding) = availability.kv_binding(name).cloned() else {
+            return Ok(None);
+        };
+        crate::service::open_generated_kv(
+            &self.client.nats(),
+            &self
+                .client
+                .participant_id()
+                .map_err(|error| crate::service::ServerError::Nats(error.to_string()))?,
+            name,
+            binding,
+            codec,
+            self.client.watch_availability(),
+        )
+        .await
+        .map(Some)
+    }
+
+    /// Open a generated Store resource handle from its current installation binding.
+    #[doc(hidden)]
+    pub async fn store_handle(
+        &self,
+        name: &str,
+    ) -> Result<Option<crate::service::StoreHandle>, crate::service::ServerError> {
+        let availability = self.client.availability();
+        let Some(binding) = availability.store_binding(name).cloned() else {
+            return Ok(None);
+        };
+        crate::service::open_generated_store(
+            &self.client.nats(),
+            &self
+                .client
+                .participant_id()
+                .map_err(|error| crate::service::ServerError::Nats(error.to_string()))?,
+            name,
+            binding,
+            self.client.watch_availability(),
+        )
+        .await
+        .map(Some)
+    }
+
+    /// Construct a generated durable Consumer handle from its installed binding.
+    #[doc(hidden)]
+    pub fn consumer_handle<D>(&self) -> Option<crate::client::ConsumerHandle<D>>
+    where
+        D: crate::client::ConsumerDescriptor,
+    {
+        let availability = self.client.availability();
+        let binding = availability.consumer_binding(D::NAME)?.clone();
+        Some(crate::client::ConsumerHandle::from_generated(
+            binding,
+            self.client.nats().clone(),
+            self.clone(),
+            self.client.watch_availability(),
+        ))
     }
 
     /// Download a generated receive-transfer grant.
@@ -802,6 +1068,17 @@ pub enum ParticipantKind {
     Agent,
 }
 
+/// Exact lexical child installed alongside a device participant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CompanionDescriptor {
+    /// Fully qualified child participant identity.
+    pub id: &'static str,
+    /// Child participant kind, restricted to app or agent.
+    pub kind: ParticipantKind,
+    /// Whether device readiness requires the child connection.
+    pub required: bool,
+}
+
 /// Descriptor implemented by each generated participant module.
 pub trait ParticipantDescriptor {
     /// Qualified participant identity.
@@ -810,6 +1087,9 @@ pub trait ParticipantDescriptor {
     const PATH: &'static str;
     /// Participant kind.
     const KIND: ParticipantKind;
+
+    /// Exact lexical app or agent companion, when declared by this device.
+    const COMPANION: Option<CompanionDescriptor> = None;
 
     /// APIs completely implemented by this participant.
     const IMPLEMENTED_API_IDS: &'static [&'static str] = &[];
@@ -826,6 +1106,17 @@ pub trait ParticipantDescriptor {
             || Self::ID.strip_prefix(evidence.root_package()) != Some(&format!(".{}", Self::PATH))
         {
             return Err(DescriptorError::ParticipantPath);
+        }
+        if let Some(companion) = Self::COMPANION {
+            if Self::KIND != ParticipantKind::Device
+                || !matches!(
+                    companion.kind,
+                    ParticipantKind::App | ParticipantKind::Agent
+                )
+                || companion.id.rsplit_once('.').map(|(parent, _)| parent) != Some(Self::ID)
+            {
+                return Err(DescriptorError::ParticipantPath);
+            }
         }
         Ok(())
     }
@@ -1263,9 +1554,67 @@ mod tests {
     use super::{
         ApiDescriptor, AvailabilitySnapshot, Codec as _, DeclaredOperationFailure,
         OperationAdapter, OperationDeclaredError, OperationDescriptor, OperationSignal,
-        OptionalAction, PackageEvidence, PackageSourceEvidence, SerializableErrorData, Timestamp,
-        TrellisError, Ulid,
+        OptionalAction, PackageEvidence, PackageSourceEvidence, ResourceKind,
+        SerializableErrorData, Timestamp, TrellisError, Ulid,
     };
+
+    #[test]
+    fn resource_generations_fence_removed_and_replaced_handles() {
+        let binding = crate::service::KvResourceBinding {
+            bucket: "KV_A".into(),
+            history: 2,
+            max_value_bytes: None,
+            ttl_ms: 0,
+        };
+        let resources = crate::service::ServiceResourceBindings {
+            kv: [("records".into(), binding.clone())].into(),
+            ..Default::default()
+        };
+        let first = AvailabilitySnapshot::replacing(vec![], resources.clone(), &Default::default());
+        let generation = first
+            .resource_generation(ResourceKind::Kv, "records")
+            .unwrap();
+
+        let unchanged = AvailabilitySnapshot::replacing(vec![], resources, &first);
+        assert_eq!(
+            unchanged.resource_generation(ResourceKind::Kv, "records"),
+            Some(generation)
+        );
+
+        let removed = AvailabilitySnapshot::replacing(vec![], Default::default(), &unchanged);
+        let readded = AvailabilitySnapshot::replacing(
+            vec![],
+            crate::service::ServiceResourceBindings {
+                kv: [("records".into(), binding.clone())].into(),
+                ..Default::default()
+            },
+            &removed,
+        );
+        assert_ne!(
+            readded.resource_generation(ResourceKind::Kv, "records"),
+            Some(generation)
+        );
+
+        let replaced = AvailabilitySnapshot::replacing(
+            vec![],
+            crate::service::ServiceResourceBindings {
+                kv: [(
+                    "records".into(),
+                    crate::service::KvResourceBinding {
+                        bucket: "KV_B".into(),
+                        ..binding
+                    },
+                )]
+                .into(),
+                ..Default::default()
+            },
+            &readded,
+        );
+        assert_ne!(
+            replaced.resource_generation(ResourceKind::Kv, "records"),
+            readded.resource_generation(ResourceKind::Kv, "records")
+        );
+    }
 
     #[tokio::test]
     async fn availability_snapshot_replacement_wakes_watchers() {
@@ -1399,6 +1748,8 @@ mod tests {
         type Input = String;
         type Output = bool;
         type Progress = u32;
+        type Update = serde_json::Value;
+        type UpdateEvidence = crate::client::NoOperationUpdates;
         type Error = ExampleOperationError;
 
         const API_ID: &'static str = "example/Orders@v1";
@@ -1410,6 +1761,7 @@ mod tests {
         const SIGNALS: &'static [&'static str] = &["Resume"];
         const UPLOAD: bool = true;
         const HAS_PROGRESS: bool = true;
+        const UPDATE_SCHEMA_JSON: Option<&'static str> = None;
 
         fn decode_error(
             value: serde_json::Value,

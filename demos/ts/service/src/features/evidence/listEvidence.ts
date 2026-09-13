@@ -3,7 +3,7 @@ import type { RpcHandler } from "@qlever-llc/trellis/service";
 import { type participants } from "../../../trellis/index.js";
 
 type Handler = RpcHandler<
-  typeof participants.demoService.participant,
+  typeof participants.Service.participant,
   "Evidence.List"
 >;
 
@@ -16,11 +16,10 @@ function evidenceIdForKey(
 
 /** Lists image evidence staged in the demo object store. */
 export const listEvidence: Handler = async ({ input, client }) => {
-  const uploads = await client.store.uploads.open().orThrow();
-  const page = await uploads.list({
+  const page = await (await client.store.uploads.open().orThrow()).list({
     prefix: input.prefix ?? "evidence/",
-    offset: input.offset,
-    limit: input.limit,
+    cursor: input.page?.cursor,
+    limit: input.page?.limit,
   }).orThrow();
   const evidence = [];
 
@@ -28,7 +27,7 @@ export const listEvidence: Handler = async ({ input, client }) => {
     evidence.push({
       evidenceId: evidenceIdForKey(info.key, info.metadata),
       key: info.key,
-      size: info.size,
+      size: BigInt(info.size),
       ...(info.contentType ? { contentType: info.contentType } : {}),
       evidenceType: info.metadata.evidenceType || "image",
       ...(info.metadata.fileName ? { fileName: info.metadata.fileName } : {}),
@@ -36,9 +35,8 @@ export const listEvidence: Handler = async ({ input, client }) => {
     });
   }
 
-  evidence.sort((left, right) =>
-    right.uploadedAt.localeCompare(left.uploadedAt)
-  );
-
-  return ok({ ...page, entries: evidence });
+  return ok({
+    items: evidence,
+    page: page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor },
+  });
 };

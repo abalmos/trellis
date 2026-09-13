@@ -17,23 +17,23 @@ Deno.test("orders caller invokes the real service", async () => {
   try {
     const identity = await runtime.registerService({
       name: "orders",
-      contract: participants.acmeOrdersService.participant,
+      contract: participants.OrdersService.participant,
     });
     const service = await TrellisService.connect({
-      participant: participants.acmeOrdersService.participant,
+      participant: participants.OrdersService.participant,
       name: "orders-service",
       trellisUrl: runtime.trellisUrl,
       seed: identity.seed,
     }).orThrow();
     let exit: Promise<unknown> | undefined;
     try {
-      await service.handleOrdersCreate(createOrder);
+      await service.handleCreate(createOrder);
       exit = service.wait().catch((error: unknown) => error);
       const client = await runtime.connectClient({
         name: "caller",
-        contract: participants.acmeOrdersCaller.participant,
+        contract: participants.OrdersCaller.participant,
       });
-      const order = await client.ordersCreate({ customerId: "customer-1" })
+      const order = await client.create({ customerId: "customer-1" })
         .orThrow();
       assertEquals(order.customerId, "customer-1");
       assertMatch(order.orderId, /^[0-9a-f-]{36}$/);

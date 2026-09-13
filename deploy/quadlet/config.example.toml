@@ -86,9 +86,9 @@ journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true
 
-[eventlog.storage]
+[events.storage]
 kind = "sqlite"
-path = "/var/lib/trellis/eventlog.sqlite"
+path = "/var/lib/trellis/events.sqlite"
 journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true

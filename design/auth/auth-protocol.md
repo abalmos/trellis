@@ -36,9 +36,8 @@ constructor does not impose that route-specific rule.
 - `proof`.
 
 `POST /bootstrap/device` has the same shape. The server rejects unknown fields
-and never accepts deployment IDs, instance IDs, participant artifacts/digests,
-needs digests, resource evidence, grant sets, or transport assertions from the
-caller.
+and never accepts deployment IDs, instance IDs, semantic evidence, resource
+bindings, grant sets, or transport assertions from the caller.
 
 Successful service and device bootstrap return the same installation shape:
 
@@ -98,11 +97,11 @@ commits browser generation-fenced login state, then invokes context refresh.
 ## Context Refresh
 
 `POST /bootstrap/context/refresh` accepts the old context digest, participant
-identity, optional needs digest, request ID, issued-at milliseconds, and session
-proof. It revalidates current principal, credential/login when present, exact
-`GrantBinding`, installed revision, resource evidence, and issuer state. It
-returns the shared `runtime` plus `transports` installation shape, including a
-new short-lived route JWT.
+identity, request ID, issued-at milliseconds, and session proof. It revalidates
+current principal, credential/login when present, exact `GrantBinding`,
+installed revision, resource evidence, and issuer state. It returns the shared
+`runtime` plus `transports` installation shape, including a new short-lived
+route JWT.
 
 Clients use refresh on cold restoration and once per disconnected episode. Fresh
 native bootstrap uses the context returned by bootstrap. A failed reconnect
@@ -146,12 +145,16 @@ The redundant session header is never an independent identity assertion.
 ## Event Verification
 
 Events carry `authorization-context`, `session-key`, `proof`, event ID, event
-type, event time, subject, and payload. The proof binds all event-specific
-fields. Events produced inside a context validity window remain historically
-verifiable after ordinary context expiry, but explicit context or issuer
-revocation invalidates them.
+time, subject, payload, and `Trellis-Event-Descriptor`. The descriptor names the
+qualified API ID, exact dotted event name, and parameter count. The proof binds
+the descriptor and every other event-specific field, so a parameterized event
+cannot be mistaken for a longer event name that produces the same NATS subject.
+Concrete parameter tokens are canonical UTF-8 encoded as unpadded base64url.
+Events produced inside a context validity window remain historically verifiable
+after ordinary context expiry, but explicit context or issuer revocation
+invalidates them.
 
-The Event Log stores raw headers and payload plus context digest and useful
+The Events journal stores raw headers and payload plus context digest and useful
 principal/connection/login projections. It never stores a duplicate complete
 context or grant set. Historical validation resolves immutable Auth SQL/KV
 context bytes by digest.

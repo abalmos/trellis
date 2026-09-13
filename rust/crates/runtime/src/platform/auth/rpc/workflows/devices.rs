@@ -10,17 +10,17 @@ pub(super) async fn dispatch(
     caller: ValidatedRequest,
 ) -> Result<Value, AuthorizationStateError> {
     match subject {
-        "rpc.v1.Auth.Devices.Provision" => processor.devices_provision(payload, &caller).await,
-        "rpc.v1.Auth.Devices.List" => processor.devices_list(payload).await,
-        "rpc.v1.Auth.DeviceUserAuthorities.List" => {
+        "rpc.v1.auth.Devices.Provision" => processor.devices_provision(payload, &caller).await,
+        "rpc.v1.auth.Devices.List" => processor.devices_list(payload).await,
+        "rpc.v1.auth.DeviceUserAuthorities.List" => {
             processor.device_user_authorities_list(payload).await
         }
-        "rpc.v1.Auth.DeviceUserAuthorities.Revoke" => {
+        "rpc.v1.auth.DeviceUserAuthorities.Revoke" => {
             processor
                 .device_user_authorities_revoke(payload, &caller)
                 .await
         }
-        "rpc.v1.Auth.Devices.Enable" => {
+        "rpc.v1.auth.Devices.Enable" => {
             processor
                 .provisioned_instance_set_state(
                     payload,
@@ -30,7 +30,7 @@ pub(super) async fn dispatch(
                 )
                 .await
         }
-        "rpc.v1.Auth.Devices.Disable" => {
+        "rpc.v1.auth.Devices.Disable" => {
             processor
                 .provisioned_instance_set_state(
                     payload,
@@ -40,7 +40,7 @@ pub(super) async fn dispatch(
                 )
                 .await
         }
-        "rpc.v1.Auth.Devices.Remove" => {
+        "rpc.v1.auth.Devices.Remove" => {
             processor
                 .provisioned_instance_set_state(
                     payload,
@@ -50,10 +50,10 @@ pub(super) async fn dispatch(
                 )
                 .await
         }
-        "rpc.v1.Auth.DeviceUserAuthorities.Reviews.List" => {
+        "rpc.v1.auth.DeviceUserAuthorities.Reviews.List" => {
             processor.activation_reviews_list(payload).await
         }
-        "rpc.v1.Auth.DeviceUserAuthorities.Reviews.Decide" => {
+        "rpc.v1.auth.DeviceUserAuthorities.Reviews.Decide" => {
             processor.activation_reviews_decide(payload, &caller).await
         }
         _ => unknown(subject),

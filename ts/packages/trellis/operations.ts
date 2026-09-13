@@ -1,4 +1,5 @@
 import { AsyncResult, err, isErr, ok, type Result } from "@qlever-llc/result";
+import { ulid } from "ulid";
 
 import { type JsonValue, parseUnknownSchema } from "./codec.ts";
 import type { InferSchemaType } from "./participant.ts";
@@ -158,6 +159,11 @@ export type OperationRef<
 export type OperationWatchOptions = {
   /** Include transient typed update events. */
   updates?: boolean;
+};
+
+/** Options that identify an idempotent operation invocation. */
+export type OperationStartOptions = {
+  invocationId?: string;
 };
 
 export type AcceptedOperationEvent<TProgress = unknown, TOutput = unknown> = {
@@ -321,6 +327,7 @@ interface OperationInputBuilderBase<
 > extends OperationObserverBuilderBase<TBuilder, TProgress, TOutput, TUpdate> {
   start(
     callbacks?: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+    options?: OperationStartOptions,
   ): AsyncResult<
     OperationRef<TDesc, TProgress, TOutput, TUpdate>,
     OperationControlError | UnexpectedError
@@ -346,6 +353,7 @@ export interface TransferOperationBuilder<
   ): TransferOperationBuilder<TDesc, TProgress, TOutput, TUpdate>;
   start(
     callbacks?: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+    options?: OperationStartOptions,
   ): AsyncResult<
     StartedTransfer<TDesc, TProgress, TOutput, TUpdate>,
     OperationControlError | UnexpectedError | TransferError
@@ -456,8 +464,8 @@ export interface OperationTransport {
   ): AsyncResult<FileInfo, TransferError>;
 }
 
-function operationRequestBody(input: unknown): JsonValue {
-  return input as JsonValue;
+function operationRequestBody(input: unknown, invocationId: string): JsonValue {
+  return { invocationId, input: input as JsonValue };
 }
 
 export function controlSubject(subject: string): string {
@@ -689,7 +697,11 @@ function decodeSignalAckFrame<TProgress, TOutput>(
       typeof frame.acceptedAt !== "string" ||
       !frame.snapshot
     ) {
-      throw new Error("Expected signal-accepted operation frame");
+      throw new Error(
+        `Expected signal-accepted operation frame, received ${
+          JSON.stringify(value)
+        }`,
+      );
     }
     return ok(frame);
   } catch (cause) {
@@ -921,7 +933,7 @@ class RuntimeOperationRef<
   }
 
   #controlSnapshot(
-    action: "get" | "wait" | "cancel" | "watch",
+    action: "get" | "cancel",
   ): AsyncResult<
     OperationSnapshot<TProgress, TOutput>,
     OperationControlError | UnexpectedError
@@ -1029,6 +1041,7 @@ function invokeOperation<
   transport: OperationTransport,
   descriptor: TDesc,
   input: unknown,
+  invocationId: string,
 ): AsyncResult<
   InvokedOperation<TDesc, TProgress, TOutput, TUpdate>,
   TransportError | UnexpectedError
@@ -1036,7 +1049,7 @@ function invokeOperation<
   return AsyncResult.from((async () => {
     const responseValue = await transport.requestJson(
       descriptor.subject,
-      operationRequestBody(input),
+      operationRequestBody(input, invocationId),
     ).take();
     if (isErr(responseValue)) {
       return responseValue;
@@ -1156,6 +1169,7 @@ function startObservedOperation<
   descriptor: TDesc,
   input: unknown,
   callbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+  options?: OperationStartOptions,
 ): AsyncResult<
   OperationRef<TDesc, TProgress, TOutput, TUpdate>,
   OperationControlError | UnexpectedError
@@ -1170,6 +1184,7 @@ function startObservedOperation<
       transport,
       descriptor,
       input,
+      options?.invocationId ?? ulid(),
     ).take();
     if (isErr(startedValue)) {
       return startedValue;
@@ -1220,6 +1235,7 @@ function startObservedTransfer<
   input: unknown,
   body: TransferBody,
   callbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+  options?: OperationStartOptions,
 ): AsyncResult<
   StartedTransfer<TDesc, TProgress, TOutput, TUpdate>,
   OperationControlError | UnexpectedError | TransferError
@@ -1234,6 +1250,7 @@ function startObservedTransfer<
       transport,
       descriptor,
       input,
+      options?.invocationId ?? ulid(),
     ).take();
     if (isErr(startedValue)) {
       return startedValue;
@@ -1262,15 +1279,11 @@ function startObservedTransfer<
       ready.resolve();
     }
 
-    const transferTask = (async () => {
-      const transferredValue = await operation.startTransfer(body).take();
-      if (isErr(transferredValue)) {
-        await observation.close?.();
-        return transferredValue;
-      }
-
-      return ok(transferredValue);
-    })();
+    const transferredValue = await operation.startTransfer(body).take();
+    if (isErr(transferredValue)) {
+      await observation.close?.();
+      return transferredValue;
+    }
 
     const publicOperation = createPublicOperationRef(
       operation,
@@ -1281,12 +1294,6 @@ function startObservedTransfer<
       operation: publicOperation,
       wait: () =>
         AsyncResult.from((async () => {
-          const transferred = await transferTask;
-          const transferredValue = transferred.take();
-          if (isErr(transferredValue)) {
-            return transferredValue;
-          }
-
           const terminalValue = await publicOperation.wait().take();
           if (isErr(terminalValue)) {
             return terminalValue;
@@ -1455,12 +1462,14 @@ function createOperationInputBuilder<
     },
     start(
       startCallbacks?: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+      options?: OperationStartOptions,
     ) {
       return startObservedOperation<TDesc, TProgress, TOutput, TUpdate>(
         transport,
         descriptor,
         input,
         { ...callbacks, ...startCallbacks },
+        options,
       );
     },
   } satisfies OperationInputBuilderBase<
@@ -1556,6 +1565,7 @@ function createTransferOperationBuilder<
     },
     start(
       startCallbacks?: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+      options?: OperationStartOptions,
     ) {
       return startObservedTransfer<TDesc, TProgress, TOutput, TUpdate>(
         transport,
@@ -1563,6 +1573,7 @@ function createTransferOperationBuilder<
         input,
         body,
         { ...callbacks, ...startCallbacks },
+        options,
       );
     },
   };

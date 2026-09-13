@@ -13,7 +13,7 @@ Deno.test("service connect honors telemetry opt-out and runtime logger", async (
   await withTrellisRuntime(async (runtime) => {
     const identity = await runtime.registerService({
       name: "runtime-options",
-      contract: participants.testProvider.participant,
+      contract: participants.Provider.participant,
     });
     let telemetryInitialized = false;
     let childLoggerCalls = 0;
@@ -32,7 +32,7 @@ Deno.test("service connect honors telemetry opt-out and runtime logger", async (
 
     const service = (await connectTrellisServiceWithRuntimeDeps({
       trellisUrl: runtime.trellisUrl,
-      participant: participants.testProvider.participant,
+      participant: participants.Provider.participant,
       seed: identity.seed,
       telemetry: false,
       runtime: { log: logger },
@@ -52,7 +52,7 @@ Deno.test("service connect honors telemetry opt-out and runtime logger", async (
 });
 
 Deno.test("service connect options keep the flat required shape", () => {
-  const participant = participants.testProvider.participant;
+  const participant = participants.Provider.participant;
   const valid: TrellisServiceConnectArgs<typeof participant> = {
     participant,
     trellisUrl: "http://localhost:3000",

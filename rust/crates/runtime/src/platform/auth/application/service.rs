@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::super::account::hash_password;
 use super::super::AuthorizationStateError;
-use super::activation_review_notifier::{ActivationReviewNotifier, ActivationReviewWaiter};
+use super::activation_review_notifier::ActivationReviewNotifier;
 
 /// Security settings for the Rust-owned authentication service.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -76,7 +76,7 @@ where
             repository,
             config,
             dummy_password_hash: dummy_password_hash.into(),
-            activation_reviews: ActivationReviewNotifier::default(),
+            activation_reviews: ActivationReviewNotifier,
         })
     }
 
@@ -84,10 +84,6 @@ where
     #[must_use]
     pub(crate) fn repository(&self) -> &R {
         &self.repository
-    }
-
-    pub(crate) async fn activation_review_waiter(&self, review_id: &str) -> ActivationReviewWaiter {
-        self.activation_reviews.register(review_id).await
     }
 
     /// Return the configured minimum local-password length.

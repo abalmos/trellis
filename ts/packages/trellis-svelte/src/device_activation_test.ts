@@ -2,8 +2,8 @@ import { AsyncResult } from "@qlever-llc/result";
 import type { BaseError } from "@qlever-llc/result";
 import type { OperationEvent, OperationSnapshot } from "@qlever-llc/trellis";
 import type {
-  AuthDeviceUserAuthoritiesResolveOutput,
-  AuthDeviceUserAuthoritiesResolveProgress,
+  DeviceUserAuthoritiesResolveOutput,
+  DeviceUserAuthoritiesResolveProgress,
 } from "@qlever-llc/trellis/auth";
 import { assertEquals } from "@std/assert";
 
@@ -19,8 +19,8 @@ import {
 type TestSnapshotOperationRef = DeviceActivationOperationRef & {
   get(): AsyncResult<
     OperationSnapshot<
-      AuthDeviceUserAuthoritiesResolveProgress,
-      AuthDeviceUserAuthoritiesResolveOutput
+      DeviceUserAuthoritiesResolveProgress,
+      DeviceUserAuthoritiesResolveOutput
     >,
     BaseError
   >;
@@ -43,12 +43,12 @@ function createStorage(): Pick<Storage, "getItem" | "setItem" | "removeItem"> {
 }
 
 function activatedOutput(
-  decidedAt = Date.parse("2026-04-21T12:34:56Z"),
-): AuthDeviceUserAuthoritiesResolveOutput {
+  decidedAt = BigInt(Date.parse("2026-04-21T12:34:56Z")),
+): DeviceUserAuthoritiesResolveOutput {
   return {
     device: {
       administrativeApproval: "approved",
-      createdAt: decidedAt - 1_000,
+      createdAt: decidedAt - 1_000n,
       delegationExpiresAt: null,
       delegationRequired: true,
       delegationState: "active",
@@ -60,7 +60,7 @@ function activatedOutput(
       principalId: "device_123",
       state: "active",
       updatedAt: decidedAt,
-      version: 2,
+      version: 2n,
     },
     review: {
       activatedByUserPrincipalId: "usr_123",
@@ -68,13 +68,13 @@ function activatedOutput(
       decidedBy: "usr_admin",
       deploymentId: "reader.default",
       devicePrincipalId: "device_123",
-      expiresAt: decidedAt + 60_000,
+      expiresAt: decidedAt + 60_000n,
       instanceId: "dev_123",
       reason: null,
-      requestedAt: decidedAt - 1_000,
+      requestedAt: decidedAt - 1_000n,
       reviewId: "dar_123",
       state: "approved",
-      version: 2,
+      version: 2n,
     },
   };
 }
@@ -98,7 +98,7 @@ function createAuthStub(overrides: {
 }
 
 function createOperationRef(
-  output: AuthDeviceUserAuthoritiesResolveOutput,
+  output: DeviceUserAuthoritiesResolveOutput,
 ): DeviceActivationOperationRef {
   const terminal = {
     id: "op_123",
@@ -143,8 +143,8 @@ function createOperationRef(
 }
 
 function createPendingReviewOperationRef(args: {
-  progress: AuthDeviceUserAuthoritiesResolveProgress;
-  output: AuthDeviceUserAuthoritiesResolveOutput;
+  progress: DeviceUserAuthoritiesResolveProgress;
+  output: DeviceUserAuthoritiesResolveOutput;
   onProgress(): void;
   waitForCompletion: Promise<void>;
 }): TestSnapshotOperationRef {
@@ -180,8 +180,8 @@ function createPendingReviewOperationRef(args: {
     watch() {
       return AsyncResult.ok((async function* (): AsyncIterable<
         OperationEvent<
-          AuthDeviceUserAuthoritiesResolveProgress,
-          AuthDeviceUserAuthoritiesResolveOutput
+          DeviceUserAuthoritiesResolveProgress,
+          DeviceUserAuthoritiesResolveOutput
         >
       > {
         yield {
@@ -392,9 +392,9 @@ Deno.test("DeviceActivationController shows pending review from operation progre
           return Promise.resolve(createPendingReviewOperationRef({
             progress: {
               state: "review_pending",
-              retryAfterMs: 1_000,
+              retryAfterMs: 1_000n,
             },
-            output: activatedOutput(Date.parse("2026-04-21T12:00:03Z")),
+            output: activatedOutput(BigInt(Date.parse("2026-04-21T12:00:03Z"))),
             onProgress: progressSeen,
             waitForCompletion,
           }));

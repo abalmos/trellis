@@ -1,13 +1,13 @@
 use std::{fmt, pin::Pin, task::Poll};
 
-use async_nats::jetstream::kv::Operation;
+use async_nats::jetstream::kv::{CreateErrorKind, Operation, UpdateErrorKind};
 use async_nats::jetstream::object_store::{GetErrorKind, PutErrorKind};
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt, TryStreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::{
-    nats_error, KvResourceClient, KvResourceEntry, KvResourceOperation, ServerError,
+    nats_error, KvResourceClient, KvResourceOperation, RawKvResourceEntry, ServerError,
     StoreObjectInfo, StoreResourceClient,
 };
 
@@ -31,7 +31,7 @@ impl fmt::Debug for BoundKvWatch {
 }
 
 impl Stream for BoundKvWatch {
-    type Item = Result<KvResourceEntry, ServerError>;
+    type Item = Result<RawKvResourceEntry, ServerError>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -46,58 +46,67 @@ impl Stream for BoundKvWatch {
 impl KvResourceClient for BoundKvResourceClient {
     type Watch = BoundKvWatch;
 
-    async fn get(&self, key: &str) -> Result<Option<Bytes>, ServerError> {
-        self.store.get(key.to_string()).await.map_err(nats_error)
+    async fn get_entry(&self, key: &str) -> Result<Option<RawKvResourceEntry>, ServerError> {
+        self.authoritative_entry(key).await
     }
 
-    async fn get_entry(&self, key: &str) -> Result<Option<KvResourceEntry>, ServerError> {
-        self.store
-            .entry(key.to_string())
-            .await
-            .map(|entry| entry.map(kv_entry_from_nats))
-            .map_err(nats_error)
+    async fn create(&self, key: &str, value: Bytes) -> Result<RawKvResourceEntry, ServerError> {
+        match self.store.create(key, value).await {
+            Ok(revision) => self.entry_at(key, revision).await,
+            Err(error) if error.kind() == CreateErrorKind::AlreadyExists => {
+                Err(self.kv_revision_mismatch(key, 0).await)
+            }
+            Err(error) => Err(nats_error(error)),
+        }
     }
 
-    async fn put(&self, key: &str, value: Bytes) -> Result<(), ServerError> {
-        self.store
-            .put(key, value)
-            .await
-            .map(|_| ())
-            .map_err(nats_error)
+    async fn put(&self, key: &str, value: Bytes) -> Result<RawKvResourceEntry, ServerError> {
+        let revision = self.store.put(key, value).await.map_err(nats_error)?;
+        self.entry_at(key, revision).await
     }
 
-    async fn update_revision(
+    async fn replace(
         &self,
         key: &str,
         value: Bytes,
         revision: u64,
-    ) -> Result<u64, ServerError> {
+    ) -> Result<RawKvResourceEntry, ServerError> {
         match self.store.update(key, value, revision).await {
-            Ok(revision) => Ok(revision),
-            Err(error) if is_revision_mismatch(&error) => {
+            Ok(revision) => self.entry_at(key, revision).await,
+            Err(error) if error.kind() == UpdateErrorKind::WrongLastRevision => {
                 Err(self.kv_revision_mismatch(key, revision).await)
             }
             Err(error) => Err(nats_error(error)),
         }
     }
 
-    async fn list(&self) -> Result<Vec<String>, ServerError> {
-        let keys = self.store.keys().await.map_err(nats_error)?;
-        keys.try_collect().await.map_err(nats_error)
-    }
-
     async fn delete(&self, key: &str) -> Result<(), ServerError> {
+        if self
+            .authoritative_entry(key)
+            .await?
+            .is_none_or(|entry| entry.operation == KvResourceOperation::Delete)
+        {
+            return Ok(());
+        }
         self.store.delete(key).await.map_err(nats_error)
     }
 
     async fn delete_revision(&self, key: &str, revision: u64) -> Result<(), ServerError> {
         match self.store.delete_expect_revision(key, Some(revision)).await {
             Ok(()) => Ok(()),
-            Err(error) if is_revision_mismatch(&error) => {
+            Err(error) if error.kind() == UpdateErrorKind::WrongLastRevision => {
                 Err(self.kv_revision_mismatch(key, revision).await)
             }
             Err(error) => Err(nats_error(error)),
         }
+    }
+
+    async fn history(&self, key: &str) -> Result<Vec<RawKvResourceEntry>, ServerError> {
+        let history = self.store.history(key).await.map_err(nats_error)?;
+        history
+            .map(|entry| entry.map(kv_entry_from_nats).map_err(nats_error))
+            .try_collect()
+            .await
     }
 
     async fn watch(&self, key: &str) -> Result<Self::Watch, ServerError> {
@@ -112,8 +121,7 @@ impl KvResourceClient for BoundKvResourceClient {
 impl BoundKvResourceClient {
     async fn kv_revision_mismatch(&self, key: &str, expected: u64) -> ServerError {
         let actual = self
-            .store
-            .entry(key.to_string())
+            .authoritative_entry(key)
             .await
             .ok()
             .flatten()
@@ -124,26 +132,39 @@ impl BoundKvResourceClient {
             actual,
         }
     }
+
+    async fn entry_at(&self, key: &str, revision: u64) -> Result<RawKvResourceEntry, ServerError> {
+        self.store
+            .entry_for_revision(key.to_string(), revision)
+            .await
+            .map_err(nats_error)?
+            .map(kv_entry_from_nats)
+            .ok_or_else(|| ServerError::Nats(format!("KV write revision {revision} disappeared")))
+    }
+
+    async fn authoritative_entry(
+        &self,
+        key: &str,
+    ) -> Result<Option<RawKvResourceEntry>, ServerError> {
+        self.store
+            .entry(key)
+            .await
+            .map(|entry| entry.map(kv_entry_from_nats))
+            .map_err(nats_error)
+    }
 }
 
-fn is_revision_mismatch(error: &impl fmt::Display) -> bool {
-    let message = error.to_string().to_ascii_lowercase();
-    message.contains("wrong last sequence")
-        || message.contains("wrong last revision")
-        || message.contains("revision mismatch")
-        || message.contains("sequence mismatch")
-}
-
-fn kv_entry_from_nats(entry: async_nats::jetstream::kv::Entry) -> KvResourceEntry {
-    KvResourceEntry {
+fn kv_entry_from_nats(entry: async_nats::jetstream::kv::Entry) -> RawKvResourceEntry {
+    let operation = match entry.operation {
+        Operation::Put => KvResourceOperation::Put,
+        Operation::Delete | Operation::Purge => KvResourceOperation::Delete,
+    };
+    RawKvResourceEntry {
         key: entry.key,
-        value: entry.value,
+        value: (operation == KvResourceOperation::Put).then_some(entry.value),
         revision: entry.revision,
         timestamp: entry.created,
-        operation: match entry.operation {
-            Operation::Put => KvResourceOperation::Update,
-            Operation::Delete | Operation::Purge => KvResourceOperation::Delete,
-        },
+        operation,
     }
 }
 
@@ -151,6 +172,13 @@ fn kv_entry_from_nats(entry: async_nats::jetstream::kv::Entry) -> KvResourceEntr
 #[derive(Clone)]
 pub struct BoundStoreResourceClient {
     pub(super) store: async_nats::jetstream::object_store::ObjectStore,
+}
+
+impl BoundStoreResourceClient {
+    #[doc(hidden)]
+    pub fn new(store: async_nats::jetstream::object_store::ObjectStore) -> Self {
+        Self { store }
+    }
 }
 
 impl fmt::Debug for BoundStoreResourceClient {
@@ -209,6 +237,18 @@ impl StoreResourceClient for BoundStoreResourceClient {
         let objects = self.store.list().await.map_err(nats_error)?;
         objects
             .map(|object| object.map(|info| info.name).map_err(nats_error))
+            .try_collect()
+            .await
+    }
+
+    async fn list_objects(&self) -> Result<Vec<StoreObjectInfo>, ServerError> {
+        let objects = self.store.list().await.map_err(nats_error)?;
+        objects
+            .map(|object| {
+                object
+                    .map_err(nats_error)
+                    .and_then(|info| store_object_info(&info))
+            })
             .try_collect()
             .await
     }

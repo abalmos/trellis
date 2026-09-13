@@ -58,24 +58,23 @@ export type NavSection = {
 };
 
 const CAPABILITIES = {
-  authorityRead: "trellis.auth::authorities.read",
-  capabilityRead: "trellis.auth::capabilities.read",
-  admin: "trellis.auth::admin",
-  devicesRead: "trellis.auth::devices.read",
-  eventlogRead: "trellis.eventlog::read",
-  healthRead: "trellis.health::read",
-  jobsRead: "trellis.jobs::read",
-  portalsRead: "trellis.auth::portals.read",
-  servicesRead: "trellis.auth::services.read",
-  sessionsRead: "trellis.auth::sessions.read",
-  usersRead: "trellis.auth::users.read",
+  authorityRead: "trellis.auth@v1::authorities_read",
+  capabilityRead: "trellis.auth@v1::capabilities_read",
+  devicesRead: "trellis.auth@v1::devices_read",
+  eventsRead: "trellis.events@v1::read",
+  healthRead: "trellis.health@v1::read",
+  jobsRead: "trellis.jobs@v1::read",
+  portalsRead: "trellis.auth@v1::portals_read",
+  servicesRead: "trellis.auth@v1::services_read",
+  sessionsRead: "trellis.auth@v1::sessions_read",
+  usersRead: "trellis.auth@v1::users_read",
 } as const;
 
 const overviewCapabilities = [
   CAPABILITIES.usersRead,
   CAPABILITIES.healthRead,
   CAPABILITIES.sessionsRead,
-  CAPABILITIES.eventlogRead,
+  CAPABILITIES.eventsRead,
   CAPABILITIES.jobsRead,
 ] as const;
 
@@ -109,7 +108,7 @@ const navSections: NavSection[] = [
         href: "/admin/events",
         label: "Events",
         icon: "activity",
-        capabilities: [CAPABILITIES.eventlogRead],
+        capabilities: [CAPABILITIES.eventsRead],
       },
       {
         href: "/admin/jobs",
@@ -205,12 +204,9 @@ export function getPageTitle(pathname: string): string {
 }
 
 export function getRoleLabel(profile: Profile): string {
-  if (profile?.capabilities?.includes(CAPABILITIES.admin)) {
-    return "Administrator";
-  }
   if (
     profile?.capabilities?.some((capability) =>
-      capability.startsWith("trellis.")
+      capability.startsWith("trellis.") && capability.includes("@v")
     )
   ) return "Operator";
   if (profile?.capabilities?.includes("service")) return "Service principal";

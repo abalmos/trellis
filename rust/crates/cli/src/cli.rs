@@ -6,12 +6,16 @@ use clap_complete::Shell;
 mod auth;
 mod bootstrap;
 mod deploy;
+mod events;
+mod resources;
 mod self_cmd;
 
 pub use auth::*;
 #[cfg(feature = "runtime")]
 pub use bootstrap::*;
 pub use deploy::*;
+pub use events::*;
+pub use resources::*;
 pub use self_cmd::*;
 
 #[derive(Debug, Parser)]
@@ -74,6 +78,12 @@ pub enum TopLevelCommand {
     Svc(SvcCommand),
     /// Manage device deployments.
     Dev(DevCommand),
+    /// Inspect and destroy provisioned resources.
+    #[command(subcommand)]
+    Resources(ResourcesCommand),
+    /// Query and administer Events.
+    #[command(subcommand)]
+    Events(EventsCommand),
     /// Run one-time initialization workflows.
     #[cfg(feature = "runtime")]
     Init(InitCommand),

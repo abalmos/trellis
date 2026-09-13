@@ -1,141 +1,54 @@
-This guide adds service-private background jobs to the Rust `orders-service` from
-[Tutorial: Write a service](/guides/write-a-service). For caller-visible async
-workflows, use [Operations: Rust](/guides/using-operations-rust).
+# Use jobs from Rust
 
-## 1. Declare queues
+Jobs are service-private durable execution. Declare a `job` resource with
+payload, optional result/update/deadline/retry, and optional keyed-concurrency
+policy. Progress, structured logs, and dead-job lifecycle are always available;
+there are no feature switches or authored ack-wait/max-delivery knobs.
 
-Declare each queue in the service contract. Payload, result, and optional update
-schemas are part of the generated Rust API:
+Native IDL uses the same job declaration for Rust generation:
 
-```json
-{
-  "jobs": {
-    "reserveInventory": {
-      "payload": { "schema": "ReserveInventoryPayload" },
-      "result": { "schema": "ReserveInventoryResult" },
-      "maxDeliver": 3,
-      "backoffMs": [1000, 5000, 15000]
-    }
-  }
+```trellis
+job reconcile {
+  title "Reconcile order";
+  description "Repairs one order projection.";
+  payload ReconcileInput;
+  result ReconcileOutput;
+  retry { attempts 3; backoff [5s, 30s]; }
+  key_concurrency { path orderId; policy queue; }
 }
 ```
 
-Run `cargo xtask install`. The participant facade now contains a typed queue
-registration method and a cloneable submission client.
+Use generated handles to register workers and submit work. The default policy is
+five total deliveries with delays of 5s, 30s, 2m, and 10m. Explicit retry uses
+attempts plus exactly attempts-minus-one positive delays.
 
-## 2. Keep a submission client
-
-Clone submission clients before registering handlers. They can be moved into RPC
-handlers, operation providers, or background tasks without borrowing the
-connected service:
+Generated provider methods accept an `ActiveJob` handler whose future returns
+`Result<JobResult, JobProcessError<E>>`:
 
 ```rust
-let reserve_inventory = service.jobs_client().reserve_inventory();
-let reserve_inventory_for_create = reserve_inventory.clone();
+use trellis_rs::jobs::JobProcessError;
 
-service.handle().rpc().orders().create(move |_context, request| {
-    let reserve_inventory = reserve_inventory_for_create.clone();
-    async move {
-        let order_id = ulid::Ulid::new().to_string();
-
-        let job = reserve_inventory
-            .submit(orders_sdk::ReserveInventoryJobPayload {
-                order_id: order_id.clone(),
-                items: request.items,
-            })
-            .await?;
-
-        Ok(orders_sdk::OrdersCreateResponse {
-            order_id,
-            job_id: job.identity().id.clone(),
-        })
-    }
-});
-```
-
-`submit(...)` returns a typed `JobRef`. Use `get()`, `wait()`, or `cancel()` on
-that reference; do not query private job subjects.
-
-## 3. Register workers
-
-Register one handler for each queue before `service.run()`:
-
-```rust
-use trellis_rs::jobs::JobProgress;
-
-service
-    .jobs()
-    .reserve_inventory()
-    .handle(|job| async move {
-        tracing::info!(
-            request_id = %job.context().request_id,
-            attempt = job.tries(),
-            "reserving inventory",
-        );
-
-        job.progress(JobProgress {
-            step: Some("reserving".into()),
-            message: Some("Checking inventory".into()),
-            ..Default::default()
-        })
-        .await
-        .map_err(|error| error.to_string())?;
-
-        if job.is_cancelled() {
-            return Err("job cancelled".to_string());
-        }
-
-        reserve_items(&job.payload().items).await
-            .map_err(|error| error.to_string())?;
-
-        Ok(orders_sdk::ReserveInventoryJobResult { reserved: true })
+provider
+    .register_reconcile(|job| async move {
+        reconcile(job.payload())
+            .await
+            .map_err(JobProcessError::retryable)
     })
     .await?;
+
+let job = provider.submit_reconcile(input).await?;
 ```
 
-The payload and result types are inferred from the generated queue descriptor.
-Handler errors implement `ToString`; returning an error requests redelivery until
-the queue reaches `maxDeliver`, after which the job becomes dead.
+Use `JobProcessError::failed(error)` for a non-retryable handler failure.
 
-## 4. Run and supervise workers
+Delivery progress acknowledgement is automatic for keyed and unkeyed work.
+Applications do not heartbeat merely to retain delivery. Keyed lease renewal is
+separate and fences/cancels work after ownership loss.
 
-`service.run().await` starts the authenticated request host and every registered
-worker. There is no separate worker host to retain. Unexpected worker exit fails
-the service and cancels sibling runtime tasks.
+For keyed work, the handler starts only after the active key slot is acquired.
+Capacity waits maintain broker delivery progress without consuming an attempt or
+causing max-delivery exhaustion. `JobProcessError::retryable(error)` from handler
+execution consumes the configured attempts and backoff schedule.
 
-For work that can exceed the queue's ack wait, call `job.heartbeat().await?`
-periodically. Heartbeats extend delivery ownership; worker-presence heartbeats
-are separate Trellis runtime traffic and require no application code.
-
-## 5. Cancellation and redelivery
-
-Cancellation is cooperative. Check `job.is_cancelled()` at safe interruption
-points. Use `job.is_redelivery()` and `job.redelivery_count()` when behavior must
-change on a retry.
-
-Per-job processing failures NAK the message and keep the queue worker alive.
-Keyed queues release their active slot on a best-effort basis before redelivery.
-
-## 6. Progress, logs, and updates
-
-Use `job.progress(...)` for durable, low-frequency lifecycle progress and
-`job.log(...)` for operator-visible log entries. If the queue declares an update
-schema, typed live updates are at most once: they are not persisted, replayed,
-shown in Jobs admin, or delivered to late subscribers. Prefer cumulative update
-payloads and treat the terminal result as authoritative.
-
-## 7. Keyed queues
-
-Use `keyConcurrency` when only one job for a logical business key may run at a
-time. Keyed queues default to clear failure (`fail-stale`, `reject`); choose
-coalescing or replacement explicitly when that is the domain behavior.
-
-The generated facade initializes the Trellis key coordinator automatically from
-the resolved queue binding. Service code does not construct a `JobManager` or
-coordinator.
-
-## Next
-
-- [Operations: Rust](/guides/using-operations-rust) for caller-visible async work
-- [Administering Jobs](/guides/administering-jobs) for query, inspection,
-  metrics, cancellation, retry, and dead-letter workflows
+Jobs are at least once. Keep side effects idempotent. Typed updates are live-only;
+durable progress, logs, result/error, and dead lifecycle remain authoritative.

@@ -44,7 +44,15 @@ try {
   for (const project of ["demos/ts", "demos/app"]) {
     const destination = join(isolated, project);
     const files = await new Deno.Command("git", {
-      args: ["ls-files", "-z", "--", project],
+      args: [
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        project,
+      ],
       cwd: repository,
     }).output();
     if (!files.success) throw new Error("Could not list demo sources");
@@ -103,15 +111,15 @@ try {
       try {
         const identity = await runtime.registerService({
           name: "native-demo",
-          contract: serviceParticipants.demoService.participant,
+          contract: serviceParticipants.Service.participant,
         });
         const caller = await runtime.connectClient({
           name: "demo-app",
-          contract: appParticipants.demoApp.participant,
+          contract: appParticipants.App.participant,
         });
         const admin = await runtime.connectClient({
           name: "device-reviewer",
-          contract: testParticipants.appCli.participant,
+          contract: testParticipants.cli.participant,
         });
         await runtime.deployments.create({
           id: "device",
@@ -120,7 +128,7 @@ try {
         });
         const approval = await runtime.contracts.apply({
           deployment: "device",
-          contract: deviceParticipants.demoDevice.participant,
+          contract: deviceParticipants.Device.participant,
         });
         for (const engine of ["node", "deno"]) {
           const secret = crypto.getRandomValues(new Uint8Array(32));
@@ -131,7 +139,7 @@ try {
             idempotencyKey: ulid(),
             identityPublicKey: null,
             instanceId: null,
-            participantId: deviceParticipants.demoDevice.participant.id,
+            participantId: deviceParticipants.Device.participant.id,
           });
           const { instanceId, principalId } = provisioned.device;
           const provisioningSecret = provisioned.provisioningSecret;
@@ -176,13 +184,13 @@ try {
                 );
               }
               const response = await caller.assignmentsList(
-                { limit: 50, offset: 0 },
+                { page: { limit: 50 } },
                 { timeout: 1000 },
               );
               return response.isOk() ? response.orThrow() : false;
             }, { timeoutMs: 30_000 });
-            assertEquals(result.entries.length > 0, true);
-            const sites = await caller.sitesList({ limit: 50, offset: 0 });
+            assertEquals(result.items.length > 0, true);
+            const sites = await caller.sitesList({ page: { limit: 50 } });
             if (sites.isErr()) {
               failures.push(
                 new Error(
@@ -224,21 +232,21 @@ try {
                 ) {
                   const review = await runtime.waitFor(async () => {
                     const reviews = await admin
-                      .authDeviceUserAuthoritiesReviewsList({
+                      .deviceUserAuthoritiesReviewsList({
                         deploymentId: approval.deploymentId,
                         state: "pending",
                       }).orThrow();
-                    return reviews.entries[0] ?? false;
+                    return reviews.items[0] ?? false;
                   });
                   const decision = await admin
-                    .authDeviceUserAuthoritiesReviewsDecide({
+                    .deviceUserAuthoritiesReviewsDecide({
                       decision: "approve",
                       expectedVersion: review.version,
                       idempotencyKey: ulid(),
                       reason: null,
                       reviewId: review.reviewId,
                     });
-                  assertEquals(decision.isOk(), true, JSON.stringify(decision));
+                  assertEquals(decision.isOk(), true);
                   approved = true;
                 }
                 if (

@@ -52,14 +52,23 @@ export {
 export type { MaybeAsync } from "@qlever-llc/result";
 export type { ClientOpts } from "./client.ts";
 export type { CallerParticipant, CallerRuntime } from "./caller.ts";
+export { PaginationError } from "./pagination.ts";
+export {
+  decodePaginationCursor,
+  encodePaginationCursor,
+  paginationQueryDigest,
+} from "./auth/protocol_wasm.ts";
+export type { PaginationErrorData } from "./pagination.ts";
 export type {
   ClientAuthContinuation,
   ClientAuthOptions,
   ClientAuthRequiredContext,
+  ClientResourceMigrations,
   ConnectedTrellisClient,
   TrellisClientConnectArgs,
 } from "./client_connect.ts";
 export { ClientAuthHandledError, TrellisClient } from "./client_connect.ts";
+export type { KvWatchItem, ResourceRevision, TypedKvEntry } from "./kv.ts";
 export type { TrellisErrorInstance } from "./errors/index.ts";
 export {
   AuthError,
@@ -75,18 +84,18 @@ export {
   UnexpectedError,
   ValidationError,
 } from "./errors/index.ts";
-export { TypedKVEntry } from "./kv.ts";
-export type { WatchEvent, WatchOptions } from "./kv.ts";
 export { TypedStoreEntry } from "./store_entry.ts";
 export type {
   StoreBody,
   StoreInfo,
+  StoreListOptions,
+  StoreListPage,
   StoreOpenOptions,
   StorePutOptions,
   StoreStatus,
   StoreWaitOptions,
 } from "./store.ts";
-export { FileInfoSchema } from "./transfer.ts";
+export { FileInfoSchema, TransferGrantSchema } from "./transfer.ts";
 export type {
   FileInfo,
   ReceiveTransferGrant,
@@ -111,6 +120,7 @@ export type {
   OperationRefData,
   OperationSignalAck,
   OperationSnapshot,
+  OperationStartOptions,
   OperationState,
   OperationTransferProgress,
   OperationWatchOptions,
@@ -143,7 +153,6 @@ export type {
   HandlerTrellis,
   HandlerTrellisForContract,
   InternalCaller,
-  MapStateStoreClient,
   OperationHandlerContext,
   OperationHandlerErrorOf,
   OperationRegistration,
@@ -167,4 +176,5 @@ export type {
   ValueStateStoreClient,
   VerifiedCaller,
 } from "./session.ts";
+export { ResourceUnavailableError, StateConflictError } from "./session.ts";
 export type { TrellisAuth } from "./session.ts";

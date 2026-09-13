@@ -14,7 +14,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Activation = apis.auth.AuthDeviceUserAuthoritiesListOutput["entries"][number];
+  type Activation = apis.auth.DeviceUserAuthoritiesListOutput["items"][number];
 
   const trellis = getTrellis();
   const notifications = getNotifications();
@@ -33,9 +33,9 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDeviceUserAuthoritiesList({ limit: 100 }).take();
+      const response = await trellis.deviceUserAuthoritiesList({ limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
-      const loadedActivations = response.entries ?? [];
+      const loadedActivations = response.items ?? [];
       const loadedActiveActivations = loadedActivations.filter((activation) => activation.device.delegationState === "active");
       activations = loadedActivations;
       if (selectedInstanceId && !loadedActiveActivations.some((activation) => activation.device.instanceId === selectedInstanceId)) {
@@ -56,12 +56,12 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authDeviceUserAuthoritiesRevoke({
+      const response = await trellis.deviceUserAuthoritiesRevoke({
         deploymentId: selectedActivation.device.deploymentId,
         devicePrincipalId: selectedActivation.device.principalId,
         idempotencyKey: ulid(),
         reason: null,
-      } satisfies apis.auth.AuthDeviceUserAuthoritiesRevokeInput,
+      } satisfies apis.auth.DeviceUserAuthoritiesRevokeInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Device activation revoked for ${selectedActivation.device.instanceId}.`, "Revoked");

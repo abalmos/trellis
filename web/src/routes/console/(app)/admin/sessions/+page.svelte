@@ -58,13 +58,13 @@
     loading = true;
     error = null;
     try {
-      currentSessionId = (await trellis.authSessionsMe({}).orThrow()).session?.sessionId ?? null;
-      const response = await trellis.authSessionsList({
+      currentSessionId = (await trellis.sessionsMe({}).orThrow()).session?.sessionId ?? null;
+      const response = await trellis.sessionsList({
         principalId: sessionFilterUser.trim() || undefined,
         limit: 100,
       }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
-      sessions = response.entries ?? [];
+      sessions = response.items ?? [];
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -76,12 +76,12 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authConnectionsList({
+      const response = await trellis.connectionsList({
         sessionId: connFilterSessionKey.trim() || undefined,
         limit: 100,
       }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
-      connections = response.entries ?? [];
+      connections = response.items ?? [];
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -102,7 +102,7 @@
     bulkBusy = true;
     sessionResult = null;
     const outcome = await runBulk(targets, async (session) => {
-      const response = await trellis.authSessionsRevoke({
+      const response = await trellis.sessionsRevoke({
         expectedVersion: session.version,
         idempotencyKey: ulid(),
         reason: null,
@@ -140,7 +140,7 @@
     bulkBusy = true;
     connectionResult = null;
     const outcome = await runBulk(targets, async (connection) => {
-      const response = await trellis.authConnectionsKick({
+      const response = await trellis.connectionsKick({
         connectionId: connection.connectionId,
         idempotencyKey: ulid(),
         reason: null,

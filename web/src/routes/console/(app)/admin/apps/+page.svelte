@@ -18,20 +18,20 @@
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let identityGrants = $state<apis.auth.AuthGrantsListOutput["entries"]>([]);
+  let identityGrants = $state<apis.auth.GrantsListOutput["items"]>([]);
 
   async function load() {
     loading = true;
     error = null;
 
-    const res = await trellis.authGrantsList({ limit: 100, ownerKind: "user" }).take();
+    const res = await trellis.grantsList({ limit: 100, ownerKind: "user" }).take();
     loading = false;
     if (isErr(res)) {
       error = errorMessage(res);
       return;
     }
 
-    identityGrants = res.entries;
+    identityGrants = res.items;
   }
 
   onMount(load);

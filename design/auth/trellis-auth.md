@@ -17,27 +17,27 @@ Status: authoritative as-built model for the WO-02 authorization cutover.
 
 ## Participants And Grants
 
-An installed participant revision is an immutable snapshot containing the exact
-canonical participant artifact plus all exact resolved API artifacts needed to
-interpret it. Revisions are monotonically increasing per participant. The server
-selects the current revision; clients do not upload artifacts or digests during
-bootstrap or browser login.
+An installed participant revision is an immutable snapshot of verified package
+semantic evidence and exact participant lexical path. Revisions are
+monotonically increasing per participant. The server selects the current
+revision; clients do not upload generated artifacts or digests during bootstrap
+or browser login.
 
 `GrantBinding` is keyed by `(identityId, participantId)` and contains:
 
 - the installed participant revision;
-- the exact `GrantSetV1` granted for that participant; and
+- approval mode, approved current-consent capabilities, approved resource
+  commitments, delegation ceiling, and exact derived grants; and
 - a finite set of Trellis platform privileges.
 
 The only platform privilege is `PlatformPrivilege::Admin`. It authorizes
-administrative RPCs but
-does not grant arbitrary participant atoms. Grant writes use `expectedRevision`,
-validate every atom against the named installed revision, and commit through the
-aggregate idempotency repository. The protected bootstrap administrator cannot
-be demoted or revoked.
+administrative RPCs but does not grant arbitrary participant atoms. Grant writes
+use `expectedRevision`, validate every atom against the named installed
+revision, and commit through the aggregate idempotency repository. The protected
+bootstrap administrator cannot be demoted or revoked.
 
 CLI, Console, activation Portal, and Auth runtime participants are installed at
-startup from canonical Trellis-owned artifacts. First-admin creation and reset
+startup from Trellis-owned source semantics. First-admin creation and reset
 atomically write Admin bindings for CLI and Console in the same transaction as
 the account credential. The Portal receives no Admin binding.
 
@@ -116,7 +116,7 @@ contains only identity and proof inputs. The server returns one shared
 installation response containing:
 
 - the server-owned assignment;
-- the exact installed participant revision and resolved API artifacts;
+- exact installed package/participant semantic evidence;
 - effective grants and structured resource evidence;
 - the signed authorization context;
 - a short-lived route JWT; and

@@ -1,5 +1,5 @@
 import { AsyncResult, BaseError, UnexpectedError } from "@qlever-llc/result";
-import { deepEqual } from "node:assert/strict";
+import { deepEqual, rejects } from "node:assert/strict";
 import { type apis } from "trellis-web-generated";
 
 import {
@@ -34,228 +34,137 @@ class JobsNotFoundTestError extends BaseError {
   }
 }
 
-Deno.test("loadJobsPageData requests jobs and services with the provided filter", async () => {
-  const calls: Array<{ method: string; input: unknown }> = [];
-  function request(
-    method: "Jobs.ListServices",
-    input: { limit: number; offset?: number },
-  ): AsyncResult<apis.jobs.JobsListServicesOutput, BaseError>;
-  function request(
-    method: "Jobs.Query",
-    input: apis.jobs.JobsQueryInput,
-  ): AsyncResult<apis.jobs.JobsQueryOutput, BaseError>;
-  function request(
-    method: "Jobs.ListServices" | "Jobs.Query",
-    input: { limit: number; offset?: number } | apis.jobs.JobsQueryInput,
-  ): AsyncResult<
-    apis.jobs.JobsListServicesOutput | apis.jobs.JobsQueryOutput,
-    BaseError
-  > {
-    calls.push({ method, input });
-    if (method === "Jobs.ListServices") {
-      return AsyncResult.ok<apis.jobs.JobsListServicesOutput>({
-        count: 1,
-        entries: [{ name: "documents", healthy: true, workers: [] }],
-        limit: 500,
-        offset: 0,
+function jobsPageRpc(
+  listServices: () => AsyncResult<apis.jobs.ListServicesOutput, BaseError>,
+) {
+  return {
+    listServices: (_input: apis.jobs.ListServicesInput) => listServices(),
+    queryJobs: (_input: apis.jobs.QueryInput) =>
+      AsyncResult.ok<apis.jobs.QueryOutput>({ items: [], page: {} }),
+    summarizeJobs: (_input: apis.jobs.SummaryInput) =>
+      AsyncResult.ok<apis.jobs.SummaryOutput>({
+        count: 0n,
+        groups: [],
+        stats: { byState: {}, total: 0n },
+      }),
+  };
+}
+
+Deno.test("loadJobsPageData requests query pages and filtered summary", async () => {
+  const serviceCalls: unknown[] = [];
+  const queryCalls: unknown[] = [];
+  const summaryCalls: unknown[] = [];
+  const data = await loadJobsPageData({
+    listServices: (input) => {
+      serviceCalls.push(input);
+      return AsyncResult.ok({
+        items: [{
+          name: input.page?.cursor ? "reports" : "documents",
+          healthy: true,
+          workers: [],
+        }],
+        page: input.page?.cursor ? {} : { nextCursor: "services-2" },
       });
-    }
-
-    return AsyncResult.ok<apis.jobs.JobsQueryOutput>({
-      count: 2,
-      entries: [
-        {
-          id: "job-1",
-          service: "documents",
-          type: "document-process",
-          state: "pending",
-          context: jobContext,
-          createdAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-01T00:00:00.000Z",
-          tries: 0,
-          maxTries: 3,
-          queueAgeMs: 1000,
-          runtimeBand: "queued",
-        },
-      ],
-      groups: [{ key: "documents", label: "documents", count: 2, depth: 2 }],
-      stats: { byState: { pending: 2 }, queued: 2, total: 2 },
-      limit: 50,
-      nextOffset: 50,
-      offset: 0,
-    });
-  }
-  const data = await loadJobsPageData({
-    listServices: (input) => request("Jobs.ListServices", input),
-    queryJobs: (filter) => request("Jobs.Query", filter),
-  }, { service: "documents", state: ["pending"], limit: 50, offset: 0 });
-
-  deepEqual(calls, [
-    { method: "Jobs.ListServices", input: { limit: 500 } },
-    {
-      method: "Jobs.Query",
-      input: {
-        service: "documents",
-        state: ["pending"],
-        limit: 50,
-        offset: 0,
-      },
     },
+    queryJobs: (input) => {
+      queryCalls.push(input);
+      return AsyncResult.ok({ items: [], page: { nextCursor: "next" } });
+    },
+    summarizeJobs: (input) => {
+      summaryCalls.push(input);
+      return AsyncResult.ok({
+        count: 2n,
+        groups: [{
+          count: 2n,
+          depth: 2n,
+          key: "document-process",
+          label: "document-process",
+        }],
+        stats: { byState: { pending: 2n }, queued: 2n, total: 2n },
+      });
+    },
+  }, {
+    groupBy: "type",
+    service: "documents",
+    state: ["pending"],
+    page: { limit: 50 },
+  });
+  deepEqual(serviceCalls, [
+    { page: { limit: 500 } },
+    { page: { cursor: "services-2", limit: 500 } },
   ]);
-  deepEqual(data.services[0]?.name, "documents");
-  deepEqual(data.jobs[0]?.id, "job-1");
-  deepEqual(data.groups[0]?.key, "documents");
-  deepEqual(data.stats.queued, 2);
-  deepEqual(data.nextOffset, 50);
+  deepEqual(queryCalls, [{
+    groupBy: "type",
+    service: "documents",
+    state: ["pending"],
+    page: { limit: 50 },
+  }]);
+  deepEqual(summaryCalls, [{
+    groupBy: "type",
+    service: "documents",
+    state: ["pending"],
+  }]);
+  deepEqual(data.services.map((service) => service.name), [
+    "documents",
+    "reports",
+  ]);
+  deepEqual(data.groups, [{
+    count: 2n,
+    depth: 2n,
+    key: "document-process",
+    label: "document-process",
+  }]);
+  deepEqual(data.stats, { byState: { pending: 2n }, queued: 2n, total: 2n });
+  deepEqual(data.count, 2n);
+  deepEqual(data.nextCursor, "next");
 });
 
-Deno.test("loadJobsPageData reports Jobs admin runtime as unavailable when Jobs RPCs have no responders", async () => {
-  function request(
-    method: "Jobs.ListServices",
-    input: { limit: number; offset?: number },
-  ): AsyncResult<apis.jobs.JobsListServicesOutput, BaseError>;
-  function request(
-    method: "Jobs.Query",
-    input: apis.jobs.JobsQueryInput,
-  ): AsyncResult<apis.jobs.JobsQueryOutput, BaseError>;
-  function request(
-    method: "Jobs.ListServices" | "Jobs.Query",
-    _input: { limit: number; offset?: number } | apis.jobs.JobsQueryInput,
-  ): AsyncResult<
-    apis.jobs.JobsListServicesOutput | apis.jobs.JobsQueryOutput,
-    BaseError
-  > {
-    if (method === "Jobs.ListServices") {
-      return AsyncResult.err(
-        new UnexpectedError({
-          cause: new Error("No responders available for request"),
-        }),
-      );
-    }
-
-    return AsyncResult.ok<apis.jobs.JobsQueryOutput>({
-      count: 0,
-      entries: [],
-      groups: [],
-      stats: { byState: {}, total: 0 },
-      limit: 50,
-      offset: 0,
-    });
-  }
-  const data = await loadJobsPageData({
-    listServices: (input) => request("Jobs.ListServices", input),
-    queryJobs: (filter) => request("Jobs.Query", filter),
-  });
-
-  deepEqual(data.available, false);
-  deepEqual(
-    data.message,
-    "Jobs admin runtime is not currently reachable.",
-  );
-  deepEqual(data.jobs, []);
-  deepEqual(data.services, []);
-});
-
-Deno.test("loadJobsPageData reports lowercase NATS no responders as unavailable", async () => {
-  function request(
-    method: "Jobs.ListServices",
-    input: { limit: number; offset?: number },
-  ): AsyncResult<apis.jobs.JobsListServicesOutput, BaseError>;
-  function request(
-    method: "Jobs.Query",
-    input: apis.jobs.JobsQueryInput,
-  ): AsyncResult<apis.jobs.JobsQueryOutput, BaseError>;
-  function request(
-    method: "Jobs.ListServices" | "Jobs.Query",
-    _input: { limit: number; offset?: number } | apis.jobs.JobsQueryInput,
-  ): AsyncResult<
-    apis.jobs.JobsListServicesOutput | apis.jobs.JobsQueryOutput,
-    BaseError
-  > {
-    if (method === "Jobs.ListServices") {
-      return AsyncResult.err(
-        new UnexpectedError({
-          cause: new Error("no responders: 'rpc.v1.Jobs.ListServices'"),
-        }),
-      );
-    }
-
-    return AsyncResult.ok<apis.jobs.JobsQueryOutput>({
-      count: 0,
-      entries: [],
-      groups: [],
-      stats: { byState: {}, total: 0 },
-      limit: 50,
-      offset: 0,
-    });
-  }
-  const data = await loadJobsPageData({
-    listServices: (input) => request("Jobs.ListServices", input),
-    queryJobs: (filter) => request("Jobs.Query", filter),
-  });
-
-  deepEqual(data.available, false);
-  deepEqual(
-    data.message,
-    "Jobs admin runtime is not currently reachable.",
+Deno.test("loadJobsPageData rejects a Services.List cursor cycle", async () => {
+  await rejects(() =>
+    loadJobsPageData(
+      jobsPageRpc(() =>
+        AsyncResult.ok({ items: [], page: { nextCursor: "cycle" } })
+      ),
+    )
   );
 });
 
-Deno.test("loadJobsPageData reports missing Jobs permissions with re-auth guidance", async () => {
-  function request(
-    method: "Jobs.ListServices",
-    input: { limit: number; offset?: number },
-  ): AsyncResult<apis.jobs.JobsListServicesOutput, BaseError>;
-  function request(
-    method: "Jobs.Query",
-    input: apis.jobs.JobsQueryInput,
-  ): AsyncResult<apis.jobs.JobsQueryOutput, BaseError>;
-  function request(
-    method: "Jobs.ListServices" | "Jobs.Query",
-    _input: { limit: number; offset?: number } | apis.jobs.JobsQueryInput,
-  ): AsyncResult<
-    apis.jobs.JobsListServicesOutput | apis.jobs.JobsQueryOutput,
-    BaseError
-  > {
-    if (method === "Jobs.ListServices") {
-      return AsyncResult.err(
-        new UnexpectedError({
-          cause: new Error(
-            'Permissions Violation for Publish to "rpc.v1.Jobs.ListServices"',
-          ),
-        }),
-      );
-    }
-
-    return AsyncResult.ok<apis.jobs.JobsQueryOutput>({
-      count: 0,
-      entries: [],
-      groups: [],
-      stats: { byState: {}, total: 0 },
-      limit: 50,
-      offset: 0,
-    });
-  }
-  const data = await loadJobsPageData({
-    listServices: (input) => request("Jobs.ListServices", input),
-    queryJobs: (filter) => request("Jobs.Query", filter),
+for (
+  const [name, cause, message] of [
+    [
+      "uppercase",
+      "No responders available for request",
+      "Jobs admin runtime is not currently reachable.",
+    ],
+    [
+      "lowercase",
+      "no responders: 'rpc.v1.dHJlbGxpcy5qb2JzQHYx.am9icy1ydW50aW1l.ListServices'",
+      "Jobs admin runtime is not currently reachable.",
+    ],
+    [
+      "permissions",
+      'nats: Permissions Violation for Publish to "rpc.v1.dHJlbGxpcy5qb2JzQHYx.am9icy1ydW50aW1l.ListServices"',
+      "Your current session is not approved for Jobs RPCs. Sign out and sign back in to refresh permissions.",
+    ],
+  ] as const
+) {
+  Deno.test(`loadJobsPageData normalizes ${name} failures`, async () => {
+    const data = await loadJobsPageData(
+      jobsPageRpc(() =>
+        AsyncResult.err(new UnexpectedError({ cause: new Error(cause) }))
+      ),
+    );
+    deepEqual(data.available, false);
+    deepEqual(data.message, message);
   });
-
-  deepEqual(data.available, false);
-  deepEqual(
-    data.message,
-    "Your current session is not approved for Jobs RPCs. Sign out and sign back in to refresh permissions.",
-  );
-  deepEqual(data.jobs, []);
-  deepEqual(data.services, []);
-});
+}
 
 Deno.test("loadJobDetailData requests detail by id", async () => {
   const calls: Array<{ method: string; input: unknown }> = [];
   const data = await loadJobDetailData({
     inspect: (input) => {
       calls.push({ method: "Jobs.Inspect", input });
-      return AsyncResult.ok<apis.jobs.JobsInspectOutput>({
+      return AsyncResult.ok<apis.jobs.InspectOutput>({
         attempts: [],
         errors: [],
         job: {
@@ -263,12 +172,14 @@ Deno.test("loadJobDetailData requests detail by id", async () => {
           service: "documents",
           type: "document-process",
           state: "failed",
-          payload: { documentId: "doc-1" },
+          payload: new TextEncoder().encode(
+            JSON.stringify({ documentId: "doc-1" }),
+          ),
           context: jobContext,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:01:00.000Z",
-          tries: 3,
-          maxTries: 3,
+          tries: 3n,
+          maxTries: 3n,
           lastError: "boom",
         },
         related: [],
@@ -298,18 +209,18 @@ Deno.test("cancelJob sends id-only action input", async () => {
   await cancelJob({
     action: (input) => {
       calls.push({ method: "Jobs.Cancel", input });
-      return AsyncResult.ok<apis.jobs.JobsCancelOutput>({
+      return AsyncResult.ok<apis.jobs.CancelOutput>({
         job: {
           id: "job-1",
           service: "documents",
           type: "document-process",
           state: "cancelled",
-          payload: null,
+          payload: new Uint8Array(),
           context: jobContext,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:01:00.000Z",
-          tries: 0,
-          maxTries: 3,
+          tries: 0n,
+          maxTries: 3n,
         },
       });
     },
@@ -323,18 +234,18 @@ Deno.test("retryJob sends id-only action input", async () => {
   await retryJob({
     action: (input) => {
       calls.push({ method: "Jobs.Retry", input });
-      return AsyncResult.ok<apis.jobs.JobsRetryOutput>({
+      return AsyncResult.ok<apis.jobs.RetryOutput>({
         job: {
           id: "job-1",
           service: "documents",
           type: "document-process",
           state: "retry",
-          payload: null,
+          payload: new Uint8Array(),
           context: jobContext,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:01:00.000Z",
-          tries: 3,
-          maxTries: 3,
+          tries: 3n,
+          maxTries: 3n,
         },
       });
     },
@@ -348,18 +259,18 @@ Deno.test("replayDlqJob sends id-only action input", async () => {
   await replayDlqJob({
     action: (input) => {
       calls.push({ method: "Jobs.ReplayDLQ", input });
-      return AsyncResult.ok<apis.jobs.JobsReplayDLQOutput>({
+      return AsyncResult.ok<apis.jobs.ReplayDLQOutput>({
         job: {
           id: "job-1",
           service: "documents",
           type: "document-process",
           state: "retry",
-          payload: null,
+          payload: new Uint8Array(),
           context: jobContext,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:01:00.000Z",
-          tries: 3,
-          maxTries: 3,
+          tries: 3n,
+          maxTries: 3n,
         },
       });
     },
@@ -373,18 +284,18 @@ Deno.test("dismissDlqJob sends id-only action input", async () => {
   await dismissDlqJob({
     action: (input) => {
       calls.push({ method: "Jobs.DismissDLQ", input });
-      return AsyncResult.ok<apis.jobs.JobsDismissDLQOutput>({
+      return AsyncResult.ok<apis.jobs.DismissDLQOutput>({
         job: {
           id: "job-1",
           service: "documents",
           type: "document-process",
           state: "dismissed",
-          payload: null,
+          payload: new Uint8Array(),
           context: jobContext,
           createdAt: "2026-01-01T00:00:00.000Z",
           updatedAt: "2026-01-01T00:01:00.000Z",
-          tries: 3,
-          maxTries: 3,
+          tries: 3n,
+          maxTries: 3n,
         },
       });
     },

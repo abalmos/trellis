@@ -24,12 +24,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
-    parse_session_proof, session_proof_request_digest, verify_session_proof, GrantSet,
+    parse_session_proof, session_proof_request_digest, verify_session_proof,
     NativeBootstrapSessionProofInput, SessionProofInput, SessionProofPolicy,
     UserAuthRequestSessionProofInput,
 };
 use trellis_rs::service::{
-    EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding,
+    EventConsumerReplay, EventConsumerReplayBinding, EventConsumerResourceBinding,
     JobsQueueResourceBinding, JobsResourceBinding, JobsSchemaRef, KvResourceBinding,
     ServiceResourceBindings, StoreResourceBinding,
 };
@@ -55,8 +55,8 @@ use url::Url;
 
 use super::ephemeral::{
     claim_oauth_state, AuthBrowserFlow, AuthBrowserFlowKind, AuthBrowserFlowState,
-    AuthEphemeralRepository, AuthOAuthKind, AuthOAuthState, AuthOAuthStatus,
-    BrowserConsentProposal, BROWSER_FLOW_FORMAT,
+    AuthEphemeralRepository, AuthOAuthKind, AuthOAuthState, AuthOAuthStatus, ConsentApproval,
+    ConsentDecision, ConsentDecisionKind, ConsentRequest, BROWSER_FLOW_FORMAT,
 };
 use super::evidence::ParticipantRuntimeProjection;
 use super::{
@@ -70,7 +70,7 @@ use super::{
     LoginPortalRecord, LoginSettingsRecord, OutboxRepository, ParticipantBindingRecord,
     ParticipantBindingState, PortalGrantProvenance, PortalRepository, PostCommitActionKind,
     PostCommitActionRecord, ProviderLoginAttributes, ProvisioningRepository,
-    ResourceBindingEvidence, ResourceProviderIdentity, SessionRepository,
+    ResourceBindingEvidence, ResourceBindingState, ResourceProviderIdentity, SessionRepository,
 };
 
 const FLOW_TTL_MS: i64 = 15 * 60_000;
@@ -199,6 +199,7 @@ fn valid_json_pointer(pointer: &str) -> bool {
 
 #[derive(Clone)]
 pub(super) struct AuthHttpState<R, E> {
+    nats: async_nats::Client,
     service: AuthService<R>,
     ephemeral: E,
     issuer: NatsBootstrapIssuer,
@@ -223,6 +224,7 @@ enum WebSource {
 }
 
 pub(crate) struct AuthHttpOptions<R, E> {
+    pub nats: async_nats::Client,
     pub service: AuthService<R>,
     pub ephemeral: E,
     pub issuer: NatsBootstrapIssuer,
@@ -357,50 +359,18 @@ fn flow_response(flow: AuthBrowserFlow) -> BrowserFlowResponse {
         providers: Vec::new(),
         registration_enabled: false,
         federated_registration_enabled: false,
-        consent_view: flow.consent.consent_view,
+        consent_view: serde_json::to_value(flow.consent).unwrap_or(Value::Null),
         redirect_target: flow.redirect_target,
     }
 }
 
 fn browser_consent(
     binding: &ParticipantBindingRecord,
-) -> Result<BrowserConsentProposal, HttpError> {
-    super::browser_consent_proposal(binding).map_err(Into::into)
-}
-
-fn select_browser_authority(
-    consent: &BrowserConsentProposal,
-    selected_optional_bundles: &[String],
-) -> Result<(GrantSet, Vec<String>, BTreeSet<String>), HttpError> {
-    let selected = selected_optional_bundles
-        .iter()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    if selected.len() != selected_optional_bundles.len() {
-        return Err(HttpError::bad_request("duplicate_optional_bundle"));
-    }
-    let mut permissions = consent.required_grant_set.permissions().to_vec();
-    for bundle_id in &selected {
-        let bundle = consent
-            .optional_grant_bundles
-            .get(bundle_id)
-            .ok_or_else(|| HttpError::bad_request("unknown_optional_bundle"))?;
-        permissions.extend_from_slice(bundle.permissions());
-    }
-    let grant_set = GrantSet::new(permissions);
-    let mut capabilities = consent.required_capabilities.clone();
-    for (qualified_name, definition) in &consent.optional_capability_definitions {
-        if definition
-            .permissions()
-            .iter()
-            .all(|permission| grant_set.permissions().contains(permission))
-        {
-            capabilities.push(qualified_name.clone());
-        }
-    }
-    capabilities.sort();
-    capabilities.dedup();
-    Ok((grant_set, capabilities, selected))
+    installed_revision: u64,
+) -> Result<ConsentRequest, HttpError> {
+    let ceiling = super::policy::participant_delegation_ceiling(binding)?;
+    super::policy::consent_request(binding, installed_revision, None, &ceiling, &[], None)
+        .map_err(Into::into)
 }
 
 async fn load_flow(
@@ -565,48 +535,62 @@ fn project_service_resource_bindings(
     let mut jobs_work_stream = None;
 
     for binding in evidence {
+        if binding.state != ResourceBindingState::Available {
+            continue;
+        }
         match &binding.provider_identity {
             ResourceProviderIdentity::Kv { bucket } => {
-                let config = participant
-                    .resources
-                    .get(&binding.local_name)
-                    .ok_or_else(|| HttpError::internal("resource_binding_invalid"))?;
+                let Some(super::resources::ResourceActual::Kv {
+                    history,
+                    ttl_ms,
+                    max_value_bytes,
+                }) = binding.actual.as_ref()
+                else {
+                    return Err(HttpError::internal("resource_binding_invalid"));
+                };
                 resources.kv.insert(
                     binding.local_name.clone(),
                     KvResourceBinding {
                         bucket: bucket.clone(),
-                        history: i64::try_from(config.history.unwrap_or(1))
+                        history: i64::try_from(*history)
                             .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
-                        max_value_bytes: config
-                            .desired_max_value
+                        max_value_bytes: max_value_bytes
+                            .as_ref()
+                            .copied()
                             .map(i64::try_from)
                             .transpose()
                             .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
-                        ttl_ms: i64::try_from(config.ttl_ms.unwrap_or_default())
+                        ttl_ms: i64::try_from(*ttl_ms)
                             .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
                     },
                 );
             }
             ResourceProviderIdentity::Store { bucket } => {
-                let config = participant
-                    .resources
-                    .get(&binding.local_name)
-                    .ok_or_else(|| HttpError::internal("resource_binding_invalid"))?;
+                let Some(super::resources::ResourceActual::Store {
+                    ttl_ms,
+                    max_object_bytes,
+                    max_total_bytes,
+                }) = binding.actual.as_ref()
+                else {
+                    return Err(HttpError::internal("resource_binding_invalid"));
+                };
                 resources.store.insert(
                     binding.local_name.clone(),
                     StoreResourceBinding {
                         name: bucket.clone(),
-                        max_object_bytes: config
-                            .desired_max_object
+                        max_object_bytes: max_object_bytes
+                            .as_ref()
+                            .copied()
                             .map(i64::try_from)
                             .transpose()
                             .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
-                        max_total_bytes: config
-                            .desired_max_total
+                        max_total_bytes: max_total_bytes
+                            .as_ref()
+                            .copied()
                             .map(i64::try_from)
                             .transpose()
                             .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
-                        ttl_ms: i64::try_from(config.ttl_ms.unwrap_or_default())
+                        ttl_ms: i64::try_from(*ttl_ms)
                             .map_err(|_| HttpError::internal("resource_binding_invalid"))?,
                     },
                 );
@@ -624,6 +608,7 @@ fn project_service_resource_bindings(
                     .resources
                     .get(&binding.local_name)
                     .ok_or_else(|| HttpError::internal("job_queue_binding_invalid"))?;
+                let backoff_ms = vec![5_000, 30_000, 120_000, 600_000];
                 if jobs_namespace
                     .as_ref()
                     .is_some_and(|current| current != namespace)
@@ -657,31 +642,41 @@ fn project_service_resource_bindings(
                             .result_schema
                             .clone()
                             .map(|schema| JobsSchemaRef { schema }),
-                        max_deliver: i64::from(config.retry_attempts.unwrap_or(5)),
-                        backoff_ms: config
-                            .retry_backoff_ms
-                            .iter()
-                            .copied()
-                            .map(i64::try_from)
-                            .collect::<Result<_, _>>()
-                            .map_err(|_| HttpError::internal("job_queue_binding_invalid"))?,
-                        ack_wait_ms: 300_000,
+                        max_deliver: 5,
+                        backoff_ms: backoff_ms.clone(),
+                        ack_wait_ms: backoff_ms[0],
                         default_deadline_ms: config
                             .deadline_ms
                             .map(i64::try_from)
                             .transpose()
                             .map_err(|_| HttpError::internal("job_queue_binding_invalid"))?,
-                        progress: false,
-                        logs: false,
-                        dlq: false,
-                        key_concurrency: None,
-                        queue: None,
+                        key_concurrency: config.job_key_path.as_ref().map(|path| {
+                            trellis_rs::jobs::bindings::JobKeyConcurrencyBinding {
+                                key: vec![format!("/{}", path.join("/"))],
+                                max_active: 1,
+                                heartbeat_interval_ms: 1_000,
+                                heartbeat_ttl_ms: 5_000,
+                                stale_policy: trellis_rs::jobs::bindings::JobKeyStalePolicy::Block,
+                            }
+                        }),
+                        queue: config.job_key_policy.as_deref().map(|policy| {
+                            trellis_rs::jobs::bindings::JobQueueDepthBinding {
+                                max_queued_per_key: if policy == "reject" { 0 } else { 100 },
+                                when_full: match policy {
+                                    "supersede" => {
+                                        trellis_rs::jobs::bindings::JobQueueWhenFull::ReplaceOldest
+                                    }
+                                    _ => trellis_rs::jobs::bindings::JobQueueWhenFull::Reject,
+                                },
+                            }
+                        }),
                     },
                 );
             }
             ResourceProviderIdentity::EventConsumer {
                 stream,
                 consumer,
+                replay_consumer,
                 filter_subjects,
             } => {
                 let config = participant
@@ -689,7 +684,7 @@ fn project_service_resource_bindings(
                     .get(&binding.local_name)
                     .ok_or_else(|| HttpError::internal("event_consumer_binding_invalid"))?;
                 let max_deliver = i64::from(config.retry_attempts.unwrap_or(6));
-                let backoff_ms = if config.retry_backoff_ms.is_empty() {
+                let backoff_ms: Vec<i64> = if config.retry_backoff_ms.is_empty() {
                     [5_000, 30_000, 120_000, 600_000, 1_800_000]
                         .into_iter()
                         .take(max_deliver.saturating_sub(1) as usize)
@@ -708,20 +703,21 @@ fn project_service_resource_bindings(
                     EventConsumerResourceBinding {
                         stream: stream.clone(),
                         consumer_name: consumer.clone(),
+                        resource_id: binding.binding_id.clone(),
                         filter_subjects: filter_subjects.clone(),
                         replay: if config.consumer_replay_all {
                             EventConsumerReplay::All
                         } else {
                             EventConsumerReplay::New
                         },
-                        ordering: if config.consumer_concurrency.unwrap_or(1) == 1 {
-                            EventConsumerOrdering::Strict
-                        } else {
-                            EventConsumerOrdering::Parallel
-                        },
-                        ack_wait_ms: 300_000,
+                        concurrency: config.consumer_concurrency.unwrap_or(1),
+                        ack_wait_ms: backoff_ms.first().copied().unwrap_or(30_000),
                         max_deliver,
                         backoff_ms,
+                        replay_binding: EventConsumerReplayBinding {
+                            stream: trellis_events_runtime::REPLAY_STREAM.to_owned(),
+                            consumer_name: replay_consumer.clone(),
+                        },
                     },
                 );
             }
@@ -737,70 +733,6 @@ fn project_service_resource_bindings(
         });
     }
     Ok(resources)
-}
-
-fn optional_i64(value: &Value, field: &str) -> Result<Option<i64>, HttpError> {
-    match value.get(field) {
-        None | Some(Value::Null) => Ok(None),
-        Some(value) => value
-            .as_i64()
-            .map(Some)
-            .ok_or_else(|| HttpError::internal("resource_policy_invalid")),
-    }
-}
-
-fn required_i64_array(value: &Value, field: &str) -> Result<Vec<i64>, HttpError> {
-    value
-        .get(field)
-        .and_then(Value::as_array)
-        .ok_or_else(|| HttpError::internal("resource_policy_invalid"))?
-        .iter()
-        .map(|value| {
-            value
-                .as_i64()
-                .ok_or_else(|| HttpError::internal("resource_policy_invalid"))
-        })
-        .collect()
-}
-
-fn required_schema_ref(value: &Value, field: &str) -> Result<JobsSchemaRef, HttpError> {
-    optional_schema_ref(value, field)?
-        .ok_or_else(|| HttpError::internal("job_schema_reference_missing"))
-}
-
-fn optional_schema_ref(value: &Value, field: &str) -> Result<Option<JobsSchemaRef>, HttpError> {
-    let Some(value) = value.get(field) else {
-        return Ok(None);
-    };
-    let schema = value
-        .get("schema")
-        .and_then(Value::as_str)
-        .ok_or_else(|| HttpError::internal("job_schema_reference_invalid"))?;
-    Ok(Some(JobsSchemaRef {
-        schema: schema.to_owned(),
-    }))
-}
-
-fn optional_policy<T: serde::de::DeserializeOwned>(
-    value: &Value,
-    field: &str,
-) -> Result<Option<T>, HttpError> {
-    let mut policy = value.get(field).cloned();
-    if let Some(object) = policy.as_mut().and_then(Value::as_object_mut) {
-        if field == "keyConcurrency" {
-            object.entry("maxActive").or_insert(json!(1));
-            object.entry("heartbeatIntervalMs").or_insert(json!(30_000));
-            object.entry("heartbeatTtlMs").or_insert(json!(120_000));
-            object.entry("stalePolicy").or_insert(json!("fail-stale"));
-        } else if field == "queue" {
-            object.entry("maxQueuedPerKey").or_insert(json!(0));
-            object.entry("whenFull").or_insert(json!("reject"));
-        }
-    }
-    policy
-        .map(serde_json::from_value)
-        .transpose()
-        .map_err(|_| HttpError::internal("job_policy_invalid"))
 }
 
 #[cfg(test)]

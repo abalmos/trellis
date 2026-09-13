@@ -28,7 +28,7 @@ pub struct ListJobsFilter {
     pub job_type: Option<String>,
     pub states: Option<Vec<JobState>>,
     pub since: Option<OffsetDateTime>,
-    pub offset: Option<u64>,
+    pub after: Option<(i64, String, String, String)>,
     pub limit: u64,
 }
 
@@ -39,7 +39,7 @@ impl Default for ListJobsFilter {
             job_type: None,
             states: None,
             since: None,
-            offset: None,
+            after: None,
             limit: u64::MAX,
         }
     }
@@ -50,9 +50,8 @@ impl Default for ListJobsFilter {
 pub struct JobsPage {
     pub jobs: Vec<Job>,
     pub count: u64,
-    pub offset: u64,
     pub limit: u64,
-    pub next_offset: Option<u64>,
+    pub next_after: Option<(i64, String, String, String)>,
 }
 
 /// Filter used by the Jobs workbench query surface.
@@ -68,7 +67,7 @@ pub struct JobsWorkbenchFilter {
     pub trigger: Option<String>,
     pub sort: JobsWorkbenchSort,
     pub group_by: Option<JobsWorkbenchGroupBy>,
-    pub offset: u64,
+    pub after: Option<(Option<i64>, i64, String, String, String)>,
     pub limit: u64,
 }
 
@@ -115,9 +114,8 @@ pub enum JobsWorkbenchGroupBy {
 pub struct JobsWorkbenchPage {
     pub entries: Vec<JobsWorkbenchEntry>,
     pub count: u64,
-    pub offset: u64,
     pub limit: u64,
-    pub next_offset: Option<u64>,
+    pub next_after: Option<(Option<i64>, i64, String, String, String)>,
     pub stats: JobsWorkbenchStats,
 }
 
@@ -414,8 +412,7 @@ impl SqliteJobsStore {
                 job_json TEXT NOT NULL,
                 PRIMARY KEY (service, job_type, id)
             );
-            DROP INDEX IF EXISTS idx_jobs_projection_global_id;
-            CREATE UNIQUE INDEX idx_jobs_projection_global_id
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_projection_global_id
                 ON jobs_projection (id);
             CREATE TABLE IF NOT EXISTS worker_presence_projection (
                 service TEXT NOT NULL,
@@ -561,14 +558,11 @@ impl SqliteJobsStore {
                 name TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            INSERT OR IGNORE INTO projection_metadata (name, value)
+                VALUES ('last_projected_sequence', '0');
             "#,
         )?;
-        ensure_projection_timestamp_columns(&connection)?;
-        ensure_metadata_timestamp_columns(&connection)?;
         ensure_workbench_indexes(&connection)?;
-        backfill_projection_timestamp_columns(&connection)?;
-        backfill_metadata_timestamp_columns(&connection)?;
-        populate_empty_search_index(&connection)?;
         Ok(())
     }
 
@@ -589,6 +583,41 @@ impl SqliteJobsStore {
                 |row| row.get(0),
             )
             .map_err(SqliteJobsStoreError::from)
+    }
+
+    /// Return the latest Jobs stream sequence durably covered by this projection.
+    pub fn projected_sequence(&self) -> Result<u64, SqliteJobsStoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteJobsStoreError::Poisoned)?;
+        let value: String = connection.query_row(
+            "SELECT value FROM projection_metadata WHERE name = 'last_projected_sequence'",
+            [],
+            |row| row.get(0),
+        )?;
+        value
+            .parse::<u64>()
+            .map_err(|error| SqliteJobsStoreError::DecodeJson {
+                model: "Jobs projection checkpoint",
+                details: error.to_string(),
+            })
+    }
+
+    /// Advance the durable Jobs stream projection checkpoint monotonically.
+    pub fn advance_projected_sequence(
+        &self,
+        stream_sequence: u64,
+    ) -> Result<(), SqliteJobsStoreError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| SqliteJobsStoreError::Poisoned)?;
+        connection.execute(
+            "UPDATE projection_metadata SET value = max(CAST(value AS INTEGER), ?1) WHERE name = 'last_projected_sequence'",
+            [stream_sequence],
+        )?;
+        Ok(())
     }
 
     pub(crate) fn with_write_transaction<T>(
@@ -1002,7 +1031,7 @@ impl SqliteJobsStore {
 
     /// List projected jobs with stable offset pagination.
     pub fn list_jobs(&self, filter: &ListJobsFilter) -> Result<JobsPage, SqliteJobsStoreError> {
-        let (where_sql, mut query_params) = list_jobs_where_clause(filter);
+        let (mut where_sql, mut query_params) = list_jobs_where_clause(filter);
         let connection = self
             .connection
             .lock()
@@ -1015,13 +1044,28 @@ impl SqliteJobsStore {
             })?;
         let count = u64::try_from(count).unwrap_or(0);
 
-        let offset = filter.offset.unwrap_or(0);
-        query_params.push(sql_u64(filter.limit));
-        query_params.push(sql_u64(offset));
+        if let Some((updated_at, service, job_type, id)) = &filter.after {
+            let predicate = "(updated_at_nanos < ? OR (updated_at_nanos = ? AND (service > ? OR (service = ? AND (job_type > ? OR (job_type = ? AND id > ?))))))";
+            where_sql = if where_sql.is_empty() {
+                format!(" WHERE {predicate}")
+            } else {
+                format!("{where_sql} AND {predicate}")
+            };
+            query_params.extend([
+                SqlValue::Integer(*updated_at),
+                SqlValue::Integer(*updated_at),
+                SqlValue::Text(service.clone()),
+                SqlValue::Text(service.clone()),
+                SqlValue::Text(job_type.clone()),
+                SqlValue::Text(job_type.clone()),
+                SqlValue::Text(id.clone()),
+            ]);
+        }
+        query_params.push(sql_u64(filter.limit.saturating_add(1)));
         let list_sql = format!(
             "SELECT job_json FROM jobs_projection{where_sql} \
-             ORDER BY updated_at_nanos DESC, service ASC, job_type ASC, id ASC \
-             LIMIT ? OFFSET ?"
+                   ORDER BY updated_at_nanos DESC, service ASC, job_type ASC, id ASC \
+                   LIMIT ?"
         );
         let mut statement = connection.prepare(&list_sql)?;
         let rows = statement.query_map(params_from_iter(query_params.iter()), |row| {
@@ -1032,16 +1076,22 @@ impl SqliteJobsStore {
             jobs.push(decode_job_json(&row?)?);
         }
 
-        let next_offset = offset
-            .checked_add(filter.limit)
-            .filter(|next_offset| *next_offset < count);
+        let next_after = (jobs.len() > filter.limit as usize).then(|| {
+            jobs.pop();
+            let job = jobs.last().expect("non-empty full page");
+            (
+                timestamp_str_nanos(&job.updated_at),
+                job.service.clone(),
+                job.job_type.clone(),
+                job.id.clone(),
+            )
+        });
 
         Ok(JobsPage {
             jobs,
             count,
-            offset,
             limit: filter.limit,
-            next_offset,
+            next_after,
         })
     }
 
@@ -1050,7 +1100,7 @@ impl SqliteJobsStore {
         &self,
         filter: &JobsWorkbenchFilter,
     ) -> Result<JobsWorkbenchPage, SqliteJobsStoreError> {
-        let (from_sql, where_sql, mut query_params) = workbench_from_where_clause(filter)?;
+        let (from_sql, mut where_sql, mut query_params) = workbench_from_where_clause(filter)?;
         let connection = self
             .connection
             .lock()
@@ -1064,12 +1114,27 @@ impl SqliteJobsStore {
         let count = u64::try_from(count).unwrap_or(0);
         let stats = query_workbench_stats(&connection, &from_sql, &where_sql, &query_params)?;
 
-        query_params.push(sql_u64(filter.limit));
-        query_params.push(sql_u64(filter.offset));
+        if let Some((primary, updated_at, service, job_type, id)) = &filter.after {
+            let (predicate, mut cursor_params) = workbench_after_predicate(
+                filter.sort,
+                *primary,
+                *updated_at,
+                service,
+                job_type,
+                id,
+            );
+            where_sql = if where_sql.is_empty() {
+                format!(" WHERE {predicate}")
+            } else {
+                format!("{where_sql} AND {predicate}")
+            };
+            query_params.append(&mut cursor_params);
+        }
+        query_params.push(sql_u64(filter.limit.saturating_add(1)));
         let list_sql = format!(
             "SELECT j.job_json, j.runtime_ms, j.queue_age_anchor_nanos, m.concurrency_key, \
                     {RUNTIME_BAND_SQL}, j.last_error_fingerprint \
-             {from_sql}{where_sql} ORDER BY {} LIMIT ? OFFSET ?",
+             {from_sql}{where_sql} ORDER BY {} LIMIT ?",
             workbench_order_sql(filter.sort)
         );
         let mut statement = connection.prepare(&list_sql)?;
@@ -1106,16 +1171,16 @@ impl SqliteJobsStore {
         }
         attach_waits_to_entries(&connection, &mut entries)?;
 
-        let next_offset = filter
-            .offset
-            .checked_add(filter.limit)
-            .filter(|next_offset| *next_offset < count);
+        let next_after = (entries.len() > filter.limit as usize).then(|| {
+            entries.pop();
+            workbench_cursor(entries.last().expect("non-empty full page"), filter.sort)
+        });
+
         Ok(JobsWorkbenchPage {
             entries,
             count,
-            offset: filter.offset,
             limit: filter.limit,
-            next_offset,
+            next_after,
             stats,
         })
     }
@@ -2030,191 +2095,6 @@ pub(crate) fn upsert_error_projection_on_connection(
     Ok(())
 }
 
-fn ensure_projection_timestamp_columns(
-    connection: &Connection,
-) -> Result<(), SqliteJobsStoreError> {
-    let mut statement = connection.prepare("PRAGMA table_info(jobs_projection)")?;
-    let columns = statement
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
-    if !columns.iter().any(|column| column == "updated_at_nanos") {
-        connection.execute(
-            "ALTER TABLE jobs_projection ADD COLUMN updated_at_nanos INTEGER",
-            [],
-        )?;
-    }
-    if !columns.iter().any(|column| column == "deadline_nanos") {
-        connection.execute(
-            "ALTER TABLE jobs_projection ADD COLUMN deadline_nanos INTEGER",
-            [],
-        )?;
-    }
-    for (column, definition) in [
-        ("request_id", "TEXT"),
-        ("trace_id", "TEXT"),
-        ("traceparent", "TEXT"),
-        ("started_at_nanos", "INTEGER"),
-        ("completed_at_nanos", "INTEGER"),
-        ("created_at_nanos", "INTEGER"),
-        ("runtime_ms", "INTEGER"),
-        ("queue_age_anchor_nanos", "INTEGER"),
-        ("last_error_message", "TEXT"),
-        ("last_error_fingerprint", "TEXT"),
-    ] {
-        if !columns.iter().any(|existing| existing == column) {
-            connection.execute(
-                &format!("ALTER TABLE jobs_projection ADD COLUMN {column} {definition}"),
-                [],
-            )?;
-        }
-    }
-    connection.execute_batch(
-        r#"
-        DROP INDEX IF EXISTS idx_jobs_projection_list;
-        DROP INDEX IF EXISTS idx_jobs_projection_deadline;
-        CREATE INDEX IF NOT EXISTS idx_jobs_projection_list
-            ON jobs_projection (updated_at_nanos DESC, service ASC, job_type ASC, id ASC);
-        CREATE INDEX IF NOT EXISTS idx_jobs_projection_deadline
-            ON jobs_projection (deadline_nanos, state);
-        "#,
-    )?;
-    Ok(())
-}
-
-fn backfill_projection_timestamp_columns(
-    connection: &Connection,
-) -> Result<(), SqliteJobsStoreError> {
-    let mut statement = connection.prepare(
-        r#"
-        SELECT service, job_type, id, updated_at, deadline, job_json
-        FROM jobs_projection
-        WHERE updated_at_nanos IS NULL
-           OR (deadline IS NOT NULL AND deadline_nanos IS NULL)
-           OR created_at_nanos IS NULL
-        "#,
-    )?;
-    let rows = statement.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-            row.get::<_, Option<String>>(4)?,
-            row.get::<_, String>(5)?,
-        ))
-    })?;
-    let mut backfills = Vec::new();
-    for row in rows {
-        let (service, job_type, id, updated_at, deadline, job_json) = row?;
-        let job = decode_job_json(&job_json)?;
-        let updated_at_nanos = timestamp_str_nanos(&updated_at);
-        let created_at_nanos = timestamp_str_nanos(&job.created_at);
-        let started_at_nanos = job.started_at.as_deref().map(timestamp_str_nanos);
-        let completed_at_nanos = job.completed_at.as_deref().map(timestamp_str_nanos);
-        let last_error_fingerprint = job
-            .last_error
-            .as_deref()
-            .map(|message| error_fingerprint(&job.service, &job.job_type, message));
-        let queue_age_anchor_nanos = queue_age_anchor_nanos(&job, created_at_nanos);
-        backfills.push((
-            service,
-            job_type,
-            id,
-            updated_at_nanos,
-            deadline.as_deref().map(timestamp_str_nanos),
-            job.context.request_id,
-            job.context.trace_id,
-            job.context.traceparent,
-            started_at_nanos,
-            completed_at_nanos,
-            created_at_nanos,
-            runtime_ms(started_at_nanos, completed_at_nanos, updated_at_nanos),
-            queue_age_anchor_nanos,
-            job.last_error,
-            last_error_fingerprint,
-        ));
-    }
-    drop(statement);
-
-    for (
-        service,
-        job_type,
-        id,
-        updated_at_nanos,
-        deadline_nanos,
-        request_id,
-        trace_id,
-        traceparent,
-        started_at_nanos,
-        completed_at_nanos,
-        created_at_nanos,
-        runtime_ms,
-        queue_age_anchor_nanos,
-        last_error_message,
-        last_error_fingerprint,
-    ) in backfills
-    {
-        connection.execute(
-            r#"
-            UPDATE jobs_projection
-            SET updated_at_nanos = ?1, deadline_nanos = ?2, request_id = ?3,
-                trace_id = ?4, traceparent = ?5, started_at_nanos = ?6,
-                completed_at_nanos = ?7, created_at_nanos = ?8, runtime_ms = ?9,
-                queue_age_anchor_nanos = ?10, last_error_message = ?11,
-                last_error_fingerprint = ?12
-            WHERE service = ?13 AND job_type = ?14 AND id = ?15
-            "#,
-            params![
-                updated_at_nanos,
-                deadline_nanos,
-                request_id,
-                trace_id,
-                traceparent,
-                started_at_nanos,
-                completed_at_nanos,
-                created_at_nanos,
-                runtime_ms,
-                queue_age_anchor_nanos,
-                last_error_message,
-                last_error_fingerprint,
-                service,
-                job_type,
-                id
-            ],
-        )?;
-    }
-    Ok(())
-}
-
-fn ensure_metadata_timestamp_columns(connection: &Connection) -> Result<(), SqliteJobsStoreError> {
-    let mut statement = connection.prepare("PRAGMA table_info(jobs_metadata_projection)")?;
-    let columns = statement
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
-    if !columns.iter().any(|column| column == "updated_at_nanos") {
-        connection.execute(
-            "ALTER TABLE jobs_metadata_projection ADD COLUMN updated_at_nanos INTEGER",
-            [],
-        )?;
-    }
-    for column in [
-        "trigger_kind",
-        "trigger_id",
-        "parent_job_id",
-        "operation_id",
-    ] {
-        if !columns.iter().any(|existing| existing == column) {
-            connection.execute(
-                &format!("ALTER TABLE jobs_metadata_projection ADD COLUMN {column} TEXT"),
-                [],
-            )?;
-        }
-    }
-    Ok(())
-}
-
 fn ensure_workbench_indexes(connection: &Connection) -> Result<(), SqliteJobsStoreError> {
     connection.execute_batch(
         r#"
@@ -2310,66 +2190,6 @@ fn error_projection_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<JobErr
         sample_job_type: row.get(6)?,
         sample_state: row.get(7)?,
     })
-}
-
-fn backfill_metadata_timestamp_columns(
-    connection: &Connection,
-) -> Result<(), SqliteJobsStoreError> {
-    let mut statement = connection.prepare(
-        r#"
-        SELECT service, job_type, id, updated_at
-        FROM jobs_metadata_projection
-        WHERE updated_at_nanos IS NULL
-        "#,
-    )?;
-    let rows = statement.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-        ))
-    })?;
-    let mut backfills = Vec::new();
-    for row in rows {
-        let (service, job_type, id, updated_at) = row?;
-        backfills.push((service, job_type, id, timestamp_str_nanos(&updated_at)));
-    }
-    drop(statement);
-
-    for (service, job_type, id, updated_at_nanos) in backfills {
-        connection.execute(
-            r#"
-            UPDATE jobs_metadata_projection
-            SET updated_at_nanos = ?1
-            WHERE service = ?2 AND job_type = ?3 AND id = ?4
-            "#,
-            params![updated_at_nanos, service, job_type, id],
-        )?;
-    }
-    Ok(())
-}
-
-fn populate_empty_search_index(connection: &Connection) -> Result<(), SqliteJobsStoreError> {
-    let count = connection.query_row("SELECT COUNT(*) FROM jobs_search_fts", [], |row| {
-        row.get::<_, i64>(0)
-    })?;
-    if count != 0 {
-        return Ok(());
-    }
-
-    let mut statement = connection.prepare(fts_row_select_sql(""))?;
-    let rows = statement.query_map([], fts_row_from_query_row)?;
-    let mut fts_rows = Vec::new();
-    for row in rows {
-        fts_rows.push(row?);
-    }
-    drop(statement);
-
-    for row in fts_rows {
-        insert_fts_row(connection, &row)?;
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -2730,6 +2550,68 @@ fn workbench_order_sql(sort: JobsWorkbenchSort) -> &'static str {
         (_, false) => "j.updated_at_nanos ASC, j.service ASC, j.job_type ASC, j.id ASC",
         (_, true) => "j.updated_at_nanos DESC, j.service ASC, j.job_type ASC, j.id ASC",
     }
+}
+
+fn workbench_cursor(
+    entry: &JobsWorkbenchEntry,
+    sort: JobsWorkbenchSort,
+) -> (Option<i64>, i64, String, String, String) {
+    let updated_at = timestamp_str_nanos(&entry.job.updated_at);
+    let primary = match sort.field {
+        JobsWorkbenchSortField::QueueAge => entry.queue_age_anchor_nanos,
+        JobsWorkbenchSortField::Runtime => entry.runtime_ms,
+        JobsWorkbenchSortField::Retries => Some(i64::try_from(entry.job.tries).unwrap_or(i64::MAX)),
+        _ => Some(updated_at),
+    };
+    (
+        primary,
+        updated_at,
+        entry.job.service.clone(),
+        entry.job.job_type.clone(),
+        entry.job.id.clone(),
+    )
+}
+
+fn workbench_after_predicate(
+    sort: JobsWorkbenchSort,
+    primary: Option<i64>,
+    updated_at: i64,
+    service: &str,
+    job_type: &str,
+    id: &str,
+) -> (String, Vec<SqlValue>) {
+    let field = match sort.field {
+        JobsWorkbenchSortField::QueueAge => {
+            "CASE WHEN j.state IN ('pending', 'retry') THEN j.created_at_nanos END"
+        }
+        JobsWorkbenchSortField::Runtime => "j.runtime_ms",
+        JobsWorkbenchSortField::Retries => "json_extract(j.job_json, '$.tries')",
+        _ => "j.updated_at_nanos",
+    };
+    let tie = "(j.updated_at_nanos < ? OR (j.updated_at_nanos = ? AND (j.service > ? OR (j.service = ? AND (j.job_type > ? OR (j.job_type = ? AND j.id > ?))))))";
+    let mut params = Vec::new();
+    let predicate = match (primary, sort.descending) {
+        (Some(primary), false) => {
+            params.extend([SqlValue::Integer(primary), SqlValue::Integer(primary)]);
+            format!("({field} > ? OR ({field} = ? AND {tie}))")
+        }
+        (Some(primary), true) => {
+            params.extend([SqlValue::Integer(primary), SqlValue::Integer(primary)]);
+            format!("({field} < ? OR {field} IS NULL OR ({field} = ? AND {tie}))")
+        }
+        (None, false) => format!("({field} IS NOT NULL OR ({field} IS NULL AND {tie}))"),
+        (None, true) => format!("({field} IS NULL AND {tie})"),
+    };
+    params.extend([
+        SqlValue::Integer(updated_at),
+        SqlValue::Integer(updated_at),
+        SqlValue::Text(service.to_owned()),
+        SqlValue::Text(service.to_owned()),
+        SqlValue::Text(job_type.to_owned()),
+        SqlValue::Text(job_type.to_owned()),
+        SqlValue::Text(id.to_owned()),
+    ]);
+    (predicate, params)
 }
 
 fn workbench_group_sql(
@@ -3264,66 +3146,6 @@ mod tests {
         path
     }
 
-    fn create_old_jobs_projection_schema(
-        path: &Path,
-        jobs: &[Job],
-    ) -> Result<(), SqliteJobsStoreError> {
-        let connection = Connection::open(path)?;
-        connection.execute_batch(
-            r#"
-            CREATE TABLE jobs_projection (
-                service TEXT NOT NULL,
-                job_type TEXT NOT NULL,
-                id TEXT NOT NULL,
-                state TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                deadline TEXT,
-                payload_json TEXT NOT NULL,
-                job_json TEXT NOT NULL,
-                PRIMARY KEY (service, job_type, id)
-            );
-            CREATE INDEX idx_jobs_projection_global_id
-                ON jobs_projection (id);
-            "#,
-        )?;
-
-        for projected in jobs {
-            let payload_json = serde_json::to_string(&projected.payload).map_err(|error| {
-                SqliteJobsStoreError::EncodeJson {
-                    model: "job payload",
-                    details: error.to_string(),
-                }
-            })?;
-            let job_json = serde_json::to_string(projected).map_err(|error| {
-                SqliteJobsStoreError::EncodeJson {
-                    model: "job",
-                    details: error.to_string(),
-                }
-            })?;
-            connection.execute(
-                r#"
-                INSERT INTO jobs_projection
-                    (service, job_type, id, state, created_at, updated_at, deadline, payload_json, job_json)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                "#,
-                params![
-                    projected.service,
-                    projected.job_type,
-                    projected.id,
-                    job_state_token(projected.state),
-                    projected.created_at,
-                    projected.updated_at,
-                    projected.deadline,
-                    payload_json,
-                    job_json
-                ],
-            )?;
-        }
-
-        Ok(())
-    }
-
     fn insert_raw_projected_job_json(
         store: &SqliteJobsStore,
         service: &str,
@@ -3382,117 +3204,6 @@ mod tests {
         assert_eq!(first_id, second_id);
         assert_eq!(first_id.len(), 32);
         assert!(first_id.chars().all(|value| value.is_ascii_hexdigit()));
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn schema_init_upgrades_old_global_id_index_to_unique() {
-        let path = temp_db_path("upgrade-global-id-index");
-        create_old_jobs_projection_schema(
-            &path,
-            &[job(
-                "job-1",
-                "svc",
-                "import",
-                "2026-01-01T00:00:00Z",
-                JobState::Pending,
-            )],
-        )
-        .expect("old schema should be created");
-
-        let store = SqliteJobsStore::open(&path).expect("store should open and upgrade index");
-        let duplicate = job(
-            "job-1",
-            "other-svc",
-            "export",
-            "2026-01-01T00:01:00Z",
-            JobState::Pending,
-        );
-        let error = store
-            .upsert_job(&duplicate)
-            .expect_err("duplicate global job id should be rejected");
-
-        assert!(matches!(error, SqliteJobsStoreError::Sqlite(_)));
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn schema_init_rejects_existing_duplicate_global_ids() {
-        let path = temp_db_path("duplicate-global-ids");
-        create_old_jobs_projection_schema(
-            &path,
-            &[
-                job(
-                    "job-1",
-                    "svc-a",
-                    "import",
-                    "2026-01-01T00:00:00Z",
-                    JobState::Pending,
-                ),
-                job(
-                    "job-1",
-                    "svc-b",
-                    "export",
-                    "2026-01-01T00:01:00Z",
-                    JobState::Pending,
-                ),
-            ],
-        )
-        .expect("old schema with duplicates should be created");
-
-        let error = SqliteJobsStore::open(&path)
-            .expect_err("existing duplicate global ids should prevent opening the projection");
-
-        assert!(matches!(error, SqliteJobsStoreError::Sqlite(_)));
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn schema_init_backfills_timestamp_columns_for_existing_rows() {
-        let path = temp_db_path("backfill-timestamp-columns");
-        let before = job(
-            "before",
-            "svc",
-            "import",
-            "2026-01-01T00:00:29Z",
-            JobState::Pending,
-        );
-        let mut at = job(
-            "at",
-            "svc",
-            "import",
-            "2025-12-31T19:00:30-05:00",
-            JobState::Pending,
-        );
-        at.deadline = Some("2025-12-31T19:01:00-05:00".to_string());
-        create_old_jobs_projection_schema(&path, &[before, at])
-            .expect("old schema should be created");
-
-        let store = SqliteJobsStore::open(&path).expect("store should open and backfill");
-        let page = store
-            .list_jobs(&ListJobsFilter {
-                since: Some(parse_timestamp("2026-01-01T00:00:30.000Z")),
-                ..Default::default()
-            })
-            .expect("list should succeed");
-        let expired = store
-            .scan_expired_jobs("2026-01-01T00:01:00Z")
-            .expect("scan should succeed");
-
-        assert_eq!(
-            page.jobs
-                .iter()
-                .map(|job| job.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["at"]
-        );
-        assert_eq!(
-            expired
-                .iter()
-                .map(|job| job.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["at"]
-        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -3706,7 +3417,7 @@ mod tests {
     }
 
     #[test]
-    fn list_jobs_uses_offset_pagination() {
+    fn list_jobs_uses_mutation_safe_keyset_pagination() {
         let store = SqliteJobsStore::open_in_memory().expect("store should open");
         for projected in [
             job(
@@ -3749,12 +3460,20 @@ mod tests {
             vec!["a", "b"]
         );
         assert_eq!(first.count, 3);
-        assert_eq!(first.offset, 0);
         assert_eq!(first.limit, 2);
-        assert_eq!(first.next_offset, Some(2));
+        assert!(first.next_after.is_some());
+        store
+            .upsert_job(&job(
+                "aa",
+                "svc",
+                "import",
+                "2026-01-03T00:00:00Z",
+                JobState::Pending,
+            ))
+            .expect("concurrent insert should succeed");
         let second = store
             .list_jobs(&ListJobsFilter {
-                offset: first.next_offset,
+                after: first.next_after,
                 limit: 2,
                 ..Default::default()
             })
@@ -3767,10 +3486,67 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["c"]
         );
-        assert_eq!(second.count, 3);
-        assert_eq!(second.offset, 2);
+        assert_eq!(second.count, 4);
         assert_eq!(second.limit, 2);
-        assert_eq!(second.next_offset, None);
+        assert_eq!(second.next_after, None);
+    }
+
+    #[test]
+    fn workbench_keyset_uses_equal_sort_tie_breakers_across_mutation() {
+        let store = SqliteJobsStore::open_in_memory().expect("store should open");
+        for id in ["b", "c", "d"] {
+            store
+                .upsert_job(&job(
+                    id,
+                    "svc",
+                    "type",
+                    "2026-01-01T00:00:00Z",
+                    JobState::Pending,
+                ))
+                .unwrap();
+        }
+        let mut filter = JobsWorkbenchFilter {
+            service: None,
+            job_type: None,
+            states: None,
+            since: None,
+            search: None,
+            queue_key: None,
+            runtime_band: None,
+            trigger: None,
+            sort: JobsWorkbenchSort::default(),
+            group_by: None,
+            after: None,
+            limit: 2,
+        };
+        let first = store.query_jobs(&filter).unwrap();
+        assert_eq!(
+            first
+                .entries
+                .iter()
+                .map(|entry| entry.job.id.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "c"]
+        );
+        store
+            .upsert_job(&job(
+                "a",
+                "svc",
+                "type",
+                "2026-01-01T00:00:00Z",
+                JobState::Pending,
+            ))
+            .unwrap();
+        filter.after = first.next_after;
+        let second = store.query_jobs(&filter).unwrap();
+        assert_eq!(
+            second
+                .entries
+                .iter()
+                .map(|entry| entry.job.id.as_str())
+                .collect::<Vec<_>>(),
+            ["d"]
+        );
     }
 
     #[test]
@@ -3795,7 +3571,7 @@ mod tests {
             .query_jobs(&JobsWorkbenchFilter {
                 search: Some("weird\"".to_string()),
                 sort: JobsWorkbenchSort::default(),
-                offset: 0,
+                after: None,
                 limit: 10,
                 service: None,
                 job_type: None,
@@ -3814,7 +3590,7 @@ mod tests {
             .query_jobs(&JobsWorkbenchFilter {
                 search: Some("\"".to_string()),
                 sort: JobsWorkbenchSort::default(),
-                offset: 0,
+                after: None,
                 limit: 10,
                 service: None,
                 job_type: None,
@@ -3830,7 +3606,7 @@ mod tests {
             store.query_jobs(&JobsWorkbenchFilter {
                 search: Some("x".repeat(MAX_FTS_SEARCH_CHARS + 1)),
                 sort: JobsWorkbenchSort::default(),
-                offset: 0,
+                after: None,
                 limit: 10,
                 service: None,
                 job_type: None,
@@ -3939,7 +3715,7 @@ mod tests {
                 descending: true,
             },
             group_by: Some(JobsWorkbenchGroupBy::State),
-            offset: 0,
+            after: None,
             limit: 10,
             service: None,
             job_type: None,

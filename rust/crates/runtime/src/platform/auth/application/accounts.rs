@@ -376,7 +376,7 @@ mod tests {
             },
         )?;
         let target = FirstAdminAuthorityTarget {
-            participant_id: super::super::builtins::CLI_PARTICIPANT_ID.to_owned(),
+            participant_id: crate::platform::auth::builtins::CLI_PARTICIPANT_ID.to_owned(),
             installed_revision: 1,
         };
 
@@ -864,7 +864,7 @@ where
             .map(|(principal, profile)| UserAccount { principal, profile }))
     }
 
-    /// List user accounts after an exclusive principal-ID cursor.
+    /// List filtered user accounts after an exclusive stable-sort cursor.
     ///
     /// # Errors
     ///
@@ -872,13 +872,15 @@ where
     /// error when the coherent page cannot be read.
     pub(crate) async fn users(
         &self,
-        cursor: Option<&str>,
+        cursor: Option<&(i64, String)>,
+        state: Option<&str>,
+        search: Option<&str>,
         limit: usize,
     ) -> Result<Vec<UserAccount>, AuthorizationStateError> {
         super::validation::validate_account_list(cursor, limit)?;
         Ok(self
             .repository
-            .list_user_accounts(cursor, limit)
+            .list_user_accounts(cursor, state, search, limit)
             .await?
             .into_iter()
             .map(|(principal, profile)| UserAccount { principal, profile })

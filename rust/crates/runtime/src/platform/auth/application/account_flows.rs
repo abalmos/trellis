@@ -217,6 +217,16 @@ where
                     participant_id: requested.participant_id.clone(),
                     installed_revision: requested.installed_revision,
                     grants: requested.grant_set.clone(),
+                    approval_mode: super::super::ApprovalMode::Exact,
+                    approved_capabilities: Vec::new(),
+                    approved_resources: Vec::new(),
+                    delegation_ceiling: super::super::DelegationCeiling {
+                        capabilities: Vec::new(),
+                        exact_restrictions: Some(requested.grant_set.clone()),
+                        platform_privileges: requested.platform_privileges.clone(),
+                    },
+                    approval_decision_digest: input.idempotency.request_digest.clone(),
+                    companion_approved: false,
                     platform_privileges: requested.platform_privileges.clone(),
                     expires_at: input.authority_expires_at,
                     expected_revision: current.as_ref().map_or(0, |binding| binding.revision),
@@ -297,21 +307,36 @@ where
             linked_at: input.completed_at,
             last_seen_at: input.completed_at,
         };
+        let approval_decision_digest = input.idempotency.request_digest.clone();
         let bindings = input
             .bindings
             .into_iter()
-            .map(|requested| GrantBindingReplacement {
-                owner_kind: GrantOwnerKind::User,
-                owner_id: principal_id.clone(),
-                participant_id: requested.participant_id,
-                installed_revision: requested.installed_revision,
-                grants: requested.grant_set,
-                platform_privileges: requested.platform_privileges,
-                expires_at: input.authority_expires_at,
-                expected_revision: 0,
-                expected_current_installed_revision: None,
-                state: GrantBindingState::Active,
-                provenance: None,
+            .map(|requested| {
+                let grants = requested.grant_set;
+                let platform_privileges = requested.platform_privileges;
+                GrantBindingReplacement {
+                    owner_kind: GrantOwnerKind::User,
+                    owner_id: principal_id.clone(),
+                    participant_id: requested.participant_id,
+                    installed_revision: requested.installed_revision,
+                    grants: grants.clone(),
+                    approval_mode: super::super::ApprovalMode::Exact,
+                    approved_capabilities: Vec::new(),
+                    approved_resources: Vec::new(),
+                    delegation_ceiling: super::super::DelegationCeiling {
+                        capabilities: Vec::new(),
+                        exact_restrictions: Some(grants),
+                        platform_privileges: platform_privileges.clone(),
+                    },
+                    approval_decision_digest: approval_decision_digest.clone(),
+                    companion_approved: false,
+                    platform_privileges,
+                    expires_at: input.authority_expires_at,
+                    expected_revision: 0,
+                    expected_current_installed_revision: None,
+                    state: GrantBindingState::Active,
+                    provenance: None,
+                }
             })
             .collect();
         super::validation::validate_new_user_account(
@@ -396,21 +421,36 @@ where
             linked_at: input.completed_at,
             last_seen_at: input.completed_at,
         };
+        let approval_decision_digest = input.idempotency.request_digest.clone();
         let bindings = input
             .bindings
             .into_iter()
-            .map(|requested| GrantBindingReplacement {
-                owner_kind: GrantOwnerKind::User,
-                owner_id: principal_id.clone(),
-                participant_id: requested.participant_id,
-                installed_revision: requested.installed_revision,
-                grants: requested.grant_set,
-                platform_privileges: requested.platform_privileges,
-                expires_at: input.authority_expires_at,
-                expected_revision: 0,
-                expected_current_installed_revision: None,
-                state: GrantBindingState::Active,
-                provenance: None,
+            .map(|requested| {
+                let grants = requested.grant_set;
+                let platform_privileges = requested.platform_privileges;
+                GrantBindingReplacement {
+                    owner_kind: GrantOwnerKind::User,
+                    owner_id: principal_id.clone(),
+                    participant_id: requested.participant_id,
+                    installed_revision: requested.installed_revision,
+                    grants: grants.clone(),
+                    approval_mode: super::super::ApprovalMode::Exact,
+                    approved_capabilities: Vec::new(),
+                    approved_resources: Vec::new(),
+                    delegation_ceiling: super::super::DelegationCeiling {
+                        capabilities: Vec::new(),
+                        exact_restrictions: Some(grants),
+                        platform_privileges: platform_privileges.clone(),
+                    },
+                    approval_decision_digest: approval_decision_digest.clone(),
+                    companion_approved: false,
+                    platform_privileges,
+                    expires_at: input.authority_expires_at,
+                    expected_revision: 0,
+                    expected_current_installed_revision: None,
+                    state: GrantBindingState::Active,
+                    provenance: None,
+                }
             })
             .collect();
         super::validation::validate_new_user_account(&principal, &profile, None, Some(&identity))?;

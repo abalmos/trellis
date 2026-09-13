@@ -49,7 +49,7 @@ const requiredAuthorizationTerms = [
   "logical connection",
   "signed authorization context",
   "resource evidence",
-  "grantset",
+  "grant set",
 ];
 
 Deno.test("authorization docs define the GrantBinding vocabulary", async () => {

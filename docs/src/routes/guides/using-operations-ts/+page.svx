@@ -1,42 +1,21 @@
 # Use operations from TypeScript
 
-Operations model caller-visible asynchronous workflows.
-
-```trellis
-operation "Reports.Generate" {
-  version "v1";
-  input GenerateReportInput;
-  progress GenerateReportUpdate;
-  output GenerateReportOutput;
-  cancellable;
-}
-```
-
-Place this declaration and its models inside the API. The service participant
-implements that API; the caller selects `invoke operation "Reports.Generate"`
-and `observe operation "Reports.Generate"` inside its `use required` block. Run
-`trellis generate` in both projects.
-
-Register a provider before starting the service lifecycle:
-
-```ts
-await service.handleReportsGenerate(async ({ input, op }) => {
-  await op.started().orThrow();
-  const output = await generateReport(input);
-  return await op.complete(output).orThrow();
-});
-```
-
-`generateReport` is your application function, returning `GenerateReportOutput`.
-On the generated client:
+Operations are caller-visible durable workflows. Declare an Operation and its
+top-level input, progress, output, error, update, and signal types in native IDL.
+The caller selects the Operation once; that includes the complete lifecycle and
+declared signals.
 
 ```ts
 const operation = await client.reportsGenerate(input).start().orThrow();
 const terminal = await operation.wait().orThrow();
-if (terminal.state === "completed") console.log(terminal.output);
 ```
 
-Progress is durable low-frequency telemetry. An optional `update` schema carries
-live-only content; it is not replayed and cannot replace authoritative terminal
-output. Cancellation is cooperative and must be declared and selected by the
-caller. Use jobs instead for execution that should remain service-private.
+Acceptance is persisted before the caller receives the reference. Retries with
+the same invocation ID and input return the same operation; changed input
+conflicts. Progress, signals, cancellation, and terminal state are durable. Live
+updates are transient.
+
+Execution is restartable and at least once. A replacement executor resumes from
+persisted state after lease expiry, so application side effects must be
+idempotent. Transfer staging is runtime-managed. An interrupted upload restarts
+from byte zero; committed staged bytes survive executor replacement.

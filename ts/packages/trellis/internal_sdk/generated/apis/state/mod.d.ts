@@ -2,89 +2,61 @@
 import { TrellisError } from "@qlever-llc/trellis/generated";
 import type { SerializableErrorData } from "@qlever-llc/trellis/generated";
 import * as Types0 from "../../types/_internal/p0.js";
-export type AuthErrorData = SerializableErrorData & {
-	readonly type: "trellis.state@v1::AuthError";
-};
-export declare class AuthError extends TrellisError<AuthErrorData> {
-	static readonly type: "trellis.state@v1::AuthError";
-	readonly name: "AuthError";
-	readonly data: AuthErrorData;
-	constructor(data: AuthErrorData);
-	static fromSerializable(data: unknown): AuthError;
-	toSerializable(): AuthErrorData;
+export type ConflictData = SerializableErrorData & {
+	readonly type: "trellis.state@v1::Conflict";
+} & Types0.StateConflict;
+export declare class Conflict extends TrellisError<ConflictData> {
+	static readonly type: "trellis.state@v1::Conflict";
+	static readonly payloadCodec: typeof Types0.StateConflictCodec;
+	readonly name: "Conflict";
+	readonly data: ConflictData;
+	constructor(data: ConflictData);
+	static fromSerializable(data: unknown): Conflict;
+	toSerializable(): ConflictData;
 }
-export type UnexpectedErrorData = SerializableErrorData & {
-	readonly type: "trellis.state@v1::UnexpectedError";
-};
-export declare class UnexpectedError extends TrellisError<UnexpectedErrorData> {
-	static readonly type: "trellis.state@v1::UnexpectedError";
-	readonly name: "UnexpectedError";
-	readonly data: UnexpectedErrorData;
-	constructor(data: UnexpectedErrorData);
-	static fromSerializable(data: unknown): UnexpectedError;
-	toSerializable(): UnexpectedErrorData;
+export type CorruptRepresentationData = SerializableErrorData & {
+	readonly type: "trellis.state@v1::CorruptRepresentation";
+} & Types0.StateRepresentationError;
+export declare class CorruptRepresentation extends TrellisError<CorruptRepresentationData> {
+	static readonly type: "trellis.state@v1::CorruptRepresentation";
+	static readonly payloadCodec: typeof Types0.StateRepresentationErrorCodec;
+	readonly name: "CorruptRepresentation";
+	readonly data: CorruptRepresentationData;
+	constructor(data: CorruptRepresentationData);
+	static fromSerializable(data: unknown): CorruptRepresentation;
+	toSerializable(): CorruptRepresentationData;
 }
-export type ValidationErrorData = SerializableErrorData & {
-	readonly type: "trellis.state@v1::ValidationError";
-};
-export declare class ValidationError extends TrellisError<ValidationErrorData> {
-	static readonly type: "trellis.state@v1::ValidationError";
-	readonly name: "ValidationError";
-	readonly data: ValidationErrorData;
-	constructor(data: ValidationErrorData);
-	static fromSerializable(data: unknown): ValidationError;
-	toSerializable(): ValidationErrorData;
+export type UnsupportedRepresentationData = SerializableErrorData & {
+	readonly type: "trellis.state@v1::UnsupportedRepresentation";
+} & Types0.StateRepresentationError;
+export declare class UnsupportedRepresentation extends TrellisError<UnsupportedRepresentationData> {
+	static readonly type: "trellis.state@v1::UnsupportedRepresentation";
+	static readonly payloadCodec: typeof Types0.StateRepresentationErrorCodec;
+	readonly name: "UnsupportedRepresentation";
+	readonly data: UnsupportedRepresentationData;
+	constructor(data: UnsupportedRepresentationData);
+	static fromSerializable(data: unknown): UnsupportedRepresentation;
+	toSerializable(): UnsupportedRepresentationData;
 }
-export type AdminDeleteInput = Types0.StateAdminDeleteRequest;
-export type AdminDeleteOutput = Types0.StateAdminDeleteResponse;
-export type AdminGetInput = Types0.StateAdminGetRequest;
-export type AdminGetOutput = Types0.StateAdminGetResponse;
-export type AdminListInput = Types0.StateAdminListRequest;
-export type AdminListOutput = Types0.StateAdminListResponse;
 export type DeleteInput = Types0.StateDeleteRequest;
 export type DeleteOutput = Types0.StateDeleteResponse;
 export type GetInput = Types0.StateGetRequest;
 export type GetOutput = Types0.StateGetResponse;
-export type ListInput = Types0.StateListRequest;
-export type ListOutput = Types0.StateListResponse;
 export type PutInput = Types0.StatePutRequest;
 export type PutOutput = Types0.StatePutResponse;
+export type ResourcesInspectInput = Types0.ResourcesInspectRequest;
+export type ResourcesInspectOutput = Types0.ResourcesInspectResponse;
+export type ResourcesQueryInput = Types0.ResourcesQueryRequest;
+export type ResourcesQueryOutput = Types0.ResourcesQueryResponse;
 declare const __api: {
 	readonly identity: "trellis.state@v1";
 	readonly actions: {
-		readonly "rpc:Admin.Delete": {
-			readonly kind: "rpc";
-			readonly descriptorName: "rpc:Admin.Delete";
-			readonly input: typeof Types0.StateAdminDeleteRequestCodec;
-			readonly output: typeof Types0.StateAdminDeleteResponseCodec;
-			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
-			readonly download: false;
-			readonly pagination: undefined;
-		};
-		readonly "rpc:Admin.Get": {
-			readonly kind: "rpc";
-			readonly descriptorName: "rpc:Admin.Get";
-			readonly input: typeof Types0.StateAdminGetRequestCodec;
-			readonly output: typeof Types0.StateAdminGetResponseCodec;
-			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
-			readonly download: false;
-			readonly pagination: undefined;
-		};
-		readonly "rpc:Admin.List": {
-			readonly kind: "rpc";
-			readonly descriptorName: "rpc:Admin.List";
-			readonly input: typeof Types0.StateAdminListRequestCodec;
-			readonly output: typeof Types0.StateAdminListResponseCodec;
-			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
-			readonly download: false;
-			readonly pagination: undefined;
-		};
 		readonly "rpc:Delete": {
 			readonly kind: "rpc";
 			readonly descriptorName: "rpc:Delete";
 			readonly input: typeof Types0.StateDeleteRequestCodec;
 			readonly output: typeof Types0.StateDeleteResponseCodec;
-			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
+			readonly errors: readonly [typeof Conflict];
 			readonly download: false;
 			readonly pagination: undefined;
 		};
@@ -93,16 +65,7 @@ declare const __api: {
 			readonly descriptorName: "rpc:Get";
 			readonly input: typeof Types0.StateGetRequestCodec;
 			readonly output: typeof Types0.StateGetResponseCodec;
-			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
-			readonly download: false;
-			readonly pagination: undefined;
-		};
-		readonly "rpc:List": {
-			readonly kind: "rpc";
-			readonly descriptorName: "rpc:List";
-			readonly input: typeof Types0.StateListRequestCodec;
-			readonly output: typeof Types0.StateListResponseCodec;
-			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
+			readonly errors: readonly [typeof CorruptRepresentation, typeof UnsupportedRepresentation];
 			readonly download: false;
 			readonly pagination: undefined;
 		};
@@ -111,13 +74,31 @@ declare const __api: {
 			readonly descriptorName: "rpc:Put";
 			readonly input: typeof Types0.StatePutRequestCodec;
 			readonly output: typeof Types0.StatePutResponseCodec;
-			readonly errors: readonly [typeof AuthError, typeof UnexpectedError, typeof ValidationError];
+			readonly errors: readonly [typeof Conflict, typeof CorruptRepresentation, typeof UnsupportedRepresentation];
 			readonly download: false;
 			readonly pagination: undefined;
+		};
+		readonly "rpc:Resources.Inspect": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:Resources.Inspect";
+			readonly input: typeof Types0.ResourcesInspectRequestCodec;
+			readonly output: typeof Types0.ResourcesInspectResponseCodec;
+			readonly errors: readonly [typeof CorruptRepresentation, typeof UnsupportedRepresentation];
+			readonly download: false;
+			readonly pagination: undefined;
+		};
+		readonly "rpc:Resources.Query": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:Resources.Query";
+			readonly input: typeof Types0.ResourcesQueryRequestCodec;
+			readonly output: typeof Types0.ResourcesQueryResponseCodec;
+			readonly errors: readonly [typeof CorruptRepresentation, typeof UnsupportedRepresentation];
+			readonly download: false;
+			readonly pagination: "cursor";
 		};
 	};
 	readonly packageEvidence: unknown;
 };
 export declare const API: typeof __api;
-export declare const API_DIGEST: "-uBNjrcPUFVtLKe8dzqBzmnF8jt9xcXjDtUAOhnCCZ0";
+export declare const API_DIGEST: "bqIK645jHWh6xBk0V8kejZI_2AWodtWsDwG0rawTvo8";
 export {};

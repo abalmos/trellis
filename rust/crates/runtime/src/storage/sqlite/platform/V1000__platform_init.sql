@@ -64,9 +64,14 @@ CREATE TABLE auth_installed_participants (
     needs_digest TEXT NOT NULL CHECK (length(needs_digest) = 43),
     package_digest TEXT NOT NULL REFERENCES auth_package_evidence(package_digest),
     participant_path TEXT NOT NULL CHECK (length(participant_path) > 0),
+    companion_participant_id TEXT CHECK (companion_participant_id IS NULL OR length(companion_participant_id) > 0),
+    companion_participant_kind TEXT CHECK (companion_participant_kind IN ('service', 'app', 'device', 'agent')),
+    companion_required INTEGER NOT NULL CHECK (companion_required IN (0, 1)),
     projection_json TEXT NOT NULL CHECK (json_valid(projection_json)),
     installed_at INTEGER NOT NULL CHECK (installed_at BETWEEN 0 AND 9007199254740991),
-    PRIMARY KEY (participant_id, revision)
+    PRIMARY KEY (participant_id, revision),
+    CHECK ((companion_participant_id IS NULL) = (companion_participant_kind IS NULL)),
+    CHECK (companion_required = 0 OR companion_participant_id IS NOT NULL)
 );
 CREATE TRIGGER auth_installed_participant_is_immutable
 BEFORE UPDATE ON auth_installed_participants
@@ -80,12 +85,26 @@ BEGIN
     SELECT RAISE(ABORT, 'installed participant snapshots are retained');
 END;
 
+CREATE TABLE auth_api_bindings (
+    participant_id TEXT NOT NULL CHECK (length(participant_id) > 0),
+    api_id TEXT NOT NULL CHECK (length(api_id) > 0),
+    provider_deployment_id TEXT NOT NULL CHECK (length(provider_deployment_id) > 0),
+    PRIMARY KEY (participant_id, api_id)
+);
+
 CREATE TABLE auth_grant_bindings (
     owner_kind TEXT NOT NULL CHECK (owner_kind IN ('deployment', 'user')),
     owner_id TEXT NOT NULL CHECK (length(owner_id) > 0),
     participant_id TEXT NOT NULL,
     installed_revision INTEGER NOT NULL CHECK (installed_revision BETWEEN 1 AND 9007199254740991),
     grants_json TEXT NOT NULL CHECK (json_valid(grants_json)),
+    approval_mode TEXT NOT NULL CHECK (approval_mode IN ('exact', 'capabilities')),
+    approved_capabilities_json TEXT NOT NULL CHECK (json_valid(approved_capabilities_json)),
+    approved_resources_json TEXT NOT NULL CHECK (json_valid(approved_resources_json)),
+    delegation_ceiling_json TEXT NOT NULL CHECK (json_valid(delegation_ceiling_json)),
+    approval_decision_digest TEXT NOT NULL CHECK (length(approval_decision_digest) = 43),
+    approval_expected_grant_revision INTEGER NOT NULL CHECK (approval_expected_grant_revision BETWEEN 0 AND 9007199254740991),
+    companion_approved INTEGER NOT NULL CHECK (companion_approved IN (0, 1)),
     platform_privileges_json TEXT NOT NULL CHECK (json_valid(platform_privileges_json)),
     revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
     state TEXT NOT NULL CHECK (state IN ('active', 'revoked')),
@@ -98,8 +117,18 @@ CREATE TABLE auth_grant_bindings (
         REFERENCES auth_installed_participants(participant_id, revision),
     CHECK (state != 'revoked' OR (
         json_array_length(grants_json, '$.permissions') = 0
+        AND json_array_length(approved_capabilities_json) = 0
+        AND json_array_length(approved_resources_json) = 0
         AND json_array_length(platform_privileges_json) = 0
     )),
+    CHECK (approval_mode != 'exact'
+        OR json_type(delegation_ceiling_json, '$.exactRestrictions') IS NOT NULL),
+    CHECK (approval_mode != 'exact'
+        OR json_array_length(delegation_ceiling_json, '$.capabilities') = 0),
+    CHECK (approval_mode != 'capabilities'
+        OR json_type(delegation_ceiling_json, '$.exactRestrictions') IS NULL
+        OR json_type(delegation_ceiling_json, '$.exactRestrictions') = 'null'),
+    CHECK (approval_expected_grant_revision + 1 = revision),
     CHECK (provenance_json IS NULL OR owner_kind = 'user'),
     CHECK (updated_at >= created_at)
 );
@@ -172,11 +201,53 @@ CREATE TABLE auth_device_delegations (
     principal_id TEXT NOT NULL,
     deployment_id TEXT NOT NULL,
     required INTEGER NOT NULL CHECK (required IN (0, 1)),
+    companion_participant_id TEXT,
+    user_login_session_id TEXT REFERENCES auth_sessions(session_id),
+    installation_public_key TEXT,
+    device_grant_revision INTEGER CHECK (device_grant_revision BETWEEN 1 AND 9007199254740991),
+    child_grant_revision INTEGER CHECK (child_grant_revision BETWEEN 1 AND 9007199254740991),
     state TEXT NOT NULL CHECK (state IN ('active', 'missing', 'revoked')),
     expires_at INTEGER CHECK (expires_at BETWEEN 0 AND 9007199254740991),
     PRIMARY KEY (principal_id, deployment_id),
     FOREIGN KEY (principal_id, deployment_id)
-        REFERENCES auth_devices(principal_id, deployment_id) ON DELETE CASCADE
+        REFERENCES auth_devices(principal_id, deployment_id) ON DELETE CASCADE,
+    CHECK (companion_participant_id IS NULL OR length(companion_participant_id) > 0),
+    CHECK (installation_public_key IS NULL OR length(installation_public_key) = 43),
+    CHECK ((companion_participant_id IS NULL) = (user_login_session_id IS NULL)),
+    CHECK ((companion_participant_id IS NULL) = (installation_public_key IS NULL)),
+    CHECK ((companion_participant_id IS NULL) = (device_grant_revision IS NULL)),
+    CHECK ((companion_participant_id IS NULL) = (child_grant_revision IS NULL)),
+    CHECK (state != 'active' OR companion_participant_id IS NOT NULL)
+);
+
+CREATE TABLE auth_resources (
+    resource_id TEXT PRIMARY KEY CHECK (length(resource_id) = 43),
+    owner_kind TEXT NOT NULL CHECK (owner_kind IN ('user', 'deployment')),
+    owner_id TEXT NOT NULL CHECK (length(owner_id) > 0),
+    participant_id TEXT NOT NULL CHECK (length(participant_id) > 0),
+    kind TEXT NOT NULL CHECK (kind IN ('consumer', 'job', 'kv', 'state', 'store')),
+    local_name TEXT NOT NULL CHECK (length(local_name) > 0),
+    commitment_json TEXT NOT NULL CHECK (json_valid(commitment_json)),
+    physical_id TEXT CHECK (physical_id IS NULL OR length(physical_id) > 0),
+    actual_json TEXT CHECK (actual_json IS NULL OR json_valid(actual_json)),
+    state TEXT NOT NULL CHECK (state IN ('detached', 'destroying', 'failed', 'pending', 'ready')),
+    readiness_reason TEXT,
+    binding_revision INTEGER NOT NULL CHECK (binding_revision BETWEEN 1 AND 9007199254740991),
+    revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
+    created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991),
+    updated_at INTEGER NOT NULL CHECK (updated_at BETWEEN 0 AND 9007199254740991),
+    UNIQUE (owner_kind, owner_id, participant_id, kind, local_name),
+    CHECK (updated_at >= created_at)
+);
+
+CREATE TABLE auth_resource_history (
+    resource_id TEXT NOT NULL REFERENCES auth_resources(resource_id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
+    commitment_json TEXT NOT NULL CHECK (json_valid(commitment_json)),
+    actual_json TEXT CHECK (actual_json IS NULL OR json_valid(actual_json)),
+    state TEXT NOT NULL CHECK (state IN ('detached', 'destroying', 'failed', 'pending', 'ready')),
+    changed_at INTEGER NOT NULL CHECK (changed_at BETWEEN 0 AND 9007199254740991),
+    PRIMARY KEY (resource_id, revision)
 );
 
 CREATE TABLE auth_resource_binding_evidence (
@@ -188,6 +259,7 @@ CREATE TABLE auth_resource_binding_evidence (
     local_name TEXT NOT NULL CHECK (length(local_name) > 0),
     binding_id TEXT NOT NULL CHECK (length(binding_id) > 0),
     provider_identity TEXT NOT NULL CHECK (length(provider_identity) > 0),
+    actual_json TEXT CHECK (actual_json IS NULL OR json_valid(actual_json)),
     state TEXT NOT NULL CHECK (state IN ('available', 'unavailable', 'stale')),
     materialized_at INTEGER NOT NULL CHECK (materialized_at BETWEEN 0 AND 9007199254740991),
     error TEXT,
@@ -464,12 +536,13 @@ CREATE INDEX auth_authorization_contexts_state_idx
 
 CREATE TABLE auth_post_commit_actions (
     action_id TEXT PRIMARY KEY CHECK (length(action_id) = 43),
-    kind TEXT NOT NULL CHECK (kind IN ('event', 'kick', 'context_publish', 'context_revoke')),
+    kind TEXT NOT NULL CHECK (kind IN ('event', 'kick', 'context_publish', 'context_revoke', 'resource_reconcile')),
     payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
     created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991),
     attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     next_attempt_at INTEGER NOT NULL CHECK (next_attempt_at BETWEEN 0 AND 9007199254740991),
     claimed_until INTEGER CHECK (claimed_until BETWEEN 0 AND 9007199254740991),
+    claim_token TEXT CHECK (claim_token IS NULL OR length(claim_token) = 26),
     last_error TEXT,
     predecessor_action_id TEXT,
     event_delivery_json TEXT CHECK (event_delivery_json IS NULL OR json_valid(event_delivery_json))

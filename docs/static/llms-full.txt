@@ -22,16 +22,20 @@ application from using a separate message system for unrelated work.
 A minimal `trellis.toml` is:
 
 ```toml
-format = 1
+[package]
 name = "orders-trellis"
+version = "1.0.0"
+
+[sources]
+orders = "contract.trellis"
 ```
 
-Author APIs and participants in `contract.trellis` or direct-child
-`contracts/*.trellis`. An API defines models and public RPC, event, feed, and
-operation surfaces. A participant identifies a service, app, agent, or device,
-the API it implements, its selected dependencies, and its runtime resources.
-Participant identity, API identity, API release version, and surface transport
-version are separate concepts.
+Author APIs and participants in the `.trellis` files explicitly listed under
+`[sources]`. An API defines models and public RPC, event, feed, and operation
+surfaces. A participant identifies a service, app, agent, or device, the API it
+implements, its selected dependencies, and its runtime resources. Participant
+identity, API identity, API release version, and surface transport version are
+separate concepts.
 
 Dependency commands:
 
@@ -41,42 +45,53 @@ Dependency commands:
 - `trellis generate` compiles local IDL and generates packages using locally
   available dependencies. Use `--watch` for continuous offline generation.
 
-Dependencies can reference local projects or canonical APIs in OCI registries.
-Remote locks pin release and digests; credentials use the Docker credential
-configuration. Installation validates exact remote APIs in the global
-content-addressed OCI cache, without a project-local installation tree. Direct
-local dependencies contribute only requested APIs compiled from their own IDL,
-without recursively resolving producer participants or manifests. Tooling supplies
-validated API values to the compiler; it does not execute source-language modules.
-Generation is offline; install missing remote dependencies first.
+Dependencies reference local or OCI native source packages. Remote locks pin
+release and digests; credentials use the Docker credential configuration.
+Installation validates exact remote APIs in the global content-addressed OCI
+cache, without a project-local installation tree. Direct local dependencies
+contribute only requested APIs compiled from their own IDL, without recursively
+resolving producer participants or manifests. Tooling supplies validated API
+values to the compiler; it does not execute source-language modules. Generation
+is offline; install missing remote dependencies first.
 
-Root `Cargo.toml` selects Rust. Root `package.json`, `deno.json`, or `deno.jsonc`
-selects TypeScript/JavaScript. One detected language defaults to `trellis/`, with
-optional `[generate].output`. Multiple detected languages require explicit
-`[generate.rust].output` and `[generate.typescript].output`. No separate language
-selection or implicit language directory exists. No supported marker means no
-language output; API-only projects remain valid. `name` is required only for
-language output and does not identify an API, participant, or deployed service.
+Configure `[generate.rust].output` and/or `[generate.typescript].output`.
 
-Each language gets one ordinary package with that name and version `0.0.0`.
-APIs and participants are separate `apis` and `participants` module namespaces,
-not independent packages or flattened root exports. TypeScript output contains
-executable ESM `.js`, `.d.ts`, and `package.json`, with no consumer transpilation
-step. Rust output is an ordinary path-dependency crate. Both declare published
-Trellis runtime dependencies matching the CLI version. Generation never edits the
-consumer's language manifests or chooses runtime paths from repository ancestry.
-Use normal ecosystem overrides if developing against a local runtime.
+Each language gets one ordinary package at the source package version. APIs and
+participants are separate `apis` and `participants` module namespaces, not
+independent packages or flattened root exports. TypeScript output contains
+executable ESM `.js`, `.d.ts`, and `package.json`, with no consumer
+transpilation step. Rust output is an ordinary path-dependency crate. Both
+declare published Trellis runtime dependencies matching the CLI version.
+Generation never edits the consumer's language manifests or chooses runtime
+paths from repository ancestry. Use normal ecosystem overrides if developing
+against a local runtime.
 
-Each package retains tooling JSON under `artifacts/apis` and
-`artifacts/participants`, including referenced APIs. Language code embeds canonical
-evidence; JSON files are not import surfaces. `trellis publish` consumes compiled
-owned API values directly. No persistent generation index is created.
+Each package contains generated APIs, participants, types, codecs, and runtime
+descriptors. Published packages contain native source and frozen resolution
+metadata, not canonical API/participant JSON. Generated descriptors are support
+ABI, not a contract-as-code authoring surface.
+
+Capability approvals are policy decisions; exact signed grants are derived from
+selected actions and current ceilings. Resource commitments approve hard
+semantics, while desired capacities are sizing hints and do not allocate larger
+resources by themselves. Approval views distinguish requested commitments from
+observed provider limits; runtime handles use the observed binding limits.
+Trellis refuses to adopt or destroy a physical resource whose ownership marker
+does not match. Removal detaches access without deleting new-version data;
+compatible approved re-add reattaches the same resource identity.
+
+State is one typed value without a key or TTL. KV is typed history and Store is
+raw bytes. State/KV migration is direct and in-memory, with no write-on-read.
+Operations are durable restartable at-least-once workflows. Consumers have local
+per-process concurrency and Events-owned scoped DLQ/replay. Jobs remain private
+durable queues. Cursor pagination ends only when `nextCursor` is absent and does
+not generally promise a snapshot.
 
 Commit IDL, `trellis.toml`, and `trellis.lock`. Commit generated packages when
-clones should build without the CLI or API cache; regenerate rather than hand-edit.
-Compilation, renderer, and formatter failures preserve the last successful
-generated outputs. Namespace collisions are errors, unrelated user files are
-protected, and publication uses only short-lived staging and backups.
+clones should build without the CLI or source-package cache; regenerate rather
+than hand-edit. Compilation, renderer, and formatter failures preserve the last
+successful generated outputs. Namespace collisions are errors, unrelated user
+files are protected, and publication uses only short-lived staging and backups.
 
 Selections must exactly match a name in the chosen API: `Get` and `Sites.Get`
 are distinct. Invented prefixes are not qualifiers. Unsupported surface members
@@ -95,7 +110,10 @@ Rust participants expose typed methods through generated facades.
 
 Service/device bootstrap sends only provisioned identity and proof inputs.
 Browser bind creates a user-login session and then performs context refresh.
-These are different identity lifecycles, not interchangeable shortcuts.
+These are different identity lifecycles, not interchangeable shortcuts. A device
+companion is created only as part of device activation after its own user
+consent. It receives a separate ordinary App/Agent user session and cannot
+bootstrap independently or borrow the parent device's authority.
 
 An administrator installs immutable participant revisions containing exact API
 artifacts and writes one `GrantBinding` per identity and participant. Deployment
@@ -119,17 +137,17 @@ connection state are updated together.
 
 Requests/events carry context digest, matching redundant `session-key`, and the
 message proof; complete contexts and GrantSets are not message metadata. Proofs
-are verified before application handlers run. Ordinary
-context expiry allows eligible historical events to be verified; explicit
-context revocation invalidates all proofs from that context. Applications do not
-implement their own verifier or inspect Trellis's internal authorization KV
-registry. See the auth design documentation for protocol details.
+are verified before application handlers run. Ordinary context expiry allows
+eligible historical events to be verified; explicit context revocation
+invalidates all proofs from that context. Applications do not implement their
+own verifier or inspect Trellis's internal authorization KV registry. See the
+auth design documentation for protocol details.
 
 ## Choose A Surface
 
 - RPC: a typed request and response, including declared business errors.
-- Event: a published fact. Durable consumption uses participant-declared event
-  consumer groups and can redeliver; handlers need an appropriate duplicate
+- Event: a published fact. Durable consumption uses participant-declared
+  Consumer resources and can redeliver; handlers need an appropriate duplicate
   handling strategy for their side effects.
 - Feed: connection-scoped live data. Closing or aborting the subscription
   cancels provider work; it is not a durable event history.
@@ -137,17 +155,36 @@ registry. See the auth design documentation for protocol details.
   and optional cancellation, updates, or transfer.
 - Job: service-private queued execution with retries and lifecycle state.
 
-Parameterized events derive their concrete subjects from payload pointers;
-listeners match the generated wildcard pattern. In Rust, retain the returned
-listener guard: dropping or aborting it removes that registration without
-stopping the other registrations in its group. Shared pull-loop failures are
-reported by the service lifecycle, and unmatched messages are not acknowledged
-as completed work. Durable names remain Trellis-owned.
+Parameterized events derive their concrete subjects from payload pointers; the
+base subject includes the encoded qualified API identity, and listeners match
+the generated wildcard pattern. Parameter values use unpadded base64url, and the
+message proof binds the exact API, dotted event name, and parameter count. In
+Rust, retain the returned listener guard:
+dropping or aborting it removes that registration without stopping the other
+registrations in its group. Shared pull-loop failures are reported by the
+service lifecycle, and unmatched messages are not acknowledged as completed
+work. Durable names remain Trellis-owned.
+
+Durable event success is acknowledged only after the handler succeeds. Retryable
+failure uses the declared backoff; final exhaustion is confirmed in that
+Consumer's Events DLQ before the source delivery is acknowledged. Manual replay
+uses the same handler with a fresh delivery budget, does not rewind the original
+Consumer, and confirms `resolved` before acknowledging success. Delivery and
+application side effects remain at least once.
 
 Operations and jobs may expose typed live updates. Updates are at-most-once, not
 persisted or replayed, and late subscribers may miss them. Durable progress and
 terminal output are separate from updates. Cancel subscriptions when no longer
-needed; cancellation of underlying work is cooperative.
+needed; cancellation of underlying work is cooperative. Operation get, watch,
+signal, and cancel remain authorized to the creator principal plus participant,
+not a particular session or connection, so reconnect can resume control.
+Completed, failed, and cancelled records are immutable.
+
+Keyed Jobs waiting for an active capacity slot maintain the current delivery and
+do not consume a retry attempt before handler entry. `Jobs.Summary` computes all
+matching totals, groups, and statistics independently of any `Jobs.Query` page.
+Feed cancellation targets the runtime-issued `feedId` and is accepted only from
+the original caller identity; another feed or principal cannot cancel it.
 
 Declare expected RPC/operation errors in IDL to obtain typed generated error
 handling. Runtime validation and transport failures remain distinct from those
@@ -155,10 +192,11 @@ business errors. Application-local error handling is an application decision.
 
 ## Resources And Application Data
 
-Connected services expose declared KV, blob stores, and jobs through resolved
-handles. Apps and devices can declare value/map State stores with schemas,
-revision checks, TTL, and migration versions. State follows principal and
-participant lineage across reconnects, rather than belonging to a socket.
+Connected services expose declared KV, Store, Consumer, and Job handles. Apps,
+agents, and devices can declare State as one typed value without a key or TTL.
+State/KV representation migrations run directly from accepted historical bytes
+to current values in SDK memory and never write on read. State follows principal
+and qualified participant identity across reconnects.
 
 Bindings are runtime internals. Use generated resource handles instead of
 constructing Trellis storage subjects or opening internal buckets. This does not
@@ -168,6 +206,12 @@ Store and transfer APIs support streaming. Whole-buffer helpers collect the
 entire value in memory. Transfers authenticate cancellation and completion;
 successful completion verifies size and SHA-256. Frame sizes are bounded by the
 grant, up to 1 MiB.
+
+Store and file metadata listing is key-sorted keyset pagination. The limit
+defaults to 100 and must be at most 500. Cursors are opaque and bound to the
+query, including its prefix; changing the query invalidates the cursor. Only
+absent `nextCursor` means completion, and concurrent mutation means the pages
+are not a snapshot.
 
 Direct event publication does not atomically commit an application database
 transaction. When that atomicity is needed, the SQL outbox integration can write
@@ -190,9 +234,10 @@ Declare these dependencies only when the application uses them:
   IDs. It is not a general user directory or a restriction on application
   profiles.
 - Jobs administration uses `Jobs.Query`, `Jobs.Metrics`, `Jobs.Inspect`, and
-  `Jobs.Watch`. Watch is an invalidation feed: reread the affected query.
-- Event Log offers read-only event history and consumer observability through
-  its Query, Inspect, Metrics, Consumers, and Watch surfaces.
+  `Jobs.Summary`, and `Jobs.Watch`. Summary is page-independent; Watch is an
+  invalidation feed, so reread the affected query and summary.
+- Events offers event history, Consumer observability, and per-Consumer DLQ
+  through its Query, Inspect, Metrics, Consumers, and Watch surfaces.
 
 ## Test And Troubleshoot
 

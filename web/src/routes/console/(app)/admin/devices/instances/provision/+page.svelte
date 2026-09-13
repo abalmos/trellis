@@ -12,7 +12,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Deployment = apis.auth.AuthDeploymentsListOutput["entries"][number];
+  type Deployment = apis.auth.DeploymentsListOutput["items"][number];
   const trellis = getTrellis();
   const notifications = getNotifications();
 
@@ -31,9 +31,9 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authDeploymentsList({ kind: "device", limit: 100 }).take();
+      const response = await trellis.deploymentsList({ kind: "device", limit: 100 }).take();
       if (isErr(response)) { error = errorMessage(response); return; }
-      const loadedDeployments = (response.entries ?? []).filter((deployment): deployment is Deployment => deployment.kind === "device");
+      const loadedDeployments = (response.items ?? []).filter((deployment): deployment is Deployment => deployment.kind === "device");
       const loadedActiveDeployments = loadedDeployments.filter((deployment) => deployment.state === "active");
       deployments = loadedDeployments;
       if (!provisionDeploymentId && loadedActiveDeployments.length) {
@@ -50,13 +50,13 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authDevicesProvision({
+      const response = await trellis.devicesProvision({
         deploymentId: provisionDeploymentId,
         idempotencyKey: ulid(),
         instanceId: instanceId.trim() || null,
         identityPublicKey: identityPublicKey.trim() || null,
         participantId: null,
-      } satisfies apis.auth.AuthDevicesProvisionInput,
+      } satisfies apis.auth.DevicesProvisionInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success("Device instance provisioned.", "Provisioned");

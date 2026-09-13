@@ -13,7 +13,10 @@ import {
   type AuthorizationContextBundle,
 } from "../../auth/authorization_context.ts";
 import { AuthorizationContextRefreshResponseSchema } from "../../auth/authorization/types.ts";
-import { decodeTrellisHttpError } from "../../auth/http_error.ts";
+import {
+  decodeTrellisHttpError,
+  TrellisHttpError,
+} from "../../auth/http_error.ts";
 import { ContractResourceBindingsSchema } from "../../participant.ts";
 import type { RuntimeApi } from "../../participant_runtime/api.ts";
 import { participantEvidence } from "../../participant_runtime/participant.ts";
@@ -212,6 +215,13 @@ export async function fetchServiceBootstrapInfo(args: {
       });
       unavailableAttempt = 0;
     } catch (cause) {
+      if (
+        cause instanceof TrellisHttpError && cause.code === "resource_pending"
+      ) {
+        await delay(bootstrapUnavailableRetryDelayMs(unavailableAttempt));
+        unavailableAttempt += 1;
+        continue;
+      }
       if (!(cause instanceof ServiceBootstrapEndpointUnavailableError)) {
         throw cause;
       }
@@ -305,17 +315,20 @@ export async function fetchServiceBootstrapInfo(args: {
   }
 }
 
-/** Drains a NATS connection created by an unsuccessful bootstrap attempt. */
+/** Closes a NATS connection created by an unsuccessful bootstrap attempt. */
 export async function closeFailedServiceBootstrapConnection(
   nc: NatsConnection,
 ): Promise<void> {
+  const closed = nc.closed().catch(() => undefined);
   if (nc.isClosed()) {
+    await closed;
     return;
   }
 
   try {
-    await nc.drain();
+    await nc.close();
   } catch {
-    await nc.closed().catch(() => undefined);
+    // The connection closure is the lifecycle result, including auth revocation.
   }
+  await closed;
 }

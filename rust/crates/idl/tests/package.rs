@@ -38,6 +38,24 @@ fn source(alias: &str, path: &str, source: &str) -> SourceUnit {
     }
 }
 
+#[test]
+fn rejects_api_names_that_produce_invalid_api_ids() {
+    let error = compile_project(
+        &manifest(&[("api", "api.trellis")]),
+        vec![source(
+            "api",
+            "api.trellis",
+            r#"api Orders@v1 { title "Orders"; description "Orders."; capabilities { public {} } }"#,
+        )],
+        BTreeMap::new(),
+    )
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("invalid api id: must use lowercase alphanumeric lineage tokens"));
+}
+
 const TYPES: &str = r#"
 model OrderId { value: ulid; }
 model Empty {}
@@ -52,7 +70,7 @@ type PagedOrders = CursorPage<Order>;
 
 const API: &str = r#"
 import { OrderId, Empty, EventEnvelope, GetInput, PagedOrders } from types;
-api Orders@v1 {
+api orders@v1 {
   title "Orders";
   description "Order access.";
   version "1.2.3";
@@ -80,27 +98,25 @@ api Orders@v1 {
   }
 }
 service backend {
-  implements Orders;
+  implements orders;
 }
 "#;
 
 const RESOURCES: &str = r#"
 import { OrderId, Empty } from types;
-import { Orders } from api;
+import { orders } from api;
 service Worker {
-  implements Orders;
+  implements orders;
   job reconcile {
     title "Reconcile";
     description "Reconciles one order.";
     payload OrderId;
     result Empty;
-    retry { attempts 2; backoff [5s]; }
-    key_concurrency { path value; policy queue; }
   }
   consumer changes {
     title "Changes";
     description "Processes order changes.";
-    events [Orders.Changed];
+    events [orders.Changed];
     concurrency 2;
     replay all;
   }
@@ -140,7 +156,7 @@ fn resolves_explicit_imports_into_typed_package_graph() {
     assert_eq!(package.apis().len(), 1);
     assert_eq!(package.participants().len(), 1);
     let api = package.apis().values().next().unwrap();
-    assert_eq!(api.identity().as_str(), "orders.Orders@v1");
+    assert_eq!(api.identity().as_str(), "orders.orders@v1");
     let action = api.actions().values().next().unwrap();
     let trellis_idl::ActionDefinition::Rpc { input, .. } = action else {
         panic!("expected RPC")
@@ -241,8 +257,8 @@ fn participant_digest_ignores_unrelated_package_declarations() {
         .find(|id| id.as_str() == "orders.Caller")
         .unwrap();
     assert_eq!(
-        trellis_idl::participant_digest(&original, &participant).unwrap(),
-        trellis_idl::participant_digest(&changed, &participant).unwrap()
+        trellis_idl::participant_digest(&original, participant).unwrap(),
+        trellis_idl::participant_digest(&changed, participant).unwrap()
     );
     let participant_changed = compile_project(
         &manifest(&[("participants", "participants.trellis")]),
@@ -255,8 +271,8 @@ fn participant_digest_ignores_unrelated_package_declarations() {
     )
     .unwrap();
     assert_ne!(
-        trellis_idl::participant_digest(&original, &participant).unwrap(),
-        trellis_idl::participant_digest(&participant_changed, &participant).unwrap()
+        trellis_idl::participant_digest(&original, participant).unwrap(),
+        trellis_idl::participant_digest(&participant_changed, participant).unwrap()
     );
 }
 
@@ -353,7 +369,7 @@ fn semantic_digest_excludes_titles_but_includes_capability_consent_text() {
         .unwrap();
     assert_eq!(
         capability_consent_digest(&original, capability).unwrap(),
-        "iIJxsRyHlywWDhP-b_iLwZwAy6G3dfYdxS8soQFAYDs"
+        "adsGOHODaJ1bmUP2IjYY7g4d1MeSU9cFnpc-riY09Dc"
     );
 }
 
@@ -522,17 +538,17 @@ fn format_two_lock_rejects_cycles_and_inexact_edges() {
 #[test]
 fn selected_compatibility_is_directional_and_recursive() {
     const APP: &str = r#"
-import { Orders } from api;
-app Shopper { use Orders { rpc Get; } }
+    import { orders } from api;
+    app Shopper { use orders { rpc Get; } }
 "#;
-    let manifest = manifest(&[
+    let package_manifest = manifest(&[
         ("types", "types.trellis"),
         ("api", "api.trellis"),
         ("app", "app.trellis"),
     ]);
     let compile = |types: &str| {
         compile_project(
-            &manifest,
+            &package_manifest,
             vec![
                 source("types", "types.trellis", types),
                 source("api", "api.trellis", API),
@@ -564,6 +580,21 @@ app Shopper { use Orders { rpc Get; } }
         .issues
         .iter()
         .any(|issue| issue.path.contains(".input.field.tenant")));
+    let missing_action_provider = compile_project(
+        &manifest(&[("types", "types.trellis"), ("api", "api.trellis")]),
+        vec![
+            source("types", "types.trellis", TYPES),
+            source("api", "api.trellis", &API.replace("rpc Get", "rpc Other")),
+        ],
+        BTreeMap::new(),
+    )
+    .unwrap();
+    let report = compare_selected(&consumer, selection, &missing_action_provider);
+    assert!(!report.compatible);
+    assert!(report
+        .issues
+        .iter()
+        .any(|issue| issue.message == "selected provider action is unavailable"));
     let mut cache = SelectedCompatibilityCache::default();
     assert!(
         !cache
@@ -644,22 +675,22 @@ fn rejects_invalid_capability_participant_and_pagination_placement() {
         )
     };
     assert!(compile(
-        r#"model Empty {} api Hidden@v1 { title "Hidden"; description "Hidden."; capabilities {} }"#
+        r#"model Empty {} api hidden@v1 { title "Hidden"; description "Hidden."; capabilities {} }"#
     )
     .is_err());
     assert!(compile(
         r#"
 model Empty {}
-api Public@v1 { title "Public"; description "Public."; capabilities { public {} } }
-app Invalid { implements Public; }
+api public@v1 { title "Public"; description "Public."; capabilities { public {} } }
+app Invalid { implements public; }
 "#
     )
     .is_err());
     assert!(compile(
         r#"
 model Empty {}
-api Public@v1 { title "Public"; description "Public."; capabilities { public {} } }
-service Valid { use Public; }
+api public@v1 { title "Public"; description "Public."; capabilities { public {} } }
+service Valid { use public; }
 "#
     )
     .is_ok());
@@ -689,7 +720,7 @@ fn dependency_and_source_aliases_do_not_affect_digest() {
 model Empty {}
 model Shared { value: string; }
 model Hidden { value: string; }
-api Common@v1 {
+api common@v1 {
   title "Common";
   description "Common values.";
   rpc Get { input Empty; output Shared; }
@@ -864,7 +895,7 @@ fn derives_subjects_codecs_and_exact_operation_needs() {
             "source.trellis",
             r#"
 model Empty {}
-api Work@v2 {
+api work@v2 {
   title "Work";
   description "Work API.";
   operation Run { input Empty; output Empty; signals { stop Empty; } }
@@ -878,21 +909,27 @@ api Work@v2 {
     }
   }
 }
-service Client { use Work { operation Run; } }
+service Client { use work { operation Run; } }
+service Worker { implements work; }
 "#,
         )],
         BTreeMap::new(),
     )
     .unwrap();
     let api = graph.root_package().apis().values().next().unwrap();
-    assert_eq!(api.subjects().operations["Run"], "operations.v2.Work.Run");
+    assert_eq!(api.subjects().operations["Run"], "operations.v2.work.Run");
     let action = api.actions().keys().next().unwrap();
     let codecs = graph.action_codecs(api.identity(), action).unwrap();
     assert!(codecs.input.is_some());
     assert!(codecs.output.is_some());
     assert!(codecs.signals.contains_key("stop"));
 
-    let participant = graph.root_package().participants().keys().next().unwrap();
+    let participant = graph
+        .root_package()
+        .participants()
+        .keys()
+        .find(|participant| participant.as_str().ends_with(".Client"))
+        .unwrap();
     let needs = graph.participant_needs(participant).unwrap();
     let actions = needs
         .required_grants()
@@ -925,6 +962,18 @@ service Client { use Work { operation Run; } }
         .iter()
         .any(|capability| capability.as_str().ends_with("::execute")));
     assert!(!needs.digest().is_empty());
+    let provider = graph
+        .root_package()
+        .participants()
+        .keys()
+        .find(|participant| participant.as_str().ends_with(".Worker"))
+        .unwrap();
+    assert!(graph
+        .participant_needs(provider)
+        .unwrap()
+        .required_grants()
+        .permissions()
+        .is_empty());
 }
 
 #[test]
@@ -946,6 +995,7 @@ device Sensor {
     desired_max_value 1MiB;
   }
 }
+
 "#,
         )],
         BTreeMap::new(),
@@ -990,4 +1040,93 @@ device Sensor {
         )
         .compatible
     );
+}
+
+#[test]
+fn state_declaration_adds_implicit_state_rpc_uses_and_grants() {
+    let state_manifest = PackageManifest {
+        package: PackageMetadata {
+            name: "trellis".into(),
+            version: Version::new(1, 0, 0),
+        },
+        sources: BTreeMap::from([("state".into(), "state.trellis".into())]),
+        dependencies: BTreeMap::new(),
+        generate: GenerateConfig::default(),
+        default_registry: None,
+        registries: BTreeMap::new(),
+    };
+    let state_graph = compile_project(
+        &state_manifest,
+        vec![source("state", "state.trellis", "model Empty {}\napi state@v1 { title \"State\"; description \"State runtime.\"; rpc Get { input Empty; output Empty; } rpc Put { input Empty; output Empty; } rpc Delete { input Empty; output Empty; } capabilities { public { allows { rpc Get; rpc Put; rpc Delete; } } } }")],
+        BTreeMap::new(),
+    )
+    .unwrap();
+    let mut app_manifest = manifest(&[("source", "source.trellis")]);
+    app_manifest.dependencies.insert(
+        "trellis".into(),
+        Dependency {
+            package: "trellis".into(),
+            version: None,
+            path: Some("../trellis".into()),
+            registry: None,
+        },
+    );
+    let graph = compile_project(
+        &app_manifest,
+        vec![source("source", "source.trellis", "model Saved { value: string; }\napp Client { state saved { title \"Saved\"; description \"Saved value.\"; schema Saved; } }\napp Denied {}")],
+        BTreeMap::from([("trellis".into(), state_graph)]),
+    )
+    .unwrap();
+
+    let client = graph
+        .root_package()
+        .participants()
+        .keys()
+        .find(|id| id.as_str().ends_with(".Client"))
+        .unwrap();
+    let participant = &graph.root_package().participants()[client];
+    let state_use = participant
+        .uses()
+        .values()
+        .find(|selection| selection.api.as_str() == "trellis.state@v1")
+        .unwrap();
+    assert_eq!(
+        state_use
+            .actions
+            .iter()
+            .map(|selection| selection.action.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Delete", "Get", "Put"]
+    );
+    let needs = graph.participant_needs(client).unwrap();
+    let permissions = needs.required_grants().permissions();
+    assert_eq!(permissions.len(), 6);
+    assert_eq!(
+        permissions
+            .iter()
+            .filter_map(|permission| permission.target().as_api_surface())
+            .map(|(_, _, name)| name)
+            .collect::<Vec<_>>(),
+        ["Delete", "Get", "Put"]
+    );
+    assert_eq!(
+        permissions
+            .iter()
+            .filter_map(|permission| permission.target().as_participant_resource())
+            .map(|(_, _, name)| name)
+            .collect::<Vec<_>>(),
+        ["saved", "saved", "saved"]
+    );
+    let denied = graph
+        .root_package()
+        .participants()
+        .keys()
+        .find(|id| id.as_str().ends_with(".Denied"))
+        .unwrap();
+    assert!(graph
+        .participant_needs(denied)
+        .unwrap()
+        .required_grants()
+        .permissions()
+        .is_empty());
 }

@@ -97,9 +97,9 @@ mod sqlite_migrations {
         use refinery::embed_migrations;
         embed_migrations!("src/storage/sqlite/health");
     }
-    pub mod eventlog {
+    pub mod events {
         use refinery::embed_migrations;
-        embed_migrations!("src/storage/sqlite/eventlog");
+        embed_migrations!("src/storage/sqlite/events");
     }
 }
 
@@ -136,7 +136,7 @@ impl SqliteStore {
             SubsystemName::Platform => sqlite_migrations::platform::migrations::runner(),
             SubsystemName::Jobs => sqlite_migrations::jobs::migrations::runner(),
             SubsystemName::Health => sqlite_migrations::health::migrations::runner(),
-            SubsystemName::Eventlog => sqlite_migrations::eventlog::migrations::runner(),
+            SubsystemName::Events => sqlite_migrations::events::migrations::runner(),
         };
         let temporary_directory = std::env::temp_dir().join(format!(
             "trellis-migration-check-{}-{}",
@@ -255,7 +255,7 @@ pub(crate) struct RuntimeStores {
     platform: Option<SqliteStore>,
     jobs: Option<SqliteStore>,
     health: Option<SqliteStore>,
-    eventlog: Option<SqliteStore>,
+    events: Option<SqliteStore>,
 }
 
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
@@ -268,7 +268,7 @@ impl RuntimeStores {
             platform: None,
             jobs: None,
             health: None,
-            eventlog: None,
+            events: None,
         };
 
         for subsystem in mode.subsystems() {
@@ -285,9 +285,9 @@ impl RuntimeStores {
                     let StorageBackend::Sqlite(config) = config.health_storage_backend()?;
                     stores.health = Some(SqliteStore::new(SubsystemName::Health, config));
                 }
-                SubsystemName::Eventlog => {
-                    let StorageBackend::Sqlite(config) = config.eventlog_storage_backend()?;
-                    stores.eventlog = Some(SqliteStore::new(SubsystemName::Eventlog, config));
+                SubsystemName::Events => {
+                    let StorageBackend::Sqlite(config) = config.events_storage_backend()?;
+                    stores.events = Some(SqliteStore::new(SubsystemName::Events, config));
                 }
             }
         }
@@ -306,14 +306,14 @@ impl RuntimeStores {
         if let Some(store) = &self.health {
             store.migrate()?;
         }
-        if let Some(store) = &self.eventlog {
+        if let Some(store) = &self.events {
             store.migrate()?;
         }
         Ok(())
     }
 
     pub(crate) fn check_all(&self) -> Result<(), StoreError> {
-        for store in [&self.platform, &self.jobs, &self.health, &self.eventlog]
+        for store in [&self.platform, &self.jobs, &self.health, &self.events]
             .into_iter()
             .flatten()
         {
@@ -343,7 +343,7 @@ fn migrate_sqlite(
         SubsystemName::Platform => sqlite_migrations::platform::migrations::runner(),
         SubsystemName::Jobs => sqlite_migrations::jobs::migrations::runner(),
         SubsystemName::Health => sqlite_migrations::health::migrations::runner(),
-        SubsystemName::Eventlog => sqlite_migrations::eventlog::migrations::runner(),
+        SubsystemName::Events => sqlite_migrations::events::migrations::runner(),
     };
     let mut connection = open_sqlite(config)?;
     // Subsystem runners intentionally see only their own migration directory.

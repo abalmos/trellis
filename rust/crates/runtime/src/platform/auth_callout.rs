@@ -17,11 +17,12 @@ use nats_jwt_rs::Claims;
 use nkeys::{KeyPair, KeyPairType, XKey};
 use serde::Deserialize;
 use subtle::ConstantTimeEq;
-use trellis_protocol::{AuthorizationPrincipalKind, VerifiedAuthorizationContext};
+use trellis_protocol::{AuthorizationPrincipalKind, ParticipantKind, VerifiedAuthorizationContext};
 
+use super::auth::context::AuthorizationContextRepository;
 use super::auth::{
     AuthConnectionPresence, AuthEphemeralRepository, AuthorizationContextService,
-    AuthorizationStateError, NatsAuthEphemeralRepository,
+    AuthorizationStateError, NatsAuthEphemeralRepository, ParticipantBindingState,
 };
 use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
@@ -133,10 +134,12 @@ impl CalloutKeys {
         &self,
         user_nkey: &str,
         principal_kind: AuthorizationPrincipalKind,
+        device_implements_apis: bool,
         permissions: super::auth::TransportPermissions,
         expires_at_seconds: i64,
     ) -> Result<String, AuthorizationStateError> {
         let mut claims = User::new_claims(user_nkey.to_owned(), user_nkey.to_owned());
+        claims.aud = Some(self.target_account.clone());
         claims.exp = Some(expires_at_seconds);
         let payload = claims.payload_mut();
         payload.issuer_account = Some(self.target_account.clone());
@@ -149,12 +152,13 @@ impl CalloutKeys {
                 allow: permissions.subscribe,
                 deny: Vec::new(),
             },
-            resp: (principal_kind == AuthorizationPrincipalKind::Service).then_some(
-                ResponsePermission {
+            resp: (principal_kind == AuthorizationPrincipalKind::Service
+                || (principal_kind == AuthorizationPrincipalKind::Device
+                    && device_implements_apis))
+                .then_some(ResponsePermission {
                     max_messages: 65_535,
                     ttl: Duration::ZERO,
-                },
-            ),
+                }),
         };
         claims.encode(&self.target_signing_key).map_err(|error| {
             AuthorizationStateError::Storage(format!("failed to sign NATS user JWT: {error}"))
@@ -170,7 +174,7 @@ impl CalloutKeys {
         let mut claims = AuthResponse::generic_claim(request.user_nkey.clone());
         claims.aud = Some(request.server.id.clone());
         let response = claims.payload_mut();
-        response.issuer_account = Some(self.target_account.clone());
+        response.issuer_account = Some(self.auth_account.clone());
         match user_jwt {
             Some(jwt) => response.jwt = jwt,
             None => response.error = denial_code.unwrap_or("internal_error").to_owned(),
@@ -196,6 +200,7 @@ struct CalloutProcessor {
     client: async_nats::Client,
     contexts: AuthorizationContextService,
     ephemeral: NatsAuthEphemeralRepository,
+    repository: super::auth::SqliteAuthorizationStore,
     keys: CalloutKeys,
     user_jwt_ttl_ms: i64,
     limiter: Arc<CalloutLimiter>,
@@ -238,6 +243,7 @@ impl AuthCallout {
         client: async_nats::Client,
         system_client: async_nats::Client,
         ephemeral: NatsAuthEphemeralRepository,
+        repository: super::auth::SqliteAuthorizationStore,
         contexts: super::auth::AuthorizationContextService,
         keys: CalloutKeys,
         user_jwt_ttl_ms: i64,
@@ -266,6 +272,7 @@ impl AuthCallout {
                 client,
                 contexts,
                 ephemeral,
+                repository,
                 keys,
                 user_jwt_ttl_ms,
                 limiter: Arc::new(CalloutLimiter::default()),
@@ -369,12 +376,30 @@ impl CalloutProcessor {
         if server_id.is_empty() || user_nkey.is_empty() {
             return Ok(());
         }
+        let connection_id = connection_id(&server_id, &client_id.to_string(), &user_nkey)?;
+        let Some(connection) = self
+            .ephemeral
+            .list_connection_presence(None)
+            .await?
+            .into_iter()
+            .find(|connection| connection.connection_id == connection_id)
+        else {
+            return Ok(());
+        };
         self.ephemeral
-            .delete_connection_presence(&connection_id(
-                &server_id,
-                &client_id.to_string(),
-                &user_nkey,
-            )?)
+            .delete_connection_presence(&connection_id)
+            .await?;
+        let now = now_millis()?;
+        self.repository
+            .enqueue_post_commit_actions(vec![super::auth::connection_event_action::<
+                trellis_runtime_apis::apis::trellis_auth_v1::events::ConnectionsClosed,
+            >(
+                &connection,
+                "Auth.Connections.Closed",
+                "closed",
+                Some("disconnected"),
+                now,
+            )?])
             .await
     }
 
@@ -494,6 +519,27 @@ impl CalloutProcessor {
             .transport_permissions(&verified_context, now_seconds)
             .await
             .map_err(|error| denied(error.to_string()))?;
+        let device_implements_apis =
+            if verified_context.principal_kind() == AuthorizationPrincipalKind::Device {
+                let retained = self
+                    .repository
+                    .get_context_by_digest(verified_context.context_digest())
+                    .await?
+                    .ok_or_else(|| denied("authorization context is missing from durable state"))?;
+                self.repository
+                    .get_installed_participant_record(
+                        verified_context.participant_id().to_owned(),
+                        Some(retained.installed_revision),
+                    )
+                    .await?
+                    .is_some_and(|(_, participant)| {
+                        participant.participant_kind == ParticipantKind::Device
+                            && participant.state == ParticipantBindingState::Resolved
+                            && !participant.projection.implemented_apis.is_empty()
+                    })
+            } else {
+                false
+            };
         tracing::debug!(
             publish_count = permissions.publish.len(),
             subscribe_count = permissions.subscribe.len(),
@@ -505,10 +551,10 @@ impl CalloutProcessor {
                 .publish
                 .iter()
                 .any(|subject| subject == "rpc.v1.Jobs.Metrics"),
-            event_log_query = permissions
+            events_query = permissions
                 .publish
                 .iter()
-                .any(|subject| subject == "rpc.v1.EventLog.Query"),
+                .any(|subject| subject == "rpc.v1.events.Query"),
             health_watch = permissions
                 .publish
                 .iter()
@@ -541,39 +587,41 @@ impl CalloutProcessor {
         let jwt = self.keys.authorized_user_jwt(
             &request.user_nkey,
             verified_context.principal_kind(),
+            device_implements_apis,
             permissions,
             expires_at_seconds,
         )?;
         let client_id = request.client_info.id.to_string();
         let connection_id = connection_id(&request.server.id, &client_id, &request.user_nkey)?;
+        let presence = AuthConnectionPresence {
+            format: "trellis.auth-connection-presence.v1".to_owned(),
+            connection_id: connection_id.clone(),
+            runtime_connection_id: verified_context.connection_id().to_owned(),
+            login_session_id: verified_context.login_session_id().map(str::to_owned),
+            principal_id: verified_context.principal_id().to_owned(),
+            principal_kind: verified_context.principal_kind(),
+            participant_id: verified_context.participant_id().to_owned(),
+            deployment_id: verified_context
+                .signed_context()
+                .unsigned
+                .deployment_id
+                .clone(),
+            instance_id: verified_context
+                .signed_context()
+                .unsigned
+                .instance_id
+                .clone(),
+            context_digest: verified_context.context_digest().to_owned(),
+            server_id: request.server.id.clone(),
+            client_id,
+            user_nkey: request.user_nkey.clone(),
+            remote_address: Some(request.client_info.host.clone()),
+            connected_at: now,
+            last_seen_at: now,
+            version: 1,
+        };
         self.ephemeral
-            .put_connection_presence(AuthConnectionPresence {
-                format: "trellis.auth-connection-presence.v1".to_owned(),
-                connection_id: connection_id.clone(),
-                runtime_connection_id: verified_context.connection_id().to_owned(),
-                login_session_id: verified_context.login_session_id().map(str::to_owned),
-                principal_id: verified_context.principal_id().to_owned(),
-                principal_kind: verified_context.principal_kind(),
-                participant_id: verified_context.participant_id().to_owned(),
-                deployment_id: verified_context
-                    .signed_context()
-                    .unsigned
-                    .deployment_id
-                    .clone(),
-                instance_id: verified_context
-                    .signed_context()
-                    .unsigned
-                    .instance_id
-                    .clone(),
-                context_digest: verified_context.context_digest().to_owned(),
-                server_id: request.server.id.clone(),
-                client_id,
-                user_nkey: request.user_nkey.clone(),
-                remote_address: Some(request.client_info.host.clone()),
-                connected_at: now,
-                last_seen_at: now,
-                version: 1,
-            })
+            .put_connection_presence(presence.clone())
             .await?;
         if self
             .contexts
@@ -587,6 +635,17 @@ impl CalloutProcessor {
                 .await?;
             return Err(denied("authorization context is not admissible"));
         }
+        self.repository
+            .enqueue_post_commit_actions(vec![super::auth::connection_event_action::<
+                trellis_runtime_apis::apis::trellis_auth_v1::events::ConnectionsOpened,
+            >(
+                &presence,
+                "Auth.Connections.Opened",
+                "opened",
+                None,
+                now,
+            )?])
+            .await?;
         tracing::debug!(
             connection_id = %verified_context.connection_id(),
             login_session_id = ?verified_context.login_session_id(),
@@ -630,6 +689,7 @@ fn handle_request_completion(
 
 fn callout_denial_code(error: &AuthorizationStateError) -> &'static str {
     match error {
+        AuthorizationStateError::ApprovalRequired { .. } => "authority_pending",
         AuthorizationStateError::NotAuthorized => "not_authorized",
         AuthorizationStateError::WrongPrincipalKind => "wrong_principal_kind",
         AuthorizationStateError::SessionMissing => "session_not_found",
@@ -857,7 +917,7 @@ mod tests {
             deny: vec![">".to_owned()],
         };
         let mut bootstrap = User::new_claims("session".to_owned(), session_nkey.clone());
-        bootstrap.payload_mut().issuer_account = Some(auth_account);
+        bootstrap.payload_mut().issuer_account = Some(auth_account.clone());
         bootstrap.payload_mut().permissions.permissions = Permissions {
             publish: deny.clone(),
             subscribe: deny,
@@ -887,6 +947,7 @@ mod tests {
         let issued = keys.authorized_user_jwt(
             &issued_user_nkey,
             AuthorizationPrincipalKind::Service,
+            false,
             TransportPermissions {
                 publish: vec!["rpc.v1.Example".to_owned()],
                 subscribe: vec!["_INBOX.example.>".to_owned()],
@@ -901,6 +962,7 @@ mod tests {
         assert_eq!(claims["iss"], target_signing_key.public_key());
         assert_eq!(claims["sub"], issued_user_nkey);
         assert_eq!(claims["name"], issued_user_nkey);
+        assert_eq!(claims["aud"], target_account);
         assert_eq!(claims["exp"], 200);
         assert_eq!(claims["nats"]["issuer_account"], target_account);
         assert_eq!(
@@ -912,6 +974,58 @@ mod tests {
             serde_json::json!(["_INBOX.example.>"])
         );
         assert_eq!(claims["nats"]["resp"]["max"], 65_535);
+
+        let device_without_apis = keys.authorized_user_jwt(
+            &issued_user_nkey,
+            AuthorizationPrincipalKind::Device,
+            false,
+            TransportPermissions {
+                publish: Vec::new(),
+                subscribe: Vec::new(),
+            },
+            200,
+        )?;
+        let payload = device_without_apis
+            .split('.')
+            .nth(1)
+            .ok_or("issued JWT has no payload")?;
+        let claims: serde_json::Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload)?)?;
+        assert!(claims["nats"]["resp"].is_null());
+
+        let device_with_apis = keys.authorized_user_jwt(
+            &issued_user_nkey,
+            AuthorizationPrincipalKind::Device,
+            true,
+            TransportPermissions {
+                publish: Vec::new(),
+                subscribe: Vec::new(),
+            },
+            200,
+        )?;
+        let payload = device_with_apis
+            .split('.')
+            .nth(1)
+            .ok_or("issued JWT has no payload")?;
+        let claims: serde_json::Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload)?)?;
+        assert_eq!(claims["nats"]["resp"]["max"], 65_535);
+
+        let mut request = AuthRequest {
+            user_nkey: issued_user_nkey.clone(),
+            ..Default::default()
+        };
+        request.server.id = KeyPair::new_server().public_key();
+        let response = keys.response(&request, Some(issued), None)?;
+        let response = std::str::from_utf8(&response)?;
+        let payload = response
+            .split('.')
+            .nth(1)
+            .ok_or("authorization response JWT has no payload")?;
+        let response: serde_json::Value =
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload)?)?;
+        assert_eq!(response["iss"], auth_signing_key.public_key());
+        assert_eq!(response["sub"], issued_user_nkey);
+        assert_eq!(response["aud"], request.server.id);
+        assert_eq!(response["nats"]["issuer_account"], auth_account);
         Ok(())
     }
 

@@ -56,12 +56,6 @@ pub mod auth;
 #[doc(hidden)]
 pub mod jobs;
 
-#[allow(
-    clippy::enum_variant_names,
-    dead_code,
-    unused_imports,
-    reason = "generated private projections are consumed selectively"
-)]
 extern crate self as trellis_rs;
 
 #[cfg(test)]
@@ -70,10 +64,6 @@ mod tests {
 
     #[test]
     fn exposes_core_facade_modules() {
-        let _request = crate::client::PageRequest {
-            offset: None,
-            limit: 25,
-        };
         let _options =
             crate::service::ServiceConnectOptions::new("http://localhost:8080", "identity-seed");
         let _state = crate::jobs::JobState::Pending;
@@ -94,7 +84,7 @@ mod tests {
             "protocol-wasm/Cargo.toml",
             "runtime-apis/Cargo.toml",
             "runtime/Cargo.toml",
-            "eventlog-runtime/Cargo.toml",
+            "events-runtime/Cargo.toml",
             "jobs-runtime/Cargo.toml",
             "trellis-test/Cargo.toml",
         ] {

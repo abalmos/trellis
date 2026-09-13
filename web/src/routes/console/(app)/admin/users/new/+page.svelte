@@ -14,7 +14,7 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type CapabilityView = apis.auth.AuthCapabilitiesListOutput["entries"][number] & {
+  type CapabilityView = apis.auth.CapabilitiesListOutput["items"][number] & {
     key: string;
     source: "platform" | "contract";
     contractId: string | null;
@@ -112,27 +112,22 @@
     return { href };
   }
 
-  function buildCreateInput(_username: string): apis.auth.AuthUsersCreateInput {
-    const input: apis.auth.AuthUsersCreateInput = {
-      email: null,
+  function buildCreateInput(_username: string): apis.auth.UsersCreateInput {
+    return {
+      email: trimmedOptional(email) ?? null,
       idempotencyKey: ulid(),
       image: null,
-      name: null,
+      name: trimmedOptional(name) ?? null,
     };
-    const trimmedName = trimmedOptional(name);
-    const trimmedEmail = trimmedOptional(email);
-    if (trimmedName) input.name = trimmedName;
-    if (trimmedEmail) input.email = trimmedEmail;
-    return input;
   }
 
   async function loadAssignments() {
     loading = true;
     error = null;
     try {
-      const capabilitiesResponse = await trellis.authCapabilitiesList({ limit: 100 }).take();
+      const capabilitiesResponse = await trellis.capabilitiesList({ limit: 100 }).take();
       if (isErr(capabilitiesResponse)) { error = errorMessage(capabilitiesResponse); return; }
-      capabilities = (capabilitiesResponse.entries ?? []).map((capability) => ({
+      capabilities = (capabilitiesResponse.items ?? []).map((capability) => ({
         ...capability,
         key: capability.capability,
         source: capability.sourceApi ? "contract" as const : "platform" as const,
@@ -158,10 +153,10 @@
         return;
       }
 
-      const createResponse = await trellis.authUsersCreate(buildCreateInput(trimmedUsername)).take();
+      const createResponse = await trellis.usersCreate(buildCreateInput(trimmedUsername)).take();
       if (isErr(createResponse)) { error = errorMessage(createResponse); return; }
 
-      const setupResponse = await trellis.authUsersPasswordResetCreate({
+      const setupResponse = await trellis.usersPasswordResetCreate({
         idempotencyKey: ulid(),
         returnTarget: null,
         userId: createResponse.user.userId,

@@ -2,11 +2,11 @@ import {
   createTrellisApp,
   type TrellisClientFor,
 } from "@qlever-llc/trellis-svelte";
-import { participants } from "trellis-web-generated";
+import { participant as consoleParticipant } from "../../../ts/packages/trellis/internal_sdk/generated/participants/console/mod.js";
 import { APP_CONFIG } from "./config.ts";
 
 export type TrellisConsoleClient = TrellisClientFor<
-  typeof participants.appConsole.participant
+  typeof consoleParticipant
 >;
 
 let selectedTrellisUrl: string | undefined = APP_CONFIG.authUrl;
@@ -17,7 +17,7 @@ export function setSelectedTrellisUrl(trellisUrl: string | undefined): void {
 }
 
 export const trellisApp = createTrellisApp({
-  participant: participants.appConsole.participant,
+  participant: consoleParticipant,
   trellisUrl: () => selectedTrellisUrl,
 });
 
@@ -26,7 +26,7 @@ export function getTrellis(): TrellisConsoleClient {
 }
 
 export function getAuthenticatedUser(trellis: TrellisConsoleClient) {
-  return trellis.authSessionsMe({}).orThrow();
+  return trellis.sessionsMe({}).orThrow();
 }
 
 export function getConnection() {

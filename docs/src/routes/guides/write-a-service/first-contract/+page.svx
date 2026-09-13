@@ -1,67 +1,23 @@
-# Declare an API and participant
-
-Create `contract.trellis` in the project from
-[setup](/guides/write-a-service/setup):
+# Declare an API and participants
 
 ```trellis
-api "acme.orders@v1" {
-    version "1.0.0";
-    display_name "Orders";
-    description "Minimal service walkthrough.";
-    model CreateOrderRequest { customerId: string; }
-    model CreateOrderResponse { orderId: string; customerId: string; }
-    rpc "Orders.Create" {
-        version "v1";
-        input CreateOrderRequest;
-        output CreateOrderResponse;
-    }
+model CreateOrderRequest { customerId: string; }
+model CreateOrderResponse { orderId: string; customerId: string; }
+
+api orders@v1 {
+  title "Orders";
+  description "Minimal service walkthrough.";
+  rpc Create { input CreateOrderRequest; output CreateOrderResponse; }
+  capabilities { public { allows { rpc Create; } } }
 }
 
-participant "acme.orders-service" service {
-    implements "acme.orders@v1";
-}
-
-api "acme.orders-caller@v1" {
-    version "1.0.0";
-    display_name "Orders caller";
-    description "Caller for the service walkthrough.";
-}
-
-participant "acme.orders-caller" app {
-    implements "acme.orders-caller@v1";
-    use required orders "acme.orders@v1" {
-        call rpc "Orders.Create";
-    }
-}
+service OrdersService { implements orders; }
+app OrdersCaller { use orders { rpc Create; } }
 ```
 
-The first API defines the request and response. The service participant
-implements it. The caller has its own identity and explicitly selects the one
-action it will call; it does not gain permission merely by importing its types.
-The empty caller-owned API is separate from the Orders API it consumes.
-
-Generate the project:
-
-```sh
-trellis update
-trellis generate
-```
-
-Because the project contains `deno.json`, generation emits one ordinary ESM
-package at `trellis/`, named `orders-trellis` by `trellis.toml`. Its executable
-JavaScript and declarations require no consumer transpilation. A root
-`package.json` or `deno.jsonc` also selects TypeScript; `Cargo.toml` selects Rust.
-A mixed project must configure separate Rust and TypeScript output destinations.
-
-Import `apis` and `participants` from `orders-trellis`. The provider is
-`participants.acmeOrdersService.participant`, the caller is
-`participants.acmeOrdersCaller.participant`, and the API vocabulary is
-`apis.acmeOrders`. These are modules of one package, not separate packages.
-
-The API ID, participant ID, API release (`1.0.0`), and RPC transport version
-(`v1`) are distinct. See [native IDL design](/design/contracts/trellis-idl) for
-project and resolution semantics. This page is a minimal RPC example, not a
-complete grammar reference; the operations, jobs, State, and store guides cover
-their respective declarations.
-
-Next, [implement the service](/guides/write-a-service/service-entrypoint).
+The service implements the API. The app selects only `Create`; importing types
+alone grants nothing. Run `trellis install` and `trellis generate`, then use the
+configured package's generated `apis` and `participants`. Exact generated names
+are authoritative: the authored API token and generated path remain lowercase
+(`orders`), while generated language symbols may use PascalCase (`Orders`).
+Package version is metadata, not authorization.

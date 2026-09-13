@@ -17,9 +17,9 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type UserView = apis.auth.AuthUsersListOutput["entries"][number];
+  type UserView = apis.auth.UsersListOutput["items"][number];
   type IdentityView = { provider: string; subject: string };
-  type CapabilityView = apis.auth.AuthCapabilitiesListOutput["entries"][number] & {
+  type CapabilityView = apis.auth.CapabilitiesListOutput["items"][number] & {
     key: string;
     source: "platform" | "contract";
     contractId: string | null;
@@ -209,12 +209,12 @@
       if (!hasTargetParams) return;
 
       const [usersResponse, capabilitiesResponse] = await Promise.all([
-        trellis.authUsersList({ limit: 100 }).take(),
-        trellis.authCapabilitiesList({ limit: 100 }).take(),
+        trellis.usersList({ limit: 100 }).take(),
+        trellis.capabilitiesList({ limit: 100 }).take(),
       ]);
       if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
       if (isErr(capabilitiesResponse)) { error = errorMessage(capabilitiesResponse); return; }
-      capabilities = (capabilitiesResponse.entries ?? []).map((capability) => ({
+      capabilities = (capabilitiesResponse.items ?? []).map((capability) => ({
         ...capability,
         key: capability.capability,
         source: capability.sourceApi ? "contract" as const : "platform" as const,
@@ -223,7 +223,7 @@
         consequence: null,
       })).sort((left, right) => left.key.localeCompare(right.key));
       assignableCapabilityGroups = [];
-      const users = usersResponse.entries ?? [];
+      const users = usersResponse.items ?? [];
       const match = users.find((user) => user.userId === requestedUserId) ?? null;
       targetUser = match;
       loadUserIntoForm(match);
@@ -239,7 +239,7 @@
     savePending = true;
     error = null;
     try {
-      const response = await trellis.authUsersUpdate({
+      const response = await trellis.usersUpdate({
         userId: targetUser.userId,
         email: targetUser.email,
         expectedVersion: targetUser.version,
@@ -247,7 +247,7 @@
         image: targetUser.image,
         name: targetUser.name,
         state: active ? "active" : "disabled",
-      } satisfies apis.auth.AuthUsersUpdateInput).take();
+      } satisfies apis.auth.UsersUpdateInput).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Updated ${targetUser.name ?? targetUser.userId}.`, "Updated");
       await load();

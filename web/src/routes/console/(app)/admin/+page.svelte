@@ -17,10 +17,10 @@
   import { getTrellis } from "$lib/trellis";
   
 
-  type ServiceInstance = apis.auth.AuthServiceInstancesListOutput["entries"][number];
-  type JobGroup = apis.jobs.JobsQueryOutput["groups"][number];
-  type JobStats = apis.jobs.JobsQueryOutput["stats"];
-  type DeviceReview = apis.auth.AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
+  type ServiceInstance = apis.auth.ServiceInstancesListOutput["items"][number];
+  type JobGroup = apis.jobs.SummaryOutput["groups"][number];
+  type JobStats = apis.jobs.SummaryOutput["stats"];
+  type DeviceReview = apis.auth.DeviceUserAuthoritiesReviewsListOutput["items"][number];
   type OverviewInstance = {
     service: string;
     id: string;
@@ -46,7 +46,7 @@
   let connectionCount = $state(0);
   let jobsUnavailableMessage = $state<string | null>(null);
   let jobGroups = $state.raw<JobGroup[]>([]);
-  let jobStats = $state.raw<JobStats>({ byState: {}, total: 0 });
+  let jobStats = $state.raw<JobStats>({ byState: {}, total: 0n });
   let pendingDeviceReviews = $state.raw<DeviceReview[]>([]);
 
   const activeInstances = $derived(instances.filter((instance) => instance.state === "active").length);
@@ -56,7 +56,7 @@
   const serviceInstanceTotal = $derived(instances.length);
   const disabledTotal = $derived(disabledInstances);
   const activeJobCount = $derived(jobStats.byState.active ?? 0);
-  const totalJobCount = $derived(jobStats.total);
+  const totalJobCount = $derived(jobStats.total.toLocaleString());
   const pendingWorkTotal = $derived(pendingDeviceReviews.length);
 
   const topology = $derived([
@@ -89,7 +89,7 @@
       key: group.key,
       job: group.label,
       state: group.state ? formatJobState(group.state) : "Grouped",
-      count: group.count,
+      count: Number(group.count > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : group.count),
       oldest: group.oldestCreatedAt ?? "—",
     }));
   }
@@ -138,36 +138,35 @@
     jobsUnavailableMessage = null;
     try {
       const [sessionsRes, connectionsRes, instancesRes, deviceReviewsRes] = await Promise.all([
-        trellis.authSessionsList({ limit: 100 }).take(),
-        trellis.authConnectionsList({ limit: 100 }).take(),
-        trellis.authServiceInstancesList({ limit: 100 }).take(),
-        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 100 }).take(),
+        trellis.sessionsList({ limit: 100 }).take(),
+        trellis.connectionsList({ limit: 100 }).take(),
+        trellis.serviceInstancesList({ limit: 100 }).take(),
+        trellis.deviceUserAuthoritiesReviewsList({ state: "pending", limit: 100 }).take(),
       ]);
       if (isErr(sessionsRes)) { error = errorMessage(sessionsRes); return; }
       if (isErr(connectionsRes)) { error = errorMessage(connectionsRes); return; }
       if (isErr(instancesRes)) { error = errorMessage(instancesRes); return; }
       if (isErr(deviceReviewsRes)) { error = errorMessage(deviceReviewsRes); return; }
-      sessionCount = sessionsRes.entries?.length ?? 0;
-      connectionCount = connectionsRes.entries?.length ?? 0;
-      instances = instancesRes.entries ?? [];
-      pendingDeviceReviews = deviceReviewsRes.entries ?? [];
+      sessionCount = sessionsRes.items?.length ?? 0;
+      connectionCount = connectionsRes.items?.length ?? 0;
+      instances = instancesRes.items ?? [];
+      pendingDeviceReviews = deviceReviewsRes.items ?? [];
 
       const jobsData = await loadJobsPageData({
-        listServices: (input) => trellis.jobsListServices(input),
+        listServices: (input) => trellis.listServices(input),
         queryJobs: (filter) => trellis.jobsQuery(filter),
-      }, { groupBy: "type", limit: 50, offset: 0 }).catch((jobsError: unknown) => ({
+        summarizeJobs: (filter) => trellis.jobsSummary(filter),
+      }, { groupBy: "type", page: { limit: 50 } }).catch((jobsError: unknown) => ({
         available: false,
         message: `Jobs admin runtime is unavailable: ${errorMessage(jobsError)}`,
         services: [],
         jobs: [],
         groups: [],
-        stats: { byState: {}, total: 0 },
-        count: 0,
-        offset: 0,
-        limit: 50,
+        stats: { byState: {}, total: 0n },
+        count: 0n,
       }));
       jobGroups = jobsData.available ? jobsData.groups : [];
-      jobStats = jobsData.available ? jobsData.stats : { byState: {}, total: 0 };
+      jobStats = jobsData.available ? jobsData.stats : { byState: {}, total: 0n };
       jobsUnavailableMessage = jobsData.available ? null : jobsData.message ?? "Jobs admin runtime is unavailable.";
     } catch (e) {
       error = errorMessage(e);

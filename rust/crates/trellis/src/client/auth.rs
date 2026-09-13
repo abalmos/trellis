@@ -43,6 +43,11 @@ impl SessionAuth {
         base64url_encode(&signature.to_bytes())
     }
 
+    pub(crate) fn sign_bytes(&self, bytes: &[u8]) -> String {
+        let signature: Signature = self.signing_key.sign(bytes);
+        base64url_encode(&signature.to_bytes())
+    }
+
     pub(crate) fn key_id(&self) -> String {
         base64url_encode(&sha256(self.signing_key.verifying_key().as_bytes()))
     }
@@ -111,6 +116,7 @@ impl SessionAuth {
     pub fn create_event_proof(
         &self,
         context_digest: &str,
+        descriptor_identity: &str,
         subject: &str,
         payload: &[u8],
         event_id: &str,
@@ -118,6 +124,7 @@ impl SessionAuth {
     ) -> Result<AuthorizationEventProof, TrellisClientError> {
         sign_authorization_event(
             context_digest,
+            descriptor_identity,
             subject,
             payload,
             event_id,

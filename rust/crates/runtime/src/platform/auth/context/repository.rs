@@ -789,7 +789,9 @@ fn context_action(
             "reason": reason,
             "version": context.version,
         }),
-        PostCommitActionKind::Event | PostCommitActionKind::Kick => unreachable!(),
+        PostCommitActionKind::Event
+        | PostCommitActionKind::Kick
+        | PostCommitActionKind::ResourceReconcile => unreachable!(),
     };
     let canonical = canonicalize_json(&payload)
         .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
@@ -811,6 +813,17 @@ fn context_action(
         claimed_until: None,
         last_error: None,
     })
+}
+
+pub(crate) fn context_revocation_action_id(
+    context: &AuthorizationContextRecord,
+) -> Result<String, AuthorizationStateError> {
+    Ok(context_action(
+        context,
+        PostCommitActionKind::ContextRevoke,
+        context.revocation_reason,
+    )?
+    .action_id)
 }
 
 fn nonempty(name: &str, value: &str) -> Result<(), AuthorizationStateError> {

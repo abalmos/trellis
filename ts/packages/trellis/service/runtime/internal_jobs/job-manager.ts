@@ -45,7 +45,7 @@ type Publisher = {
     subject: string,
     payload: Uint8Array,
     opts?: { headers?: MsgHdrs },
-  ): void | Promise<void>;
+  ): unknown | Promise<unknown>;
 };
 
 type JobMetaSource = {
@@ -63,6 +63,7 @@ type JobManagerContext = {
 type ActiveJobRuntimeMetadata = {
   redeliveryCount?: number;
   instanceId?: string;
+  progressAckIntervalMs?: number;
   latestState?: Job["state"];
   workEventType?: JobEvent["eventType"];
 };
@@ -634,13 +635,13 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       const result = await this.withActiveJobAndHeartbeat(
         { ...job, state: "active", tries },
         cancellation,
-        lease ? this.#keyedHeartbeat(job, lease, heartbeat) : heartbeat,
+        heartbeat,
         handler,
         metadata,
         lease,
       );
 
-      if (cancellation.isHostShutdown()) {
+      if (cancellation.isHostShutdown() || cancellation.isLeaseLost()) {
         await this.#releaseKeyedSlot(job, lease);
         return { outcome: "interrupted", tries };
       }
@@ -679,7 +680,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       });
       return { outcome: "completed", tries, result };
     } catch (error) {
-      if (cancellation.isHostShutdown()) {
+      if (cancellation.isHostShutdown() || cancellation.isLeaseLost()) {
         await this.#releaseKeyedSlot(job, lease);
         return { outcome: "interrupted", tries };
       }
@@ -701,21 +702,6 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
           if (release === "staleCompletion") {
             await this.#publishStaleCompletionIgnored(job, tries);
             return { outcome: "stale_completion_ignored", tries };
-          }
-          if (tries >= job.maxTries) {
-            await this.#publishJobEvent(job.type, job.id, {
-              jobId: job.id,
-              service: job.service,
-              jobType: job.type,
-              eventType: "dead",
-              state: "dead",
-              previousState: "active",
-              context: job.context,
-              tries,
-              error: detail,
-              timestamp: this.#meta().nowIso(),
-            });
-            return { outcome: "dead", tries, error: detail };
           }
           await this.#publishJobEvent(job.type, job.id, {
             jobId: job.id,
@@ -772,12 +758,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     job: Job<TPayload, TResult>,
     progress: JobProgress,
   ): Promise<void> {
-    const queue = this.#getQueueBinding(job.type);
-    if (!queue.progress) {
-      throw new Error(
-        `Feature 'progress' is disabled for queue '${queue.queueType}'`,
-      );
-    }
+    this.#getQueueBinding(job.type);
     if (job.state !== "active") {
       throw new Error(
         `Cannot emit progress for job '${job.id}' in state '${job.state}'`,
@@ -799,12 +780,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
   }
 
   async emitLog(job: Job<TPayload, TResult>, log: JobLogEntry): Promise<void> {
-    const queue = this.#getQueueBinding(job.type);
-    if (!queue.logs) {
-      throw new Error(
-        `Feature 'logs' is disabled for queue '${queue.queueType}'`,
-      );
-    }
+    this.#getQueueBinding(job.type);
     if (job.state !== "active") {
       throw new Error(
         `Cannot emit log for job '${job.id}' in state '${job.state}'`,
@@ -880,10 +856,8 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
   #keyedHeartbeat(
     job: Job<TPayload, TResult>,
     lease: ActiveSlotLease,
-    heartbeat: () => Promise<void>,
   ): () => Promise<void> {
     return async () => {
-      await heartbeat();
       const renewed = await this.#context.keyCoordinator!.renewHeartbeat({
         service: this.#coordinationService(),
         jobType: job.type,
@@ -892,15 +866,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
         now: this.#meta().nowIso(),
       });
       if (renewed.kind === "lost") {
-        recordTrellisError(
-          new ActiveJobRuntimeError("keyed job slot lease was lost"),
-          {
-            surface: "job",
-            direction: "worker",
-            operation: job.type,
-            phase: "heartbeat",
-          },
-        );
+        throw new ActiveJobRuntimeError("keyed job slot lease was lost");
       }
     };
   }
@@ -969,8 +935,17 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     metadata: ActiveJobRuntimeMetadata = {},
     lease?: ActiveSlotLease,
   ): Promise<T> {
-    const stopAutoHeartbeat = lease
-      ? startAutoHeartbeat(heartbeat, lease.policy.heartbeatIntervalMs)
+    const stopProgressAcks = startAutoHeartbeat(
+      heartbeat,
+      metadata.progressAckIntervalMs ?? 1_000,
+      () => cancellation.cancelForLeaseLoss(),
+    );
+    const stopKeyHeartbeat = lease
+      ? startAutoHeartbeat(
+        this.#keyedHeartbeat(job, lease),
+        lease.policy.heartbeatIntervalMs,
+        () => cancellation.cancelForLeaseLoss(),
+      )
       : () => {};
     const activeJob = new ActiveJob(job, cancellation, {
       updateProgress: (progress) => this.emitProgress(job, progress),
@@ -998,7 +973,8 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
         waitFor: (target, fn) => this.waitFor(job, target, fn),
       }, () => f(activeJob));
     } finally {
-      stopAutoHeartbeat();
+      stopProgressAcks();
+      stopKeyHeartbeat();
     }
   }
 
@@ -1075,6 +1051,7 @@ function getKeyPolicy(
 function startAutoHeartbeat(
   heartbeat: () => Promise<void>,
   intervalMs: number,
+  onFailure: () => void,
 ): () => void {
   const timer = setInterval(() => {
     void heartbeat().catch((error) => {
@@ -1083,6 +1060,8 @@ function startAutoHeartbeat(
         direction: "worker",
         phase: "heartbeat",
       });
+      clearInterval(timer);
+      onFailure();
     });
   }, intervalMs);
   return () => clearInterval(timer);

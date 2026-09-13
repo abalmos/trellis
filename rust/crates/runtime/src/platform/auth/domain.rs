@@ -1,10 +1,10 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use ed25519_dalek::VerifyingKey;
-use serde::{Deserialize, Serialize};
+use ed25519_dalek::{Signature, Verifier as _, VerifyingKey};
+use serde::{ser::SerializeStruct, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use trellis_protocol::{GrantSet, ParticipantKind, PlatformPrivilege};
+use trellis_protocol::{GrantSet, ParticipantKind, ParticipantResourceKind, PlatformPrivilege};
 
 use super::evidence::{
     verify_package_evidence, PackageEvidenceInput, ParticipantRuntimeProjection,
@@ -38,7 +38,7 @@ pub enum GrantBindingState {
 }
 
 /// Verified portal/provider policy association for automatic user grants.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct PortalGrantProvenance {
     /// Registered trusted portal responsible for the verified login.
@@ -51,9 +51,127 @@ pub struct PortalGrantProvenance {
     pub effective_policy_digest: String,
 }
 
-/// The sole current authority for `(ownerKind, ownerId, participantId)`.
+/// How the current exact authority was approved.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApprovalMode {
+    /// An administrator approved the exact atom set.
+    Exact,
+    /// A user or administrator approved named capability fingerprints.
+    Capabilities,
+}
+
+/// A named capability approval bound to its human consent text.
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ApprovedCapability {
+    /// Qualified capability identity.
+    pub id: String,
+    /// Digest of the human-facing consent text.
+    pub consent_digest: String,
+}
+
+/// Authorization resource family used by approvals and consent.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AuthorizationResourceKind {
+    /// Durable event consumer.
+    Consumer,
+    /// Private job queue.
+    Job,
+    /// Key-value bucket.
+    Kv,
+    /// Single-value state.
+    State,
+    /// Object store.
+    Store,
+}
+
+impl From<ParticipantResourceKind> for AuthorizationResourceKind {
+    fn from(value: ParticipantResourceKind) -> Self {
+        match value {
+            ParticipantResourceKind::EventConsumer => Self::Consumer,
+            ParticipantResourceKind::JobQueue => Self::Job,
+            ParticipantResourceKind::Kv => Self::Kv,
+            ParticipantResourceKind::State => Self::State,
+            ParticipantResourceKind::Store => Self::Store,
+        }
+    }
+}
+
+/// Exact desired resource configuration requiring approval.
+#[derive(Clone, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ResourceCommitment {
+    /// Requested per-object byte limit, when finite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired_max_object_bytes: Option<u64>,
+    /// Requested total storage byte limit, when finite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired_max_total_bytes: Option<u64>,
+    /// Requested per-value byte limit, when finite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desired_max_value_bytes: Option<u64>,
+    /// Requested KV revision history depth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<u64>,
+    /// Requested retention duration in milliseconds; absent means forever.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_ms: Option<u64>,
+}
+
+impl ResourceCommitment {
+    pub(crate) fn validate(&self) -> Result<(), AuthorizationStateError> {
+        if [
+            self.desired_max_object_bytes,
+            self.desired_max_total_bytes,
+            self.desired_max_value_bytes,
+            self.history,
+            self.ttl_ms,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value > MAX_PROTOCOL_INTEGER)
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "resource commitment exceeds safe integer range".to_owned(),
+            ));
+        }
+        if self.history == Some(0) {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "resource commitment history must be positive".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// One approved participant-local physical resource commitment.
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct ApprovedResource {
+    /// Resource family.
+    pub kind: AuthorizationResourceKind,
+    /// Participant-local resource name.
+    pub name: String,
+    /// Approved physical commitment.
+    pub commitment: ResourceCommitment,
+}
+
+/// Server-owned upper bound for authority delegated by one verified decision.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct DelegationCeiling {
+    /// Named capability fingerprints that may be delegated.
+    pub capabilities: Vec<ApprovedCapability>,
+    /// Optional additional exact permission restriction.
+    pub exact_restrictions: Option<GrantSet>,
+    /// Platform privileges that may be delegated.
+    pub platform_privileges: Vec<PlatformPrivilege>,
+}
+
+/// The sole current authority for `(ownerKind, ownerId, participantId)`.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GrantBinding {
     /// Existing owner record class.
     pub owner_kind: GrantOwnerKind,
@@ -65,6 +183,20 @@ pub struct GrantBinding {
     pub installed_revision: u64,
     /// Expanded, canonical action and resource permissions.
     pub grants: GrantSet,
+    /// Approval model used to derive `grants`.
+    pub approval_mode: ApprovalMode,
+    /// Current consent fingerprints approved for capability-mode authority.
+    pub approved_capabilities: Vec<ApprovedCapability>,
+    /// Current concrete resource commitments approved for this owner.
+    pub approved_resources: Vec<ApprovedResource>,
+    /// Current verified delegation ceiling.
+    pub delegation_ceiling: DelegationCeiling,
+    /// Digest of the exact verified decision that produced this approval.
+    pub approval_decision_digest: String,
+    /// Grant revision observed by that decision.
+    pub approval_expected_grant_revision: u64,
+    /// Explicit nested companion decision.
+    pub companion_approved: bool,
     /// Explicit administrative meta-authority, never participant capability names.
     pub platform_privileges: Vec<PlatformPrivilege>,
     /// Positive safe-integer revision covering all authorization-relevant fields.
@@ -89,6 +221,12 @@ pub(crate) struct GrantBindingReplacement {
     pub participant_id: String,
     pub installed_revision: u64,
     pub grants: GrantSet,
+    pub approval_mode: ApprovalMode,
+    pub approved_capabilities: Vec<ApprovedCapability>,
+    pub approved_resources: Vec<ApprovedResource>,
+    pub delegation_ceiling: DelegationCeiling,
+    pub approval_decision_digest: String,
+    pub companion_approved: bool,
     pub platform_privileges: Vec<PlatformPrivilege>,
     pub state: GrantBindingState,
     pub expires_at: Option<i64>,
@@ -102,8 +240,16 @@ impl GrantBinding {
     pub fn validate(&mut self) -> Result<(), AuthorizationStateError> {
         require_nonempty("ownerId", &self.owner_id)?;
         require_nonempty("participantId", &self.participant_id)?;
+        require_digest("approval.decisionDigest", &self.approval_decision_digest)?;
         require_positive("installedRevision", self.installed_revision)?;
         require_positive("revision", self.revision)?;
+        if self.approval_expected_grant_revision > MAX_PROTOCOL_INTEGER
+            || self.approval_expected_grant_revision.checked_add(1) != Some(self.revision)
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "approval expected grant revision does not precede binding revision".to_owned(),
+            ));
+        }
         require_protocol_timestamp("createdAt", self.created_at)?;
         require_protocol_timestamp("updatedAt", self.updated_at)?;
         if self.updated_at < self.created_at {
@@ -116,8 +262,96 @@ impl GrantBinding {
         }
         self.platform_privileges.sort_unstable();
         self.platform_privileges.dedup();
+        self.approved_capabilities.sort();
+        self.approved_capabilities.dedup();
+        self.delegation_ceiling.capabilities.sort();
+        self.delegation_ceiling.capabilities.dedup();
+        self.delegation_ceiling.platform_privileges.sort_unstable();
+        self.delegation_ceiling.platform_privileges.dedup();
+        if self.approval_mode == ApprovalMode::Exact
+            && (self.delegation_ceiling.exact_restrictions.is_none()
+                || !self.delegation_ceiling.capabilities.is_empty())
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "exact approval requires only exactRestrictions".to_owned(),
+            ));
+        }
+        if self.approval_mode == ApprovalMode::Capabilities
+            && self.delegation_ceiling.exact_restrictions.is_some()
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "capability approval cannot contain exactRestrictions".to_owned(),
+            ));
+        }
+        for capability in self
+            .approved_capabilities
+            .iter()
+            .chain(&self.delegation_ceiling.capabilities)
+        {
+            require_nonempty("capability id", &capability.id)?;
+            require_digest("consentDigest", &capability.consent_digest)?;
+        }
+        if (self.approval_mode == ApprovalMode::Exact && !self.approved_capabilities.is_empty())
+            || (self.approval_mode == ApprovalMode::Capabilities
+                && self
+                    .approved_capabilities
+                    .iter()
+                    .any(|capability| !self.delegation_ceiling.capabilities.contains(capability)))
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "approved capabilities do not match the approval mode and ceiling".to_owned(),
+            ));
+        }
+        self.approved_resources
+            .sort_by(|left, right| left.name.cmp(&right.name));
+        if self
+            .approved_resources
+            .windows(2)
+            .any(|items| items[0].name == items[1].name)
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "approved resources contain a duplicate identity".to_owned(),
+            ));
+        }
+        for resource in &self.approved_resources {
+            require_nonempty("approved resource name", &resource.name)?;
+            resource.commitment.validate()?;
+            let valid = match resource.kind {
+                AuthorizationResourceKind::Kv => {
+                    resource.commitment.desired_max_object_bytes.is_none()
+                        && resource.commitment.desired_max_total_bytes.is_none()
+                }
+                AuthorizationResourceKind::Store => {
+                    resource.commitment.desired_max_value_bytes.is_none()
+                        && resource.commitment.history.is_none()
+                }
+                AuthorizationResourceKind::Consumer
+                | AuthorizationResourceKind::Job
+                | AuthorizationResourceKind::State => {
+                    resource.commitment == ResourceCommitment::default()
+                }
+            };
+            if !valid {
+                return Err(AuthorizationStateError::InvalidRecord(
+                    "resource commitment contains fields unsupported by its kind".to_owned(),
+                ));
+            }
+        }
+        if self.platform_privileges.iter().any(|privilege| {
+            !self
+                .delegation_ceiling
+                .platform_privileges
+                .contains(privilege)
+        }) {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "platform privileges exceed delegation ceiling".to_owned(),
+            ));
+        }
         if self.state == GrantBindingState::Revoked
-            && (!self.grants.permissions().is_empty() || !self.platform_privileges.is_empty())
+            && (!self.grants.permissions().is_empty()
+                || !self.platform_privileges.is_empty()
+                || !self.approved_capabilities.is_empty()
+                || !self.approved_resources.is_empty())
         {
             return Err(AuthorizationStateError::InvalidRecord(
                 "revoked grant bindings must contain no authority".to_owned(),
@@ -139,6 +373,63 @@ impl GrantBinding {
             provenance.roles.dedup();
         }
         Ok(())
+    }
+}
+
+impl Serialize for GrantBinding {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PublicCeiling<'a> {
+            capabilities: &'a [ApprovedCapability],
+            #[serde(skip_serializing_if = "Option::is_none")]
+            exact_restrictions: &'a Option<GrantSet>,
+        }
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Approval<'a> {
+            approved_capabilities: &'a [ApprovedCapability],
+            approved_resources: &'a [ApprovedResource],
+            companion_approved: bool,
+            decision_digest: &'a str,
+            delegation_ceiling: PublicCeiling<'a>,
+            expected_grant_revision: u64,
+            installed_revision: u64,
+            mode: ApprovalMode,
+        }
+
+        let approval = Approval {
+            approved_capabilities: &self.approved_capabilities,
+            approved_resources: &self.approved_resources,
+            companion_approved: self.companion_approved,
+            decision_digest: &self.approval_decision_digest,
+            delegation_ceiling: PublicCeiling {
+                capabilities: &self.delegation_ceiling.capabilities,
+                exact_restrictions: &self.delegation_ceiling.exact_restrictions,
+            },
+            expected_grant_revision: self.approval_expected_grant_revision,
+            installed_revision: self.installed_revision,
+            mode: self.approval_mode,
+        };
+        let mut state = serializer.serialize_struct("GrantBinding", 14)?;
+        state.serialize_field("ownerKind", &self.owner_kind)?;
+        state.serialize_field("ownerId", &self.owner_id)?;
+        state.serialize_field("participantId", &self.participant_id)?;
+        state.serialize_field("installedRevision", &self.installed_revision)?;
+        state.serialize_field("grants", &self.grants)?;
+        state.serialize_field("approval", &approval)?;
+        state.serialize_field("approvalMode", &self.approval_mode)?;
+        state.serialize_field("platformPrivileges", &self.platform_privileges)?;
+        state.serialize_field("revision", &self.revision)?;
+        state.serialize_field("state", &self.state)?;
+        state.serialize_field("expiresAt", &self.expires_at)?;
+        state.serialize_field("provenance", &self.provenance)?;
+        state.serialize_field("createdAt", &self.created_at)?;
+        state.serialize_field("updatedAt", &self.updated_at)?;
+        state.end()
     }
 }
 
@@ -343,6 +634,28 @@ pub(crate) fn validate_ed25519_public_key(
     Ok(URL_SAFE_NO_PAD.encode(Sha256::digest(raw)))
 }
 
+pub(crate) fn verify_detached_ed25519_proof(
+    public_key: &str,
+    digest: &str,
+    signature: &str,
+) -> Result<(), AuthorizationStateError> {
+    validate_ed25519_public_key("installationPublicKey", public_key)?;
+    let decode = |value: &str| {
+        URL_SAFE_NO_PAD.decode(value).map_err(|_| {
+            AuthorizationStateError::InvalidRecord("invalid detached proof".to_owned())
+        })
+    };
+    let key =
+        VerifyingKey::from_bytes(decode(public_key)?.as_slice().try_into().map_err(|_| {
+            AuthorizationStateError::InvalidRecord("invalid detached proof".to_owned())
+        })?)
+        .map_err(|_| AuthorizationStateError::InvalidRecord("invalid detached proof".to_owned()))?;
+    let signature = Signature::from_slice(&decode(signature)?)
+        .map_err(|_| AuthorizationStateError::InvalidRecord("invalid detached proof".to_owned()))?;
+    key.verify(&decode(digest)?, &signature)
+        .map_err(|_| AuthorizationStateError::InvalidRecord("invalid detached proof".to_owned()))
+}
+
 /// Exact verified package and participant projection binding.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -360,7 +673,7 @@ pub struct ParticipantBindingRecord {
     /// Exact participant path within the verified package closure.
     pub participant_path: String,
     /// Read-only projection reconstructed from verified source evidence.
-    pub projection: ParticipantRuntimeProjection,
+    pub(crate) projection: ParticipantRuntimeProjection,
     /// Resolution time in Unix milliseconds.
     pub resolved_at: i64,
     /// Whether the binding is currently usable.
@@ -415,6 +728,15 @@ impl ParticipantBindingRecord {
         }
         if self.package_digest.len() != 43 || self.needs_digest.len() != 43 {
             return Err(AuthorizationStateError::NeedsDigestMismatch);
+        }
+        if self.projection.companion_participant_id.is_some()
+            != self.projection.companion_participant_kind.is_some()
+            || (self.projection.companion_required
+                && self.projection.companion_participant_id.is_none())
+        {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "companion participant identity and kind must be stored together".to_owned(),
+            ));
         }
         Ok(&self.projection)
     }
@@ -544,6 +866,16 @@ pub struct DeviceDelegationRecord {
     pub principal_id: String,
     /// Deployment in which the delegation applies.
     pub deployment_id: String,
+    /// Exact nested App/Agent delegated through this device.
+    pub companion_participant_id: Option<String>,
+    /// Ordinary user login owned by the companion credential.
+    pub user_login_session_id: Option<String>,
+    /// Public installation key proving this device's child credential.
+    pub installation_public_key: Option<String>,
+    /// Outer device grant revision approved with this delegation.
+    pub device_grant_revision: Option<u64>,
+    /// Child user grant revision approved with this delegation.
+    pub child_grant_revision: Option<u64>,
     /// Whether this device lifecycle requires delegation.
     pub required: bool,
     /// Current delegation lifecycle state.
@@ -578,6 +910,8 @@ pub struct ResourceBindingEvidence {
     pub owner_participant_id: String,
     /// Exact typed physical provider identity.
     pub provider_identity: ResourceProviderIdentity,
+    /// Effective provider configuration used by runtime bindings.
+    pub(crate) actual: Option<super::resources::ResourceActual>,
     /// Current binding state.
     pub state: ResourceBindingState,
     /// Materialization time in Unix milliseconds.
@@ -626,6 +960,8 @@ pub enum ResourceProviderIdentity {
         stream: String,
         /// Exact durable consumer name.
         consumer: String,
+        /// Exact durable consumer for targeted replay deliveries.
+        replay_consumer: String,
         /// Exact event subjects selected by the durable consumer.
         filter_subjects: Vec<String>,
     },
@@ -698,6 +1034,12 @@ impl IssuableAuthorizationState {
 /// Authorization-state denial, conflict, and storage categories.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum AuthorizationStateError {
+    /// Deployment approval must be based on the current server-computed consent request.
+    #[error("deployment approval is required")]
+    ApprovalRequired {
+        /// Current consent projection that the caller may display and approve.
+        consent_request: serde_json::Value,
+    },
     /// A record violates a durable domain invariant.
     #[error("invalid authorization record: {0}")]
     InvalidRecord(String),

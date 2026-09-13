@@ -1,12 +1,10 @@
+use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use futures_util::future::BoxFuture;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_rs::client::SessionAuth;
-use trellis_rs::service::{
-    AcceptedOperation, OperationRefData, OperationSnapshot, OperationState, RequestContext, Router,
-    ServerError, ServiceOperationProvider,
-};
+use trellis_rs::service::{OperationSnapshot, OperationState, RequestContext, Router, ServerError};
 use trellis_runtime_apis::apis::trellis_auth_v1::operations::DeviceUserAuthoritiesResolve;
 use trellis_runtime_apis::types::{
     AuthDeviceUserAuthoritiesResolveProgress,
@@ -18,12 +16,523 @@ type AuthDeviceUserAuthoritiesResolveOperation =
     trellis_rs::generated::OperationAdapter<DeviceUserAuthoritiesResolve>;
 
 use super::auth::{
-    AuthService, AuthorityEvidenceRepository, ClaimActivationReviewInput,
+    ActivationReviewClaim, ActivationReviewDecision, ApprovalMode, ApprovedCapability,
+    ApprovedResource, AuthService, AuthorityEvidenceRepository, ClaimActivationReviewInput,
     DecideActivationReviewInput, DeploymentRepository, DeviceActivationReviewRecord,
     DeviceActivationReviewState, DeviceDelegationRecord, DeviceDelegationState, DeviceReviewMode,
-    IdempotencyResultRecord, PostCommitActionRecord, ProvisioningRepository,
+    GrantBindingReplacement, GrantBindingState, GrantOwnerKind, IdempotencyResultRecord,
+    PostCommitActionRecord, ProvisioningRepository, SessionRecord, SessionState,
     SqliteAuthorizationStore,
 };
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompanionClaim {
+    participant_id: String,
+    kind: trellis_protocol::ParticipantKind,
+    installation_public_key: String,
+    request_proof: String,
+    request_proof_digest: String,
+}
+
+fn convert_generated_integers(value: &mut Value, encode: bool) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                convert_generated_integers(value, encode);
+            }
+        }
+        Value::Object(fields) => {
+            for (name, value) in fields {
+                if matches!(
+                    name.as_str(),
+                    "installedRevision"
+                        | "expectedGrantRevision"
+                        | "desiredMaxObjectBytes"
+                        | "desiredMaxTotalBytes"
+                        | "desiredMaxValueBytes"
+                        | "history"
+                        | "ttlMs"
+                        | "maxObjectBytes"
+                        | "maxTotalBytes"
+                        | "maxValueBytes"
+                        | "representationVersion"
+                ) {
+                    if encode {
+                        if let Some(number) = value.as_u64() {
+                            *value = Value::String(number.to_string());
+                        }
+                    } else if let Some(text) = value.as_str() {
+                        if let Ok(number) = text.parse::<u64>() {
+                            *value = Value::Number(number.into());
+                        }
+                    }
+                } else {
+                    convert_generated_integers(value, encode);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn companion_consent_value(
+    consent: Option<super::auth::ConsentRequest>,
+) -> Result<Value, ServerError> {
+    let mut value = serde_json::to_value(consent)?;
+    convert_generated_integers(&mut value, true);
+    Ok(value)
+}
+
+fn decode_companion_approval(
+    approval: &trellis_runtime_apis::types::Approval,
+) -> Result<(super::auth::ConsentApproval, String), super::auth::AuthorizationStateError> {
+    let mut value = serde_json::to_value(approval)
+        .map_err(|error| super::auth::AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    convert_generated_integers(&mut value, false);
+    let approval = serde_json::from_value(value)
+        .map_err(|error| super::auth::AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let request_digest =
+        trellis_protocol::digest_json(&serde_json::to_value(&approval).map_err(|error| {
+            super::auth::AuthorizationStateError::InvalidRecord(error.to_string())
+        })?)
+        .map_err(|error| super::auth::AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    Ok((approval, request_digest))
+}
+
+async fn companion_consent(
+    service: &AuthService<SqliteAuthorizationStore>,
+    review: &DeviceActivationReviewRecord,
+    user_principal_id: &str,
+) -> Result<Option<super::auth::ConsentRequest>, super::auth::AuthorizationStateError> {
+    let Some(claim) = review.payload.get("companion") else {
+        return Ok(None);
+    };
+    let claim: CompanionClaim = serde_json::from_value(claim.clone())
+        .map_err(|error| super::auth::AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let (_, outer) = service
+        .repository()
+        .get_installed_participant_record(
+            review.payload["participantId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            None,
+        )
+        .await?
+        .ok_or(super::auth::AuthorizationStateError::ParticipantMissing)?;
+    let outer = outer.resolve()?;
+    if outer.companion_participant_id.as_deref() != Some(&claim.participant_id)
+        || outer.companion_participant_kind != Some(claim.kind)
+    {
+        return Err(super::auth::AuthorizationStateError::InvalidRecord(
+            "companion claim does not match the device descriptor".to_owned(),
+        ));
+    }
+    let (installed_revision, child) = service
+        .repository()
+        .get_installed_participant_record(claim.participant_id.clone(), None)
+        .await?
+        .ok_or(super::auth::AuthorizationStateError::ParticipantMissing)?;
+    let current = service
+        .repository()
+        .get_grant_binding(
+            GrantOwnerKind::User,
+            user_principal_id.to_owned(),
+            claim.participant_id.clone(),
+        )
+        .await?;
+    let actuals = service
+        .repository()
+        .consent_resource_actuals(
+            GrantOwnerKind::User,
+            user_principal_id.to_owned(),
+            claim.participant_id,
+        )
+        .await?;
+    let ceiling = super::auth::policy::participant_delegation_ceiling(&child)?;
+    super::auth::policy::consent_request(
+        &child,
+        installed_revision,
+        current.as_ref(),
+        &ceiling,
+        &actuals,
+        None,
+    )
+    .map(Some)
+}
+
+async fn apply_companion_approval(
+    service: &AuthService<SqliteAuthorizationStore>,
+    review: &DeviceActivationReviewRecord,
+    user_principal_id: &str,
+    approval: &trellis_runtime_apis::types::Approval,
+) -> Result<(Option<GrantBindingReplacement>, String), super::auth::AuthorizationStateError> {
+    let consent = companion_consent(service, review, user_principal_id)
+        .await?
+        .ok_or_else(|| {
+            super::auth::AuthorizationStateError::InvalidRecord(
+                "companion approval supplied for a device without a companion".to_owned(),
+            )
+        })?;
+    let (mut approval, request_digest) = decode_companion_approval(approval)?;
+    let approved_capabilities = approval
+        .approved_capabilities
+        .iter()
+        .collect::<BTreeSet<_>>();
+    let approved_resources = approval.approved_resources.iter().collect::<BTreeSet<_>>();
+    if approval.mode != ApprovalMode::Capabilities
+        || approval.companion_approved
+        || approval.decision_digest != consent.decision_digest
+        || approval.installed_revision != consent.installed_revision
+        || approval.expected_grant_revision != consent.expected_grant_revision
+        || approved_capabilities.len() != approval.approved_capabilities.len()
+        || approved_resources.len() != approval.approved_resources.len()
+        || approval.approved_capabilities.iter().any(|approved| {
+            !consent.capabilities.iter().any(|capability| {
+                capability.eligible
+                    && capability.id == approved.id
+                    && capability.consent_digest == approved.consent_digest
+            })
+        })
+        || approval.approved_resources.iter().any(|approved| {
+            !consent.resources.iter().any(|resource| {
+                resource.eligible
+                    && resource.kind == approved.kind
+                    && resource.name == approved.name
+                    && resource.requested_commitment == approved.commitment
+            })
+        })
+        || consent.capabilities.iter().any(|capability| {
+            capability.required
+                && capability.eligible
+                && !approved_capabilities.contains(&ApprovedCapability {
+                    id: capability.id.clone(),
+                    consent_digest: capability.consent_digest.clone(),
+                })
+        })
+        || consent.resources.iter().any(|resource| {
+            resource.required
+                && resource.eligible
+                && !approved_resources.contains(&ApprovedResource {
+                    kind: resource.kind,
+                    name: resource.name.clone(),
+                    commitment: resource.requested_commitment.clone(),
+                })
+        })
+    {
+        return Err(super::auth::AuthorizationStateError::NotAuthorized);
+    }
+    approval.approved_capabilities.extend(
+        consent
+            .capabilities
+            .iter()
+            .filter(|capability| capability.already_approved)
+            .map(|capability| ApprovedCapability {
+                id: capability.id.clone(),
+                consent_digest: capability.consent_digest.clone(),
+            }),
+    );
+    approval.approved_resources.extend(
+        consent
+            .resources
+            .iter()
+            .filter(|resource| resource.already_approved)
+            .map(|resource| ApprovedResource {
+                kind: resource.kind,
+                name: resource.name.clone(),
+                commitment: resource.requested_commitment.clone(),
+            }),
+    );
+    approval.approved_capabilities.sort();
+    approval.approved_capabilities.dedup();
+    approval.approved_resources.sort();
+    approval.approved_resources.dedup();
+    let (_, child) = service
+        .repository()
+        .get_installed_participant_record(
+            consent.participant_id.clone(),
+            Some(consent.installed_revision),
+        )
+        .await?
+        .ok_or(super::auth::AuthorizationStateError::ParticipantMissing)?;
+    let ceiling = super::auth::policy::participant_delegation_ceiling(&child)?;
+    if approval
+        .delegation_ceiling
+        .as_ref()
+        .is_some_and(|submitted| {
+            submitted.capabilities != ceiling.capabilities
+                || submitted.exact_restrictions != ceiling.exact_restrictions
+        })
+    {
+        return Err(super::auth::AuthorizationStateError::NotAuthorized);
+    }
+    let resources = service
+        .repository()
+        .resource_bindings(
+            GrantOwnerKind::User,
+            user_principal_id.to_owned(),
+            consent.participant_id.clone(),
+            consent.installed_revision,
+        )
+        .await?;
+    let authority = super::auth::policy::resolve_authority(
+        &child,
+        ApprovalMode::Capabilities,
+        &approval.approved_capabilities,
+        &approval.approved_resources,
+        &[],
+        &ceiling,
+        (&resources, false),
+    )?;
+    let replacement = GrantBindingReplacement {
+        owner_kind: GrantOwnerKind::User,
+        owner_id: user_principal_id.to_owned(),
+        participant_id: consent.participant_id,
+        installed_revision: consent.installed_revision,
+        grants: authority.exact_grants,
+        approval_mode: ApprovalMode::Capabilities,
+        approved_capabilities: approval.approved_capabilities,
+        approved_resources: approval.approved_resources,
+        delegation_ceiling: ceiling,
+        approval_decision_digest: consent.decision_digest,
+        companion_approved: false,
+        platform_privileges: Vec::new(),
+        expected_revision: consent.expected_grant_revision,
+        expected_current_installed_revision: Some(consent.installed_revision),
+        state: GrantBindingState::Active,
+        expires_at: None,
+        provenance: None,
+    };
+    let current = service
+        .repository()
+        .get_grant_binding(
+            GrantOwnerKind::User,
+            user_principal_id.to_owned(),
+            replacement.participant_id.clone(),
+        )
+        .await?;
+    let unchanged = current.as_ref().is_some_and(|binding| {
+        binding.installed_revision == replacement.installed_revision
+            && binding.grants == replacement.grants
+            && binding.approval_mode == replacement.approval_mode
+            && binding.approved_capabilities == replacement.approved_capabilities
+            && binding.approved_resources == replacement.approved_resources
+            && binding.delegation_ceiling == replacement.delegation_ceiling
+            && binding.companion_approved == replacement.companion_approved
+            && binding.platform_privileges == replacement.platform_privileges
+            && binding.state == replacement.state
+            && binding.expires_at == replacement.expires_at
+            && binding.provenance == replacement.provenance
+    });
+    Ok(((!unchanged).then_some(replacement), request_digest))
+}
+
+pub(crate) async fn companion_activation(
+    service: &AuthService<SqliteAuthorizationStore>,
+    review: &DeviceActivationReviewRecord,
+    user_principal_id: &str,
+    now: i64,
+) -> Result<
+    (Option<DeviceDelegationRecord>, Option<SessionRecord>),
+    super::auth::AuthorizationStateError,
+> {
+    companion_activation_with_replacement(service, review, user_principal_id, now, None).await
+}
+
+async fn companion_activation_with_replacement(
+    service: &AuthService<SqliteAuthorizationStore>,
+    review: &DeviceActivationReviewRecord,
+    user_principal_id: &str,
+    now: i64,
+    replacement: Option<&GrantBindingReplacement>,
+) -> Result<
+    (Option<DeviceDelegationRecord>, Option<SessionRecord>),
+    super::auth::AuthorizationStateError,
+> {
+    let Some(claim) = review.payload.get("companion") else {
+        return Ok((None, None));
+    };
+    let claim: CompanionClaim = serde_json::from_value(claim.clone())
+        .map_err(|error| super::auth::AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    super::auth::verify_detached_ed25519_proof(
+        &claim.installation_public_key,
+        &claim.request_proof_digest,
+        &claim.request_proof,
+    )?;
+    let (_, outer) = service
+        .repository()
+        .get_installed_participant_record(
+            review.payload["participantId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            None,
+        )
+        .await?
+        .ok_or(super::auth::AuthorizationStateError::ParticipantMissing)?;
+    let projection = outer.resolve()?;
+    if projection.companion_participant_id.as_deref() != Some(&claim.participant_id)
+        || projection.companion_participant_kind != Some(claim.kind)
+        || !matches!(
+            claim.kind,
+            trellis_protocol::ParticipantKind::App | trellis_protocol::ParticipantKind::Agent
+        )
+    {
+        return Err(super::auth::AuthorizationStateError::InvalidRecord(
+            "companion claim does not match the device descriptor".to_owned(),
+        ));
+    }
+    let device_grant = service
+        .repository()
+        .get_grant_binding(
+            GrantOwnerKind::Deployment,
+            review.deployment_id.clone(),
+            projection.participant_id.clone(),
+        )
+        .await?
+        .ok_or(super::auth::AuthorizationStateError::NotAuthorized)?;
+    let child_grant = service
+        .repository()
+        .get_grant_binding(
+            GrantOwnerKind::User,
+            user_principal_id.to_owned(),
+            claim.participant_id.clone(),
+        )
+        .await?;
+    let (installed_revision, child) = service
+        .repository()
+        .get_installed_participant_record(claim.participant_id.clone(), None)
+        .await?
+        .ok_or(super::auth::AuthorizationStateError::ParticipantMissing)?;
+    let (
+        child_installed_revision,
+        approval_mode,
+        approved_capabilities,
+        approved_resources,
+        platform_privileges,
+        grants,
+        expires_at,
+        provenance,
+        child_grant_revision,
+    ) = if let Some(replacement) = replacement {
+        if replacement.owner_kind != GrantOwnerKind::User
+            || replacement.owner_id != user_principal_id
+            || replacement.participant_id != claim.participant_id
+            || replacement.state != super::auth::GrantBindingState::Active
+        {
+            return Err(super::auth::AuthorizationStateError::NotAuthorized);
+        }
+        (
+            replacement.installed_revision,
+            replacement.approval_mode,
+            &replacement.approved_capabilities,
+            &replacement.approved_resources,
+            &replacement.platform_privileges,
+            &replacement.grants,
+            replacement.expires_at,
+            replacement.provenance.as_ref(),
+            replacement
+                .expected_revision
+                .checked_add(1)
+                .ok_or_else(|| {
+                    super::auth::AuthorizationStateError::InvalidRecord(
+                        "grant revision overflow".to_owned(),
+                    )
+                })?,
+        )
+    } else if let Some(child_grant) = child_grant.as_ref() {
+        (
+            child_grant.installed_revision,
+            child_grant.approval_mode,
+            &child_grant.approved_capabilities,
+            &child_grant.approved_resources,
+            &child_grant.platform_privileges,
+            &child_grant.grants,
+            child_grant.expires_at,
+            child_grant.provenance.as_ref(),
+            child_grant.revision,
+        )
+    } else {
+        return if projection.companion_required {
+            Err(super::auth::AuthorizationStateError::NotAuthorized)
+        } else {
+            Ok((None, None))
+        };
+    };
+    if child.participant_kind != claim.kind
+        || child_installed_revision != installed_revision
+        || approval_mode != super::auth::ApprovalMode::Capabilities
+        || expires_at.is_some_and(|expires_at| expires_at <= now)
+        || provenance.is_some()
+        || replacement.is_none()
+            && child_grant
+                .as_ref()
+                .is_some_and(|binding| binding.state != super::auth::GrantBindingState::Active)
+    {
+        return Err(super::auth::AuthorizationStateError::NotAuthorized);
+    }
+    let ceiling = super::auth::policy::participant_delegation_ceiling(&child)?;
+    let resources = service
+        .repository()
+        .resource_bindings(
+            GrantOwnerKind::User,
+            user_principal_id.to_owned(),
+            claim.participant_id.clone(),
+            installed_revision,
+        )
+        .await?;
+    let authority = super::auth::policy::resolve_authority(
+        &child,
+        approval_mode,
+        approved_capabilities,
+        approved_resources,
+        platform_privileges,
+        &ceiling,
+        (&resources, true),
+    )?;
+    if authority.exact_grants != *grants
+        || authority
+            .missing_required
+            .iter()
+            .any(|item| !item.starts_with("resource:"))
+    {
+        return Err(super::auth::AuthorizationStateError::NotAuthorized);
+    }
+    let session_id = ulid::Ulid::new().to_string();
+    let session = SessionRecord {
+        session_id: session_id.clone(),
+        principal_id: user_principal_id.to_owned(),
+        participant_id: claim.participant_id.clone(),
+        participant_kind: claim.kind,
+        session_key_id: crate::platform::auth::validate_ed25519_public_key(
+            "installationPublicKey",
+            &claim.installation_public_key,
+        )?,
+        session_public_key: claim.installation_public_key.clone(),
+        state: SessionState::Active,
+        created_at: now,
+        last_authenticated_at: now,
+        expires_at,
+        revoked_at: None,
+        version: 1,
+    };
+    Ok((
+        Some(DeviceDelegationRecord {
+            principal_id: review.principal_id.clone(),
+            deployment_id: review.deployment_id.clone(),
+            companion_participant_id: Some(claim.participant_id),
+            user_login_session_id: Some(session_id),
+            installation_public_key: Some(claim.installation_public_key),
+            device_grant_revision: Some(device_grant.revision),
+            child_grant_revision: Some(child_grant_revision),
+            required: projection.companion_required,
+            state: DeviceDelegationState::Active,
+            expires_at,
+        }),
+        Some(session),
+    ))
+}
 use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
 
@@ -36,24 +545,77 @@ pub(crate) struct AuthOperationRuntime {
 }
 
 impl AuthOperationRuntime {
-    pub(crate) fn new(
+    pub(crate) async fn new(
         client: async_nats::Client,
         _auth: SessionAuth,
         service: AuthService<SqliteAuthorizationStore>,
         verifier: super::auth::verifier::RuntimeAuthVerifier,
-    ) -> Self {
+    ) -> Result<Self, RuntimeError> {
+        const DEPLOYMENT_ID: &str = "trellis-auth-runtime";
+        super::auth::resources::ensure_operation_store(&client, DEPLOYMENT_ID)
+            .await
+            .map_err(|error| RuntimeError::Nats(error.to_string()))?;
+        let store = async_nats::jetstream::new(client.clone())
+            .get_key_value(format!("trellis_operations_{DEPLOYMENT_ID}"))
+            .await
+            .map_err(|error| RuntimeError::Nats(error.to_string()))?;
+        let staging = async_nats::jetstream::new(client.clone())
+            .get_object_store(format!("trellis_operation_staging_{DEPLOYMENT_ID}"))
+            .await
+            .map_err(|error| RuntimeError::Nats(error.to_string()))?;
         let mut router = Router::new();
-        router.register_operation_provider::<AuthDeviceUserAuthoritiesResolveOperation, _>(
-            AuthResolveProvider { service },
+        router.set_provider_deployment_id("dep_trellis_auth_runtime");
+        router.register_operation_handler::<AuthDeviceUserAuthoritiesResolveOperation, _, _, _>(
+            trellis_rs::service::internal::OperationHandlerRuntime {
+                service: "trellis.auth@v1".to_owned(),
+                deployment_id: DEPLOYMENT_ID.to_owned(),
+                executor_id: ulid::Ulid::new().to_string(),
+                repository: trellis_rs::service::KvOperationRepository::new(store),
+                nats: client.clone(),
+                service_session_key: "trellis-auth-runtime".to_owned(),
+                staging: trellis_rs::service::internal::BoundStoreResourceClient::new(staging),
+                validator: verifier.clone(),
+            },
+            move |context, input, operation| {
+                let service = service.clone();
+                async move {
+                    let caller = caller_principal_id(&context)?;
+                    claim_activation(&service, caller, &input).await?;
+                    approve_unreviewed_activation(&service, caller, &input).await?;
+                    let snapshot = resolve_snapshot(&service, &context, &input.flow_id).await?;
+                    match snapshot.state {
+                        OperationState::Completed => {
+                            operation
+                                .complete(snapshot.output.ok_or_else(|| {
+                                    ServerError::Nats(
+                                        "completed auth operation has no output".to_owned(),
+                                    )
+                                })?)
+                                .await?;
+                        }
+                        OperationState::Running => {
+                            if let Some(progress) = snapshot.progress {
+                                operation.progress(progress).await?;
+                            }
+                        }
+                        _ => {}
+                    }
+                    Ok(())
+                }
+            },
         );
-        Self {
+        Ok(Self {
             client,
             router,
             verifier,
-        }
+        })
     }
 
     pub(crate) async fn run(self, stop: StopHandle) -> Result<(), RuntimeError> {
+        self.router
+            .recover_operations()
+            .await
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?;
         tokio::select! {
             result = trellis_rs::service::internal::run_builtin_authenticated_router(
                 self.client,
@@ -67,81 +629,6 @@ impl AuthOperationRuntime {
             ) => result.map_err(|error| RuntimeError::Platform(error.to_string())),
             () = stop.stopped() => Ok(()),
         }
-    }
-}
-
-struct AuthResolveProvider {
-    service: AuthService<SqliteAuthorizationStore>,
-}
-
-impl ServiceOperationProvider<AuthDeviceUserAuthoritiesResolveOperation> for AuthResolveProvider {
-    fn start(
-        &self,
-        context: RequestContext,
-        input: AuthDeviceUserAuthoritiesResolveInput,
-    ) -> BoxFuture<
-        'static,
-        Result<
-            AcceptedOperation<
-                AuthDeviceUserAuthoritiesResolveProgress,
-                AuthDeviceUserAuthoritiesResolveOutput,
-            >,
-            ServerError,
-        >,
-    > {
-        let service = self.service.clone();
-        Box::pin(async move {
-            let caller = caller_principal_id(&context)?;
-            claim_activation(&service, caller, &input).await?;
-            approve_unreviewed_activation(&service, caller, &input).await?;
-            let snapshot = resolve_snapshot(&service, &context, &input.flow_id).await?;
-            Ok(AcceptedOperation {
-                kind: "accepted".to_owned(),
-                operation_ref: OperationRefData {
-                    id: input.flow_id.to_string(),
-                    service: "trellis.auth@v1".to_owned(),
-                    operation: OPERATION.to_owned(),
-                },
-                snapshot,
-                transfer: None,
-            })
-        })
-    }
-
-    fn get(
-        &self,
-        context: RequestContext,
-        operation_id: String,
-    ) -> BoxFuture<
-        'static,
-        Result<
-            OperationSnapshot<
-                AuthDeviceUserAuthoritiesResolveProgress,
-                AuthDeviceUserAuthoritiesResolveOutput,
-            >,
-            ServerError,
-        >,
-    > {
-        let service = self.service.clone();
-        Box::pin(async move { resolve_by_id(&service, &context, operation_id).await })
-    }
-
-    fn wait(
-        &self,
-        context: RequestContext,
-        operation_id: String,
-    ) -> BoxFuture<
-        'static,
-        Result<
-            OperationSnapshot<
-                AuthDeviceUserAuthoritiesResolveProgress,
-                AuthDeviceUserAuthoritiesResolveOutput,
-            >,
-            ServerError,
-        >,
-    > {
-        let service = self.service.clone();
-        Box::pin(async move { wait_for_resolution(&service, &context, operation_id).await })
     }
 }
 
@@ -174,13 +661,14 @@ async fn claim_activation(
         ));
     }
     if let Some(activated_by) = review.activated_by_user_principal_id.as_deref() {
-        return if activated_by == caller {
-            Ok(())
-        } else {
+        if activated_by != caller {
             Err(ServerError::Nats(
                 "activation review belongs to another user".to_owned(),
-            ))
-        };
+            ))?;
+        }
+        if review.payload.get("companion").is_none() || input.companion_approval.is_none() {
+            return Ok(());
+        }
     }
     if !matches!(
         review.state,
@@ -194,15 +682,74 @@ async fn claim_activation(
         .await
         .map_err(server_error)?
         .ok_or_else(|| ServerError::Nats("activation deployment not found".to_owned()))?;
-    let delegation = (review.state == DeviceActivationReviewState::Approved
-        && profile.requires_device_delegation)
-        .then(|| DeviceDelegationRecord {
-            principal_id: review.principal_id.clone(),
-            deployment_id: review.deployment_id.clone(),
-            required: true,
-            state: DeviceDelegationState::Active,
-            expires_at: None,
-        });
+    let companion = review.payload.get("companion").is_some();
+    if review.state == DeviceActivationReviewState::Pending && companion {
+        return Ok(());
+    }
+    if review.state == DeviceActivationReviewState::Approved && companion {
+        let approval = input
+            .companion_approval
+            .as_ref()
+            .ok_or_else(|| ServerError::Nats("companion approval is required".to_owned()))?;
+        let (_, request_digest) = decode_companion_approval(approval).map_err(server_error)?;
+        let (replacement, delegation, companion_session) =
+            if review.activated_by_user_principal_id.is_some() {
+                (None, None, None)
+            } else {
+                let (replacement, _) = apply_companion_approval(service, &review, caller, approval)
+                    .await
+                    .map_err(server_error)?;
+                let (delegation, session) = companion_activation_with_replacement(
+                    service,
+                    &review,
+                    caller,
+                    now,
+                    replacement.as_ref(),
+                )
+                .await
+                .map_err(server_error)?;
+                (replacement, delegation, session)
+            };
+        let mut requested = requested_event(&review, caller, now)?;
+        requested.predecessor_action_id = Some(
+            crate::platform::auth::activation_review_event_action_id(&review.review_id, "approved")
+                .map_err(server_error)?,
+        );
+        let mut actions = vec![requested];
+        if delegation.is_some() {
+            actions.push(resolved_event(&review, now, "active")?);
+        }
+        service
+            .repository()
+            .apply_companion_activation_claim(
+                replacement,
+                ActivationReviewClaim {
+                    review_id: review.review_id.clone(),
+                    expected_version: review.version,
+                    activated_by_user_principal_id: caller.to_owned(),
+                    now,
+                    delegation,
+                    companion_session,
+                    idempotency: companion_activation_idempotency(
+                        caller,
+                        &review,
+                        request_digest,
+                        now,
+                    )?,
+                    actions,
+                },
+            )
+            .await
+            .map_err(server_error)?;
+        return Ok(());
+    }
+    let (delegation, companion_session) = if review.state == DeviceActivationReviewState::Approved {
+        companion_activation(service, &review, caller, now)
+            .await
+            .map_err(server_error)?
+    } else {
+        (None, None)
+    };
     let mut requested = requested_event(&review, caller, now)?;
     let requested_predecessor = match (review.state, profile.review_mode) {
         (DeviceActivationReviewState::Approved, _) => Some("approved"),
@@ -233,6 +780,7 @@ async fn claim_activation(
             activated_by_user_principal_id: caller.to_owned(),
             now,
             delegation,
+            companion_session,
             idempotency: IdempotencyResultRecord {
                 scope_key: resolve_scope_key(
                     "device.user-authority.resolve.claim",
@@ -268,6 +816,39 @@ async fn approve_unreviewed_activation(
         .map_err(server_error)?
         .ok_or_else(|| ServerError::Nats("activation review not found".to_owned()))?;
     if review.state != DeviceActivationReviewState::Pending {
+        if review.state == DeviceActivationReviewState::Approved
+            && review.payload.get("companion").is_some()
+            && review.activated_by_user_principal_id.as_deref() == Some(caller)
+        {
+            let approval = input
+                .companion_approval
+                .as_ref()
+                .ok_or_else(|| ServerError::Nats("companion approval is required".to_owned()))?;
+            let (_, request_digest) = decode_companion_approval(approval).map_err(server_error)?;
+            let now = now_ms()?;
+            service
+                .repository()
+                .apply_companion_activation_claim(
+                    None,
+                    ActivationReviewClaim {
+                        review_id: review.review_id.clone(),
+                        expected_version: review.version,
+                        activated_by_user_principal_id: caller.to_owned(),
+                        now,
+                        delegation: None,
+                        companion_session: None,
+                        idempotency: companion_activation_idempotency(
+                            caller,
+                            &review,
+                            request_digest,
+                            now,
+                        )?,
+                        actions: Vec::new(),
+                    },
+                )
+                .await
+                .map_err(server_error)?;
+        }
         return Ok(());
     }
     let profile = service
@@ -284,6 +865,10 @@ async fn approve_unreviewed_activation(
             "device activation review policy is invalid".to_owned(),
         ));
     }
+    let companion = review.payload.get("companion").is_some();
+    if companion && input.companion_approval.is_none() {
+        return Ok(());
+    }
     let now = now_ms()?;
     let mut approved = approved_event(&review, caller, now)?;
     approved.predecessor_action_id = Some(
@@ -295,6 +880,67 @@ async fn approve_unreviewed_activation(
         crate::platform::auth::activation_review_event_action_id(&review.review_id, "approved")
             .map_err(server_error)?,
     );
+    if companion {
+        let approval = input
+            .companion_approval
+            .as_ref()
+            .ok_or_else(|| ServerError::Nats("companion approval is required".to_owned()))?;
+        let (replacement, request_digest) =
+            apply_companion_approval(service, &review, caller, approval)
+                .await
+                .map_err(|error| {
+                    tracing::warn!(?error, review_id = %review.review_id, "companion approval resolution failed");
+                    server_error(error)
+                })?;
+        let (delegation, companion_session) = companion_activation_with_replacement(
+            service,
+            &review,
+            caller,
+            now,
+            replacement.as_ref(),
+        )
+        .await
+        .map_err(|error| {
+            tracing::warn!(?error, review_id = %review.review_id, "companion activation construction failed");
+            server_error(error)
+        })?;
+        service
+            .repository()
+            .apply_companion_activation_decision(
+                replacement,
+                ActivationReviewDecision {
+                    review_id: review.review_id.clone(),
+                    expected_version: review.version,
+                    state: DeviceActivationReviewState::Approved,
+                    decided_at: now,
+                    decided_by: caller.to_owned(),
+                    reason: None,
+                    delegation,
+                    companion_session,
+                    activate_device: true,
+                    idempotency: companion_activation_idempotency(
+                        caller,
+                        &review,
+                        request_digest,
+                        now,
+                    )?,
+                    actions: vec![approved, resolved],
+                },
+            )
+            .await
+            .map_err(|error| {
+                tracing::warn!(?error, review_id = %review.review_id, "companion activation commit failed");
+                server_error(error)
+            })?;
+        return Ok(());
+    }
+    let (delegation, companion_session) = if profile.requires_device_delegation {
+        companion_activation(service, &review, caller, now)
+            .await
+            .map_err(server_error)?
+    } else {
+        (None, None)
+    };
     service
         .decide_activation_review(DecideActivationReviewInput {
             review_id: review.review_id.clone(),
@@ -303,15 +949,8 @@ async fn approve_unreviewed_activation(
             decided_at: now,
             decided_by: caller.to_owned(),
             reason: None,
-            delegation: profile
-                .requires_device_delegation
-                .then(|| DeviceDelegationRecord {
-                    principal_id: review.principal_id.clone(),
-                    deployment_id: review.deployment_id.clone(),
-                    required: true,
-                    state: DeviceDelegationState::Active,
-                    expires_at: None,
-                }),
+            delegation,
+            companion_session,
             activate_device: true,
             idempotency: IdempotencyResultRecord {
                 scope_key: resolve_scope_key(
@@ -334,70 +973,6 @@ async fn approve_unreviewed_activation(
         .await
         .map_err(server_error)?;
     Ok(())
-}
-
-async fn resolve_by_id(
-    service: &AuthService<SqliteAuthorizationStore>,
-    context: &RequestContext,
-    operation_id: String,
-) -> Result<
-    OperationSnapshot<
-        AuthDeviceUserAuthoritiesResolveProgress,
-        AuthDeviceUserAuthoritiesResolveOutput,
-    >,
-    ServerError,
-> {
-    service
-        .expire_due_activation_reviews(now_ms()?)
-        .await
-        .map_err(server_error)?;
-    resolve_snapshot(service, context, &operation_id).await
-}
-
-async fn wait_for_resolution(
-    service: &AuthService<SqliteAuthorizationStore>,
-    context: &RequestContext,
-    operation_id: String,
-) -> Result<
-    OperationSnapshot<
-        AuthDeviceUserAuthoritiesResolveProgress,
-        AuthDeviceUserAuthoritiesResolveOutput,
-    >,
-    ServerError,
-> {
-    loop {
-        let snapshot = resolve_by_id(service, context, operation_id.clone()).await?;
-        if snapshot.state != OperationState::Running {
-            return Ok(snapshot);
-        }
-        let revision = snapshot.revision;
-        let waiter = service.activation_review_waiter(&operation_id).await;
-        let snapshot = resolve_by_id(service, context, operation_id.clone()).await?;
-        if snapshot.state != OperationState::Running {
-            return Ok(snapshot);
-        }
-        if snapshot.revision != revision {
-            continue;
-        }
-        let review = service
-            .repository()
-            .get_activation_review(&operation_id)
-            .await
-            .map_err(server_error)?
-            .ok_or_else(|| ServerError::Nats("activation review not found".to_owned()))?;
-        let remaining_ms = review.expires_at.saturating_sub(now_ms()?);
-        tokio::select! {
-            () = waiter.wait() => {}
-            () = tokio::time::sleep(std::time::Duration::from_millis(
-                u64::try_from(remaining_ms).unwrap_or(0),
-            )) => {
-                service
-                    .expire_due_activation_reviews(now_ms()?)
-                    .await
-                    .map_err(server_error)?;
-            }
-        }
-    }
 }
 
 async fn resolve_snapshot(
@@ -431,9 +1006,15 @@ async fn resolve_snapshot(
         DeviceActivationReviewState::Pending => Ok(snapshot(
             &review,
             OperationState::Running,
-            Some(serde_json::from_value(
-                json!({"state": "review_pending", "retryAfterMs": 1_000}),
-            )?),
+            Some(serde_json::from_value(json!({
+                "state": "review_pending",
+                "retryAfterMs": "1000",
+                    "companionConsent": companion_consent_value(
+                        companion_consent(service, &review, caller)
+                            .await
+                            .map_err(server_error)?,
+                    )?,
+            }))?),
             None,
         )),
         DeviceActivationReviewState::Approved => {
@@ -454,13 +1035,29 @@ async fn resolve_snapshot(
                 .get_device_delegation(&review.principal_id, &review.deployment_id)
                 .await
                 .map_err(server_error)?;
+            if review.payload.get("companion").is_some() && delegation.is_none() {
+                return Ok(snapshot(
+                    &review,
+                    OperationState::Running,
+                    Some(serde_json::from_value(json!({
+                        "state": "delegation_pending",
+                        "retryAfterMs": "1000",
+                        "companionConsent": companion_consent_value(
+                            companion_consent(service, &review, caller)
+                                .await
+                                .map_err(server_error)?,
+                        )?,
+                    }))?),
+                    None,
+                ));
+            }
             if profile.requires_device_delegation && review.activated_by_user_principal_id.is_none()
             {
                 return Ok(snapshot(
                     &review,
                     OperationState::Running,
                     Some(serde_json::from_value(
-                        json!({"state": "review_pending", "retryAfterMs": 1_000}),
+                        json!({"state": "review_pending", "retryAfterMs": "1000"}),
                     )?),
                     None,
                 ));
@@ -492,10 +1089,10 @@ async fn resolve_snapshot(
                     "administrativeApproval": "approved",
                     "delegationRequired": profile.requires_device_delegation,
                     "delegationState": "active",
-                    "delegationExpiresAt": delegation.and_then(|delegation| delegation.expires_at),
-                    "createdAt": device.created_at,
-                    "updatedAt": device.updated_at,
-                    "version": device.version,
+                    "delegationExpiresAt": delegation.and_then(|delegation| delegation.expires_at).map(|value| value.to_string()),
+                    "createdAt": device.created_at.to_string(),
+                    "updatedAt": device.updated_at.to_string(),
+                    "version": device.version.to_string(),
                 },
                 "review": {
                     "reviewId": review.review_id,
@@ -504,12 +1101,12 @@ async fn resolve_snapshot(
                     "devicePrincipalId": review.principal_id,
                     "activatedByUserPrincipalId": review.activated_by_user_principal_id,
                     "state": "approved",
-                    "requestedAt": review.requested_at,
-                    "expiresAt": review.expires_at,
-                    "decidedAt": review.decided_at,
+                    "requestedAt": review.requested_at.to_string(),
+                    "expiresAt": review.expires_at.to_string(),
+                    "decidedAt": review.decided_at.map(|value| value.to_string()),
                     "decidedBy": review.decided_by,
                     "reason": review.reason,
-                    "version": review.version,
+                    "version": review.version.to_string(),
                 },
             }))?;
             Ok(snapshot(
@@ -545,9 +1142,9 @@ async fn resolve_snapshot(
                     "delegationRequired": profile.requires_device_delegation,
                     "delegationState": "missing",
                     "delegationExpiresAt": null,
-                    "createdAt": device.created_at,
-                    "updatedAt": device.updated_at,
-                    "version": device.version,
+                    "createdAt": device.created_at.to_string(),
+                    "updatedAt": device.updated_at.to_string(),
+                    "version": device.version.to_string(),
                 },
                 "review": {
                     "reviewId": review.review_id,
@@ -556,12 +1153,12 @@ async fn resolve_snapshot(
                     "devicePrincipalId": review.principal_id,
                     "activatedByUserPrincipalId": review.activated_by_user_principal_id,
                     "state": "rejected",
-                    "requestedAt": review.requested_at,
-                    "expiresAt": review.expires_at,
-                    "decidedAt": review.decided_at,
+                    "requestedAt": review.requested_at.to_string(),
+                    "expiresAt": review.expires_at.to_string(),
+                    "decidedAt": review.decided_at.map(|value| value.to_string()),
                     "decidedBy": review.decided_by,
                     "reason": review.reason,
-                    "version": review.version,
+                    "version": review.version.to_string(),
                 },
             }))?;
             Ok(snapshot(
@@ -597,9 +1194,9 @@ async fn resolve_snapshot(
                     "delegationRequired": profile.requires_device_delegation,
                     "delegationState": "missing",
                     "delegationExpiresAt": null,
-                    "createdAt": device.created_at,
-                    "updatedAt": device.updated_at,
-                    "version": device.version,
+                    "createdAt": device.created_at.to_string(),
+                    "updatedAt": device.updated_at.to_string(),
+                    "version": device.version.to_string(),
                 },
                 "review": {
                     "reviewId": review.review_id,
@@ -608,12 +1205,12 @@ async fn resolve_snapshot(
                     "devicePrincipalId": review.principal_id,
                     "activatedByUserPrincipalId": review.activated_by_user_principal_id,
                     "state": "expired",
-                    "requestedAt": review.requested_at,
-                    "expiresAt": review.expires_at,
-                    "decidedAt": review.decided_at,
+                    "requestedAt": review.requested_at.to_string(),
+                    "expiresAt": review.expires_at.to_string(),
+                    "decidedAt": review.decided_at.map(|value| value.to_string()),
                     "decidedBy": review.decided_by,
                     "reason": review.reason,
-                    "version": review.version,
+                    "version": review.version.to_string(),
                 },
             }))?;
             Ok(snapshot(
@@ -624,6 +1221,27 @@ async fn resolve_snapshot(
             ))
         }
     }
+}
+
+fn companion_activation_idempotency(
+    caller: &str,
+    review: &DeviceActivationReviewRecord,
+    request_digest: String,
+    now: i64,
+) -> Result<IdempotencyResultRecord, ServerError> {
+    const PURPOSE: &str = "device.companion-activation.approve";
+    Ok(IdempotencyResultRecord {
+        scope_key: resolve_scope_key(PURPOSE, caller, &review.review_id)?,
+        purpose: PURPOSE.to_owned(),
+        signer_id: caller.to_owned(),
+        request_id: review.review_id.clone(),
+        request_digest,
+        result: Value::Null,
+        created_at: now,
+        expires_at: now
+            .checked_add(86_400_000)
+            .ok_or_else(|| ServerError::Nats("idempotency expiry overflow".to_owned()))?,
+    })
 }
 
 fn resolve_scope_key(purpose: &str, caller: &str, review_id: &str) -> Result<String, ServerError> {

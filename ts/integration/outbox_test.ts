@@ -1,7 +1,9 @@
 import { connect, credsAuthenticator } from "@nats-io/transport-node";
 import { assert, assertEquals } from "@std/assert";
+import { Value } from "typebox/value";
 import { TypedKV } from "../packages/trellis/kv.ts";
 import {
+  type KvOutboxRecord,
   KvOutboxRecordSchema,
   NatsKvOutboxRepository,
 } from "../packages/trellis/service/outbox_inbox.ts";
@@ -17,9 +19,18 @@ Deno.test("NATS KV outbox claims recover with CAS-fenced completion", async () =
     });
     try {
       const bucket = "outbox_claims";
-      const kv = await TypedKV.open(nats, bucket, KvOutboxRecordSchema, {})
+      const representation = {
+        codec: {
+          decode: (value: unknown) => Value.Decode(KvOutboxRecordSchema, value),
+          encode: (value: KvOutboxRecord) =>
+            Value.Encode(KvOutboxRecordSchema, value),
+        },
+        version: 1,
+        migrations: {},
+      };
+      const kv = await TypedKV.open(nats, bucket, representation, {})
         .orThrow();
-      const other = await TypedKV.open(nats, bucket, KvOutboxRecordSchema, {
+      const other = await TypedKV.open(nats, bucket, representation, {
         bindOnly: true,
       }).orThrow();
       const repositories = [kv, other].map((store) =>
@@ -29,7 +40,7 @@ Deno.test("NATS KV outbox claims recover with CAS-fenced completion", async () =
         id: "event",
         kind: "event.publish",
         name: "Created",
-        subject: "events.v1.Created",
+        subject: "events.v1.outbox.Created",
         payload: "{}",
         headers: {},
       });
@@ -39,7 +50,7 @@ Deno.test("NATS KV outbox claims recover with CAS-fenced completion", async () =
       ))).flat();
       assertEquals(claims.length, 1);
       assertEquals(await repositories[1].claimDue(1, now), []);
-      const reopened = await TypedKV.open(nats, bucket, KvOutboxRecordSchema, {
+      const reopened = await TypedKV.open(nats, bucket, representation, {
         bindOnly: true,
       }).orThrow();
       const recovered = new NatsKvOutboxRepository(reopened);

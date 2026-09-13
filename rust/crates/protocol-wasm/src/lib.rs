@@ -5,7 +5,10 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 use trellis_protocol::{
-    parse_authorization_context,
+    decode_pagination_cursor as decode_pagination_cursor_protocol,
+    derive_event_subject as derive_event_subject_protocol,
+    encode_pagination_cursor as encode_pagination_cursor_protocol,
+    pagination_query_digest as pagination_query_digest_protocol, parse_authorization_context,
     session_proof_request_digest as session_proof_request_digest_protocol,
     session_proof_signing_digest as session_proof_signing_digest_protocol,
     verify_authorization_context as verify_authorization_context_protocol,
@@ -22,6 +25,38 @@ use trellis_protocol::{
 use wasm_bindgen::prelude::*;
 
 const MAXIMUM_SAFE_JSON_INTEGER: f64 = 9_007_199_254_740_991.0;
+
+/// Compute the shared query binding for an opaque pagination cursor.
+#[wasm_bindgen]
+pub fn pagination_query_digest(endpoint: &str, query_json: &str) -> Result<String, JsError> {
+    let query: Value =
+        serde_json::from_str(query_json).map_err(|error| JsError::new(&error.to_string()))?;
+    pagination_query_digest_protocol(endpoint, &query)
+        .map_err(|error| JsError::new(&error.to_string()))
+}
+
+/// Encode a JSON value as a shared versioned pagination cursor.
+#[wasm_bindgen]
+pub fn encode_pagination_cursor(query_digest: &str, after_json: &str) -> Result<String, JsError> {
+    let after: Value =
+        serde_json::from_str(after_json).map_err(|error| JsError::new(&error.to_string()))?;
+    encode_pagination_cursor_protocol(query_digest, &after)
+        .map_err(|error| JsError::new(&error.to_string()))
+}
+
+/// Decode and query-bind a shared versioned pagination cursor.
+#[wasm_bindgen]
+pub fn decode_pagination_cursor(encoded: &str, query_digest: &str) -> Result<String, JsError> {
+    let after: Value = decode_pagination_cursor_protocol(encoded, query_digest)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    serde_json::to_string(&after).map_err(|error| JsError::new(&error.to_string()))
+}
+
+/// Derive an API-qualified event base subject.
+#[wasm_bindgen]
+pub fn event_subject(api_id: &str, action: &str) -> Result<String, JsError> {
+    derive_event_subject_protocol(api_id, action).map_err(|error| JsError::new(&error.to_string()))
+}
 
 #[derive(Deserialize)]
 #[serde(transparent)]
@@ -220,10 +255,10 @@ struct WireAuthorizationRequest {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct WireAuthorizationEvent {
     subject: String,
+    descriptor_identity: String,
     event_id: String,
     event_time: String,
     proof: String,
-    required_permissions: Vec<PermissionAtom>,
     #[serde(default)]
     revoked_at: Option<i64>,
     policy: WireAuthorizationVerificationPolicy,
@@ -410,12 +445,12 @@ fn event_result(
     let verified = match verify_authorization_event_protocol(AuthorizationEventVerificationInput {
         context,
         subject: &input.subject,
+        descriptor_identity: &input.descriptor_identity,
         raw_payload: payload,
         event_id: &input.event_id,
         event_time: &input.event_time,
         proof: &proof,
         policy: &policy,
-        required_permissions: &input.required_permissions,
         revoked_at: input.revoked_at,
     }) {
         Ok(verified) => verified,

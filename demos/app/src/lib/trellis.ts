@@ -6,7 +6,7 @@ import {
 import { participants } from "../../trellis/index.js";
 
 export type TrellisDemoAppClient = TrellisClientFor<
-  typeof participants.demoApp.participant
+  typeof participants.App.participant
 >;
 
 const defaultTrellisUrl = "http://localhost:3000";
@@ -18,7 +18,7 @@ export const trellisUrl = new URL(
   .replace(/\/$/, "");
 
 export const trellisApp = createTrellisApp({
-  participant: participants.demoApp.participant,
+  participant: participants.App.participant,
   trellisUrl,
 });
 

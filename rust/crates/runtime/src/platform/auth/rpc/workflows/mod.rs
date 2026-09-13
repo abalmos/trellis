@@ -2,6 +2,7 @@ mod deployments;
 mod devices;
 mod grants;
 mod portals;
+mod resources;
 mod sessions;
 mod users;
 
@@ -13,31 +14,34 @@ pub(super) async fn dispatch(
     payload: &[u8],
     caller: ValidatedRequest,
 ) -> Result<Value, AuthorizationStateError> {
-    if subject.starts_with("rpc.v1.Auth.Grants.")
-        || subject == "rpc.v1.Auth.Issuers.Revoke"
-        || subject.starts_with("rpc.v1.Auth.Participants.")
-        || subject == "rpc.v1.Auth.Deployments.Apply"
+    if subject.starts_with("rpc.v1.core.Resources.") {
+        resources::dispatch(processor, subject, payload, caller).await
+    } else if subject.starts_with("rpc.v1.auth.Grants.")
+        || subject == "rpc.v1.auth.Issuers.Revoke"
+        || subject.starts_with("rpc.v1.auth.Participants.")
+        || subject == "rpc.v1.auth.Deployments.Apply"
+        || subject == "rpc.v1.auth.Deployments.Apply"
     {
         grants::dispatch(processor, subject, payload, caller).await
-    } else if subject.starts_with("rpc.v1.Auth.Sessions.")
-        || subject.starts_with("rpc.v1.Auth.Connections.")
+    } else if subject.starts_with("rpc.v1.auth.Sessions.")
+        || subject.starts_with("rpc.v1.auth.Connections.")
     {
         sessions::dispatch(processor, subject, payload, caller).await
-    } else if subject.starts_with("rpc.v1.Auth.Portals.")
-        || subject == "rpc.v1.Auth.Capabilities.List"
+    } else if subject.starts_with("rpc.v1.auth.Portals.")
+        || subject == "rpc.v1.auth.Capabilities.List"
     {
         portals::dispatch(processor, subject, payload, caller).await
-    } else if subject.starts_with("rpc.v1.Auth.Users.")
-        || subject.starts_with("rpc.v1.Auth.UserIdentities.")
-        || subject.starts_with("rpc.v1.Auth.CapabilityGroups.")
+    } else if subject.starts_with("rpc.v1.auth.Users.")
+        || subject.starts_with("rpc.v1.auth.UserIdentities.")
+        || subject.starts_with("rpc.v1.auth.CapabilityGroups.")
     {
         users::dispatch(processor, subject, payload, caller).await
-    } else if subject.starts_with("rpc.v1.Auth.Deployments.")
-        || subject.starts_with("rpc.v1.Auth.ServiceInstances.")
+    } else if subject.starts_with("rpc.v1.auth.Deployments.")
+        || subject.starts_with("rpc.v1.auth.ServiceInstances.")
     {
         deployments::dispatch(processor, subject, payload, caller).await
-    } else if subject.starts_with("rpc.v1.Auth.Devices.")
-        || subject.starts_with("rpc.v1.Auth.DeviceUserAuthorities.")
+    } else if subject.starts_with("rpc.v1.auth.Devices.")
+        || subject.starts_with("rpc.v1.auth.DeviceUserAuthorities.")
     {
         devices::dispatch(processor, subject, payload, caller).await
     } else {

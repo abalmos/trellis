@@ -12,9 +12,6 @@
 use base64::Engine;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
-use trellis_protocol::{
-    ApiSurfaceKind, PermissionAction, PermissionAtom, PermissionTarget, ProtocolError,
-};
 
 use crate::client::{
     AuthorizationProviderCache, AuthorizationVerificationCore, EventVerificationInput,
@@ -218,8 +215,7 @@ impl LocalAuthVerifier {
         subject: &str,
         payload: &[u8],
         headers: Option<&async_nats::header::HeaderMap>,
-        event_api_id: &str,
-        event_name: &str,
+        expected_descriptor_identity: &str,
     ) -> Result<super::runtime_facade::ServiceEventPublisherContext, EventVerificationFailure> {
         let Some(headers) = headers else {
             return Err(EventVerificationFailure::rejected(
@@ -231,6 +227,7 @@ impl LocalAuthVerifier {
         let authorization_context = required_event_header(headers, "authorization-context")?;
         let event_id = required_event_header(headers, "Nats-Msg-Id")?;
         let event_time = required_event_header(headers, "Trellis-Event-Time")?;
+        let descriptor_identity = required_event_header(headers, "Trellis-Event-Descriptor")?;
 
         // Historical resolution retains signed contexts after expiry; the
         // strict eventTime window is enforced below by the protocol verifier.
@@ -300,27 +297,23 @@ impl LocalAuthVerifier {
         // The caller supplies the API identity and event name from its
         // precompiled descriptor; the verifier never infers either from the
         // transport subject or the connected service's own participant.
-        let permission = match select_publish_permission(event_api_id, event_name) {
-            Ok(permission) => permission,
-            Err(error) => {
-                tracing::debug!(subject, %error, "local event permission rejected");
-                return Err(EventVerificationFailure::rejected(
-                    "invalid event proof signature",
-                ));
-            }
-        };
+        if descriptor_identity != expected_descriptor_identity {
+            return Err(EventVerificationFailure::rejected(
+                "event descriptor identity does not match the registered listener",
+            ));
+        }
         let verified_event = self
             .verification
             .verify_event(EventVerificationInput {
                 context: &context,
                 context_digest: &authorization_context,
                 subject,
+                descriptor_identity: &descriptor_identity,
                 payload,
                 event_id: &event_id,
                 event_time: &event_time,
                 proof: &proof,
                 policy: &policy,
-                required_permissions: &[permission],
                 revoked_at,
             })
             .map_err(|error| {
@@ -368,6 +361,25 @@ impl RequestValidator for LocalAuthVerifier {
         Box::pin(async move {
             self.verify_request_inner(subject, payload, context, false)
                 .await
+        })
+    }
+
+    fn revalidate_current<'a>(
+        &'a self,
+        context: &'a RequestContext,
+    ) -> BoxFuture<'a, Result<bool, ServerError>> {
+        Box::pin(async move {
+            let (Some(provider), Some(digest), Some(route)) = (
+                self.provider.as_ref(),
+                context.authorization_context.as_deref(),
+                context.required_permission.as_ref(),
+            ) else {
+                return Ok(false);
+            };
+            let Ok(permission) = route.permission_atom() else {
+                return Ok(false);
+            };
+            Ok(provider.current_context_allows(digest, &permission))
         })
     }
 }
@@ -422,14 +434,4 @@ pub fn payload_hash_base64url(payload: &[u8]) -> String {
     use base64::Engine as _;
     use sha2::Digest as _;
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(payload))
-}
-
-fn select_publish_permission(
-    api_id: &str,
-    event_name: &str,
-) -> Result<PermissionAtom, ProtocolError> {
-    PermissionAtom::new(
-        PermissionTarget::api_surface(api_id, ApiSurfaceKind::Event, event_name)?,
-        PermissionAction::Publish,
-    )
 }

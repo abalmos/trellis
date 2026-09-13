@@ -26,13 +26,13 @@ use super::transfer::{
 use super::{
     bootstrap_service_host, control_subject, BootstrapBindingInfo, DownloadTransferGrantPlan,
     EventPublisher, FeedDescriptor, HandlerResult, JobsResourceBinding, KvResourceBinding,
-    OperationDescriptor, OperationTransferProgress, RequestContext, Router, RpcDescriptor,
-    ServerError, ServiceOperationProvider, ServiceResourceBindings, StoreResourceBinding,
-    StoreResourceClient, UploadTransferCompletion, UploadTransferSession,
+    OperationControl, OperationDescriptor, OperationTransferProgress, RequestContext, Router,
+    RpcDescriptor, ServerError, ServiceResourceBindings, StoreResourceBinding, StoreResourceClient,
+    UploadTransferCompletion, UploadTransferSession,
 };
 
 use crate::client::{
-    EventMessage, EventReplayPolicy, EventSubscribeOptions, EventSubscriptionMode,
+    EventReplayPolicy, EventSubscribeOptions, EventSubscriptionMode,
     ServiceConnectWithContractOptions, TrellisClient, TrellisClientError,
 };
 use crate::jobs::{
@@ -71,13 +71,90 @@ struct SharedDurableEventListener {
 struct EventRegistration {
     event_api_id: String,
     event_name: String,
+    descriptor_identity: String,
     handlers: BTreeMap<u64, SharedEventHandler>,
 }
 
 struct DurableEventPullConfig {
     key: DurableEventListenerKey,
     subscribe_options: EventSubscribeOptions,
+    replay_subscribe_options: EventSubscribeOptions,
     context: ServiceEventListenerContext,
+    ack_wait: Duration,
+    backoff: Vec<Duration>,
+    max_deliver: u64,
+    resource_id: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConsumerReplayEnvelope {
+    dead_letter_id: String,
+    generation: u64,
+    resource_id: String,
+    original_record_sequence: u64,
+    original_subject: String,
+    original_payload_bytes: Vec<u8>,
+    original_headers: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConsumerDeliveryReport {
+    resource_id: String,
+    source_stream: String,
+    source_sequence: String,
+    delivery_count: u64,
+    delivery_proof: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    replay_generation: Option<u64>,
+    outcome: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+struct ConsumerReportDelivery;
+struct ConsumerDeadLetterInspect;
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConsumerDeadLetterInspectInput {
+    resource_id: String,
+    dead_letter_id: String,
+}
+
+impl crate::generated::RpcDescriptor for ConsumerReportDelivery {
+    type Input = ConsumerDeliveryReport;
+    type Output = serde_json::Value;
+    type Error = serde_json::Value;
+
+    const API_ID: &'static str = "trellis.events@v1";
+    const DESCRIPTOR_NAME: &'static str = "rpc:Consumers.ReportDelivery";
+    const SUBJECT: &'static str = "";
+    const KEY: &'static str = "Consumers.ReportDelivery";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const DOWNLOAD: bool = false;
+
+    fn decode_error(value: serde_json::Value) -> Result<Option<Self::Error>, serde_json::Error> {
+        Ok(Some(value))
+    }
+}
+
+impl crate::generated::RpcDescriptor for ConsumerDeadLetterInspect {
+    type Input = ConsumerDeadLetterInspectInput;
+    type Output = serde_json::Value;
+    type Error = serde_json::Value;
+
+    const API_ID: &'static str = "trellis.events@v1";
+    const DESCRIPTOR_NAME: &'static str = "rpc:DeadLetters.Inspect";
+    const SUBJECT: &'static str = "";
+    const KEY: &'static str = "DeadLetters.Inspect";
+    const CALLER_CAPABILITIES: &'static [&'static str] = &[];
+    const DOWNLOAD: bool = false;
+
+    fn decode_error(value: serde_json::Value) -> Result<Option<Self::Error>, serde_json::Error> {
+        Ok(Some(value))
+    }
 }
 
 #[derive(Clone)]
@@ -222,22 +299,13 @@ pub enum ServiceRuntimeError {
         subject: String,
     },
 
-    /// A durable listener count must be at least one.
+    /// A bound durable listener count must be at least one.
     #[error("event consumer group '{group}' has invalid listener concurrency {concurrency}; expected >= 1")]
     InvalidEventListenerConcurrency {
         /// Event consumer group name.
         group: String,
         /// Invalid requested listener count.
         concurrency: u32,
-    },
-
-    /// Strict ordering permits only one pull loop per service instance.
-    #[error(
-        "event consumer group '{group}' uses strict ordering and requires listener concurrency 1"
-    )]
-    StrictEventListenerConcurrency {
-        /// Strictly ordered event consumer group name.
-        group: String,
     },
 
     /// Registrations sharing one durable consumer must use the same local count.
@@ -267,8 +335,6 @@ pub struct ServiceEventListenOptions {
     pub mode: ServiceEventListenerMode,
     /// Contract-local event consumer group name. Required when more than one group matches.
     pub group: Option<String>,
-    /// Number of local pull loops for a parallel durable consumer group.
-    pub concurrency: u32,
 }
 
 impl Default for ServiceEventListenOptions {
@@ -276,7 +342,6 @@ impl Default for ServiceEventListenOptions {
         Self {
             mode: ServiceEventListenerMode::Durable,
             group: None,
-            concurrency: 1,
         }
     }
 }
@@ -449,6 +514,28 @@ impl ServiceHandle {
             })
     }
 
+    /// Open one generated typed KV resource against its installed binding.
+    #[doc(hidden)]
+    pub async fn generated_kv_handle<T>(
+        &self,
+        name: &str,
+        codec: crate::client::ResourceCodec<T>,
+    ) -> Result<KvHandle<T>, ServerError>
+    where
+        T: crate::generated::Codec + Send + 'static,
+    {
+        let binding = self.kv_binding(name)?;
+        validate_kv_binding(self.service_name(), name, binding)?;
+        let client = self.client().nats().open_kv(binding).await?;
+        Ok(KvResourceHandle::from_generated(
+            name,
+            binding.clone(),
+            codec,
+            client,
+            self.client.watch_availability(),
+        ))
+    }
+
     /// Return one object-store resource binding by contract-local resource name.
     pub fn store_binding(&self, name: &str) -> Result<&StoreResourceBinding, ServerError> {
         self.resources
@@ -564,14 +651,6 @@ impl ServiceHandle {
         listen_event_with_bindings::<D, _, _>(self, event_api_id, handler, options).await
     }
 
-    /// Open a bound KV resource client by contract-local resource name.
-    pub async fn kv_client(&self, name: &str) -> Result<KvHandle, ServerError> {
-        let binding = self.kv_binding(name)?;
-        validate_kv_binding(self.service_name(), name, binding)?;
-        let client = self.client().nats().open_kv(binding).await?;
-        Ok(KvResourceHandle::new(name, binding.clone(), client))
-    }
-
     /// Open a bound object-store resource client by contract-local resource name.
     pub async fn store_client(&self, name: &str) -> Result<StoreHandle, ServerError> {
         let binding = self.store_binding(name)?;
@@ -582,6 +661,7 @@ impl ServiceHandle {
             name,
             binding.clone(),
             client,
+            self.client.watch_availability(),
         ))
     }
 
@@ -648,12 +728,17 @@ impl ServiceHandle {
 pub struct ServiceHandlerContext {
     request: RequestContext,
     handle: ServiceHandle,
+    download_allowed: bool,
 }
 
 impl ServiceHandlerContext {
     /// Build a handler context from low-level request metadata and a service handle.
     pub fn new(request: RequestContext, handle: ServiceHandle) -> Self {
-        Self { request, handle }
+        Self {
+            request,
+            handle,
+            download_allowed: false,
+        }
     }
 
     /// Return low-level request metadata, including caller and tracing fields.
@@ -675,6 +760,11 @@ impl ServiceHandlerContext {
         chunk_bytes: u64,
         info: super::FileTransferInfo,
     ) -> Result<DownloadTransferGrantPlan, ServerError> {
+        if !self.download_allowed {
+            return Err(ServerError::Nats(
+                "RPC descriptor does not declare a download transfer".to_owned(),
+            ));
+        }
         let session_key = self
             .request
             .caller
@@ -707,7 +797,6 @@ pub struct ConnectedServiceRuntime<C> {
     client: Arc<TrellisClient>,
     binding: CoreBootstrapBinding,
     resources: ServiceResourceBindings,
-    kv_handles: BTreeMap<String, KvHandle>,
     store_handles: BTreeMap<String, StoreHandle>,
     event_listeners: SharedDurableEventListeners,
     event_failures: mpsc::UnboundedSender<ServiceRuntimeError>,
@@ -715,6 +804,11 @@ pub struct ConnectedServiceRuntime<C> {
     auth: LocalAuthVerifier,
     _event_listener_cleanup: ServiceEventListenerRegistryCleanup,
     router: Router,
+    provider_deployment_id: String,
+    provider_instance_id: String,
+    operation_executor_id: String,
+    operation_repository: Option<super::KvOperationRepository>,
+    operation_staging: Option<super::resources::backend::BoundStoreResourceClient>,
     service_name: String,
     registered_subjects: BTreeSet<String>,
     job_hosts: Vec<WorkerHostHandle>,
@@ -746,12 +840,18 @@ impl<C> ConnectedServiceRuntime<C> {
         let auth =
             LocalAuthVerifier::new(client.authorization_context_cache().ok(), api_id.clone());
         let mut router = Router::new();
-        router.set_api_id(api_id);
+        let provider_deployment_id = client
+            .own_deployment_id()
+            .expect("connected services always have a deployment assignment");
+        router.set_provider_deployment_id(provider_deployment_id.clone());
+        let provider_instance_id = client
+            .own_instance_id()
+            .expect("connected services always have an instance assignment");
+        router.set_provider_instance_id(provider_instance_id.clone());
         Self {
             client,
             binding,
             resources,
-            kv_handles: BTreeMap::new(),
             store_handles: BTreeMap::new(),
             event_listeners: Arc::clone(&event_listeners),
             event_failures,
@@ -759,6 +859,11 @@ impl<C> ConnectedServiceRuntime<C> {
             auth,
             _event_listener_cleanup: ServiceEventListenerRegistryCleanup::new(event_listeners),
             router,
+            provider_deployment_id,
+            provider_instance_id,
+            operation_executor_id: ulid::Ulid::new().to_string(),
+            operation_repository: None,
+            operation_staging: None,
             service_name: service_name.into(),
             registered_subjects: BTreeSet::new(),
             job_hosts: Vec::new(),
@@ -771,8 +876,27 @@ impl<C> ConnectedServiceRuntime<C> {
         &self.client
     }
 
-    fn descriptor_subject(&self, subject: &str) -> String {
-        subject.to_owned()
+    fn descriptor_subject(&self, family: &str, api_id: &str, action: &str) -> String {
+        let action = action.split_once('.').map_or(action, |(_, name)| name);
+        let subject = match family {
+            "rpc" => trellis_protocol::derive_bound_rpc_subject(
+                api_id,
+                &self.provider_deployment_id,
+                action,
+            ),
+            "operation" => trellis_protocol::derive_bound_operation_subject(
+                api_id,
+                &self.provider_deployment_id,
+                action,
+            ),
+            "feed" => trellis_protocol::derive_bound_feed_subject(
+                api_id,
+                &self.provider_deployment_id,
+                action,
+            ),
+            _ => unreachable!("only request route families are deployment-bound"),
+        };
+        subject.expect("generated route metadata must form a valid bound subject")
     }
 
     /// Return the authenticated transport consumed by generated facades.
@@ -791,12 +915,6 @@ impl<C> ConnectedServiceRuntime<C> {
         &self.resources
     }
 
-    /// Return an opened generic KV handle when bootstrap installed the resource.
-    #[doc(hidden)]
-    pub fn generated_kv_handle(&self, name: &str) -> Option<&KvHandle> {
-        self.kv_handles.get(name)
-    }
-
     /// Return an opened generic object-store handle when bootstrap installed the resource.
     #[doc(hidden)]
     pub fn generated_store_handle(&self, name: &str) -> Option<&StoreHandle> {
@@ -813,6 +931,28 @@ impl<C> ConnectedServiceRuntime<C> {
                 resource_kind: "kv".to_string(),
                 resource_name: name.to_string(),
             })
+    }
+
+    /// Open one generated typed KV resource against its installed binding.
+    #[doc(hidden)]
+    pub async fn generated_kv_handle<T>(
+        &self,
+        name: &str,
+        codec: crate::client::ResourceCodec<T>,
+    ) -> Result<KvHandle<T>, ServerError>
+    where
+        T: crate::generated::Codec + Send + 'static,
+    {
+        let binding = self.kv_binding(name)?;
+        validate_kv_binding(self.service_name(), name, binding)?;
+        let client = self.client().nats().open_kv(binding).await?;
+        Ok(KvResourceHandle::from_generated(
+            name,
+            binding.clone(),
+            codec,
+            client,
+            self.client.watch_availability(),
+        ))
     }
 
     /// Return one object-store resource binding by contract-local resource name.
@@ -845,8 +985,21 @@ impl<C> ConnectedServiceRuntime<C> {
     }
 
     /// Return the Event Log domain transport used by Trellis infrastructure.
-    pub fn eventlog_runtime(&self) -> super::EventLogRuntime {
-        super::EventLogRuntime::from_client(Arc::clone(self.client()))
+    pub fn events_runtime(&self) -> super::EventsRuntime {
+        super::EventsRuntime::from_client(Arc::clone(self.client()))
+    }
+
+    /// Open the platform-provisioned durable operation repository for this deployment.
+    pub async fn operation_repository(&self) -> Result<super::KvOperationRepository, ServerError> {
+        if let Some(repository) = &self.operation_repository {
+            return Ok(repository.clone());
+        }
+        let bucket = format!("trellis_operations_{}", self.provider_deployment_id);
+        let store = async_nats::jetstream::new(self.client.nats())
+            .get_key_value(bucket)
+            .await
+            .map_err(|error| ServerError::Nats(error.to_string()))?;
+        Ok(super::KvOperationRepository::new(store))
     }
 
     /// Submit a typed service-private job for generated participant code.
@@ -872,7 +1025,24 @@ impl<C> ConnectedServiceRuntime<C> {
     where
         D: JobDescriptor + 'static,
         H: Fn(crate::jobs::ActiveJob<D::Payload, D::Result>) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = Result<D::Result, E>> + Send + 'static,
+        Fut: Future<Output = Result<D::Result, JobProcessError<E>>> + Send + 'static,
+        E: ToString + Send + 'static,
+    {
+        self.register_generated_job_worker_with_concurrency::<D, H, Fut, E>(handler, 1)
+            .await
+    }
+
+    /// Start generated service-private job workers with local concurrency.
+    #[doc(hidden)]
+    pub async fn register_generated_job_worker_with_concurrency<D, H, Fut, E>(
+        &mut self,
+        handler: H,
+        concurrency: u32,
+    ) -> Result<(), ServiceRuntimeError>
+    where
+        D: JobDescriptor + 'static,
+        H: Fn(crate::jobs::ActiveJob<D::Payload, D::Result>) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = Result<D::Result, JobProcessError<E>>> + Send + 'static,
         E: ToString + Send + 'static,
     {
         let mut binding = self.binding.jobs_runtime_binding()?;
@@ -895,14 +1065,25 @@ impl<C> ConnectedServiceRuntime<C> {
                 async move {
                     let active = crate::jobs::internal::typed_active_job::<D>(active)
                         .map_err(|error| JobProcessError::Failed(error.to_string()))?;
-                    let result = handler(active)
-                        .await
-                        .map_err(|error| JobProcessError::Failed(error.to_string()))?;
+                    let result = handler(active).await.map_err(|error| match error {
+                        JobProcessError::Retryable(error) => {
+                            JobProcessError::Retryable(error.to_string())
+                        }
+                        JobProcessError::Failed(error) => {
+                            JobProcessError::Failed(error.to_string())
+                        }
+                    })?;
                     serde_json::to_value(result)
                         .map_err(|error| JobProcessError::Failed(error.to_string()))
                 }
             },
-            WorkerHostOptions::default(),
+            WorkerHostOptions {
+                queue_concurrency: std::collections::BTreeMap::from([(
+                    D::QUEUE_TYPE.to_owned(),
+                    concurrency,
+                )]),
+                ..WorkerHostOptions::default()
+            },
         )
         .await?;
         self.job_hosts.push(host);
@@ -931,14 +1112,6 @@ impl<C> ConnectedServiceRuntime<C> {
             .await
     }
 
-    /// Open a bound KV resource client by contract-local resource name.
-    pub async fn kv_client(&self, name: &str) -> Result<KvHandle, ServerError> {
-        let binding = self.kv_binding(name)?;
-        validate_kv_binding(self.service_name(), name, binding)?;
-        let client = self.client().nats().open_kv(binding).await?;
-        Ok(KvResourceHandle::new(name, binding.clone(), client))
-    }
-
     /// Open a bound object-store resource client by contract-local resource name.
     pub async fn store_client(&self, name: &str) -> Result<StoreHandle, ServerError> {
         let binding = self.store_binding(name)?;
@@ -949,6 +1122,7 @@ impl<C> ConnectedServiceRuntime<C> {
             name,
             binding.clone(),
             client,
+            self.client.watch_availability(),
         ))
     }
 
@@ -996,10 +1170,12 @@ impl<C> ConnectedServiceRuntime<C> {
     {
         let handle = self.generated_handle();
         self.router.register_rpc::<D, _, _>(move |request, input| {
-            handler(ServiceHandlerContext::new(request, handle.clone()), input)
+            let mut context = ServiceHandlerContext::new(request, handle.clone());
+            context.download_allowed = D::DOWNLOAD;
+            handler(context, input)
         });
         self.registered_subjects
-            .insert(self.descriptor_subject(D::SUBJECT));
+            .insert(self.descriptor_subject("rpc", D::API_ID, D::KEY));
     }
 
     /// Register one descriptor-backed feed handler and record its subject.
@@ -1013,25 +1189,53 @@ impl<C> ConnectedServiceRuntime<C> {
         self.router.register_feed::<D, _, _>(move |request, input| {
             handler(ServiceHandlerContext::new(request, handle.clone()), input)
         });
+        let subject = self.descriptor_subject("feed", D::API_ID, D::KEY);
+        self.registered_subjects.insert(subject.clone());
         self.registered_subjects
-            .insert(self.descriptor_subject(D::SUBJECT));
+            .insert(trellis_protocol::derive_feed_control_subject(
+                &subject,
+                &self.provider_instance_id,
+            ));
     }
 
-    /// Register one operation-backed provider and record data/control subjects.
-    pub fn register_operation_provider<D, P>(&mut self, provider: P)
+    /// Register one operation business handler and record its runtime-owned lifecycle routes.
+    pub fn register_operation_handler<D, F, Fut>(&mut self, handler: F)
     where
         D: OperationDescriptor + 'static,
-        P: ServiceOperationProvider<D>,
+        D::Progress: serde::de::DeserializeOwned,
+        D::Output: serde::de::DeserializeOwned,
+        F: Fn(RequestContext, D::Input, OperationControl<D>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
     {
-        self.router.register_operation_provider::<D, _>(provider);
-        self.registered_subjects
-            .insert(self.descriptor_subject(D::SUBJECT));
-        self.registered_subjects
-            .insert(control_subject(&self.descriptor_subject(D::SUBJECT)));
+        self.router.register_operation_provider::<D, _>(
+            super::operations::RuntimeOperationProvider::new(
+                super::operations::OperationHandlerRuntime {
+                    service: self.service_name.clone(),
+                    deployment_id: self.provider_deployment_id.clone(),
+                    executor_id: self.operation_executor_id.clone(),
+                    repository: self
+                        .operation_repository
+                        .clone()
+                        .expect("connected service operation repository"),
+                    nats: self.client.nats().clone(),
+                    service_session_key: self.client.auth().session_key.clone(),
+                    staging: self
+                        .operation_staging
+                        .clone()
+                        .expect("connected service operation staging store"),
+                    validator: self.auth.clone(),
+                },
+                handler,
+            ),
+        );
+        let subject = self.descriptor_subject("operation", D::API_ID, D::KEY);
+        self.registered_subjects.insert(subject.clone());
+        self.registered_subjects.insert(control_subject(&subject));
     }
 
     /// Run registered subjects using the default NATS request loop.
     pub async fn run(self) -> Result<(), ServiceRuntimeError> {
+        self.router.recover_operations().await?;
         let mut event_failures = self.event_failure_receiver;
         let subjects = self.registered_subjects.into_iter().collect::<Vec<_>>();
         let job_hosts = self.job_hosts;
@@ -1113,10 +1317,19 @@ impl<C: crate::generated::ParticipantDescriptor> ConnectedServiceRuntime<C> {
             binding,
             api_id,
         );
-        for name in runtime.resources.kv.keys().cloned().collect::<Vec<_>>() {
-            let handle = runtime.kv_client(&name).await?;
-            runtime.kv_handles.insert(name, handle);
-        }
+        runtime.operation_repository = Some(runtime.operation_repository().await?);
+        let staging = async_nats::jetstream::new(runtime.client.nats().clone())
+            .get_object_store(format!(
+                "trellis_operation_staging_{}",
+                runtime.provider_deployment_id
+            ))
+            .await
+            .map_err(|error| {
+                ServiceRuntimeError::Server(Box::new(ServerError::Nats(error.to_string())))
+            })?;
+        runtime.operation_staging = Some(super::resources::backend::BoundStoreResourceClient::new(
+            staging,
+        ));
         for name in runtime.resources.store.keys().cloned().collect::<Vec<_>>() {
             let handle = runtime.store_client(&name).await?;
             runtime.store_handles.insert(name, handle);
@@ -1132,15 +1345,6 @@ fn parse_bootstrap_binding(
         .service_bootstrap_binding()
         .cloned()
         .ok_or(ServiceRuntimeError::MissingBootstrapBinding)
-}
-
-fn service_event_context_from_message<T>(
-    mode: ServiceEventListenerMode,
-    group: Option<String>,
-    message: &EventMessage<T>,
-    publisher: Option<ServiceEventPublisherContext>,
-) -> ServiceEventListenerContext {
-    service_event_context_from_headers(mode, group, message.headers(), publisher)
 }
 
 fn service_event_context_from_headers(
@@ -1185,7 +1389,12 @@ where
     let event_listeners = Arc::clone(&service.event_listeners);
     let failures = service.event_failures.clone();
     let event_api_id = event_api_id.to_owned();
-    let event_name = D::KEY.to_owned();
+    let event_name = D::KEY
+        .split_once('.')
+        .map_or(D::KEY, |(_, name)| name)
+        .to_owned();
+    let descriptor_identity = D::descriptor_identity()
+        .map_err(|error| ServiceRuntimeError::Client(TrellisClientError::Subject(error)))?;
     if options.mode == ServiceEventListenerMode::Ephemeral {
         let mut events = client
             .nats()
@@ -1198,8 +1407,7 @@ where
             .await
             .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
         let event_auth = auth.clone();
-        let event_api_id = event_api_id.clone();
-        let event_name = event_name.clone();
+        let descriptor_identity = descriptor_identity.clone();
         let task = tokio::spawn(async move {
             let result = async {
                 while let Some(message) = events.next().await {
@@ -1208,8 +1416,7 @@ where
                             message.subject.as_ref(),
                             &message.payload,
                             message.headers.as_ref(),
-                            &event_api_id,
-                            &event_name,
+                            &descriptor_identity,
                         )
                         .await
                     {
@@ -1254,7 +1461,7 @@ where
     let subject = client.descriptor_subject(D::SUBSCRIBE_SUBJECT);
     let (group, binding) =
         resolve_event_consumer_binding(bindings, &subject, options.group.as_deref())?;
-    validate_event_listener_concurrency(&group, binding.ordering, options.concurrency, None)?;
+    validate_event_listener_concurrency(&group, binding.concurrency, None)?;
     let key = DurableEventListenerKey {
         stream: binding.stream.clone(),
         durable_name: binding.consumer_name.clone(),
@@ -1289,15 +1496,15 @@ where
     if let Some(listener) = listeners.get_mut(&key) {
         validate_event_listener_concurrency(
             context.group.as_deref().expect("durable listener group"),
-            binding.ordering,
-            options.concurrency,
+            binding.concurrency,
             Some(listener.concurrency),
         )?;
         for (pattern, registration) in &listener.registrations {
             if event_patterns_overlap(pattern, &subject)
                 && (pattern != &subject
                     || registration.event_api_id != event_api_id
-                    || registration.event_name != event_name)
+                    || registration.event_name != event_name
+                    || registration.descriptor_identity != descriptor_identity)
             {
                 return Err(TrellisClientError::EventSubscriptionProtocol(format!(
                     "event registration '{subject}' overlaps '{pattern}'"
@@ -1309,8 +1516,9 @@ where
             .registrations
             .entry(subject.clone())
             .or_insert_with(|| EventRegistration {
-                event_api_id,
-                event_name,
+                event_api_id: event_api_id.clone(),
+                event_name: event_name.clone(),
+                descriptor_identity: descriptor_identity.clone(),
                 handlers: BTreeMap::new(),
             })
             .handlers
@@ -1332,7 +1540,7 @@ where
         replay: EventReplayPolicy::New,
         durable_name: Some(binding.consumer_name.clone()),
     };
-    let pull_abort_handles = (0..options.concurrency)
+    let pull_abort_handles = (0..binding.concurrency)
         .map(|_| {
             let pull = run_durable_event_pull_loop(
                 Arc::clone(client),
@@ -1341,7 +1549,21 @@ where
                 DurableEventPullConfig {
                     key: key.clone(),
                     subscribe_options: subscribe_options.clone(),
+                    replay_subscribe_options: EventSubscribeOptions {
+                        stream: Some(binding.replay_binding.stream.clone()),
+                        mode: EventSubscriptionMode::Durable,
+                        replay: EventReplayPolicy::New,
+                        durable_name: Some(binding.replay_binding.consumer_name.clone()),
+                    },
                     context: context.clone(),
+                    ack_wait: Duration::from_millis(binding.ack_wait_ms.unsigned_abs()),
+                    backoff: binding
+                        .backoff_ms
+                        .iter()
+                        .map(|delay| Duration::from_millis(delay.unsigned_abs()))
+                        .collect(),
+                    max_deliver: binding.max_deliver.unsigned_abs(),
+                    resource_id: binding.resource_id.clone(),
                 },
             );
             let failures = failures.clone();
@@ -1361,10 +1583,11 @@ where
                 EventRegistration {
                     event_api_id,
                     event_name,
+                    descriptor_identity,
                     handlers: BTreeMap::from([(handler_id, handler)]),
                 },
             )]),
-            concurrency: options.concurrency,
+            concurrency: binding.concurrency,
             pull_abort_handles,
         },
     );
@@ -1383,7 +1606,6 @@ where
 
 fn validate_event_listener_concurrency(
     group: &str,
-    ordering: super::EventConsumerOrdering,
     requested: u32,
     existing: Option<u32>,
 ) -> Result<(), ServiceRuntimeError> {
@@ -1391,11 +1613,6 @@ fn validate_event_listener_concurrency(
         return Err(ServiceRuntimeError::InvalidEventListenerConcurrency {
             group: group.to_string(),
             concurrency: requested,
-        });
-    }
-    if ordering == super::EventConsumerOrdering::Strict && requested > 1 {
-        return Err(ServiceRuntimeError::StrictEventListenerConcurrency {
-            group: group.to_string(),
         });
     }
     if let Some(existing) = existing.filter(|existing| *existing != requested) {
@@ -1451,42 +1668,133 @@ async fn run_durable_event_pull_loop(
     event_listeners: SharedDurableEventListeners,
     config: DurableEventPullConfig,
 ) -> Result<(), ServiceRuntimeError> {
+    let mut replay = false;
+    let mut original_consumer_opened = false;
     loop {
-        let mut messages = match client
-            .event_messages::<serde_json::Value>(config.subscribe_options.clone(), None)
+        let is_replay = replay;
+        replay = !replay;
+        let messages = match client
+            .event_messages::<serde_json::Value>(
+                if is_replay {
+                    config.replay_subscribe_options.clone()
+                } else {
+                    config.subscribe_options.clone()
+                },
+                None,
+                Some(1),
+            )
             .await
         {
             Ok(messages) => messages,
-            Err(error) if is_missing_durable_event_consumer_error(&error) => {
+            Err(error)
+                if missing_durable_event_consumer_is_retryable(
+                    &error,
+                    is_replay,
+                    original_consumer_opened,
+                ) =>
+            {
                 tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS)).await;
                 continue;
             }
             Err(error) => return Err(error.into()),
         };
+        if !is_replay {
+            original_consumer_opened = true;
+        }
+        let mut messages = messages.take(1);
 
         loop {
-            let Some(result) = messages.next().await else {
-                return Err(TrellisClientError::EventSubscriptionProtocol(
-                    "durable event stream closed".to_owned(),
-                )
-                .into());
+            let result = match tokio::time::timeout(Duration::from_secs(1), messages.next()).await {
+                Ok(Some(result)) => result,
+                Ok(None) => break,
+                Err(_) => break,
             };
             let message = match result {
                 Ok(message) => message,
-                Err(error) if is_missing_durable_event_consumer_error(&error) => {
+                Err(error)
+                    if missing_durable_event_consumer_is_retryable(
+                        &error,
+                        is_replay,
+                        original_consumer_opened,
+                    ) =>
+                {
                     tokio::time::sleep(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS))
                         .await;
                     break;
                 }
                 Err(error) => return Err(error.into()),
             };
+            let replay_envelope = if is_replay {
+                Some(
+                    serde_json::from_slice::<ConsumerReplayEnvelope>(message.payload()).map_err(
+                        |error| TrellisClientError::EventSubscriptionProtocol(error.to_string()),
+                    )?,
+                )
+            } else {
+                None
+            };
+            if let Some(envelope) = &replay_envelope {
+                if envelope.resource_id != config.resource_id
+                    || envelope.original_record_sequence == 0
+                {
+                    message.term().await?;
+                    continue;
+                }
+                let inspected = match crate::generated::Client::from_client(Arc::clone(&client))
+                    .call::<ConsumerDeadLetterInspect>(&ConsumerDeadLetterInspectInput {
+                        resource_id: config.resource_id.clone(),
+                        dead_letter_id: envelope.dead_letter_id.clone(),
+                    })
+                    .await
+                {
+                    Ok(inspected) => inspected,
+                    Err(error) => {
+                        tracing::warn!(error = %error, "Replay state inspection unavailable");
+                        let delivery = message.delivery_count();
+                        let delay = config
+                            .backoff
+                            .get(delivery.saturating_sub(1) as usize)
+                            .or_else(|| config.backoff.last())
+                            .copied()
+                            .unwrap_or(config.ack_wait);
+                        message.nak_after(delay).await?;
+                        continue;
+                    }
+                };
+                let detail = inspected.get("deadLetter").unwrap_or(&inspected);
+                let dead_letter = detail.get("deadLetter").unwrap_or(detail);
+                let projected_generation = dead_letter.get("generation").and_then(|value| {
+                    value
+                        .as_u64()
+                        .or_else(|| value.as_str().and_then(|value| value.parse().ok()))
+                });
+                if projected_generation.is_none_or(|generation| generation < envelope.generation) {
+                    message
+                        .nak_after(Duration::from_millis(DURABLE_EVENT_CONSUMER_RETRY_MS))
+                        .await?;
+                    continue;
+                }
+                if projected_generation != Some(envelope.generation)
+                    || !matches!(
+                        dead_letter.get("state").and_then(serde_json::Value::as_str),
+                        Some("replayPending" | "replaying")
+                    )
+                {
+                    message.ack().await?;
+                    continue;
+                }
+            }
+            let effective_subject = replay_envelope.as_ref().map_or_else(
+                || message.subject(),
+                |envelope| envelope.original_subject.as_str(),
+            );
             let registration = lock_service_event_listeners(&event_listeners)
                 .get(&config.key)
                 .and_then(|listener| {
                     listener
                         .registrations
                         .iter()
-                        .find(|(pattern, _)| event_patterns_overlap(pattern, message.subject()))
+                        .find(|(pattern, _)| event_patterns_overlap(pattern, effective_subject))
                         .map(|(_, registration)| registration.clone())
                 });
             let Some(registration) = registration else {
@@ -1494,13 +1802,27 @@ async fn run_durable_event_pull_loop(
                 message.nak_after(Duration::from_secs(5)).await?;
                 continue;
             };
+            let mut replay_headers = HeaderMap::new();
+            if let Some(envelope) = &replay_envelope {
+                for (name, values) in &envelope.original_headers {
+                    for value in values {
+                        replay_headers.append(name.as_str(), value.as_str());
+                    }
+                }
+            }
+            let effective_payload = replay_envelope.as_ref().map_or_else(
+                || message.payload(),
+                |envelope| envelope.original_payload_bytes.as_slice(),
+            );
+            let effective_headers = replay_envelope
+                .as_ref()
+                .map_or_else(|| message.headers(), |_| Some(&replay_headers));
             let publisher = match auth
                 .verify_event(
-                    message.subject(),
-                    message.payload(),
-                    message.headers(),
-                    &registration.event_api_id,
-                    &registration.event_name,
+                    effective_subject,
+                    effective_payload,
+                    effective_headers,
+                    &registration.descriptor_identity,
                 )
                 .await
             {
@@ -1513,28 +1835,118 @@ async fn run_durable_event_pull_loop(
                     );
                     match error {
                         super::EventVerificationFailure::Retryable(_) => {
-                            let _ = message.nak_after(Duration::from_secs(5)).await;
+                            let delivery = message.delivery_count();
+                            let delay = config
+                                .backoff
+                                .get(delivery.saturating_sub(1) as usize)
+                                .or_else(|| config.backoff.last())
+                                .copied()
+                                .unwrap_or(config.ack_wait);
+                            let _ = message.nak_after(delay).await;
                         }
                         super::EventVerificationFailure::Rejected(_) => {
-                            let _ = message.term().await;
+                            if let Some(envelope) = &replay_envelope {
+                                message.ack_progress().await?;
+                                let report = ConsumerDeliveryReport {
+                                    resource_id: config.resource_id.clone(),
+                                    source_stream: config
+                                        .replay_subscribe_options
+                                        .stream
+                                        .clone()
+                                        .unwrap_or_default(),
+                                    source_sequence: message.stream_sequence()?.to_string(),
+                                    delivery_count: message.delivery_count(),
+                                    delivery_proof: message.delivery_proof()?,
+                                    replay_generation: Some(envelope.generation),
+                                    outcome: "unreplayable".to_owned(),
+                                    error: Some(error.message().to_owned()),
+                                };
+                                if let Err(error) =
+                                    crate::generated::Client::from_client(Arc::clone(&client))
+                                        .call::<ConsumerReportDelivery>(&report)
+                                        .await
+                                {
+                                    tracing::warn!(%error, consumer = %config.key.durable_name, "Replay delivery report unavailable");
+                                    continue;
+                                }
+                                message.term().await?;
+                            } else {
+                                let _ = message.term().await;
+                            }
                         }
                     }
                     continue;
                 }
             };
             let mut handled = true;
+            let delivery = message.delivery_count();
+            let effective_wait = config
+                .backoff
+                .get(delivery.saturating_sub(1) as usize)
+                .or_else(|| config.backoff.last())
+                .copied()
+                .unwrap_or(config.ack_wait);
+            let progress_interval = durable_event_progress_interval(effective_wait);
             for handler in registration.handlers.values() {
-                let context = service_event_context_from_message(
+                let context = service_event_context_from_headers(
                     config.context.mode,
                     config.context.group.clone(),
-                    &message,
+                    effective_headers,
                     Some(publisher.clone()),
                 );
-                if handler(Bytes::copy_from_slice(message.payload()), context)
-                    .await
-                    .is_err()
-                {
-                    let _ = message.nak().await;
+                let future = handler(Bytes::copy_from_slice(effective_payload), context);
+                tokio::pin!(future);
+                let mut progress = tokio::time::interval(progress_interval);
+                progress.tick().await;
+                let result = loop {
+                    tokio::select! {
+                        result = &mut future => break result,
+                        _ = progress.tick() => message.ack_progress().await?,
+                    }
+                };
+                if result.is_err() {
+                    let error = result.err().map(|error| error.to_string());
+                    if delivery >= config.max_deliver {
+                        message.ack_progress().await?;
+                        let report = ConsumerDeliveryReport {
+                            resource_id: config.resource_id.clone(),
+                            source_stream: if is_replay {
+                                config
+                                    .replay_subscribe_options
+                                    .stream
+                                    .clone()
+                                    .unwrap_or_default()
+                            } else {
+                                config.subscribe_options.stream.clone().unwrap_or_default()
+                            },
+                            source_sequence: message.stream_sequence()?.to_string(),
+                            delivery_count: delivery,
+                            delivery_proof: message.delivery_proof()?,
+                            replay_generation: replay_envelope
+                                .as_ref()
+                                .map(|envelope| envelope.generation),
+                            outcome: "exhausted".to_owned(),
+                            error,
+                        };
+                        let report_result =
+                            crate::generated::Client::from_client(Arc::clone(&client))
+                                .call::<ConsumerReportDelivery>(&report)
+                                .await;
+                        if report_result.is_ok() {
+                            message.ack().await?;
+                        } else if let Err(error) = report_result {
+                            tracing::warn!(%error, group = ?config.context.group, "Delivery report unavailable");
+                        }
+                        handled = false;
+                        break;
+                    }
+                    let delay = config
+                        .backoff
+                        .get(delivery.saturating_sub(1) as usize)
+                        .or_else(|| config.backoff.last())
+                        .copied()
+                        .unwrap_or(Duration::ZERO);
+                    let _ = message.nak_after(delay).await;
                     handled = false;
                     break;
                 }
@@ -1542,9 +1954,37 @@ async fn run_durable_event_pull_loop(
             if !handled {
                 continue;
             }
+            if let Some(envelope) = &replay_envelope {
+                message.ack_progress().await?;
+                let report = ConsumerDeliveryReport {
+                    resource_id: config.resource_id.clone(),
+                    source_stream: config
+                        .replay_subscribe_options
+                        .stream
+                        .clone()
+                        .unwrap_or_default(),
+                    source_sequence: message.stream_sequence()?.to_string(),
+                    delivery_count: delivery,
+                    delivery_proof: message.delivery_proof()?,
+                    replay_generation: Some(envelope.generation),
+                    outcome: "succeeded".to_owned(),
+                    error: None,
+                };
+                if let Err(error) = crate::generated::Client::from_client(Arc::clone(&client))
+                    .call::<ConsumerReportDelivery>(&report)
+                    .await
+                {
+                    tracing::warn!(%error, consumer = %config.key.durable_name, "Replay delivery report unavailable");
+                    continue;
+                }
+            }
             message.ack().await?;
         }
     }
+}
+
+fn durable_event_progress_interval(effective_wait: Duration) -> Duration {
+    Duration::from_millis((effective_wait.as_millis() as u64 / 3).max(1))
 }
 
 fn resolve_event_consumer_binding(
@@ -1602,14 +2042,24 @@ fn is_missing_durable_event_consumer_error(error: &TrellisClientError) -> bool {
     message.contains("consumer not found")
         || message.contains("consumer does not exist")
         || message.contains("no consumer")
+        || message.contains("consumer is paused")
+        || message.contains("consumer paused")
+}
+
+fn missing_durable_event_consumer_is_retryable(
+    error: &TrellisClientError,
+    is_replay: bool,
+    original_consumer_opened: bool,
+) -> bool {
+    is_missing_durable_event_consumer_error(error) && (is_replay || !original_consumer_opened)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::service::{
-        BootstrapBinding, EventConsumerOrdering, EventConsumerReplay, EventConsumerResourceBinding,
-        KvResourceBinding, StoreResourceBinding,
+        BootstrapBinding, EventConsumerReplay, EventConsumerReplayBinding,
+        EventConsumerResourceBinding, KvResourceBinding, StoreResourceBinding,
     };
     use std::collections::BTreeMap;
 
@@ -1623,14 +2073,19 @@ mod tests {
                 event_consumers: BTreeMap::from([(
                     "projection".to_string(),
                     EventConsumerResourceBinding {
+                        resource_id: "consumer/projection".to_string(),
                         stream: "trellis".to_string(),
                         consumer_name: "svc-projection".to_string(),
                         filter_subjects: vec!["events.v1.Billing.Paid".to_string()],
                         replay: EventConsumerReplay::New,
-                        ordering: EventConsumerOrdering::Strict,
+                        concurrency: 1,
                         ack_wait_ms: 30_000,
                         max_deliver: 5,
                         backoff_ms: vec![1_000, 5_000],
+                        replay_binding: EventConsumerReplayBinding {
+                            stream: "trellis-replay".to_string(),
+                            consumer_name: "svc-projection-replay".to_string(),
+                        },
                     },
                 )]),
                 jobs: None,
@@ -1658,6 +2113,7 @@ mod tests {
 
     fn event_consumer_binding(subjects: &[&str]) -> EventConsumerResourceBinding {
         EventConsumerResourceBinding {
+            resource_id: "consumer/test".to_string(),
             stream: "trellis".to_string(),
             consumer_name: "consumer".to_string(),
             filter_subjects: subjects
@@ -1665,10 +2121,14 @@ mod tests {
                 .map(|subject| (*subject).to_string())
                 .collect(),
             replay: EventConsumerReplay::New,
-            ordering: EventConsumerOrdering::Strict,
+            concurrency: 1,
             ack_wait_ms: 30_000,
             max_deliver: 5,
             backoff_ms: vec![1_000, 5_000],
+            replay_binding: EventConsumerReplayBinding {
+                stream: "trellis-replay".to_string(),
+                consumer_name: "consumer-replay".to_string(),
+            },
         }
     }
 
@@ -1688,51 +2148,22 @@ mod tests {
     }
 
     #[test]
-    fn durable_event_listener_concurrency_defaults_to_one() {
-        assert_eq!(ServiceEventListenOptions::default().concurrency, 1);
-    }
-
-    #[test]
-    fn core_bootstrap_maps_parallel_event_consumer_ordering() {
+    fn core_bootstrap_maps_event_consumer_concurrency() {
         let mut resources = binding().resource_bindings();
         resources
             .event_consumers
             .get_mut("projection")
             .expect("projection event consumer binding")
-            .ordering = EventConsumerOrdering::Parallel;
+            .concurrency = 4;
 
-        assert_eq!(
-            resources.event_consumers["projection"].ordering,
-            EventConsumerOrdering::Parallel
-        );
+        assert_eq!(resources.event_consumers["projection"].concurrency, 4);
     }
 
     #[test]
-    fn durable_event_listener_concurrency_enforces_ordering_and_group_agreement() {
-        assert!(validate_event_listener_concurrency(
-            "projection",
-            EventConsumerOrdering::Parallel,
-            4,
-            Some(4)
-        )
-        .is_ok());
+    fn durable_event_listener_concurrency_enforces_group_agreement() {
+        assert!(validate_event_listener_concurrency("projection", 4, Some(4)).is_ok());
         assert!(matches!(
-            validate_event_listener_concurrency(
-                "projection",
-                EventConsumerOrdering::Strict,
-                2,
-                None
-            ),
-            Err(ServiceRuntimeError::StrictEventListenerConcurrency { group })
-                if group == "projection"
-        ));
-        assert!(matches!(
-            validate_event_listener_concurrency(
-                "projection",
-                EventConsumerOrdering::Parallel,
-                2,
-                Some(4)
-            ),
+            validate_event_listener_concurrency("projection", 2, Some(4)),
             Err(ServiceRuntimeError::EventListenerConcurrencyMismatch {
                 group,
                 existing: 4,
@@ -1740,12 +2171,7 @@ mod tests {
             }) if group == "projection"
         ));
         assert!(matches!(
-            validate_event_listener_concurrency(
-                "projection",
-                EventConsumerOrdering::Parallel,
-                0,
-                None
-            ),
+            validate_event_listener_concurrency("projection", 0, None),
             Err(ServiceRuntimeError::InvalidEventListenerConcurrency {
                 group,
                 concurrency: 0
@@ -1827,5 +2253,36 @@ mod tests {
         assert!(!is_missing_durable_event_consumer_error(
             &TrellisClientError::Timeout
         ));
+    }
+
+    #[test]
+    fn deleting_an_opened_original_consumer_is_fatal() {
+        let deleted = TrellisClientError::NatsRequest("consumer not found".to_string());
+
+        assert!(missing_durable_event_consumer_is_retryable(
+            &deleted, false, false
+        ));
+        assert!(!missing_durable_event_consumer_is_retryable(
+            &deleted, false, true
+        ));
+        assert!(missing_durable_event_consumer_is_retryable(
+            &deleted, true, true
+        ));
+    }
+
+    #[test]
+    fn durable_event_progress_interval_has_one_millisecond_minimum() {
+        assert_eq!(
+            durable_event_progress_interval(Duration::from_millis(1)),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            durable_event_progress_interval(Duration::from_millis(2)),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            durable_event_progress_interval(Duration::from_millis(6)),
+            Duration::from_millis(2)
+        );
     }
 }

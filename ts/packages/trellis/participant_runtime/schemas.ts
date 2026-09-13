@@ -22,178 +22,29 @@ function formatIsoDate(value: Date): string {
   return value.toISOString();
 }
 
-export const ContractSchemaRefSchema = Type.Object({
+const ContractSchemaRefSchema = Type.Object({
   schema: Type.String({ minLength: 1 }),
 });
 
-export type ContractSchemaRef = Static<typeof ContractSchemaRefSchema>;
-
-export const ContractDocsSchema = Type.Object({
-  summary: Type.Optional(Type.String()),
-  markdown: Type.String(),
-});
-
-export type ContractDocs = Static<typeof ContractDocsSchema>;
-
-export const ContractKvResourceSchema = Type.Object({
-  purpose: Type.String({ minLength: 1 }),
-  schema: ContractSchemaRefSchema,
-  required: Type.Optional(Type.Boolean({ default: true })),
-  history: Type.Optional(Type.Integer({ minimum: 1, default: 1 })),
-  ttlMs: Type.Optional(Type.Integer({ minimum: 0, default: 0 })),
-  maxValueBytes: Type.Optional(Type.Integer({ minimum: 1 })),
-  docs: Type.Optional(ContractDocsSchema),
-});
-
-export type ContractKvResource = Static<typeof ContractKvResourceSchema>;
-
-export const ContractStoreResourceSchema = Type.Object({
-  purpose: Type.String({ minLength: 1 }),
-  required: Type.Optional(Type.Boolean({ default: true })),
-  ttlMs: Type.Optional(Type.Integer({ minimum: 0, default: 0 })),
-  maxObjectBytes: Type.Optional(Type.Integer({ minimum: 1 })),
-  maxTotalBytes: Type.Optional(Type.Integer({ minimum: 1 })),
-  docs: Type.Optional(ContractDocsSchema),
-});
-
-export type ContractStoreResource = Static<typeof ContractStoreResourceSchema>;
-
-export const ContractStateStoreSchema = Type.Object({
-  kind: Type.Union([
-    Type.Literal("value"),
-    Type.Literal("map"),
-  ]),
-  schema: ContractSchemaRefSchema,
-  stateVersion: Type.Optional(Type.String({ minLength: 1 })),
-  acceptedVersions: Type.Optional(Type.Record(
-    Type.String({ minLength: 1 }),
-    ContractSchemaRefSchema,
-  )),
-  docs: Type.Optional(ContractDocsSchema),
-});
-
-export type ContractStateStore = Static<typeof ContractStateStoreSchema>;
-
-export const ContractStateSchema = Type.Record(
-  Type.String({ minLength: 1 }),
-  ContractStateStoreSchema,
-);
-
-export type ContractState = Static<typeof ContractStateSchema>;
-
-export const JobKeyConcurrencySchema = Type.Object({
-  key: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-  maxActive: Type.Optional(Type.Integer({ minimum: 1 })),
-  heartbeatIntervalMs: Type.Optional(Type.Integer({ minimum: 1 })),
-  heartbeatTtlMs: Type.Optional(Type.Integer({ minimum: 1 })),
-  stalePolicy: Type.Optional(Type.Union([
-    Type.Literal("fail-stale"),
-    Type.Literal("block"),
-  ])),
-});
-
-export type JobKeyConcurrency = Static<typeof JobKeyConcurrencySchema>;
-
-export const JobQueueDepthSchema = Type.Object({
-  maxQueuedPerKey: Type.Optional(Type.Integer({ minimum: 0 })),
-  whenFull: Type.Optional(Type.Union([
-    Type.Literal("reject"),
-    Type.Literal("coalesce"),
-    Type.Literal("replace-oldest"),
-  ])),
-});
-
-export type JobQueueDepth = Static<typeof JobQueueDepthSchema>;
-
-export const ContractJobQueueSchema = Type.Object({
-  payload: ContractSchemaRefSchema,
-  update: Type.Optional(ContractSchemaRefSchema),
-  result: Type.Optional(ContractSchemaRefSchema),
-  maxDeliver: Type.Optional(Type.Integer({ minimum: 1 })),
-  backoffMs: Type.Optional(Type.Array(Type.Integer({ minimum: 0 }))),
-  ackWaitMs: Type.Optional(Type.Integer({ minimum: 1 })),
-  defaultDeadlineMs: Type.Optional(Type.Integer({ minimum: 1 })),
-  progress: Type.Optional(Type.Boolean()),
-  logs: Type.Optional(Type.Boolean()),
-  dlq: Type.Optional(Type.Boolean()),
-  keyConcurrency: Type.Optional(JobKeyConcurrencySchema),
-  queue: Type.Optional(JobQueueDepthSchema),
-  docs: Type.Optional(ContractDocsSchema),
-});
-
-export type ContractJobQueue = Static<typeof ContractJobQueueSchema>;
-
-export const ContractJobsSchema = Type.Record(
-  Type.String({ minLength: 1 }),
-  ContractJobQueueSchema,
-);
-
-export type ContractJobs = Static<typeof ContractJobsSchema>;
-
-export const ContractEventConsumerUsesSchema = Type.Record(
-  Type.String({ minLength: 1 }),
-  Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
-);
-
-export type ContractEventConsumerUses = Static<
-  typeof ContractEventConsumerUsesSchema
->;
-
-export const ContractEventConsumerSelfSchema = Type.Array(
-  Type.String({ minLength: 1 }),
-);
-
-export type ContractEventConsumerSelf = Static<
-  typeof ContractEventConsumerSelfSchema
->;
-
-export const ContractEventConsumerGroupSchema = Type.Object({
-  uses: Type.Optional(ContractEventConsumerUsesSchema),
-  self: Type.Optional(ContractEventConsumerSelfSchema),
-  replay: Type.Optional(Type.Union([
-    Type.Literal("new"),
-    Type.Literal("all"),
-  ])),
-  ordering: Type.Optional(Type.Union([
-    Type.Literal("strict"),
-    Type.Literal("parallel"),
-  ])),
-  ackWaitMs: Type.Optional(Type.Integer({ minimum: 1 })),
-  maxDeliver: Type.Optional(Type.Integer({ minimum: 1 })),
-  backoffMs: Type.Optional(Type.Array(Type.Integer({ minimum: 0 }))),
-  docs: Type.Optional(ContractDocsSchema),
-});
-
-export type ContractEventConsumerGroup = Static<
-  typeof ContractEventConsumerGroupSchema
->;
-
 export const ContractEventConsumersSchema = Type.Record(
   Type.String({ minLength: 1 }),
-  ContractEventConsumerGroupSchema,
+  Type.Object({
+    uses: Type.Optional(Type.Record(
+      Type.String({ minLength: 1 }),
+      Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+    )),
+    self: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+    replay: Type.Optional(Type.Union([
+      Type.Literal("new"),
+      Type.Literal("all"),
+    ])),
+    concurrency: Type.Optional(Type.Integer({ minimum: 1 })),
+  }),
 );
 
-export type ContractEventConsumers = Readonly<
-  Record<
-    string,
-    Omit<ContractEventConsumerGroup, "self" | "uses" | "backoffMs"> & {
-      readonly self?: readonly string[];
-      readonly uses?: Readonly<Record<string, readonly string[]>>;
-      readonly backoffMs?: readonly number[];
-    }
-  >
+export type ContractEventConsumers = Static<
+  typeof ContractEventConsumersSchema
 >;
-
-export const ContractResourcesSchema = Type.Object({
-  kv: Type.Optional(
-    Type.Record(Type.String({ minLength: 1 }), ContractKvResourceSchema),
-  ),
-  store: Type.Optional(
-    Type.Record(Type.String({ minLength: 1 }), ContractStoreResourceSchema),
-  ),
-});
-
-export type ContractResources = Static<typeof ContractResourcesSchema>;
 
 export const KvResourceBindingSchema = Type.Object({
   bucket: Type.String({ minLength: 1 }),
@@ -254,9 +105,6 @@ export const JobsQueueBindingSchema = Type.Object({
   backoffMs: Type.Array(Type.Integer({ minimum: 0 })),
   ackWaitMs: Type.Integer({ minimum: 1 }),
   defaultDeadlineMs: Type.Optional(Type.Integer({ minimum: 1 })),
-  progress: Type.Boolean(),
-  logs: Type.Boolean(),
-  dlq: Type.Boolean(),
   keyConcurrency: Type.Optional(JobsQueueKeyConcurrencyBindingSchema),
   queue: Type.Optional(JobsQueueDepthBindingSchema),
 });
@@ -273,17 +121,19 @@ export const JobsResourceBindingSchema = Type.Object({
 export type JobsResourceBinding = Static<typeof JobsResourceBindingSchema>;
 
 export const EventConsumerResourceBindingSchema = Type.Object({
+  resourceId: Type.String({ minLength: 1 }),
   stream: Type.String({ minLength: 1 }),
   consumerName: Type.String({ minLength: 1 }),
   filterSubjects: Type.Array(Type.String({ minLength: 1 })),
   replay: Type.Union([Type.Literal("new"), Type.Literal("all")]),
-  ordering: Type.Union([
-    Type.Literal("strict"),
-    Type.Literal("parallel"),
-  ]),
+  concurrency: Type.Integer({ minimum: 1 }),
   ackWaitMs: Type.Integer({ minimum: 1 }),
   maxDeliver: Type.Integer({ minimum: 1 }),
   backoffMs: Type.Array(Type.Integer({ minimum: 0 })),
+  replayBinding: Type.Object({
+    stream: Type.String({ minLength: 1 }),
+    consumerName: Type.String({ minLength: 1 }),
+  }),
 });
 
 export type EventConsumerResourceBinding = Static<
@@ -407,7 +257,7 @@ export function buildPageResponse<T>(
 /** Schema for a cursor pagination query. */
 export const CursorQuerySchema = Type.Object({
   cursor: Type.Optional(Type.String({ minLength: 1 })),
-  limit: Type.Optional(Type.Integer({ minimum: 0, maximum: 500 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1 })),
 });
 
 /** Cursor pagination query. */
@@ -447,7 +297,7 @@ export type CursorPage<TItem> = {
 export type CursorQueryOptions = {
   /** Limit used when the query does not specify one. Defaults to `100`. */
   defaultLimit?: number;
-  /** Maximum accepted limit. Defaults to `500`. */
+  /** Service-owned maximum accepted limit, when one applies. */
   maxLimit?: number;
 };
 
@@ -460,20 +310,19 @@ export type NormalizedCursorQuery = {
 /**
  * Validates and normalizes a cursor pagination query.
  *
- * Defaults `limit` to `100`, rejects limits above `500` unless `maxLimit` is
- * overridden, and preserves a non-empty optional cursor.
+ * Defaults `limit` to `100`, applies an optional service-owned maximum, and
+ * preserves a non-empty optional cursor.
  */
 export function normalizeCursorQuery(
   query: CursorQuery,
   options: CursorQueryOptions = {},
 ): NormalizedCursorQuery {
-  const maxLimit = options.maxLimit ?? 500;
   const limit = query.limit ?? options.defaultLimit ?? 100;
-  if (!Number.isInteger(limit) || limit < 0) {
-    throw new RangeError("list limit must be a non-negative integer");
+  if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit <= 0) {
+    throw new RangeError("list limit must be a positive finite integer");
   }
-  if (limit > maxLimit) {
-    throw new RangeError(`list limit must be <= ${maxLimit}`);
+  if (options.maxLimit !== undefined && limit > options.maxLimit) {
+    throw new RangeError(`list limit must be <= ${options.maxLimit}`);
   }
   if (query.cursor === undefined) {
     return { limit };

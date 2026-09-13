@@ -1,11 +1,53 @@
 //! Generated API `trellis.events@v1`.
 pub const API_ID: &str = "trellis.events@v1";
-pub const API_DIGEST: &str = "oJlY-7SaNj7LSVf14gq3H5DWYUovxBhfkVHa0ysIr1Y";
+pub const API_DIGEST: &str = "ByInt82orMBbflrAMLFBGWM8wUI97_J8ci4ra39Sby0";
 pub struct Api;
 impl trellis_rs::generated::ApiDescriptor for Api {
     const ID: &'static str = API_ID;
 }
 pub mod errors {
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct Conflict {
+        #[serde(flatten)]
+        pub error: trellis_rs::generated::SerializableErrorData,
+    }
+    impl Conflict {
+        pub fn payload(
+            &self,
+        ) -> Result<crate::__types::trellis::EventsErrorData, serde_json::Error> {
+            serde_json::from_value(serde_json::Value::Object(self.error.extra.clone()))
+        }
+    }
+    impl std::fmt::Display for Conflict {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(&self.error.message)
+        }
+    }
+    impl std::error::Error for Conflict {}
+    impl trellis_rs::generated::TrellisError for Conflict {
+        const TYPE: &'static str = "trellis.events@v1::Conflict";
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct Forbidden {
+        #[serde(flatten)]
+        pub error: trellis_rs::generated::SerializableErrorData,
+    }
+    impl Forbidden {
+        pub fn payload(
+            &self,
+        ) -> Result<crate::__types::trellis::EventsErrorData, serde_json::Error> {
+            serde_json::from_value(serde_json::Value::Object(self.error.extra.clone()))
+        }
+    }
+    impl std::fmt::Display for Forbidden {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(&self.error.message)
+        }
+    }
+    impl std::error::Error for Forbidden {}
+    impl trellis_rs::generated::TrellisError for Forbidden {
+        const TYPE: &'static str = "trellis.events@v1::Forbidden";
+    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct NotFoundError {
         #[serde(flatten)]
@@ -28,6 +70,27 @@ pub mod errors {
         const TYPE: &'static str = "trellis.events@v1::NotFoundError";
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct Unavailable {
+        #[serde(flatten)]
+        pub error: trellis_rs::generated::SerializableErrorData,
+    }
+    impl Unavailable {
+        pub fn payload(
+            &self,
+        ) -> Result<crate::__types::trellis::EventsErrorData, serde_json::Error> {
+            serde_json::from_value(serde_json::Value::Object(self.error.extra.clone()))
+        }
+    }
+    impl std::fmt::Display for Unavailable {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(&self.error.message)
+        }
+    }
+    impl std::error::Error for Unavailable {}
+    impl trellis_rs::generated::TrellisError for Unavailable {
+        const TYPE: &'static str = "trellis.events@v1::Unavailable";
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct UnexpectedError {
         #[serde(flatten)]
         pub error: trellis_rs::generated::SerializableErrorData,
@@ -40,6 +103,27 @@ pub mod errors {
     impl std::error::Error for UnexpectedError {}
     impl trellis_rs::generated::TrellisError for UnexpectedError {
         const TYPE: &'static str = "trellis.events@v1::UnexpectedError";
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct UnreplayableOriginal {
+        #[serde(flatten)]
+        pub error: trellis_rs::generated::SerializableErrorData,
+    }
+    impl UnreplayableOriginal {
+        pub fn payload(
+            &self,
+        ) -> Result<crate::__types::trellis::EventsErrorData, serde_json::Error> {
+            serde_json::from_value(serde_json::Value::Object(self.error.extra.clone()))
+        }
+    }
+    impl std::fmt::Display for UnreplayableOriginal {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(&self.error.message)
+        }
+    }
+    impl std::error::Error for UnreplayableOriginal {}
+    impl trellis_rs::generated::TrellisError for UnreplayableOriginal {
+        const TYPE: &'static str = "trellis.events@v1::UnreplayableOriginal";
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct ValidationError {
@@ -65,7 +149,10 @@ pub mod rpc {
         pub const DESCRIPTOR_NAME: &'static str = "rpc.Consumers.Inspect";
         pub const KEY: &'static str = "events.Consumers.Inspect";
         pub const SUBJECT: &'static str = "rpc.v1.events.Consumers.Inspect";
-        pub const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.events@v1::read"];
+        pub const CALLER_CAPABILITIES: &'static [&'static str] = &[
+            "trellis.events@v1::manage_consumers",
+            "trellis.events@v1::public",
+        ];
         pub const ERRORS: &'static [&'static str] = &[
             "trellis.events@v1::NotFoundError",
             "trellis.events@v1::UnexpectedError",
@@ -113,6 +200,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -127,13 +215,16 @@ pub mod rpc {
         pub const DESCRIPTOR_NAME: &'static str = "rpc.Consumers.Query";
         pub const KEY: &'static str = "events.Consumers.Query";
         pub const SUBJECT: &'static str = "rpc.v1.events.Consumers.Query";
-        pub const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.events@v1::read"];
+        pub const CALLER_CAPABILITIES: &'static [&'static str] = &[
+            "trellis.events@v1::manage_consumers",
+            "trellis.events@v1::public",
+        ];
         pub const ERRORS: &'static [&'static str] = &[
             "trellis.events@v1::UnexpectedError",
             "trellis.events@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum ConsumersQueryError {
@@ -169,10 +260,447 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
             ConsumersQueryError::decode(value)
+        }
+    }
+    pub type ConsumersReportDeliveryInput =
+        crate::__types::trellis::EventsConsumersReportDeliveryRequest;
+    pub type ConsumersReportDeliveryOutput =
+        crate::__types::trellis::EventsConsumersReportDeliveryResponse;
+    pub struct ConsumersReportDelivery;
+    impl ConsumersReportDelivery {
+        pub const API_ID: &'static str = super::API_ID;
+        pub const DESCRIPTOR_NAME: &'static str = "rpc.Consumers.ReportDelivery";
+        pub const KEY: &'static str = "events.Consumers.ReportDelivery";
+        pub const SUBJECT: &'static str = "rpc.v1.events.Consumers.ReportDelivery";
+        pub const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.events@v1::public"];
+        pub const ERRORS: &'static [&'static str] = &[
+            "trellis.events@v1::Conflict",
+            "trellis.events@v1::Forbidden",
+            "trellis.events@v1::NotFoundError",
+            "trellis.events@v1::Unavailable",
+            "trellis.events@v1::ValidationError",
+        ];
+        pub const DOWNLOAD: bool = false;
+        pub const CURSOR_PAGINATION: bool = false;
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum ConsumersReportDeliveryError {
+        Conflict(super::errors::Conflict),
+        Forbidden(super::errors::Forbidden),
+        NotFoundError(super::errors::NotFoundError),
+        Unavailable(super::errors::Unavailable),
+        ValidationError(super::errors::ValidationError),
+    }
+    impl ConsumersReportDeliveryError {
+        pub fn decode(value: serde_json::Value) -> Result<Option<Self>, serde_json::Error> {
+            let error_type = value.get("type").and_then(serde_json::Value::as_str);
+            match error_type {
+                Some("trellis.events@v1::Conflict") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::Conflict>(value)
+                        .map(|value| value.map(Self::Conflict))
+                }
+                Some("trellis.events@v1::Forbidden") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::Forbidden>(value)
+                        .map(|value| value.map(Self::Forbidden))
+                }
+                Some("trellis.events@v1::NotFoundError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::NotFoundError>(value)
+                        .map(|value| value.map(Self::NotFoundError))
+                }
+                Some("trellis.events@v1::Unavailable") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::Unavailable>(value)
+                        .map(|value| value.map(Self::Unavailable))
+                }
+                Some("trellis.events@v1::ValidationError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::ValidationError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::ValidationError))
+                }
+                _ => Ok(None),
+            }
+        }
+    }
+    impl trellis_rs::generated::RpcDescriptor for ConsumersReportDelivery {
+        type Input = ConsumersReportDeliveryInput;
+        type Output = ConsumersReportDeliveryOutput;
+        type Error = ConsumersReportDeliveryError;
+        const API_ID: &'static str = super::API_ID;
+        const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME;
+        const SUBJECT: &'static str = Self::SUBJECT;
+        const KEY: &'static str = Self::KEY;
+        const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
+        fn decode_error(
+            value: serde_json::Value,
+        ) -> Result<Option<Self::Error>, serde_json::Error> {
+            ConsumersReportDeliveryError::decode(value)
+        }
+    }
+    pub type DeadLettersDismissInput = crate::__types::trellis::EventsDeadLettersDismissRequest;
+    pub type DeadLettersDismissOutput = crate::__types::trellis::EventsDeadLettersDismissResponse;
+    pub struct DeadLettersDismiss;
+    impl DeadLettersDismiss {
+        pub const API_ID: &'static str = super::API_ID;
+        pub const DESCRIPTOR_NAME: &'static str = "rpc.DeadLetters.Dismiss";
+        pub const KEY: &'static str = "events.DeadLetters.Dismiss";
+        pub const SUBJECT: &'static str = "rpc.v1.events.DeadLetters.Dismiss";
+        pub const CALLER_CAPABILITIES: &'static [&'static str] = &[
+            "trellis.events@v1::manage_consumers",
+            "trellis.events@v1::public",
+        ];
+        pub const ERRORS: &'static [&'static str] = &[
+            "trellis.events@v1::Conflict",
+            "trellis.events@v1::Forbidden",
+            "trellis.events@v1::NotFoundError",
+            "trellis.events@v1::Unavailable",
+            "trellis.events@v1::ValidationError",
+        ];
+        pub const DOWNLOAD: bool = false;
+        pub const CURSOR_PAGINATION: bool = false;
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum DeadLettersDismissError {
+        Conflict(super::errors::Conflict),
+        Forbidden(super::errors::Forbidden),
+        NotFoundError(super::errors::NotFoundError),
+        Unavailable(super::errors::Unavailable),
+        ValidationError(super::errors::ValidationError),
+    }
+    impl DeadLettersDismissError {
+        pub fn decode(value: serde_json::Value) -> Result<Option<Self>, serde_json::Error> {
+            let error_type = value.get("type").and_then(serde_json::Value::as_str);
+            match error_type {
+                Some("trellis.events@v1::Conflict") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::Conflict>(value)
+                        .map(|value| value.map(Self::Conflict))
+                }
+                Some("trellis.events@v1::Forbidden") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::Forbidden>(value)
+                        .map(|value| value.map(Self::Forbidden))
+                }
+                Some("trellis.events@v1::NotFoundError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::NotFoundError>(value)
+                        .map(|value| value.map(Self::NotFoundError))
+                }
+                Some("trellis.events@v1::Unavailable") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::Unavailable>(value)
+                        .map(|value| value.map(Self::Unavailable))
+                }
+                Some("trellis.events@v1::ValidationError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::ValidationError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::ValidationError))
+                }
+                _ => Ok(None),
+            }
+        }
+    }
+    impl trellis_rs::generated::RpcDescriptor for DeadLettersDismiss {
+        type Input = DeadLettersDismissInput;
+        type Output = DeadLettersDismissOutput;
+        type Error = DeadLettersDismissError;
+        const API_ID: &'static str = super::API_ID;
+        const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME;
+        const SUBJECT: &'static str = Self::SUBJECT;
+        const KEY: &'static str = Self::KEY;
+        const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
+        fn decode_error(
+            value: serde_json::Value,
+        ) -> Result<Option<Self::Error>, serde_json::Error> {
+            DeadLettersDismissError::decode(value)
+        }
+    }
+    pub type DeadLettersInspectInput = crate::__types::trellis::EventsDeadLettersInspectRequest;
+    pub type DeadLettersInspectOutput = crate::__types::trellis::EventsDeadLettersInspectResponse;
+    pub struct DeadLettersInspect;
+    impl DeadLettersInspect {
+        pub const API_ID: &'static str = super::API_ID;
+        pub const DESCRIPTOR_NAME: &'static str = "rpc.DeadLetters.Inspect";
+        pub const KEY: &'static str = "events.DeadLetters.Inspect";
+        pub const SUBJECT: &'static str = "rpc.v1.events.DeadLetters.Inspect";
+        pub const CALLER_CAPABILITIES: &'static [&'static str] = &[
+            "trellis.events@v1::manage_consumers",
+            "trellis.events@v1::public",
+        ];
+        pub const ERRORS: &'static [&'static str] = &[
+            "trellis.events@v1::Forbidden",
+            "trellis.events@v1::NotFoundError",
+            "trellis.events@v1::Unavailable",
+            "trellis.events@v1::ValidationError",
+        ];
+        pub const DOWNLOAD: bool = false;
+        pub const CURSOR_PAGINATION: bool = false;
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum DeadLettersInspectError {
+        Forbidden(super::errors::Forbidden),
+        NotFoundError(super::errors::NotFoundError),
+        Unavailable(super::errors::Unavailable),
+        ValidationError(super::errors::ValidationError),
+    }
+    impl DeadLettersInspectError {
+        pub fn decode(value: serde_json::Value) -> Result<Option<Self>, serde_json::Error> {
+            let error_type = value.get("type").and_then(serde_json::Value::as_str);
+            match error_type {
+                Some("trellis.events@v1::Forbidden") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::Forbidden>(value)
+                        .map(|value| value.map(Self::Forbidden))
+                }
+                Some("trellis.events@v1::NotFoundError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::NotFoundError>(value)
+                        .map(|value| value.map(Self::NotFoundError))
+                }
+                Some("trellis.events@v1::Unavailable") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::Unavailable>(value)
+                        .map(|value| value.map(Self::Unavailable))
+                }
+                Some("trellis.events@v1::ValidationError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::ValidationError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::ValidationError))
+                }
+                _ => Ok(None),
+            }
+        }
+    }
+    impl trellis_rs::generated::RpcDescriptor for DeadLettersInspect {
+        type Input = DeadLettersInspectInput;
+        type Output = DeadLettersInspectOutput;
+        type Error = DeadLettersInspectError;
+        const API_ID: &'static str = super::API_ID;
+        const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME;
+        const SUBJECT: &'static str = Self::SUBJECT;
+        const KEY: &'static str = Self::KEY;
+        const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
+        fn decode_error(
+            value: serde_json::Value,
+        ) -> Result<Option<Self::Error>, serde_json::Error> {
+            DeadLettersInspectError::decode(value)
+        }
+    }
+    pub type DeadLettersQueryInput = crate::__types::trellis::EventsDeadLettersQueryRequest;
+    pub type DeadLettersQueryOutput = crate::__types::trellis::EventsDeadLettersQueryResponse;
+    pub struct DeadLettersQuery;
+    impl DeadLettersQuery {
+        pub const API_ID: &'static str = super::API_ID;
+        pub const DESCRIPTOR_NAME: &'static str = "rpc.DeadLetters.Query";
+        pub const KEY: &'static str = "events.DeadLetters.Query";
+        pub const SUBJECT: &'static str = "rpc.v1.events.DeadLetters.Query";
+        pub const CALLER_CAPABILITIES: &'static [&'static str] = &[
+            "trellis.events@v1::manage_consumers",
+            "trellis.events@v1::public",
+        ];
+        pub const ERRORS: &'static [&'static str] = &[
+            "trellis.events@v1::Forbidden",
+            "trellis.events@v1::UnexpectedError",
+            "trellis.events@v1::ValidationError",
+        ];
+        pub const DOWNLOAD: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum DeadLettersQueryError {
+        Forbidden(super::errors::Forbidden),
+        UnexpectedError(super::errors::UnexpectedError),
+        ValidationError(super::errors::ValidationError),
+    }
+    impl DeadLettersQueryError {
+        pub fn decode(value: serde_json::Value) -> Result<Option<Self>, serde_json::Error> {
+            let error_type = value.get("type").and_then(serde_json::Value::as_str);
+            match error_type {
+                Some("trellis.events@v1::Forbidden") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::Forbidden>(value)
+                        .map(|value| value.map(Self::Forbidden))
+                }
+                Some("trellis.events@v1::UnexpectedError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::UnexpectedError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::UnexpectedError))
+                }
+                Some("trellis.events@v1::ValidationError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::ValidationError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::ValidationError))
+                }
+                _ => Ok(None),
+            }
+        }
+    }
+    impl trellis_rs::generated::RpcDescriptor for DeadLettersQuery {
+        type Input = DeadLettersQueryInput;
+        type Output = DeadLettersQueryOutput;
+        type Error = DeadLettersQueryError;
+        const API_ID: &'static str = super::API_ID;
+        const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME;
+        const SUBJECT: &'static str = Self::SUBJECT;
+        const KEY: &'static str = Self::KEY;
+        const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
+        fn decode_error(
+            value: serde_json::Value,
+        ) -> Result<Option<Self::Error>, serde_json::Error> {
+            DeadLettersQueryError::decode(value)
+        }
+    }
+    pub type DeadLettersReplayInput = crate::__types::trellis::EventsDeadLettersReplayRequest;
+    pub type DeadLettersReplayOutput = crate::__types::trellis::EventsDeadLettersReplayResponse;
+    pub struct DeadLettersReplay;
+    impl DeadLettersReplay {
+        pub const API_ID: &'static str = super::API_ID;
+        pub const DESCRIPTOR_NAME: &'static str = "rpc.DeadLetters.Replay";
+        pub const KEY: &'static str = "events.DeadLetters.Replay";
+        pub const SUBJECT: &'static str = "rpc.v1.events.DeadLetters.Replay";
+        pub const CALLER_CAPABILITIES: &'static [&'static str] = &[
+            "trellis.events@v1::manage_consumers",
+            "trellis.events@v1::public",
+        ];
+        pub const ERRORS: &'static [&'static str] = &[
+            "trellis.events@v1::Conflict",
+            "trellis.events@v1::Forbidden",
+            "trellis.events@v1::NotFoundError",
+            "trellis.events@v1::Unavailable",
+            "trellis.events@v1::UnreplayableOriginal",
+            "trellis.events@v1::ValidationError",
+        ];
+        pub const DOWNLOAD: bool = false;
+        pub const CURSOR_PAGINATION: bool = false;
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum DeadLettersReplayError {
+        Conflict(super::errors::Conflict),
+        Forbidden(super::errors::Forbidden),
+        NotFoundError(super::errors::NotFoundError),
+        Unavailable(super::errors::Unavailable),
+        UnreplayableOriginal(super::errors::UnreplayableOriginal),
+        ValidationError(super::errors::ValidationError),
+    }
+    impl DeadLettersReplayError {
+        pub fn decode(value: serde_json::Value) -> Result<Option<Self>, serde_json::Error> {
+            let error_type = value.get("type").and_then(serde_json::Value::as_str);
+            match error_type {
+                Some("trellis.events@v1::Conflict") => {
+                    trellis_rs::generated::decode_typed_error::<
+                        super::errors::Conflict,
+                    >(value)
+                        .map(|value| value.map(Self::Conflict))
+                }
+                Some("trellis.events@v1::Forbidden") => {
+                    trellis_rs::generated::decode_typed_error::<
+                        super::errors::Forbidden,
+                    >(value)
+                        .map(|value| value.map(Self::Forbidden))
+                }
+                Some("trellis.events@v1::NotFoundError") => {
+                    trellis_rs::generated::decode_typed_error::<
+                        super::errors::NotFoundError,
+                    >(value)
+                        .map(|value| value.map(Self::NotFoundError))
+                }
+                Some("trellis.events@v1::Unavailable") => {
+                    trellis_rs::generated::decode_typed_error::<
+                        super::errors::Unavailable,
+                    >(value)
+                        .map(|value| value.map(Self::Unavailable))
+                }
+                Some("trellis.events@v1::UnreplayableOriginal") => {
+                    trellis_rs::generated::decode_typed_error::<
+                        super::errors::UnreplayableOriginal,
+                    >(value)
+                        .map(|value| value.map(Self::UnreplayableOriginal))
+                }
+                Some("trellis.events@v1::ValidationError") => {
+                    trellis_rs::generated::decode_typed_error::<
+                        super::errors::ValidationError,
+                    >(value)
+                        .map(|value| value.map(Self::ValidationError))
+                }
+                _ => Ok(None),
+            }
+        }
+    }
+    impl trellis_rs::generated::RpcDescriptor for DeadLettersReplay {
+        type Input = DeadLettersReplayInput;
+        type Output = DeadLettersReplayOutput;
+        type Error = DeadLettersReplayError;
+        const API_ID: &'static str = super::API_ID;
+        const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME;
+        const SUBJECT: &'static str = Self::SUBJECT;
+        const KEY: &'static str = Self::KEY;
+        const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
+        fn decode_error(
+            value: serde_json::Value,
+        ) -> Result<Option<Self::Error>, serde_json::Error> {
+            DeadLettersReplayError::decode(value)
+        }
+    }
+    pub type DiagnosticsInput = crate::__types::trellis::EventsDiagnosticsRequest;
+    pub type DiagnosticsOutput = crate::__types::trellis::EventsDiagnosticsResponse;
+    pub struct Diagnostics;
+    impl Diagnostics {
+        pub const API_ID: &'static str = super::API_ID;
+        pub const DESCRIPTOR_NAME: &'static str = "rpc.Diagnostics";
+        pub const KEY: &'static str = "events.Diagnostics";
+        pub const SUBJECT: &'static str = "rpc.v1.events.Diagnostics";
+        pub const CALLER_CAPABILITIES: &'static [&'static str] = &["trellis.events@v1::read"];
+        pub const ERRORS: &'static [&'static str] = &[
+            "trellis.events@v1::UnexpectedError",
+            "trellis.events@v1::ValidationError",
+        ];
+        pub const DOWNLOAD: bool = false;
+        pub const CURSOR_PAGINATION: bool = false;
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum DiagnosticsError {
+        UnexpectedError(super::errors::UnexpectedError),
+        ValidationError(super::errors::ValidationError),
+    }
+    impl DiagnosticsError {
+        pub fn decode(value: serde_json::Value) -> Result<Option<Self>, serde_json::Error> {
+            let error_type = value.get("type").and_then(serde_json::Value::as_str);
+            match error_type {
+                Some("trellis.events@v1::UnexpectedError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::UnexpectedError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::UnexpectedError))
+                }
+                Some("trellis.events@v1::ValidationError") => {
+                    trellis_rs::generated::decode_typed_error::<super::errors::ValidationError>(
+                        value,
+                    )
+                    .map(|value| value.map(Self::ValidationError))
+                }
+                _ => Ok(None),
+            }
+        }
+    }
+    impl trellis_rs::generated::RpcDescriptor for Diagnostics {
+        type Input = DiagnosticsInput;
+        type Output = DiagnosticsOutput;
+        type Error = DiagnosticsError;
+        const API_ID: &'static str = super::API_ID;
+        const DESCRIPTOR_NAME: &'static str = Self::DESCRIPTOR_NAME;
+        const SUBJECT: &'static str = Self::SUBJECT;
+        const KEY: &'static str = Self::KEY;
+        const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
+        fn decode_error(
+            value: serde_json::Value,
+        ) -> Result<Option<Self::Error>, serde_json::Error> {
+            DiagnosticsError::decode(value)
         }
     }
     pub type InspectInput = crate::__types::trellis::EventsInspectRequest;
@@ -231,6 +759,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -287,6 +816,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -307,7 +837,7 @@ pub mod rpc {
             "trellis.events@v1::ValidationError",
         ];
         pub const DOWNLOAD: bool = false;
-        pub const CURSOR_PAGINATION: bool = false;
+        pub const CURSOR_PAGINATION: bool = true;
     }
     #[derive(Clone, Debug, PartialEq)]
     pub enum QueryError {
@@ -343,6 +873,7 @@ pub mod rpc {
         const SUBJECT: &'static str = Self::SUBJECT;
         const KEY: &'static str = Self::KEY;
         const CALLER_CAPABILITIES: &'static [&'static str] = Self::CALLER_CAPABILITIES;
+        const DOWNLOAD: bool = Self::DOWNLOAD;
         fn decode_error(
             value: serde_json::Value,
         ) -> Result<Option<Self::Error>, serde_json::Error> {
@@ -375,8 +906,15 @@ pub mod feeds {
 }
 /// Registers metadata for every RPC in this API.
 pub fn register_rpc_metadata(router: &mut trellis_rs::service::Router) {
+    let _ = router;
     router.register_rpc_metadata::<rpc::ConsumersInspect>();
     router.register_rpc_metadata::<rpc::ConsumersQuery>();
+    router.register_rpc_metadata::<rpc::ConsumersReportDelivery>();
+    router.register_rpc_metadata::<rpc::DeadLettersDismiss>();
+    router.register_rpc_metadata::<rpc::DeadLettersInspect>();
+    router.register_rpc_metadata::<rpc::DeadLettersQuery>();
+    router.register_rpc_metadata::<rpc::DeadLettersReplay>();
+    router.register_rpc_metadata::<rpc::Diagnostics>();
     router.register_rpc_metadata::<rpc::Inspect>();
     router.register_rpc_metadata::<rpc::Metrics>();
     router.register_rpc_metadata::<rpc::Query>();
@@ -405,6 +943,237 @@ impl Client {
     {
         self.inner.call::<rpc::ConsumersQuery>(input).await
     }
+    pub fn consumers_query_pages(
+        &self,
+        input: rpc::ConsumersQueryInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::ConsumersQueryOutput, crate::PaginationError<rpc::ConsumersQueryError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .consumers_query(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn consumers_query_items(
+        &self,
+        input: rpc::ConsumersQueryInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::EventConsumerStatusRow,
+            crate::PaginationError<rpc::ConsumersQueryError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::EventConsumerStatusRow>::new().into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .consumers_query(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
+    }
+    pub async fn consumers_report_delivery(
+        &self,
+        input: &rpc::ConsumersReportDeliveryInput,
+    ) -> Result<
+        rpc::ConsumersReportDeliveryOutput,
+        trellis_rs::client::CallError<rpc::ConsumersReportDeliveryError>,
+    > {
+        self.inner.call::<rpc::ConsumersReportDelivery>(input).await
+    }
+    pub async fn dead_letters_dismiss(
+        &self,
+        input: &rpc::DeadLettersDismissInput,
+    ) -> Result<
+        rpc::DeadLettersDismissOutput,
+        trellis_rs::client::CallError<rpc::DeadLettersDismissError>,
+    > {
+        self.inner.call::<rpc::DeadLettersDismiss>(input).await
+    }
+    pub async fn dead_letters_inspect(
+        &self,
+        input: &rpc::DeadLettersInspectInput,
+    ) -> Result<
+        rpc::DeadLettersInspectOutput,
+        trellis_rs::client::CallError<rpc::DeadLettersInspectError>,
+    > {
+        self.inner.call::<rpc::DeadLettersInspect>(input).await
+    }
+    pub async fn dead_letters_query(
+        &self,
+        input: &rpc::DeadLettersQueryInput,
+    ) -> Result<
+        rpc::DeadLettersQueryOutput,
+        trellis_rs::client::CallError<rpc::DeadLettersQueryError>,
+    > {
+        self.inner.call::<rpc::DeadLettersQuery>(input).await
+    }
+    pub fn dead_letters_query_pages(
+        &self,
+        input: rpc::DeadLettersQueryInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::DeadLettersQueryOutput, crate::PaginationError<rpc::DeadLettersQueryError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .dead_letters_query(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn dead_letters_query_items(
+        &self,
+        input: rpc::DeadLettersQueryInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<
+            crate::__types::trellis::EventsDeadLetter,
+            crate::PaginationError<rpc::DeadLettersQueryError>,
+        >,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::EventsDeadLetter>::new().into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .dead_letters_query(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
+    }
+    pub async fn dead_letters_replay(
+        &self,
+        input: &rpc::DeadLettersReplayInput,
+    ) -> Result<
+        rpc::DeadLettersReplayOutput,
+        trellis_rs::client::CallError<rpc::DeadLettersReplayError>,
+    > {
+        self.inner.call::<rpc::DeadLettersReplay>(input).await
+    }
+    pub async fn diagnostics(
+        &self,
+        input: &rpc::DiagnosticsInput,
+    ) -> Result<rpc::DiagnosticsOutput, trellis_rs::client::CallError<rpc::DiagnosticsError>> {
+        self.inner.call::<rpc::Diagnostics>(input).await
+    }
     pub async fn inspect(
         &self,
         input: &rpc::InspectInput,
@@ -422,6 +1191,93 @@ impl Client {
         input: &rpc::QueryInput,
     ) -> Result<rpc::QueryOutput, trellis_rs::client::CallError<rpc::QueryError>> {
         self.inner.call::<rpc::Query>(input).await
+    }
+    pub fn query_pages(
+        &self,
+        input: rpc::QueryInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<rpc::QueryOutput, crate::PaginationError<rpc::QueryError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (client, input, seen, false),
+            |(client, mut input, mut seen, done)| async move {
+                if done {
+                    return Ok(None);
+                }
+                let page = client
+                    .query(&input)
+                    .await
+                    .map_err(crate::PaginationError::Call)?;
+                let next = page.page.next_cursor.clone();
+                let done = next.is_none();
+                if let Some(cursor) = next {
+                    if !seen.insert(cursor.clone()) {
+                        return Err(crate::PaginationError::RepeatedCursor(cursor));
+                    }
+                    let limit = input.page.as_ref().and_then(|page| page.limit);
+                    input.page = Some(crate::__types::CursorQuery {
+                        cursor: Some(cursor),
+                        limit,
+                    });
+                }
+                Ok(Some((page, (client, input, seen, done))))
+            },
+        ))
+    }
+    pub fn query_items(
+        &self,
+        input: rpc::QueryInput,
+    ) -> futures_util::stream::BoxStream<
+        'static,
+        Result<crate::__types::trellis::EventsRow, crate::PaginationError<rpc::QueryError>>,
+    > {
+        let client = self.clone();
+        let mut seen = std::collections::BTreeSet::new();
+        if let Some(cursor) = input.page.as_ref().and_then(|page| page.cursor.clone()) {
+            seen.insert(cursor);
+        }
+        Box::pin(futures_util::stream::try_unfold(
+            (
+                client,
+                input,
+                seen,
+                false,
+                Vec::<crate::__types::trellis::EventsRow>::new().into_iter(),
+            ),
+            |(client, mut input, mut seen, mut done, mut items)| async move {
+                loop {
+                    if let Some(item) = items.next() {
+                        return Ok(Some((item, (client, input, seen, done, items))));
+                    }
+                    if done {
+                        return Ok(None);
+                    }
+                    let page = client
+                        .query(&input)
+                        .await
+                        .map_err(crate::PaginationError::Call)?;
+                    let next = page.page.next_cursor.clone();
+                    done = next.is_none();
+                    if let Some(cursor) = next {
+                        if !seen.insert(cursor.clone()) {
+                            return Err(crate::PaginationError::RepeatedCursor(cursor));
+                        }
+                        let limit = input.page.as_ref().and_then(|page| page.limit);
+                        input.page = Some(crate::__types::CursorQuery {
+                            cursor: Some(cursor),
+                            limit,
+                        });
+                    }
+                    items = page.items.into_iter();
+                }
+            },
+        ))
     }
     pub async fn watch(
         &self,
@@ -470,6 +1326,88 @@ impl<'a, P: trellis_rs::generated::ParticipantDescriptor> Provider<'a, P> {
     {
         self.runtime
             .register_rpc::<rpc::ConsumersQuery, _, _>(handler);
+    }
+    pub fn register_consumers_report_delivery<F, Fut>(&mut self, handler: F)
+    where
+        F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::ConsumersReportDeliveryInput) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: std::future::Future<
+                Output = trellis_rs::service::HandlerResult<rpc::ConsumersReportDeliveryOutput>,
+            > + Send
+            + 'static,
+    {
+        self.runtime
+            .register_rpc::<rpc::ConsumersReportDelivery, _, _>(handler);
+    }
+    pub fn register_dead_letters_dismiss<F, Fut>(&mut self, handler: F)
+    where
+        F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::DeadLettersDismissInput) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: std::future::Future<
+                Output = trellis_rs::service::HandlerResult<rpc::DeadLettersDismissOutput>,
+            > + Send
+            + 'static,
+    {
+        self.runtime
+            .register_rpc::<rpc::DeadLettersDismiss, _, _>(handler);
+    }
+    pub fn register_dead_letters_inspect<F, Fut>(&mut self, handler: F)
+    where
+        F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::DeadLettersInspectInput) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: std::future::Future<
+                Output = trellis_rs::service::HandlerResult<rpc::DeadLettersInspectOutput>,
+            > + Send
+            + 'static,
+    {
+        self.runtime
+            .register_rpc::<rpc::DeadLettersInspect, _, _>(handler);
+    }
+    pub fn register_dead_letters_query<F, Fut>(&mut self, handler: F)
+    where
+        F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::DeadLettersQueryInput) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: std::future::Future<
+                Output = trellis_rs::service::HandlerResult<rpc::DeadLettersQueryOutput>,
+            > + Send
+            + 'static,
+    {
+        self.runtime
+            .register_rpc::<rpc::DeadLettersQuery, _, _>(handler);
+    }
+    pub fn register_dead_letters_replay<F, Fut>(&mut self, handler: F)
+    where
+        F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::DeadLettersReplayInput) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: std::future::Future<
+                Output = trellis_rs::service::HandlerResult<rpc::DeadLettersReplayOutput>,
+            > + Send
+            + 'static,
+    {
+        self.runtime
+            .register_rpc::<rpc::DeadLettersReplay, _, _>(handler);
+    }
+    pub fn register_diagnostics<F, Fut>(&mut self, handler: F)
+    where
+        F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::DiagnosticsInput) -> Fut
+            + Send
+            + Sync
+            + 'static,
+        Fut: std::future::Future<Output = trellis_rs::service::HandlerResult<rpc::DiagnosticsOutput>>
+            + Send
+            + 'static,
+    {
+        self.runtime.register_rpc::<rpc::Diagnostics, _, _>(handler);
     }
     pub fn register_inspect<F, Fut>(&mut self, handler: F)
     where

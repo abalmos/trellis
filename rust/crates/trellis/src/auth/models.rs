@@ -121,3 +121,15 @@ pub struct DeviceIdentity {
     /// Secret used to derive activation confirmation codes. Keep it device-local.
     pub activation_key_base64url: String,
 }
+
+/// Device-local credential derived for one exact user companion installation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[doc = concat!("Public Trellis data type `", stringify!(DeviceCompanionIdentity), "`.")]
+pub struct DeviceCompanionIdentity {
+    /// Secret Ed25519 seed. Keep it device-local and never send it to Trellis.
+    #[serde(rename = "installationSeedBase64url")]
+    pub installation_seed_base64url: String,
+    /// Public installation key sent in the proof-bound companion claim.
+    #[serde(rename = "installationPublicKey")]
+    pub installation_public_key: String,
+}

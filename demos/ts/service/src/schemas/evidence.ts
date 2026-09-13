@@ -31,20 +31,6 @@ export const EvidenceRecord = Type.Object({
   uploadedAt: Type.String({ minLength: 1 }),
 });
 
-export const EvidenceListRequest = Type.Object({
-  limit: Type.Integer({ minimum: 0, maximum: 500 }),
-  offset: Type.Optional(Type.Integer({ minimum: 0 })),
-  prefix: Type.Optional(Type.String({ minLength: 1 })),
-});
-
-export const EvidenceListResponse = Type.Object({
-  entries: Type.Array(EvidenceRecord),
-  count: Type.Integer({ minimum: 0 }),
-  offset: Type.Integer({ minimum: 0 }),
-  limit: Type.Integer({ minimum: 0 }),
-  nextOffset: Type.Optional(Type.Integer({ minimum: 0 })),
-});
-
 export const EvidenceDownloadRequest = Type.Object({
   key: Type.String({ minLength: 1 }),
 });

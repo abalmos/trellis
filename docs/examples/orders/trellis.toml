@@ -1,4 +1,9 @@
-format = 1
-name = "orders-trellis"
+[package]
+name = "acme-orders"
+version = "1.0.0"
 
-[apis]
+[sources]
+orders = "contract.trellis"
+
+[generate.typescript]
+output = "trellis"

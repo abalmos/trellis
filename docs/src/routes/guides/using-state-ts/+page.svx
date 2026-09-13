@@ -1,29 +1,17 @@
 # Use State from TypeScript
 
-Declare state inside an app or device participant. Define its schema model in
-the implemented API; the generator derives the required state runtime grants.
-Services use KV resources instead of participant state.
+Declare a typed `state` resource inside an app, agent, or device. State is one
+value with no key or TTL. Generated handles expose `get`, `create`, `set`,
+`replace`, and `delete`; revisions are opaque CAS tokens.
 
-```trellis
-state preferences value {
-  schema Preferences;
-  state_version "preferences.v1";
-}
-```
+An available but unwritten State returns no value, unlike an unavailable optional
+handle. State belongs to the stable principal and qualified participant. A
+device companion is a lexical child with its own user grant, login session,
+authorization context, resources, and connection. Its State is therefore owned
+by the user and qualified child participant: the same user's named child can
+share State across devices while each outer device's State remains isolated by
+the device principal.
 
-Run `trellis generate` and connect with the generated participant. For a
-`Preferences` model containing `theme: string`:
-
-```ts
-await client.state.preferences.put({ theme: "dark" }).orThrow();
-const stored = await client.state.preferences.get().orThrow();
-if ("found" in stored && stored.found) {
-  console.log(stored.entry.value.theme);
-}
-```
-
-State belongs to the stable principal and participant lineage, not a socket.
-It survives reconnects and server restarts. Use the revision/CAS options exposed
-by the generated handle when coordinating concurrent writes. A `state_version`
-change is a migration decision, not a cache-busting value. Never access the
-internal state bucket directly.
+For accepted historical representations written by this architecture, register
+the generated direct historical-to-current migration. Reads and conflicts
+migrate in memory without changing stored bytes, revision, or timestamp.

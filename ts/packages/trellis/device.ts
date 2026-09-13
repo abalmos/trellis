@@ -16,6 +16,10 @@ import {
 import { ulid } from "ulid";
 import { decodeTrellisHttpError, TrellisHttpError } from "./auth/http_error.ts";
 import {
+  connectClientWithDeps,
+  type ConnectedTrellisClient,
+} from "./client_connect.ts";
+import {
   type ContractResourceBindings,
   ContractResourceBindingsSchema,
 } from "./participant.ts";
@@ -23,13 +27,16 @@ import {
 import {
   deriveDeviceConfirmationCode,
   deriveDeviceIdentity,
+  deriveDeviceUserCompanion,
   requestDeviceEnrollment,
   verifyDeviceConfirmationCode,
   waitForDeviceActivation,
 } from "./auth/device_activation.ts";
+import { sessionProofRequestDigest } from "./auth/session_proof.ts";
 import {
   base64urlDecode,
   base64urlEncode,
+  canonicalizeJsonValue,
   sha256,
   utf8,
 } from "./auth/utils.ts";
@@ -50,7 +57,7 @@ import { publishHealthHeartbeatSample } from "./health_transport.ts";
 import { type RuntimeStateStoresForContract, Trellis } from "./session.ts";
 import { logger as noopLogger, type LoggerLike } from "./globals.ts";
 import { TransportError } from "./errors/index.ts";
-import { Type } from "typebox";
+import { type StaticDecode, Type } from "typebox";
 import { Value } from "typebox/value";
 import {
   installConnectionAvailability,
@@ -65,10 +72,12 @@ import {
 } from "./auth/authorization_context.ts";
 import { type CallerRuntime, createCallerRuntime } from "./caller.ts";
 import {
+  bindApiRoutes,
   type GeneratedParticipant,
   getParticipantRuntime,
   participantAvailability,
   participantEvidence,
+  refreshApiRoutes,
 } from "./participant_runtime/participant.ts";
 
 type DeviceContract = GeneratedParticipant;
@@ -107,9 +116,22 @@ function deviceConnectResult<T>(
 
 export type TrellisDeviceConnection<
   TContract extends DeviceContract = DeviceContract,
-> = CallerRuntime<TContract> & {
-  readonly health: ServiceHealth;
-};
+> =
+  & CallerRuntime<TContract>
+  & {
+    readonly health: ServiceHealth;
+  }
+  & (TContract extends {
+    companion: {
+      participant: infer TChild extends GeneratedParticipant;
+      availability: infer TAvailability;
+    };
+  } ? {
+      readonly companion: TAvailability extends "required"
+        ? ConnectedTrellisClient<TChild>
+        : ConnectedTrellisClient<TChild> | undefined;
+    }
+    : { readonly companion?: never });
 
 type DeviceConnectTransport = {
   connect(options: {
@@ -204,13 +226,23 @@ export type TrellisDeviceConnectArgs<
   log?: LoggerLike | false;
 };
 
-const DeviceBootstrapReadySchema = Type.Object({
+const DeviceBootstrapInstallationSchema = Type.Object({
   ...AuthorizationContextRefreshResponseSchema.properties,
   authorization: Type.Object({
     participantId: Type.String({ minLength: 1 }),
     participantDigest: Type.String({ minLength: 1 }),
     resourceRuntime: ContractResourceBindingsSchema,
   }),
+});
+
+const DeviceBootstrapReadySchema = Type.Object({
+  ...DeviceBootstrapInstallationSchema.properties,
+  companion: Type.Optional(Type.Object({
+    participantId: Type.String({ minLength: 1 }),
+    loginSessionId: Type.String({ minLength: 1 }),
+    required: Type.Boolean(),
+    installation: DeviceBootstrapInstallationSchema,
+  })),
 });
 
 type DeviceBootstrapReady = {
@@ -229,6 +261,14 @@ type DeviceBootstrapReady = {
     resourceBindings: ContractResourceBindings;
   };
   sessionAuth: Awaited<ReturnType<typeof createAuth>>;
+  companion?: {
+    participantId: string;
+    loginSessionId: string;
+    required: boolean;
+    installationSeedBase64url: string;
+    sessionSeedBase64url: string;
+    bootstrap: StaticDecode<typeof DeviceBootstrapInstallationSchema>;
+  };
 };
 type DeviceBootstrapResponse = DeviceBootstrapReady;
 type ResolvedDeviceConnectInfo = DeviceBootstrapReady["connectInfo"];
@@ -379,6 +419,11 @@ function createActivationSession<
   localState: TLocalState;
   sessionIdentity?: Awaited<ReturnType<typeof createAuth>>;
   connectionId?: string;
+  companion?: {
+    participantId: string;
+    kind: "app" | "agent";
+    installation: Awaited<ReturnType<typeof deriveDeviceUserCompanion>>;
+  };
 }): TrellisDeviceActivationSession<TLocalState> {
   assertActivationStateMatchesIdentity({
     localState: args.localState,
@@ -410,6 +455,7 @@ function createActivationSession<
         signal: opts?.signal,
         sessionIdentity: args.sessionIdentity,
         connectionId: args.connectionId,
+        companion: args.companion,
       });
       return activatedState;
     },
@@ -439,6 +485,7 @@ function createActivationSession<
 async function fetchDeviceBootstrap(args: {
   trellisUrl: string;
   deviceIdentity: Awaited<ReturnType<typeof deriveDeviceIdentity>>;
+  rootSecret: Uint8Array;
   participant: DeviceContract;
   now: () => number;
   offsetState: DeviceClockOffsetState;
@@ -462,7 +509,7 @@ async function fetchDeviceBootstrap(args: {
   const deviceIdentityKeyId = base64urlEncode(
     await sha256(base64urlDecode(identityAuth.sessionKey)),
   );
-  const unsigned = {
+  const unsigned: Record<string, unknown> & { iat: number } = {
     identityKeyId: deviceIdentityKeyId,
     sessionKey: sessionAuth.sessionKey,
     connectionId: args.connectionId ?? ulid(),
@@ -471,6 +518,47 @@ async function fetchDeviceBootstrap(args: {
     name: args.participant.identity,
     ...participantEvidence(args.participant),
   };
+  const descriptor = args.participant.companion;
+  let companionInstallationSeedBase64url: string | undefined;
+  let companionSessionSeedBase64url: string | undefined;
+  if (descriptor) {
+    const installation = await deriveDeviceUserCompanion(
+      args.rootSecret,
+      args.trellisUrl,
+      descriptor.participant.identity,
+    );
+    companionInstallationSeedBase64url = installation.installationSeedBase64url;
+    const companionAuth = await createAuth({
+      sessionKeySeed: installation.installationSeedBase64url,
+    });
+    companionSessionSeedBase64url = base64urlEncode(
+      crypto.getRandomValues(new Uint8Array(32)),
+    );
+    const companionSessionAuth = await createAuth({
+      sessionKeySeed: companionSessionSeedBase64url,
+    });
+    const companionRequest = {
+      connectionId: ulid(),
+      requestId: ulid(),
+      issuedAt,
+      sessionKey: companionSessionAuth.sessionKey,
+    };
+    const digest = base64urlEncode(
+      await sha256(utf8(canonicalizeJsonValue({
+        format: "trellis.device.user-companion.v1",
+        origin: new URL(args.trellisUrl).origin,
+        identityKeyId: deviceIdentityKeyId,
+        participantId: descriptor.participant.identity,
+        ...companionRequest,
+      }))),
+    );
+    unsigned.companion = {
+      ...companionRequest,
+      proof: base64urlEncode(
+        await companionAuth.sign(base64urlDecode(digest)),
+      ),
+    };
+  }
   const response = await fetch(
     new URL("/bootstrap/device", args.trellisUrl),
     {
@@ -521,6 +609,17 @@ async function fetchDeviceBootstrap(args: {
       apiBindings: ready.apiBindings,
       resourceBindings: ready.authorization.resourceRuntime,
     },
+    ...(ready.companion && companionInstallationSeedBase64url &&
+        companionSessionSeedBase64url
+      ? {
+        companion: {
+          ...ready.companion,
+          installationSeedBase64url: companionInstallationSeedBase64url,
+          sessionSeedBase64url: companionSessionSeedBase64url,
+          bootstrap: ready.companion.installation,
+        },
+      }
+      : {}),
   };
 }
 
@@ -544,6 +643,24 @@ export async function startDeviceActivationWithDeps<
     ),
   });
   const connectionId = ulid();
+  const companion = args.participant.companion;
+  if (
+    companion && companion.participant.kind !== "app" &&
+    companion.participant.kind !== "agent"
+  ) {
+    throw new Error("device companion must be an app or agent");
+  }
+  const companionIdentity = companion
+    ? {
+      participantId: companion.participant.identity,
+      kind: companion.participant.kind as "app" | "agent",
+      installation: await deriveDeviceUserCompanion(
+        rootSecret,
+        args.trellisUrl,
+        companion.participant.identity,
+      ),
+    }
+    : undefined;
   const activation = await requestDeviceEnrollment({
     trellisUrl: args.trellisUrl,
     publicIdentityKey: identity.publicIdentityKey,
@@ -559,6 +676,7 @@ export async function startDeviceActivationWithDeps<
       publicIdentityKey: identity.publicIdentityKey,
       nonce,
     }),
+    companion: companionIdentity,
   });
   const activationState = activation.activation as
     | Record<string, unknown>
@@ -600,6 +718,7 @@ export async function startDeviceActivationWithDeps<
     },
     sessionIdentity,
     connectionId,
+    companion: companionIdentity,
   });
 }
 
@@ -619,6 +738,7 @@ export async function resumeDeviceActivationWithDeps<
 ): Promise<TrellisDeviceActivationSession<TLocalState>> {
   const rootSecret = normalizeRootSecret(args.rootSecret);
   const identity = await deriveDeviceIdentity(rootSecret);
+  const companion = args.participant.companion;
 
   return await createActivationSession({
     trellisUrl: args.trellisUrl,
@@ -628,6 +748,17 @@ export async function resumeDeviceActivationWithDeps<
     participant: args.participant,
     now: deps.now,
     localState: args.localState,
+    companion: companion
+      ? {
+        participantId: companion.participant.identity,
+        kind: companion.participant.kind as "app" | "agent",
+        installation: await deriveDeviceUserCompanion(
+          rootSecret,
+          args.trellisUrl,
+          companion.participant.identity,
+        ),
+      }
+      : undefined,
   });
 }
 
@@ -647,13 +778,28 @@ export async function connectDeviceWithDeps<
   const rootSecret = normalizeRootSecret(args.rootSecret);
   const identity = await deriveDeviceIdentity(rootSecret);
   const offsetState: DeviceClockOffsetState = { serverClockOffsetMs: 0 };
-  const bootstrap = await fetchDeviceBootstrap({
-    trellisUrl: args.trellisUrl,
-    deviceIdentity: identity,
-    participant: args.participant,
-    now: deps.now,
-    offsetState,
-  });
+  let bootstrap: Awaited<ReturnType<typeof fetchDeviceBootstrap>>;
+  while (true) {
+    try {
+      bootstrap = await fetchDeviceBootstrap({
+        trellisUrl: args.trellisUrl,
+        deviceIdentity: identity,
+        rootSecret,
+        participant: args.participant,
+        now: deps.now,
+        offsetState,
+      });
+      break;
+    } catch (error) {
+      if (
+        !(error instanceof TrellisHttpError) || error.status !== 503 ||
+        error.code !== "resource_pending"
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
 
   const connectInfo = bootstrap.connectInfo;
 
@@ -745,6 +891,10 @@ export async function connectDeviceWithDeps<
   connection.subscribe((status) =>
     authorizationProviderCache.observeConnectionPhase(status.phase)
   );
+  const runtimeApi = bindApiRoutes(
+    getParticipantRuntime(args.participant).api,
+    connectInfo.apiBindings,
+  ) as RuntimeApi;
   const stopContextRefresh = startAuthorizationContextRefresh({
     trellisUrl: args.trellisUrl,
     sessionId: connectInfo.connectionId,
@@ -755,6 +905,7 @@ export async function connectDeviceWithDeps<
         const next = await fetchDeviceBootstrap({
           trellisUrl: args.trellisUrl,
           deviceIdentity: identity,
+          rootSecret,
           participant: args.participant,
           now: deps.now,
           offsetState,
@@ -781,6 +932,7 @@ export async function connectDeviceWithDeps<
             next.connectInfo.resourceBindings,
           ),
         );
+        refreshApiRoutes(runtimeApi, next.connectInfo.apiBindings);
         return context;
       } catch (error) {
         if (error instanceof TrellisHttpError) {
@@ -789,8 +941,7 @@ export async function connectDeviceWithDeps<
         throw error;
       }
     },
-    onRefresh: () =>
-      connection.status.phase !== "connected" ? nc.reconnect() : undefined,
+    onRefresh: () => nc.reconnect(),
     onTerminalFailure: async () => {
       if (!nc.isClosed()) await nc.drain();
     },
@@ -812,7 +963,7 @@ export async function connectDeviceWithDeps<
     },
     {
       log,
-      api: getParticipantRuntime(args.participant).api as RuntimeApi,
+      api: runtimeApi,
       state: getParticipantRuntime(args.participant).state,
       connection,
     },
@@ -877,9 +1028,64 @@ export async function connectDeviceWithDeps<
   }, health.publishIntervalMs);
   void nc.closed().finally(stopHeartbeat);
 
+  let companionConnection: ConnectedTrellisClient<DeviceContract> | undefined;
+  if (bootstrap.companion) {
+    const companion = args.participant.companion;
+    if (
+      !companion ||
+      companion.participant.identity !== bootstrap.companion.participantId
+    ) {
+      throw new Error(
+        "device bootstrap companion does not match its descriptor",
+      );
+    }
+    try {
+      const installation = bootstrap.companion.bootstrap;
+      companionConnection = await connectClientWithDeps({
+        trellisUrl: args.trellisUrl,
+        participant: companion.participant,
+        auth: {
+          mode: "session_key",
+          sessionKeySeed: bootstrap.companion.installationSeedBase64url,
+          sessionId: bootstrap.companion.loginSessionId,
+          redirectTo: new URL(args.trellisUrl).origin,
+        },
+      }, {
+        ...deps,
+        runtimeSessionKeySeed: bootstrap.companion.sessionSeedBase64url,
+        initialBootstrap: {
+          status: "ready",
+          serverNow: Math.floor(installation.serverNow / 1_000),
+          serverClockOffsetMs: installation.serverNow - deps.now(),
+          connectInfo: {
+            connectionId: installation.runtime.connectionId,
+            sessionId: bootstrap.companion.loginSessionId,
+            participantId: installation.runtime.participantId,
+            participantDigest: installation.authorization.participantDigest,
+            transports: installation.transports,
+            transport: {
+              jwt: installation.routing.bootstrapJwt,
+              jwtExpiresAt: installation.routing.bootstrapJwtExpiresAt,
+              inboxPrefix: installation.runtime.inboxPrefix,
+            },
+            authorizationContext: installation.authorizationContext,
+          },
+          apiBindings: installation.apiBindings,
+          resourceBindings: installation.authorization.resourceRuntime,
+        },
+      });
+    } catch (error) {
+      if (bootstrap.companion.required) throw error;
+      log.warn({ error }, "Optional device companion could not connect");
+    }
+  } else if (args.participant.companion?.availability === "required") {
+    throw new Error("required device companion is unavailable");
+  }
+
   return Object.assign(createCallerRuntime(trellis, args.participant), {
     health,
-  });
+    companion: companionConnection,
+  }) as TrellisDeviceConnection<TContract>;
 }
 
 export const TrellisDevice = {

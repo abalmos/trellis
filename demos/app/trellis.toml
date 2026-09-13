@@ -1,10 +1,13 @@
-format = 1
-name = "app-trellis"
-
-[apis."demo.service@v1"]
+[package]
+name = "demo-app"
 version = "1.0.0"
-path = "../ts/service"
 
-[apis."trellis.state@v1"]
-version = "1.0.0"
-path = "../../rust/crates/runtime"
+[sources]
+app = "contract.trellis"
+
+[dependencies]
+service = { package = "demo-service", path = "../ts/service" }
+trellis = { package = "trellis", path = "../../rust/crates/runtime" }
+
+[generate.typescript]
+output = "trellis"

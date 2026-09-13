@@ -42,6 +42,8 @@ fn context(id: &str) -> JobContext {
 #[test]
 fn max_deliveries_advisory_parses_supported_spellings() {
     let expected = MaxDeliveriesAdvisory {
+        advisory_type: "io.nats.jetstream.advisory.v1.max_deliver".to_owned(),
+        id: "advisory-1".to_owned(),
         stream: "JOBS_WORK".to_string(),
         consumer: "documents-document-process".to_string(),
         stream_seq: 41,
@@ -58,6 +60,8 @@ fn max_deliveries_advisory_parses_supported_spellings() {
 
     for raw in [
         json!({
+            "type": "io.nats.jetstream.advisory.v1.max_deliver",
+            "id": "advisory-1",
             "stream": "JOBS_WORK",
             "consumer": "documents-document-process",
             "stream_seq": 41,
@@ -65,6 +69,8 @@ fn max_deliveries_advisory_parses_supported_spellings() {
             "timestamp": "2026-03-28T12:05:00.000Z"
         }),
         json!({
+            "type": "io.nats.jetstream.advisory.v1.max_deliver",
+            "id": "advisory-1",
             "stream": "JOBS_WORK",
             "consumer": "documents-document-process",
             "streamSeq": 41,
@@ -72,6 +78,8 @@ fn max_deliveries_advisory_parses_supported_spellings() {
             "timestamp": "2026-03-28T12:05:00.000Z"
         }),
         json!({
+            "type": "io.nats.jetstream.advisory.v1.max_deliver",
+            "id": "advisory-1",
             "stream": "JOBS_WORK",
             "consumer": "documents-document-process",
             "stream_seq": 41,
@@ -79,6 +87,8 @@ fn max_deliveries_advisory_parses_supported_spellings() {
             "timestamp": "2026-03-28T12:05:00.000Z"
         }),
         json!({
+            "type": "io.nats.jetstream.advisory.v1.max_deliver",
+            "id": "advisory-1",
             "stream": "JOBS_WORK",
             "consumer": "documents-document-process",
             "streamSeq": 41,
@@ -96,6 +106,8 @@ fn max_deliveries_advisory_parses_supported_spellings() {
 #[test]
 fn map_dead_event_from_advisory_job_uses_current_state_and_max_tries() {
     let advisory = MaxDeliveriesAdvisory {
+        advisory_type: "io.nats.jetstream.advisory.v1.max_deliver".to_owned(),
+        id: "advisory-1".to_owned(),
         stream: "JOBS_WORK".to_string(),
         consumer: "documents-document-process".to_string(),
         stream_seq: 41,
@@ -124,8 +136,30 @@ fn map_dead_event_from_advisory_job_uses_current_state_and_max_tries() {
 }
 
 #[test]
+fn map_dead_event_without_projection_does_not_invent_previous_work_state() {
+    let advisory = MaxDeliveriesAdvisory {
+        advisory_type: "io.nats.jetstream.advisory.v1.max_deliver".to_owned(),
+        id: "advisory-1".to_owned(),
+        stream: "JOBS_WORK".to_string(),
+        consumer: "documents-document-process".to_string(),
+        stream_seq: 41,
+        deliveries: 3,
+        timestamp: "2026-03-28T12:05:00.000Z".to_string(),
+    };
+    let work = sample_job("job-1", JobState::Active, 99);
+
+    let mapped = map_dead_event_from_advisory_job(None, &work, &advisory)
+        .expect("valid advisory should map to a dead event");
+
+    assert_eq!(mapped.event.previous_state, None);
+    assert_eq!(mapped.event.tries, 3);
+}
+
+#[test]
 fn map_dead_event_from_advisory_job_skips_terminal_current_job() {
     let advisory = MaxDeliveriesAdvisory {
+        advisory_type: "io.nats.jetstream.advisory.v1.max_deliver".to_owned(),
+        id: "advisory-1".to_owned(),
         stream: "JOBS_WORK".to_string(),
         consumer: "documents-document-process".to_string(),
         stream_seq: 41,

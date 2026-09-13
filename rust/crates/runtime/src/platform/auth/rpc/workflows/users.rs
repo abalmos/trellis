@@ -7,28 +7,28 @@ pub(super) async fn dispatch(
     caller: ValidatedRequest,
 ) -> Result<Value, AuthorizationStateError> {
     match subject {
-        "rpc.v1.Auth.Users.Create" => processor.users_create(payload, &caller).await,
-        "rpc.v1.Auth.Users.Get" => processor.users_get(payload).await,
-        "rpc.v1.Auth.Users.Resolve" => processor.users_resolve(payload).await,
-        "rpc.v1.Auth.Users.List" => processor.users_list(payload).await,
-        "rpc.v1.Auth.Users.Update" => processor.users_update(payload, &caller).await,
-        "rpc.v1.Auth.Users.PasswordReset.Create" => {
+        "rpc.v1.auth.Users.Create" => processor.users_create(payload, &caller).await,
+        "rpc.v1.auth.Users.Get" => processor.users_get(payload).await,
+        "rpc.v1.auth.Users.Resolve" => processor.users_resolve(payload).await,
+        "rpc.v1.auth.Users.List" => processor.users_list(payload).await,
+        "rpc.v1.auth.Users.Update" => processor.users_update(payload, &caller).await,
+        "rpc.v1.auth.Users.PasswordReset.Create" => {
             processor.password_reset_create(payload, &caller).await
         }
-        "rpc.v1.Auth.Users.Password.Change" => processor.password_change(payload, &caller).await,
-        "rpc.v1.Auth.Users.IdentityLink.Create" => {
+        "rpc.v1.auth.Users.Password.Change" => processor.password_change(payload, &caller).await,
+        "rpc.v1.auth.Users.IdentityLink.Create" => {
             processor.identity_link_create(payload, &caller).await
         }
-        "rpc.v1.Auth.UserIdentities.List" => processor.user_identities_list(payload, &caller).await,
-        "rpc.v1.Auth.UserIdentities.Unlink" => {
+        "rpc.v1.auth.UserIdentities.List" => processor.user_identities_list(payload, &caller).await,
+        "rpc.v1.auth.UserIdentities.Unlink" => {
             processor.user_identities_unlink(payload, &caller).await
         }
-        "rpc.v1.Auth.CapabilityGroups.List" => processor.capability_groups_list(payload).await,
-        "rpc.v1.Auth.CapabilityGroups.Get" => processor.capability_groups_get(payload).await,
-        "rpc.v1.Auth.CapabilityGroups.Put" => {
+        "rpc.v1.auth.CapabilityGroups.List" => processor.capability_groups_list(payload).await,
+        "rpc.v1.auth.CapabilityGroups.Get" => processor.capability_groups_get(payload).await,
+        "rpc.v1.auth.CapabilityGroups.Put" => {
             processor.capability_groups_put(payload, &caller).await
         }
-        "rpc.v1.Auth.CapabilityGroups.Delete" => {
+        "rpc.v1.auth.CapabilityGroups.Delete" => {
             processor.capability_groups_delete(payload, &caller).await
         }
         _ => unknown(subject),

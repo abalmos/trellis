@@ -1,28 +1,10 @@
-# Select optional authority
+# Select optional functionality
 
-Required and optional action selections belong in native IDL, not a TypeScript
-`uses` object or Rust builder. For example, a separate caller can request the
-Orders RPC without making it mandatory:
+Optionality belongs on implicated capabilities and resource/companion
+declarations, not on a whole API use or individual action. `use Api;` selects
+nothing; a nonempty body selects exact interactions.
 
-```trellis
-participant "acme.optional-caller" app {
-  use optional orders "acme.orders@v1" {
-    call rpc "Orders.Create";
-  }
-}
-```
-
-The referenced API must still be available when compiling the project. Optional
-does not mean an unresolved build dependency, an automatic network fallback, or
-a guarantee that a running provider exists. It means that the participant can be
-authorized without that action selection being granted.
-
-After `trellis generate`, the caller facade has `ordersCreate`, but calling it
-without accepted optional authority is denied. Handle the returned `Result` and
-show or disable the optional feature according to your application's behavior.
-Do not use generated method presence as evidence of a grant.
-
-Use `use required` for the authority the participant needs to fulfill its role.
-Changing required or optional selections changes participant needs: regenerate
-the installed participant and update its `GrantBinding` rather than editing permissions
-or digests in application code.
+Required implicated capabilities must be approved and eligible for readiness.
+Declining an optional capability leaves its actions unavailable without blocking
+the participant. Optional resource handles are absent when unapproved or
+unusable. Generated method presence is not evidence of current authority.

@@ -1,20 +1,15 @@
 use super::super::*;
 use super::local::{portal_flow_response, PortalFlowResponse};
 use crate::platform::auth::policy::portal_allows_authenticated_provider;
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ApprovalRequest {
-    approved: bool,
-    consent_view_digest: String,
-    pub(crate) selected_optional_bundles: Vec<String>,
-}
+use crate::platform::auth::{
+    ApprovalMode, ApprovedCapability, ApprovedResource, DelegationCeiling,
+};
 
 pub(crate) async fn decide_approval<R, E>(
     State(state): State<AuthHttpState<R, E>>,
     Path(flow_id): Path<String>,
     headers: HeaderMap,
-    Json(request): Json<ApprovalRequest>,
+    Json(request): Json<ConsentDecision>,
 ) -> Result<Json<PortalFlowResponse>, HttpError>
 where
     R: AccountRepository
@@ -58,8 +53,12 @@ where
             .repository()
             .get_idempotency_result("browser.grant.accept", &signer_id, &flow_id)
             .await?;
-        if !request.approved
-            || request.consent_view_digest != flow.consent.consent_view_digest
+        if request.decision != ConsentDecisionKind::Approve
+            || request
+                .approval
+                .as_ref()
+                .map(|approval| &approval.decision_digest)
+                != Some(&flow.consent.decision_digest)
             || recorded.as_ref().map(|record| &record.request_digest) != Some(&request_digest)
         {
             return Err(HttpError::conflict("approval_replay_mismatch"));
@@ -79,13 +78,83 @@ where
         )
         .await?
         .ok_or_else(|| HttpError::internal("participant_binding_missing"))?;
-    let current_consent = browser_consent(&binding)?;
-    if request.consent_view_digest != flow.consent.consent_view_digest
-        || current_consent != flow.consent
-    {
+    let current = state
+        .service
+        .repository()
+        .get_grant_binding(
+            GrantOwnerKind::User,
+            flow.principal_id
+                .clone()
+                .ok_or_else(|| HttpError::conflict("flow_has_no_principal"))?,
+            flow.participant_id.clone(),
+        )
+        .await?;
+    let mut ceiling = super::super::super::policy::participant_delegation_ceiling(&binding)?;
+    ceiling.platform_privileges = current
+        .as_ref()
+        .map_or_else(Vec::new, |binding| binding.platform_privileges.clone());
+    let actuals = state
+        .service
+        .repository()
+        .consent_resource_actuals(
+            GrantOwnerKind::User,
+            flow.principal_id
+                .clone()
+                .ok_or_else(|| HttpError::conflict("flow_has_no_principal"))?,
+            flow.participant_id.clone(),
+        )
+        .await?;
+    let companion_id = binding.resolve()?.companion_participant_id.clone();
+    let companion = if let Some(participant_id) = companion_id {
+        let (_, child) = state
+            .service
+            .repository()
+            .get_installed_participant_record(participant_id.clone(), None)
+            .await?
+            .ok_or_else(|| HttpError::internal("companion_binding_missing"))?;
+        let child_current = state
+            .service
+            .repository()
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                flow.principal_id
+                    .clone()
+                    .ok_or_else(|| HttpError::conflict("flow_has_no_principal"))?,
+                participant_id.clone(),
+            )
+            .await?;
+        let child_actuals = state
+            .service
+            .repository()
+            .consent_resource_actuals(
+                GrantOwnerKind::User,
+                flow.principal_id
+                    .clone()
+                    .ok_or_else(|| HttpError::conflict("flow_has_no_principal"))?,
+                participant_id,
+            )
+            .await?;
+        Some((child, child_current, child_actuals))
+    } else {
+        None
+    };
+    let current_consent = super::super::super::policy::consent_request(
+        &binding,
+        flow.installed_revision,
+        current.as_ref(),
+        &ceiling,
+        &actuals,
+        companion
+            .as_ref()
+            .map(|(child, current, actuals)| (child, current.as_ref(), actuals.as_slice())),
+    )?;
+    if current_consent != flow.consent {
         return Err(HttpError::conflict("consent_view_changed"));
     }
-    if !request.approved {
+    if request.decision == ConsentDecisionKind::Reject {
+        if request.approval.is_some() {
+            return Err(HttpError::bad_request("invalid_consent_decision"));
+        }
         let expected = flow.version;
         flow.state = AuthBrowserFlowState::ApprovalDenied;
         flow.completed_at = Some(now);
@@ -100,17 +169,11 @@ where
         .principal_id
         .clone()
         .ok_or_else(|| HttpError::conflict("flow_has_no_principal"))?;
-    let (grant_set, _, _) =
-        select_browser_authority(&flow.consent, &request.selected_optional_bundles)?;
-    let current = state
-        .service
-        .repository()
-        .get_grant_binding(
-            GrantOwnerKind::User,
-            principal_id.clone(),
-            flow.participant_id.clone(),
-        )
-        .await?;
+    let approval = request
+        .approval
+        .as_ref()
+        .ok_or_else(|| HttpError::bad_request("invalid_consent_decision"))?;
+    validate_consent_decision(&flow.consent, approval, &ceiling)?;
     let platform_privileges = current
         .as_ref()
         .filter(|binding| {
@@ -118,6 +181,15 @@ where
                 && binding.expires_at.is_none_or(|expires_at| expires_at > now)
         })
         .map_or_else(Vec::new, |binding| binding.platform_privileges.clone());
+    let resolved = super::super::super::policy::resolve_authority(
+        &binding,
+        ApprovalMode::Capabilities,
+        &approval.approved_capabilities,
+        &approval.approved_resources,
+        &platform_privileges,
+        &ceiling,
+        (&[], approval.companion_approved),
+    )?;
     let signer_id = super::super::super::domain::validate_ed25519_public_key(
         "sessionPublicKey",
         &flow.session_public_key,
@@ -131,7 +203,13 @@ where
                 owner_id: principal_id.clone(),
                 participant_id: flow.participant_id.clone(),
                 installed_revision: flow.installed_revision,
-                grants: grant_set,
+                grants: resolved.exact_grants,
+                approval_mode: ApprovalMode::Capabilities,
+                approved_capabilities: approval.approved_capabilities.clone(),
+                approved_resources: approval.approved_resources.clone(),
+                delegation_ceiling: ceiling,
+                approval_decision_digest: approval.decision_digest.clone(),
+                companion_approved: approval.companion_approved,
                 platform_privileges,
                 expected_revision: flow.target_grant_revision,
                 expected_current_installed_revision: Some(flow.installed_revision),
@@ -151,6 +229,11 @@ where
         .await
         .map_err(|error| match error {
             AuthorizationStateError::StorageConflict => HttpError::conflict("authority_changed"),
+            AuthorizationStateError::InvalidRecord(message)
+                if message == "grant binding does not match resolved authority" =>
+            {
+                HttpError::conflict("authority_changed")
+            }
             error => error.into(),
         })?;
     let durable_result_digest = trellis_protocol::digest_json(&durable)
@@ -179,6 +262,88 @@ where
         flow = current;
     }
     Ok(Json(portal_flow_response(&state, flow).await?))
+}
+
+fn validate_consent_decision(
+    consent: &ConsentRequest,
+    approval: &ConsentApproval,
+    ceiling: &DelegationCeiling,
+) -> Result<(), HttpError> {
+    let approved_capabilities = approval
+        .approved_capabilities
+        .iter()
+        .collect::<BTreeSet<_>>();
+    let approved_resources = approval.approved_resources.iter().collect::<BTreeSet<_>>();
+    if consent.resources.iter().any(|resource| {
+        resource.required
+            && resource.eligible
+            && !approved_resources.contains(&ApprovedResource {
+                kind: resource.kind,
+                name: resource.name.clone(),
+                commitment: resource.requested_commitment.clone(),
+            })
+    }) {
+        return Err(HttpError::bad_request("required_resource_not_approved"));
+    }
+    if consent
+        .companion
+        .as_ref()
+        .is_some_and(|companion| companion.required && !approval.companion_approved)
+        || (approval.companion_approved && consent.companion.is_none())
+    {
+        return Err(HttpError::bad_request("invalid_companion_approval"));
+    }
+    if approval.decision_digest != consent.decision_digest
+        || approval.installed_revision != consent.installed_revision
+        || approval.expected_grant_revision != consent.expected_grant_revision
+    {
+        return Err(HttpError::conflict("consent_decision_stale"));
+    }
+    if approval.approved_capabilities.iter().any(|approved| {
+        !consent.capabilities.iter().any(|capability| {
+            capability.eligible
+                && capability.id == approved.id
+                && capability.consent_digest == approved.consent_digest
+        })
+    }) || approval.approved_resources.iter().any(|approved| {
+        !consent.resources.iter().any(|resource| {
+            resource.eligible
+                && resource.kind == approved.kind
+                && resource.name == approved.name
+                && resource.requested_commitment == approved.commitment
+        })
+    }) {
+        return Err(HttpError::conflict("consent_selection_stale"));
+    }
+    if consent.capabilities.iter().any(|capability| {
+        capability.required
+            && capability.eligible
+            && !approved_capabilities.contains(&ApprovedCapability {
+                id: capability.id.clone(),
+                consent_digest: capability.consent_digest.clone(),
+            })
+    }) {
+        return Err(HttpError::bad_request("required_capability_not_approved"));
+    }
+    if approval.mode != ApprovalMode::Capabilities {
+        return Err(HttpError::bad_request("invalid_approval_mode"));
+    }
+    if approval
+        .delegation_ceiling
+        .as_ref()
+        .is_some_and(|submitted| {
+            submitted.capabilities != ceiling.capabilities
+                || submitted.exact_restrictions != ceiling.exact_restrictions
+        })
+    {
+        return Err(HttpError::conflict("delegation_ceiling_changed"));
+    }
+    if approved_capabilities.len() != approval.approved_capabilities.len()
+        || approved_resources.len() != approval.approved_resources.len()
+    {
+        return Err(HttpError::bad_request("duplicate_consent_selection"));
+    }
+    Ok(())
 }
 
 pub(super) async fn apply_trusted_portal_authority<R, E>(
@@ -212,14 +377,19 @@ where
         )
         .await?
         .ok_or_else(|| HttpError::internal("participant_binding_missing"))?;
-    let consent = browser_consent(&binding)?;
-    if consent != flow.consent {
-        return Err(HttpError::conflict("consent_view_changed"));
-    }
     let principal_id = flow
         .principal_id
         .clone()
         .ok_or_else(|| HttpError::conflict("flow_has_no_principal"))?;
+    let current = state
+        .service
+        .repository()
+        .get_grant_binding(
+            GrantOwnerKind::User,
+            principal_id.clone(),
+            flow.participant_id.clone(),
+        )
+        .await?;
     let signer_id = super::super::super::domain::validate_ed25519_public_key(
         "sessionPublicKey",
         &flow.session_public_key,
@@ -275,7 +445,26 @@ where
                 &groups,
             )?;
             let selection =
-                resolve_portal_authority_selection(&policy, &groups, &consent, &attributes)?;
+                resolve_portal_authority_selection(&policy, &groups, &binding, &attributes)?;
+            let mut ceiling =
+                super::super::super::policy::participant_delegation_ceiling(&binding)?;
+            ceiling
+                .capabilities
+                .retain(|capability| selection.ceiling.capabilities.contains(capability));
+            ceiling.platform_privileges = selection.ceiling.platform_privileges.clone();
+            let approved_capabilities = ceiling.capabilities.clone();
+            let approved_resources = current
+                .as_ref()
+                .map_or_else(Vec::new, |binding| binding.approved_resources.clone());
+            let resolved = super::super::super::policy::resolve_authority(
+                &binding,
+                ApprovalMode::Capabilities,
+                &approved_capabilities,
+                &approved_resources,
+                &selection.ceiling.platform_privileges,
+                &ceiling,
+                (&[], true),
+            )?;
             let request_digest = trellis_protocol::digest_json(&json!({
                 "flowId": flow.flow_id,
                 "portalId": flow.portal_id,
@@ -298,8 +487,14 @@ where
                         owner_id: principal_id.clone(),
                         participant_id: flow.participant_id.clone(),
                         installed_revision: flow.installed_revision,
-                        grants: selection.grant_set,
-                        platform_privileges: selection.platform_privileges,
+                        grants: resolved.exact_grants,
+                        approval_mode: ApprovalMode::Capabilities,
+                        approved_capabilities,
+                        approved_resources,
+                        delegation_ceiling: ceiling,
+                        approval_decision_digest: request_digest.clone(),
+                        companion_approved: false,
+                        platform_privileges: resolved.platform_privileges,
                         expected_revision: flow.target_grant_revision,
                         expected_current_installed_revision: Some(flow.installed_revision),
                         state: GrantBindingState::Active,
@@ -371,7 +566,7 @@ where
     E: AuthEphemeralRepository + Clone,
 {
     if flow.state == AuthBrowserFlowState::ChooseProvider {
-        flow.target_grant_revision = state
+        let current = state
             .service
             .repository()
             .get_grant_binding(
@@ -379,8 +574,71 @@ where
                 principal_id.clone(),
                 flow.participant_id.clone(),
             )
+            .await?;
+        flow.target_grant_revision = current.as_ref().map_or(0, |binding| binding.revision);
+        let (_, participant) = state
+            .service
+            .repository()
+            .get_installed_participant_record(
+                flow.participant_id.clone(),
+                Some(flow.installed_revision),
+            )
             .await?
-            .map_or(0, |binding| binding.revision);
+            .ok_or_else(|| HttpError::internal("participant_binding_missing"))?;
+        let mut ceiling =
+            super::super::super::policy::participant_delegation_ceiling(&participant)?;
+        ceiling.platform_privileges = current
+            .as_ref()
+            .map_or_else(Vec::new, |binding| binding.platform_privileges.clone());
+        let actuals = state
+            .service
+            .repository()
+            .consent_resource_actuals(
+                GrantOwnerKind::User,
+                principal_id.clone(),
+                flow.participant_id.clone(),
+            )
+            .await?;
+        let companion_id = participant.resolve()?.companion_participant_id.clone();
+        let companion = if let Some(participant_id) = companion_id {
+            let (_, child) = state
+                .service
+                .repository()
+                .get_installed_participant_record(participant_id.clone(), None)
+                .await?
+                .ok_or_else(|| HttpError::internal("companion_binding_missing"))?;
+            let child_current = state
+                .service
+                .repository()
+                .get_grant_binding(
+                    GrantOwnerKind::User,
+                    principal_id.clone(),
+                    participant_id.clone(),
+                )
+                .await?;
+            let child_actuals = state
+                .service
+                .repository()
+                .consent_resource_actuals(
+                    GrantOwnerKind::User,
+                    principal_id.clone(),
+                    participant_id,
+                )
+                .await?;
+            Some((child, child_current, child_actuals))
+        } else {
+            None
+        };
+        flow.consent = super::super::super::policy::consent_request(
+            &participant,
+            flow.installed_revision,
+            current.as_ref(),
+            &ceiling,
+            &actuals,
+            companion
+                .as_ref()
+                .map(|(child, current, actuals)| (child, current.as_ref(), actuals.as_slice())),
+        )?;
         let expected = flow.version;
         flow.state = AuthBrowserFlowState::Authenticated;
         flow.principal_id = Some(principal_id.clone());
@@ -510,7 +768,7 @@ fn automatic_approval_allowed(require_explicit_approval: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::platform::auth::{builtins, sqlite::SqliteAuthorizationStore};
+    use crate::platform::auth::{builtins, sqlite::SqliteAuthorizationStore, DelegationCeiling};
     use trellis_protocol::PlatformPrivilege;
 
     #[test]
@@ -538,15 +796,23 @@ mod tests {
                 .await?,
             1
         );
-        let consent = browser_consent(&participant_v1).expect("built-in consent is valid");
-        let (grants, _, _) =
-            select_browser_authority(&consent, &[]).expect("required authority is valid");
+        let grants = participant_v1.projection.required_grants.clone();
         let approval = GrantBindingReplacement {
             owner_kind: GrantOwnerKind::User,
             owner_id: principal_id.clone(),
             participant_id: participant_id.clone(),
             installed_revision: 1,
             grants: grants.clone(),
+            approval_mode: ApprovalMode::Exact,
+            approved_capabilities: Vec::new(),
+            approved_resources: Vec::new(),
+            delegation_ceiling: DelegationCeiling {
+                capabilities: Vec::new(),
+                exact_restrictions: Some(grants.clone()),
+                platform_privileges: Vec::new(),
+            },
+            approval_decision_digest: digest_parts(&["approval-r1"]),
+            companion_approved: false,
             platform_privileges: Vec::new(),
             state: GrantBindingState::Active,
             expires_at: None,
@@ -579,7 +845,8 @@ mod tests {
 
         let mut participant_v2 = participant_v1;
         participant_v2.projection.display_name = "Trellis Console R2".to_owned();
-        participant_v2.needs_digest = trellis_protocol::digest_json(&participant_v2.projection)?;
+        participant_v2.needs_digest =
+            trellis_protocol::digest_json(&serde_json::to_value(&participant_v2.projection)?)?;
         participant_v2.resolved_at = now + 1;
         assert_eq!(store.put_participant_binding(participant_v2).await?, 2);
 
@@ -589,6 +856,16 @@ mod tests {
             participant_id: participant_id.clone(),
             installed_revision: 1,
             grants: grants.clone(),
+            approval_mode: ApprovalMode::Exact,
+            approved_capabilities: Vec::new(),
+            approved_resources: Vec::new(),
+            delegation_ceiling: DelegationCeiling {
+                capabilities: Vec::new(),
+                exact_restrictions: Some(grants.clone()),
+                platform_privileges: Vec::new(),
+            },
+            approval_decision_digest: digest_parts(&["approval-stale-install"]),
+            companion_approved: false,
             platform_privileges: Vec::new(),
             state: GrantBindingState::Active,
             expires_at: None,
@@ -641,6 +918,16 @@ mod tests {
             participant_id: participant_id.clone(),
             installed_revision: 2,
             grants: grants.clone(),
+            approval_mode: ApprovalMode::Exact,
+            approved_capabilities: Vec::new(),
+            approved_resources: Vec::new(),
+            delegation_ceiling: DelegationCeiling {
+                capabilities: Vec::new(),
+                exact_restrictions: Some(grants.clone()),
+                platform_privileges: Vec::new(),
+            },
+            approval_decision_digest: digest_parts(&["approval-r2"]),
+            companion_approved: false,
             platform_privileges: Vec::new(),
             state: GrantBindingState::Active,
             expires_at: None,
@@ -672,6 +959,16 @@ mod tests {
                     participant_id: participant_id.clone(),
                     installed_revision: 2,
                     grants: grants.clone(),
+                    approval_mode: ApprovalMode::Exact,
+                    approved_capabilities: Vec::new(),
+                    approved_resources: Vec::new(),
+                    delegation_ceiling: DelegationCeiling {
+                        capabilities: Vec::new(),
+                        exact_restrictions: Some(grants.clone()),
+                        platform_privileges: vec![PlatformPrivilege::Admin],
+                    },
+                    approval_decision_digest: digest_parts(&["admin-replacement"]),
+                    companion_approved: false,
                     platform_privileges: vec![PlatformPrivilege::Admin],
                     state: GrantBindingState::Active,
                     expires_at: None,
@@ -698,7 +995,17 @@ mod tests {
                         owner_id: principal_id,
                         participant_id,
                         installed_revision: 2,
-                        grants,
+                        grants: grants.clone(),
+                        approval_mode: ApprovalMode::Exact,
+                        approved_capabilities: Vec::new(),
+                        approved_resources: Vec::new(),
+                        delegation_ceiling: DelegationCeiling {
+                            capabilities: Vec::new(),
+                            exact_restrictions: Some(grants),
+                            platform_privileges: Vec::new(),
+                        },
+                        approval_decision_digest: digest_parts(&["approval-stale-binding"]),
+                        companion_approved: false,
                         platform_privileges: Vec::new(),
                         state: GrantBindingState::Active,
                         expires_at: None,

@@ -15,7 +15,6 @@ import type { PermissionAtom as DescriptorPermissionAtom } from "../participant_
 import { type VerifiedCaller, verifyLocalAuthorization } from "../session.ts";
 import {
   AuthorizationProviderUnavailableError,
-  integrationTestResolvedContexts,
 } from "./authorization/provider_cache.ts";
 import { AuthorizationRegistryReader } from "./authorization/nats_registry.ts";
 import {
@@ -30,6 +29,7 @@ import {
 } from "./authorization_context.ts";
 import type { PermissionAtom } from "./protocol_wasm.ts";
 import { createAuth } from "./session_auth.ts";
+import { refreshAuthorizationContextWithMetadata } from "./authorization/refresh.ts";
 import {
   base64urlDecode,
   base64urlEncode,
@@ -37,6 +37,36 @@ import {
   sha256,
   utf8,
 } from "./utils.ts";
+
+Deno.test("user refresh binds a fresh runtime key under the installation proof", async () => {
+  const installation = await createAuth({
+    sessionKeySeed: base64urlEncode(new Uint8Array(32).fill(7)),
+  });
+  const runtime = await createAuth({
+    sessionKeySeed: base64urlEncode(new Uint8Array(32).fill(8)),
+  });
+  let body: Record<string, unknown> | undefined;
+  const cache = new AuthorizationContextCache("https://trellis.example");
+  await assertRejects(() =>
+    refreshAuthorizationContextWithMetadata({
+      trellisUrl: "https://trellis.example",
+      sessionId: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      auth: installation,
+      sessionKey: runtime.sessionKey,
+      cache,
+      fetch: async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return new Response(JSON.stringify({ code: "login_not_found" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    })
+  );
+  assertEquals(body?.sessionKey, runtime.sessionKey);
+  assert(body?.sessionKey !== installation.sessionKey);
+  assert(typeof body?.proof === "object");
+});
 
 const chain = vectors.completeChain;
 const policy = vectors.defaults.policy;
@@ -120,6 +150,34 @@ Deno.test("authorization refresh can use native bootstrap", async () => {
   );
 });
 
+Deno.test("changed authorization refresh reconnects once while connected", async () => {
+  const value = await installedCache();
+  const auth = await createAuth({ sessionKeySeed: chain.sessionSeed });
+  let reconnects = 0;
+  let reconnected!: () => void;
+  const didReconnect = new Promise<void>((resolve) => reconnected = resolve);
+  const stop = startAuthorizationContextRefresh({
+    trellisUrl: "https://trellis.test",
+    sessionId: value.current().context.connectionId,
+    auth,
+    cache: value,
+    refresh: () =>
+      Promise.resolve({
+        ...value.current(),
+        contextDigest: "changed-context",
+      }),
+    onRefresh: () => {
+      reconnects += 1;
+      reconnected();
+    },
+  });
+
+  value.requestRefresh();
+  await didReconnect;
+  stop();
+  assertEquals(reconnects, 1);
+});
+
 function permission(): PermissionAtom {
   return vectors.defaults.permission as PermissionAtom;
 }
@@ -143,12 +201,12 @@ function event(): AuthorizationProviderEvent {
   return {
     contextDigest: chain.contextDigest,
     sessionKey: JSON.parse(chain.contextCanonicalJson).sessionKey,
+    descriptorIdentity: vectors.defaults.event.descriptorIdentity,
     subject: vectors.defaults.event.subject,
     payload: utf8(vectors.defaults.event.payload),
     eventId: vectors.defaults.event.eventId,
     eventTime: vectors.defaults.event.eventTime,
     proof: chain.eventProof,
-    requiredPermissions: [permission()],
     requiredCapabilities: [],
   };
 }
@@ -650,6 +708,28 @@ Deno.test("authorization context cache installs, binds runtime, and clears in me
   assertEquals(value.runtimeBinding(), runtimeBinding());
 });
 
+Deno.test("authorization context installs additional state in the same commit", async () => {
+  const value = cache();
+  let additionalInstalled = false;
+  await value.install(
+    bundle(),
+    { bootstrapJwt: "route", bootstrapJwtExpiresAt: 2_000 },
+    policy.nowUnixSeconds,
+    undefined,
+    runtimeBinding(),
+    (verified) => {
+      assertThrows(() => value.current(policy.nowUnixSeconds));
+      assertEquals(verified.contextDigest, chain.contextDigest);
+      additionalInstalled = true;
+    },
+  );
+  assertEquals(additionalInstalled, true);
+  assertEquals(
+    value.current(policy.nowUnixSeconds).contextDigest,
+    chain.contextDigest,
+  );
+});
+
 Deno.test("provider resolves a cold context once and reuses the verified hot entry", async () => {
   const registry: Registry = {
     contexts: new Map([[chain.contextDigest, chain.contextCanonicalJson]]),
@@ -792,13 +872,16 @@ Deno.test("provider fails unavailable after watch loss and resynchronizes", asyn
     await value.resolveContext(chain.contextDigest);
     registry.watchUnavailable = true;
     registry.closeWatches?.();
-    while (integrationTestResolvedContexts(value).length !== 0) {
-      await Promise.resolve();
+    let failure: unknown;
+    for (let attempt = 0; attempt < 100 && !failure; attempt += 1) {
+      try {
+        await value.resolveContext(chain.contextDigest);
+        await Promise.resolve();
+      } catch (error) {
+        failure = error;
+      }
     }
-    await assertRejects(
-      () => value.resolveContext(chain.contextDigest),
-      AuthorizationProviderUnavailableError,
-    );
+    assert(failure instanceof AuthorizationProviderUnavailableError);
     registry.watchUnavailable = false;
     await value.resolveContext(chain.contextDigest);
     assertEquals(value.ioCounters().contextGets, 2);
@@ -817,13 +900,16 @@ Deno.test("provider invalidates coverage when revocation evidence disappears", a
     await value.resolveContext(chain.contextDigest);
     registry.watchUnavailable = true;
     registry.deleteWatches?.();
-    while (integrationTestResolvedContexts(value).length !== 0) {
-      await Promise.resolve();
+    let failure: unknown;
+    for (let attempt = 0; attempt < 100 && !failure; attempt += 1) {
+      try {
+        await value.resolveContext(chain.contextDigest);
+        await Promise.resolve();
+      } catch (error) {
+        failure = error;
+      }
     }
-    await assertRejects(
-      () => value.resolveContext(chain.contextDigest),
-      AuthorizationProviderUnavailableError,
-    );
+    assert(failure instanceof AuthorizationProviderUnavailableError);
   } finally {
     value.stop();
   }
@@ -1113,7 +1199,7 @@ Deno.test("lean request and event verifier outputs are enriched from cached cont
         subject: vectors.defaults.request.subject,
       },
       permission: {
-        apiId: "documents@v1",
+        apiId: "documents",
         apiVersion: "v1",
         surfaceKind: "rpc",
         surfaceName: "Documents.Get",
@@ -1179,12 +1265,11 @@ Deno.test("provider LRU stays at 256 entries and evicts the oldest context", asy
     await Promise.all(pending);
     registry.contextReadBarrier = undefined;
     await value.resolveContext(last);
-    const resolved = integrationTestResolvedContexts(value).map((entry) =>
-      entry.contextDigest
-    );
-    assertEquals(resolved.length, 256);
-    assert(!resolved.includes(first));
-    assert(resolved.includes(last));
+    assertEquals(value.ioCounters().contextGets, 257);
+    await value.resolveContext(last);
+    assertEquals(value.ioCounters().contextGets, 257);
+    await value.resolveContext(first);
+    assertEquals(value.ioCounters().contextGets, 258);
   } finally {
     value.stop();
   }

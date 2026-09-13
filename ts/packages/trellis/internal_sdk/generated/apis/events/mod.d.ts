@@ -2,6 +2,30 @@
 import { TrellisError } from "@qlever-llc/trellis/generated";
 import type { SerializableErrorData } from "@qlever-llc/trellis/generated";
 import * as Types0 from "../../types/_internal/p0.js";
+export type ConflictData = SerializableErrorData & {
+	readonly type: "trellis.events@v1::Conflict";
+} & Types0.EventsErrorData;
+export declare class Conflict extends TrellisError<ConflictData> {
+	static readonly type: "trellis.events@v1::Conflict";
+	static readonly payloadCodec: typeof Types0.EventsErrorDataCodec;
+	readonly name: "Conflict";
+	readonly data: ConflictData;
+	constructor(data: ConflictData);
+	static fromSerializable(data: unknown): Conflict;
+	toSerializable(): ConflictData;
+}
+export type ForbiddenData = SerializableErrorData & {
+	readonly type: "trellis.events@v1::Forbidden";
+} & Types0.EventsErrorData;
+export declare class Forbidden extends TrellisError<ForbiddenData> {
+	static readonly type: "trellis.events@v1::Forbidden";
+	static readonly payloadCodec: typeof Types0.EventsErrorDataCodec;
+	readonly name: "Forbidden";
+	readonly data: ForbiddenData;
+	constructor(data: ForbiddenData);
+	static fromSerializable(data: unknown): Forbidden;
+	toSerializable(): ForbiddenData;
+}
 export type NotFoundErrorData = SerializableErrorData & {
 	readonly type: "trellis.events@v1::NotFoundError";
 } & Types0.EventsNotFoundErrorData;
@@ -14,6 +38,18 @@ export declare class NotFoundError extends TrellisError<NotFoundErrorData> {
 	static fromSerializable(data: unknown): NotFoundError;
 	toSerializable(): NotFoundErrorData;
 }
+export type UnavailableData = SerializableErrorData & {
+	readonly type: "trellis.events@v1::Unavailable";
+} & Types0.EventsErrorData;
+export declare class Unavailable extends TrellisError<UnavailableData> {
+	static readonly type: "trellis.events@v1::Unavailable";
+	static readonly payloadCodec: typeof Types0.EventsErrorDataCodec;
+	readonly name: "Unavailable";
+	readonly data: UnavailableData;
+	constructor(data: UnavailableData);
+	static fromSerializable(data: unknown): Unavailable;
+	toSerializable(): UnavailableData;
+}
 export type UnexpectedErrorData = SerializableErrorData & {
 	readonly type: "trellis.events@v1::UnexpectedError";
 };
@@ -24,6 +60,18 @@ export declare class UnexpectedError extends TrellisError<UnexpectedErrorData> {
 	constructor(data: UnexpectedErrorData);
 	static fromSerializable(data: unknown): UnexpectedError;
 	toSerializable(): UnexpectedErrorData;
+}
+export type UnreplayableOriginalData = SerializableErrorData & {
+	readonly type: "trellis.events@v1::UnreplayableOriginal";
+} & Types0.EventsErrorData;
+export declare class UnreplayableOriginal extends TrellisError<UnreplayableOriginalData> {
+	static readonly type: "trellis.events@v1::UnreplayableOriginal";
+	static readonly payloadCodec: typeof Types0.EventsErrorDataCodec;
+	readonly name: "UnreplayableOriginal";
+	readonly data: UnreplayableOriginalData;
+	constructor(data: UnreplayableOriginalData);
+	static fromSerializable(data: unknown): UnreplayableOriginal;
+	toSerializable(): UnreplayableOriginalData;
 }
 export type ValidationErrorData = SerializableErrorData & {
 	readonly type: "trellis.events@v1::ValidationError";
@@ -40,6 +88,18 @@ export type ConsumersInspectInput = Types0.EventsConsumersInspectRequest;
 export type ConsumersInspectOutput = Types0.EventsConsumersInspectResponse;
 export type ConsumersQueryInput = Types0.EventsConsumersQueryRequest;
 export type ConsumersQueryOutput = Types0.EventsConsumersQueryResponse;
+export type ConsumersReportDeliveryInput = Types0.EventsConsumersReportDeliveryRequest;
+export type ConsumersReportDeliveryOutput = Types0.EventsConsumersReportDeliveryResponse;
+export type DeadLettersDismissInput = Types0.EventsDeadLettersDismissRequest;
+export type DeadLettersDismissOutput = Types0.EventsDeadLettersDismissResponse;
+export type DeadLettersInspectInput = Types0.EventsDeadLettersInspectRequest;
+export type DeadLettersInspectOutput = Types0.EventsDeadLettersInspectResponse;
+export type DeadLettersQueryInput = Types0.EventsDeadLettersQueryRequest;
+export type DeadLettersQueryOutput = Types0.EventsDeadLettersQueryResponse;
+export type DeadLettersReplayInput = Types0.EventsDeadLettersReplayRequest;
+export type DeadLettersReplayOutput = Types0.EventsDeadLettersReplayResponse;
+export type DiagnosticsInput = Types0.EventsDiagnosticsRequest;
+export type DiagnosticsOutput = Types0.EventsDiagnosticsResponse;
 export type InspectInput = Types0.EventsInspectRequest;
 export type InspectOutput = Types0.EventsInspectResponse;
 export type MetricsInput = Types0.EventsMetricsRequest;
@@ -65,6 +125,60 @@ declare const __api: {
 			readonly descriptorName: "rpc:Consumers.Query";
 			readonly input: typeof Types0.EventsConsumersQueryRequestCodec;
 			readonly output: typeof Types0.EventsConsumersQueryResponseCodec;
+			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: "cursor";
+		};
+		readonly "rpc:Consumers.ReportDelivery": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:Consumers.ReportDelivery";
+			readonly input: typeof Types0.EventsConsumersReportDeliveryRequestCodec;
+			readonly output: typeof Types0.EventsConsumersReportDeliveryResponseCodec;
+			readonly errors: readonly [typeof Conflict, typeof Forbidden, typeof NotFoundError, typeof Unavailable, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: undefined;
+		};
+		readonly "rpc:DeadLetters.Dismiss": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:DeadLetters.Dismiss";
+			readonly input: typeof Types0.EventsDeadLettersDismissRequestCodec;
+			readonly output: typeof Types0.EventsDeadLettersDismissResponseCodec;
+			readonly errors: readonly [typeof Conflict, typeof Forbidden, typeof NotFoundError, typeof Unavailable, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: undefined;
+		};
+		readonly "rpc:DeadLetters.Inspect": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:DeadLetters.Inspect";
+			readonly input: typeof Types0.EventsDeadLettersInspectRequestCodec;
+			readonly output: typeof Types0.EventsDeadLettersInspectResponseCodec;
+			readonly errors: readonly [typeof Forbidden, typeof NotFoundError, typeof Unavailable, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: undefined;
+		};
+		readonly "rpc:DeadLetters.Query": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:DeadLetters.Query";
+			readonly input: typeof Types0.EventsDeadLettersQueryRequestCodec;
+			readonly output: typeof Types0.EventsDeadLettersQueryResponseCodec;
+			readonly errors: readonly [typeof Forbidden, typeof UnexpectedError, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: "cursor";
+		};
+		readonly "rpc:DeadLetters.Replay": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:DeadLetters.Replay";
+			readonly input: typeof Types0.EventsDeadLettersReplayRequestCodec;
+			readonly output: typeof Types0.EventsDeadLettersReplayResponseCodec;
+			readonly errors: readonly [typeof Conflict, typeof Forbidden, typeof NotFoundError, typeof Unavailable, typeof UnreplayableOriginal, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: undefined;
+		};
+		readonly "rpc:Diagnostics": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:Diagnostics";
+			readonly input: typeof Types0.EventsDiagnosticsRequestCodec;
+			readonly output: typeof Types0.EventsDiagnosticsResponseCodec;
 			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
 			readonly pagination: undefined;
@@ -94,7 +208,7 @@ declare const __api: {
 			readonly output: typeof Types0.EventsQueryResponseCodec;
 			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "feed:Watch": {
 			readonly kind: "feed";
@@ -106,5 +220,5 @@ declare const __api: {
 	readonly packageEvidence: unknown;
 };
 export declare const API: typeof __api;
-export declare const API_DIGEST: "oJlY-7SaNj7LSVf14gq3H5DWYUovxBhfkVHa0ysIr1Y";
+export declare const API_DIGEST: "ByInt82orMBbflrAMLFBGWM8wUI97_J8ci4ra39Sby0";
 export {};

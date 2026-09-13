@@ -29,13 +29,19 @@ pub(crate) struct IssuanceConnection {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub(crate) enum IssuanceCredentialRecord {
     Login(SessionRecord),
-    Native {
-        identity: Box<super::ProvisionedIdentityRecord>,
-        instance: RuntimeInstanceRecord,
-        deployment: DeploymentRecord,
-        device: Option<DeviceRecord>,
-        delegation: Option<DeviceDelegationRecord>,
-    },
+    Native(Box<NativeIssuanceCredentialRecord>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub(crate) struct NativeIssuanceCredentialRecord {
+    pub identity: Box<super::ProvisionedIdentityRecord>,
+    pub instance: RuntimeInstanceRecord,
+    pub deployment: DeploymentRecord,
+    pub device: Option<DeviceRecord>,
+    pub delegation: Option<DeviceDelegationRecord>,
+    pub delegation_session: Option<SessionRecord>,
+    pub delegation_principal: Option<PrincipalRecord>,
+    pub delegation_binding: Option<super::GrantBinding>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
@@ -178,6 +184,44 @@ pub(super) fn validate_device_delegation(
 ) -> Result<(), AuthorizationStateError> {
     require_nonempty("principalId", &delegation.principal_id)?;
     require_nonempty("deploymentId", &delegation.deployment_id)?;
+    for (field, value) in [
+        (
+            "companionParticipantId",
+            delegation.companion_participant_id.as_deref(),
+        ),
+        (
+            "userLoginSessionId",
+            delegation.user_login_session_id.as_deref(),
+        ),
+        (
+            "installationPublicKey",
+            delegation.installation_public_key.as_deref(),
+        ),
+    ] {
+        if let Some(value) = value {
+            require_nonempty(field, value)?;
+        }
+    }
+    if delegation.companion_participant_id.is_some() != delegation.user_login_session_id.is_some()
+        || delegation.companion_participant_id.is_some()
+            != delegation.installation_public_key.is_some()
+        || delegation.companion_participant_id.is_some()
+            != delegation.device_grant_revision.is_some()
+        || delegation.companion_participant_id.is_some()
+            != delegation.child_grant_revision.is_some()
+    {
+        return Err(AuthorizationStateError::InvalidRecord(
+            "device companion identity, login, and installation key must be stored together"
+                .to_owned(),
+        ));
+    }
+    if delegation.state == super::DeviceDelegationState::Active
+        && delegation.companion_participant_id.is_none()
+    {
+        return Err(AuthorizationStateError::InvalidRecord(
+            "active device delegation requires complete child authority linkage".to_owned(),
+        ));
+    }
     if let Some(expires_at) = delegation.expires_at {
         require_protocol_timestamp("delegation.expiresAt", expires_at)?;
     }
@@ -209,4 +253,32 @@ pub(crate) fn validate_deployment_evidence(
         require_protocol_timestamp("deployment.expiresAt", expires_at)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_device_delegation;
+    use crate::platform::auth::{DeviceDelegationRecord, DeviceDelegationState};
+
+    #[test]
+    fn active_companion_delegation_requires_one_complete_child_session_link() {
+        let complete = DeviceDelegationRecord {
+            principal_id: "dev_01".to_owned(),
+            deployment_id: "dep_01".to_owned(),
+            companion_participant_id: Some("acme.Sensor.Companion".to_owned()),
+            user_login_session_id: Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_owned()),
+            installation_public_key: Some("A".repeat(43)),
+            device_grant_revision: Some(2),
+            child_grant_revision: Some(3),
+            required: true,
+            state: DeviceDelegationState::Active,
+            expires_at: None,
+        };
+        assert!(validate_device_delegation(&complete).is_ok());
+        assert!(validate_device_delegation(&DeviceDelegationRecord {
+            user_login_session_id: None,
+            ..complete
+        })
+        .is_err());
+    }
 }

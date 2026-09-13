@@ -30,19 +30,6 @@ export const ReportRecord = Type.Object({
   evidenceStatus: Type.String({ minLength: 1 }),
 });
 
-export const ReportsListRequest = Type.Object({
-  limit: Type.Integer({ minimum: 0, maximum: 500 }),
-  offset: Type.Optional(Type.Integer({ minimum: 0 })),
-});
-
-export const ReportsListResponse = Type.Object({
-  entries: Type.Array(ReportRecord),
-  count: Type.Integer({ minimum: 0 }),
-  offset: Type.Integer({ minimum: 0 }),
-  limit: Type.Integer({ minimum: 0 }),
-  nextOffset: Type.Optional(Type.Integer({ minimum: 0 })),
-});
-
 export const ReportsPublishedEvent = Type.Object({
   reportId: Type.String({ minLength: 1 }),
   inspectionId: Type.String({ minLength: 1 }),

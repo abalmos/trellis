@@ -26,9 +26,8 @@ const expectedAdminMethods = {
   authPortalsPut: "portalsPut",
   authPortalsRoutesPut: "portalsRoutesPut",
   authDevicesProvision: "devicesProvision",
-  stateAdminDelete: "adminDelete",
-  stateAdminGet: "adminGet",
-  stateAdminList: "adminList",
+  stateResourcesInspect: "resourcesInspect",
+  stateResourcesQuery: "resourcesQuery",
   authDeploymentsCreate: "deploymentsCreate",
   authDeploymentsGet: "deploymentsGet",
   authDeploymentsApply: "deploymentsApply",
@@ -38,7 +37,12 @@ const expectedAdminMethods = {
   authGrantsSet: "grantsSet",
   authGrantsRevoke: "grantsRevoke",
   authServiceInstancesProvision: "serviceInstancesProvision",
+  authServiceInstancesDisable: "serviceInstancesDisable",
   authSessionsRevoke: "sessionsRevoke",
+  eventsConsumersQuery: "consumersQuery",
+  eventsDeadLettersQuery: "deadLettersQuery",
+  eventsDeadLettersInspect: "deadLettersInspect",
+  eventsDeadLettersReplay: "deadLettersReplay",
 } as const;
 
 Deno.test("admin registry and local dispatch stay in parity", async () => {
@@ -61,6 +65,38 @@ Deno.test("admin registry and local dispatch stay in parity", async () => {
     );
     assertEquals(called, clientMethod);
   }
+});
+
+Deno.test("test CLI exposes the authority workflow actions", () => {
+  const auth = participants.cli.participant.uses.find((use) =>
+    use.api.identity === "trellis.auth@v1"
+  );
+  assertEquals(
+    auth?.actions.map((action) => action.descriptorName).filter((name) =>
+      name.startsWith("rpc:Grants.") || name === "rpc:Sessions.Revoke"
+    ),
+    [
+      "rpc:Grants.Get",
+      "rpc:Grants.List",
+      "rpc:Grants.Revoke",
+      "rpc:Grants.Set",
+      "rpc:Sessions.Revoke",
+    ],
+  );
+  assertEquals(
+    Object.fromEntries(
+      Object.entries(participants.cli.participant.actionNames).filter(([key]) =>
+        key.includes(":rpc:Grants.") || key.endsWith(":rpc:Sessions.Revoke")
+      ),
+    ),
+    {
+      "trellis.auth@v1:rpc:Grants.Get": "Grants.Get",
+      "trellis.auth@v1:rpc:Grants.List": "Grants.List",
+      "trellis.auth@v1:rpc:Grants.Revoke": "Grants.Revoke",
+      "trellis.auth@v1:rpc:Grants.Set": "Grants.Set",
+      "trellis.auth@v1:rpc:Sessions.Revoke": "Sessions.Revoke",
+    },
+  );
 });
 
 Deno.test("client auth completion is not an admin RPC", async () => {

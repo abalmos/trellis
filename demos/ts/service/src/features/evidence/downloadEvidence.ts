@@ -5,7 +5,7 @@ import { type participants } from "../../../trellis/index.js";
 import type { FieldOpsDeps } from "../../deps.ts";
 
 type Handler = RpcHandler<
-  typeof participants.demoService.participant,
+  typeof participants.Service.participant,
   "Evidence.Download"
 >;
 
@@ -149,7 +149,13 @@ export function createDownloadEvidenceHandler(
             sessionKey: context.sessionKey,
             expiresInMs: TRANSFER_GRANT_TTL_MS,
           }).take();
-          if (!isErr(retried)) return ok({ transfer: retried });
+          if (!isErr(retried)) {
+            return ok({
+              ...retried.info,
+              size: BigInt(retried.info.size),
+              transfer: retried,
+            });
+          }
 
           return Result.err(annotateDownloadFailure({
             error: retried.error,
@@ -180,6 +186,10 @@ export function createDownloadEvidenceHandler(
       }));
     }
 
-    return ok({ transfer });
+    return ok({
+      ...transfer.info,
+      size: BigInt(transfer.info.size),
+      transfer,
+    });
   };
 }

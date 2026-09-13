@@ -9,17 +9,16 @@ Verify exact generated names and signatures in the generated crate and the
 
 ## Generated package
 
-Set `format = 1` and a package `name` in `trellis.toml`, then run
-`trellis generate`. A Rust-only project writes one crate under `trellis/` unless
-overridden by `[generate].output`.
+Set `[package]` identity and `[generate.rust].output` in `trellis.toml`, then run
+`trellis generate`.
 
 ```toml
 [dependencies]
 orders-trellis = { path = "trellis" }
 ```
 
-The generated package embeds exact participant/API artifacts. Callers never
-supply participant IDs, artifact digests, needs digests, deployments, instances,
+The generated package embeds exact participant/package evidence. Callers never
+supply participant IDs, semantic digests, deployments, instances,
 grants, resources, or transport endpoints as bootstrap assertions.
 
 ## Connect a service
@@ -72,7 +71,7 @@ let options = UserConnectOptions::new(
 ```
 
 Connection performs context refresh before the first physical CONNECT. Do not
-assemble route credentials, NATS permissions, or participant digests manually.
+assemble route credentials, NATS permissions, or semantic evidence manually.
 
 ## Connect a device
 
@@ -120,10 +119,23 @@ failures remain distinct call-error variants.
 ## Services and resources
 
 Generated service facades expose handler registration plus typed `kv`, `store`,
-`jobs`, state, transfer, and event-consumer surfaces declared by the
+`jobs`, State, transfer, and Consumer surfaces declared by the
 participant. Resources come from the connected runtime. Service code does not
 import the core SDK for bootstrap, call `Trellis.Bindings.Get`, construct raw
 resource handles, or pass binding payloads into constructors.
+
+Generated cursor-paginated RPCs add lazy `*_pages` and `*_items` fallible
+streams. Missing `next_cursor` is the only end signal; general pagination is
+keyset-based, not a transaction snapshot.
+
+Optional resource accessors return `Option`. An enabled but unwritten State
+resource is still present and `get` returns `None`. State/KV historical
+representation handlers migrate values in memory without write-on-read.
+
+Generated providers expose `submit_<job>` and `register_<job>` methods. Job
+handlers return `Result<JobResult, JobProcessError<E>>`; keyed capacity waits do
+not consume retries, while `JobProcessError::retryable(error)` does. See
+[Jobs: Rust](/guides/using-jobs-rust).
 
 ## Proof and authorization behavior
 

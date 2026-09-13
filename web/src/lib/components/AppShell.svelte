@@ -25,7 +25,7 @@
 
   type Props = {
     children: Snippet;
-    profile: apis.auth.AuthSessionsMeOutput["user"] | null;
+    profile: apis.auth.SessionsMeOutput["user"] | null;
     profileLoaded: boolean;
     navSections: NavSection[];
     connectionStatus: ConnectionStatus["phase"];

@@ -3,6 +3,8 @@ import {
   TrellisDevice,
 } from "@qlever-llc/trellis/device";
 import { TransportError } from "@qlever-llc/trellis/errors";
+import { TransferGrantSchema } from "@qlever-llc/trellis";
+import { Value } from "typebox/value";
 import chalk from "chalk";
 import { readFile, writeFile } from "node:fs/promises";
 import process from "node:process";
@@ -29,7 +31,7 @@ async function prompt(
   const line = await inputLines.next();
   return line.done ? null : line.value || defaultValue;
 }
-const LIST_PAGE = { limit: 50, offset: 0 };
+const LIST_PAGE = { page: { limit: 50 } };
 
 async function main(): Promise<void> {
   const [
@@ -45,7 +47,7 @@ async function main(): Promise<void> {
   }
 
   const activation = await checkDeviceActivation({
-    participant: participants.demoDevice.participant,
+    participant: participants.Device.participant,
     trellisUrl,
     rootSecret,
     ...(provisioningSecret === undefined ? {} : { provisioningSecret }),
@@ -61,7 +63,7 @@ async function main(): Promise<void> {
   }
 
   const device = await TrellisDevice.connect({
-    participant: participants.demoDevice.participant,
+    participant: participants.Device.participant,
     trellisUrl,
     rootSecret,
   }).orThrow();
@@ -120,7 +122,7 @@ type Device = Awaited<ReturnType<typeof connectForTypes>>;
 
 async function connectForTypes() {
   return await TrellisDevice.connect({
-    participant: participants.demoDevice.participant,
+    participant: participants.Device.participant,
     trellisUrl: "http://localhost:0",
     rootSecret: "types-only",
   }).orThrow();
@@ -143,8 +145,7 @@ function printMenu(): void {
 async function runGuidedInspectionWizard(device: Device): Promise<void> {
   console.log(chalk.green.bold("== Guided Inspection Wizard"));
   console.info("Step 1: choose an assigned inspection.");
-  const assignments =
-    (await device.assignmentsList(LIST_PAGE).orThrow()).entries;
+  const assignments = (await device.assignmentsList(LIST_PAGE).orThrow()).items;
   if (assignments.length === 0) {
     console.info("No assignments are available for the guided workflow.");
     return;
@@ -161,7 +162,7 @@ async function runGuidedInspectionWizard(device: Device): Promise<void> {
     Number((await prompt("Inspection number", "1"))?.trim() || "1") - 1;
   const selected = assignments[selectedIndex] ?? assignments[0];
 
-  await device.state.selectedSite.put({
+  await device.state.selectedSite.set({
     siteId: selected.siteId,
     siteName: selected.siteName,
     selectedAt: new Date().toISOString(),
@@ -192,7 +193,7 @@ async function runGuidedInspectionWizard(device: Device): Promise<void> {
   console.info("Step 5: save local draft notes.");
   const notes = (await prompt("Draft notes"))?.trim() ||
     "Guided workflow notes captured from the field device.";
-  await device.state.draftInspections.put(selected.inspectionId, {
+  await device.kv.draftInspections.put(selected.inspectionId, {
     inspectionId: selected.inspectionId,
     siteId: selected.siteId,
     checklistName: selected.checklistName,
@@ -221,12 +222,12 @@ async function listAssignments(device: Device): Promise<void> {
   console.log(chalk.green.bold("== Assigned Inspections"));
   const result = await device.assignmentsList(LIST_PAGE).orThrow();
 
-  if (result.entries.length === 0) {
+  if (result.items.length === 0) {
     console.info("No assigned inspections.");
     return;
   }
 
-  for (const item of result.entries) {
+  for (const item of result.items) {
     console.info(
       `- ${item.inspectionId}: [${item.priority.toUpperCase()}] ${item.siteName} / ${item.assetName} (${item.checklistName}) at ${item.scheduledFor}`,
     );
@@ -236,21 +237,17 @@ async function listAssignments(device: Device): Promise<void> {
 async function viewSelectedSite(device: Device): Promise<void> {
   console.log(chalk.green.bold("== Selected Site"));
   const selected = await device.state.selectedSite.get().orThrow();
-  if ("migrationRequired" in selected) {
-    console.info("Selected site state needs migration before it can be read.");
-    return;
-  }
-  if (!selected.found) {
+  if (!selected) {
     console.info("No selected site saved. Use option 7 to save one.");
     return;
   }
 
   const result = await device.sitesGet({
-    siteId: selected.entry.value.siteId,
+    siteId: selected.value.siteId,
   }).orThrow();
 
   if (!result.site) {
-    console.info(`Selected site ${selected.entry.value.siteId} was not found.`);
+    console.info(`Selected site ${selected.value.siteId} was not found.`);
     return;
   }
 
@@ -401,12 +398,12 @@ async function listAndDownloadEvidence(device: Device): Promise<void> {
     ...LIST_PAGE,
     prefix: "evidence/",
   }).orThrow();
-  if (result.entries.length === 0) {
+  if (result.items.length === 0) {
     console.info("No evidence files found.");
     return;
   }
 
-  result.entries.forEach((item, index) => {
+  result.items.forEach((item, index) => {
     console.info(
       `${index + 1}. ${item.fileName ?? item.key} (${item.size} bytes, ${
         item.contentType ?? "unknown"
@@ -421,7 +418,7 @@ async function listAndDownloadEvidence(device: Device): Promise<void> {
 
   const choice = Number(rawChoice);
   const selected = Number.isInteger(choice)
-    ? result.entries[choice - 1]
+    ? result.items[choice - 1]
     : undefined;
   if (!selected) {
     console.info("No evidence file selected.");
@@ -437,18 +434,11 @@ async function listAndDownloadEvidence(device: Device): Promise<void> {
   const download = await device.evidenceDownload({
     key: selected.key,
   }).orThrow();
-  const metadata = Object.fromEntries(
-    Object.entries(download.transfer.info.metadata).map(([name, value]) => {
-      if (typeof value !== "string") {
-        throw new Error(`Invalid transfer metadata '${name}'.`);
-      }
-      return [name, value];
-    }),
-  );
-  const downloaded = await device.transfer({
-    ...download.transfer,
-    info: { ...download.transfer.info, metadata },
-  }).bytes().orThrow();
+  const transfer = Value.Parse(TransferGrantSchema, download.transfer);
+  if (transfer.direction !== "receive") {
+    throw new Error("Evidence download returned a send transfer grant.");
+  }
+  const downloaded = await device.transfer(transfer).bytes().orThrow();
   await writeFile(outputPath, downloaded);
   console.info(`Downloaded ${downloaded.byteLength} bytes to ${outputPath}`);
 }
@@ -468,14 +458,14 @@ async function watchActivity(device: Device): Promise<void> {
         console.info("Audit.Recorded");
         console.dir(event, { depth: null });
       },
-      { mode: "ephemeral", replay: "new", signal: controller.signal },
+      { mode: "ephemeral", signal: controller.signal },
     ).orThrow();
     await device.onReportsPublished(
       (event) => {
         console.info("Reports.Published");
         console.dir(event, { depth: null });
       },
-      { mode: "ephemeral", replay: "new", signal: controller.signal },
+      { mode: "ephemeral", signal: controller.signal },
     ).orThrow();
 
     await new Promise((resolve) => setTimeout(resolve, EVENT_WATCH_MS));
@@ -487,15 +477,14 @@ async function watchActivity(device: Device): Promise<void> {
 
 async function saveAndListDraftState(device: Device): Promise<void> {
   console.log(chalk.green.bold("== Draft State"));
-  const assignments =
-    (await device.assignmentsList(LIST_PAGE).orThrow()).entries;
+  const assignments = (await device.assignmentsList(LIST_PAGE).orThrow()).items;
   const selected = assignments[0];
   if (!selected) {
     console.info("No assignments available for sample state.");
     return;
   }
 
-  await device.state.selectedSite.put({
+  await device.state.selectedSite.set({
     siteId: selected.siteId,
     siteName: selected.siteName,
     selectedAt: new Date().toISOString(),
@@ -503,7 +492,7 @@ async function saveAndListDraftState(device: Device): Promise<void> {
 
   const notes = (await prompt("Draft notes"))?.trim() ||
     "Field notes captured from the consolidated device demo.";
-  await device.state.draftInspections.put(selected.inspectionId, {
+  await device.kv.draftInspections.put(selected.inspectionId, {
     inspectionId: selected.inspectionId,
     siteId: selected.siteId,
     checklistName: selected.checklistName,
@@ -512,8 +501,13 @@ async function saveAndListDraftState(device: Device): Promise<void> {
   }).orThrow();
 
   const selectedSite = await device.state.selectedSite.get().orThrow();
-  const drafts = await device.state.draftInspections.list({ limit: 10 })
-    .orThrow();
+  const draftKeys = await device.kv.draftInspections.keys().orThrow();
+  const drafts = [];
+  for await (const key of draftKeys) {
+    const draft = await device.kv.draftInspections.get(key).orThrow();
+    if (draft) drafts.push(draft);
+    if (drafts.length === 10) break;
+  }
 
   console.info("Selected site state:");
   console.dir(selectedSite, { depth: null });

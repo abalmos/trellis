@@ -3,8 +3,9 @@ use std::fmt::Write;
 
 use miette::{IntoDiagnostic, Result};
 use trellis_idl::{
-    api_digest, participant_digest, selected_permission_atoms, ActionDefinition, ActionKind,
-    PackageGraph, ParticipantDefinition, ParticipantKind, ResourceDefinition,
+    api_digest, capability_consent_digest, participant_digest, selected_permission_atoms,
+    ActionDefinition, ActionKind, PackageGraph, ParticipantDefinition, ParticipantKind,
+    ResourceDefinition,
 };
 use trellis_protocol::PermissionAtom;
 
@@ -106,8 +107,9 @@ fn render_api(
     for (id, capability) in api.capabilities() {
         writeln!(
             source,
-            "            ({:?}.into(), CapabilityRuntimeProjection {{ display_name: {:?}.into(), description: {:?}.into(), allows: vec![",
-            id.as_str(), capability.title, capability.description
+            "            ({:?}.into(), CapabilityRuntimeProjection {{ display_name: {:?}.into(), description: {:?}.into(), consequence: {:?}.into(), consent_digest: {:?}.into(), public: {}, allows: vec![",
+            id.as_str(), capability.title, capability.description, capability.consequence,
+            capability_consent_digest(graph, id)?, capability.public
         )
         .into_diagnostic()?;
         for selection in &capability.allows {
@@ -163,7 +165,7 @@ fn render_participant(
 
     let mut resources = Vec::new();
     for (name, resource) in participant.resources() {
-        let (projection, _) = resource_projection(resource);
+        let (projection, _) = resource_projection(graph, resource)?;
         resources.push((name.as_str(), projection));
     }
 
@@ -248,7 +250,26 @@ fn render_participant(
         )
         .into_diagnostic()?;
     }
-    source.push_str("            ]),\n        },\n    }\n}\n\n");
+    let (companion_participant_id, companion_participant_kind, companion_required) = participant
+        .companion()
+        .map_or(("None".to_owned(), "None".to_owned(), false), |companion| {
+            let kind = graph
+                .packages()
+                .values()
+                .find_map(|package| package.participants().get(&companion.participant))
+                .expect("compiled companion participant")
+                .kind();
+            (
+                format!("Some({:?}.into())", companion.participant.as_str()),
+                format!("Some(ParticipantKind::{kind:?})"),
+                !companion.optional,
+            )
+        });
+    writeln!(
+        source,
+        "            ]),\n            companion_participant_id: {companion_participant_id},\n            companion_participant_kind: {companion_participant_kind},\n            companion_required: {companion_required},\n        }},\n    }}\n}}\n"
+    )
+    .into_diagnostic()?;
     Ok(())
 }
 
@@ -277,6 +298,9 @@ fn render_permission(atom: &PermissionAtom) -> String {
 struct ResourceProjection {
     kind: &'static str,
     optional: bool,
+    title: String,
+    description: String,
+    representation: Option<String>,
     history: Option<u64>,
     ttl_ms: Option<u64>,
     desired_max_value: Option<u64>,
@@ -286,6 +310,8 @@ struct ResourceProjection {
     payload_schema: Option<String>,
     result_schema: Option<String>,
     update_schema: Option<String>,
+    job_key_path: Option<Vec<String>>,
+    job_key_policy: Option<String>,
     retry_attempts: Option<u32>,
     retry_backoff_ms: Vec<u64>,
     consumer_events: BTreeMap<String, Vec<String>>,
@@ -296,9 +322,12 @@ struct ResourceProjection {
 impl ResourceProjection {
     fn render(&self) -> String {
         format!(
-            "ResourceRuntimeProjection {{ kind: ParticipantResourceKind::{}, optional: {}, history: {:?}, ttl_ms: {:?}, desired_max_value: {:?}, desired_max_object: {:?}, desired_max_total: {:?}, deadline_ms: {:?}, payload_schema: {}, result_schema: {}, update_schema: {}, retry_attempts: {:?}, retry_backoff_ms: vec!{:?}, consumer_events: BTreeMap::from([{}]), consumer_concurrency: {:?}, consumer_replay_all: {} }}",
+            "ResourceRuntimeProjection {{ kind: ParticipantResourceKind::{}, optional: {}, title: {:?}.into(), description: {:?}.into(), representation: {}, history: {:?}, ttl_ms: {:?}, desired_max_value: {:?}, desired_max_object: {:?}, desired_max_total: {:?}, deadline_ms: {:?}, payload_schema: {}, result_schema: {}, update_schema: {}, job_key_path: {:?}, job_key_policy: {}, retry_attempts: {:?}, retry_backoff_ms: vec!{:?}, consumer_events: BTreeMap::from([{}]), consumer_concurrency: {:?}, consumer_replay_all: {} }}",
             self.kind,
             self.optional,
+            self.title,
+            self.description,
+            self.representation.as_deref().unwrap_or("None"),
             self.history,
             self.ttl_ms,
             self.desired_max_value,
@@ -308,6 +337,8 @@ impl ResourceProjection {
             option_string(&self.payload_schema),
             option_string(&self.result_schema),
             option_string(&self.update_schema),
+            self.job_key_path,
+            option_string(&self.job_key_policy),
             self.retry_attempts,
             self.retry_backoff_ms,
             self.consumer_events.iter().map(|(api, events)| format!("({api:?}.into(), vec!{:?}.into_iter().map(str::to_owned).collect())", events)).collect::<Vec<_>>().join(", "),
@@ -317,10 +348,16 @@ impl ResourceProjection {
     }
 }
 
-fn resource_projection(resource: &ResourceDefinition) -> (ResourceProjection, Vec<&'static str>) {
+fn resource_projection(
+    graph: &PackageGraph,
+    resource: &ResourceDefinition,
+) -> Result<(ResourceProjection, Vec<&'static str>)> {
     let mut projection = ResourceProjection {
         kind: "State",
         optional: false,
+        title: String::new(),
+        description: String::new(),
+        representation: None,
         history: None,
         ttl_ms: None,
         desired_max_value: None,
@@ -330,6 +367,8 @@ fn resource_projection(resource: &ResourceDefinition) -> (ResourceProjection, Ve
         payload_schema: None,
         result_schema: None,
         update_schema: None,
+        job_key_path: None,
+        job_key_policy: None,
         retry_attempts: None,
         retry_backoff_ms: Vec::new(),
         consumer_events: BTreeMap::new(),
@@ -337,26 +376,45 @@ fn resource_projection(resource: &ResourceDefinition) -> (ResourceProjection, Ve
         consumer_replay_all: false,
     };
     let actions = match resource {
-        ResourceDefinition::State { optional, .. } => {
+        ResourceDefinition::State {
+            optional,
+            docs,
+            schema,
+            version,
+            accepts,
+        } => {
             projection.optional = *optional;
+            projection.title.clone_from(&docs.title);
+            projection.description.clone_from(&docs.description);
+            projection.representation =
+                Some(render_representation(graph, schema, *version, accepts)?);
             vec!["Read", "Write", "Delete"]
         }
         ResourceDefinition::Kv {
             optional,
+            docs,
             history,
             ttl_ms,
             desired_max_value,
+            schema,
+            version,
+            accepts,
             ..
         } => {
             projection.kind = "Kv";
             projection.optional = *optional;
+            projection.title.clone_from(&docs.title);
+            projection.description.clone_from(&docs.description);
             projection.history = Some(*history);
             projection.ttl_ms = Some(*ttl_ms);
             projection.desired_max_value = *desired_max_value;
+            projection.representation =
+                Some(render_representation(graph, schema, *version, accepts)?);
             vec!["Read", "Write", "Delete"]
         }
         ResourceDefinition::Store {
             optional,
+            docs,
             ttl_ms,
             desired_max_object,
             desired_max_total,
@@ -364,6 +422,8 @@ fn resource_projection(resource: &ResourceDefinition) -> (ResourceProjection, Ve
         } => {
             projection.kind = "Store";
             projection.optional = *optional;
+            projection.title.clone_from(&docs.title);
+            projection.description.clone_from(&docs.description);
             projection.ttl_ms = Some(*ttl_ms);
             projection.desired_max_object = *desired_max_object;
             projection.desired_max_total = *desired_max_total;
@@ -371,27 +431,36 @@ fn resource_projection(resource: &ResourceDefinition) -> (ResourceProjection, Ve
         }
         ResourceDefinition::Job {
             optional,
+            docs,
             payload,
             result,
             update,
-            deadline_ms,
-            retry,
+            key_concurrency,
             ..
         } => {
             projection.kind = "JobQueue";
             projection.optional = *optional;
-            projection.deadline_ms = *deadline_ms;
+            projection.title.clone_from(&docs.title);
+            projection.description.clone_from(&docs.description);
             projection.payload_schema = Some(payload.id.as_str().to_owned());
             projection.result_schema = result.as_ref().map(|value| value.id.as_str().to_owned());
             projection.update_schema = update.as_ref().map(|value| value.id.as_str().to_owned());
-            if let Some(retry) = retry {
-                projection.retry_attempts = Some(retry.attempts);
-                projection.retry_backoff_ms = retry.backoff_ms.clone();
+            if let Some(key_concurrency) = key_concurrency {
+                projection.job_key_path = Some(key_concurrency.path.clone());
+                projection.job_key_policy = Some(
+                    match key_concurrency.policy {
+                        trellis_idl::KeyConcurrencyPolicy::Queue => "queue",
+                        trellis_idl::KeyConcurrencyPolicy::Reject => "reject",
+                        trellis_idl::KeyConcurrencyPolicy::Supersede => "supersede",
+                    }
+                    .to_owned(),
+                );
             }
             vec!["Submit", "Process"]
         }
         ResourceDefinition::Consumer {
             optional,
+            docs,
             events,
             concurrency,
             replay,
@@ -400,6 +469,8 @@ fn resource_projection(resource: &ResourceDefinition) -> (ResourceProjection, Ve
         } => {
             projection.kind = "EventConsumer";
             projection.optional = *optional;
+            projection.title.clone_from(&docs.title);
+            projection.description.clone_from(&docs.description);
             projection.consumer_concurrency = Some(*concurrency);
             projection.consumer_replay_all = matches!(replay, trellis_idl::Replay::All);
             for (api, event) in events {
@@ -416,7 +487,32 @@ fn resource_projection(resource: &ResourceDefinition) -> (ResourceProjection, Ve
             vec!["Consume"]
         }
     };
-    (projection, actions)
+    Ok((projection, actions))
+}
+
+fn render_representation(
+    graph: &PackageGraph,
+    schema: &trellis_idl::TypeRef,
+    version: u32,
+    accepts: &[trellis_idl::HistoricRepresentation],
+) -> Result<String> {
+    let schema =
+        serde_json::to_string(&trellis_idl::json_schema(graph, schema)?).into_diagnostic()?;
+    let accepts = accepts
+        .iter()
+        .map(|accepted| {
+            Ok(format!(
+                "({}, serde_json::from_str({:?}).expect(\"generated representation schema\"))",
+                accepted.version,
+                serde_json::to_string(&trellis_idl::json_schema(graph, &accepted.ty)?)
+                    .into_diagnostic()?
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(format!(
+        "Some(super::evidence::ResourceRepresentationRuntimeProjection {{ schema: serde_json::from_str({schema:?}).expect(\"generated representation schema\"), version: {version}, accepts: BTreeMap::from([{}]) }})",
+        accepts.join(", ")
+    ))
 }
 
 fn option_string(value: &Option<String>) -> String {

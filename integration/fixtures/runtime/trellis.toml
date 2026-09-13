@@ -1,5 +1,9 @@
-format = 1
+[package]
 name = "runtime-trellis"
+version = "0.12.0"
+
+[sources]
+runtime = "contract.trellis"
 
 [generate.rust]
 output = "crates/runtime-trellis"
@@ -7,10 +11,5 @@ output = "crates/runtime-trellis"
 [generate.typescript]
 output = "packages/runtime-trellis"
 
-[apis."trellis.state@v1"]
-version = "^1.0"
-path = "../../../rust/crates/runtime"
-
-[apis."trellis.auth@v1"]
-version = "^1.0"
-path = "../../../rust/crates/runtime"
+[dependencies]
+trellis = { package = "trellis", path = "../../../rust/crates/runtime" }

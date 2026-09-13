@@ -1,99 +1,103 @@
 # Trellis APIs and Participants
 
-## Status
+## Source of truth
 
-This document defines the native Trellis contract architecture. A Trellis
-contract is authored once and finalized as two protocol artifacts:
+Trellis contracts are native `.trellis` source packages. The compiler resolves
+the locked package graph into a native semantic model and generated runtime
+descriptors. There is no canonical API/participant JSON authoring or exchange
+format, and generated descriptor constructors are not a second authoring API.
 
-- `trellis.api.v1` describes schemas, callable surfaces, machine capability
-  allows, and human consent wording.
-- `trellis.participant.v1` describes a deployable participant, the exact APIs it
-  implements or uses, selected surfaces, resources, jobs, and event consumers.
+Published OCI bundles contain the manifest, explicitly listed source files, and
+frozen resolution metadata. Runtime JSON Schema is a validator projection only.
 
-The two canonical protocol artifacts are `trellis.api.v1` and
-`trellis.participant.v1`. There is no combined contract, bundle, catalog, or
-runtime-authority artifact.
+## Identity and evidence
 
-## Identity
+- API identity is `<package>.<ApiName>@v<major>`.
+- Participant identity is `<package>.<lexical-path>`.
+- Capability identity is `<api-id>::<name>`.
+- Resource identity is the owner binding, participant identity, kind, and local
+  resource name.
 
-Every normalized API has a stable `lineage@vN` `id`, an independently authored
-Semantic Version release `version`, and a semantic `apiDigest`. Release version,
-consent wording, and other human metadata are preserved in normalized API JSON
-but excluded from the semantic API digest; changing machine permissions changes
-the digest. Runtime evidence and permissions pin stable API ID plus semantic
-digest, not release version.
+Package version and API metadata are descriptive. Machine meaning is identified
+by the semantic package digest. Participant evidence combines that package
+digest with its exact lexical participant path; source filenames and generated
+symbol spellings are not identity.
 
-Every normalized participant has an `id`, semantic `participantDigest`, and an
-authoritatively resolved `participantNeedsDigest`. Participant resolution also
-returns required and optional grant sets. Runtime identity and provenance use
-the participant digest.
+Package evidence carries presentation-preserving canonical source for the exact
+dependency closure. The server parses and resolves it, verifies every frozen
+edge/version/digest, and recomputes semantic digests. Externally supplied
+evidence for the reserved `trellis` package must match an explicitly trusted
+installed digest.
 
-Generated TypeScript participants expose:
+## APIs, capabilities, and grants
 
-- participant id and semantic participant digest
-- `API`, `API_DIGEST`
-- `PARTICIPANT`
+APIs define RPCs, Operations, Events, Feeds, API-scoped errors, and one
+capabilities block. A capability groups exact actions and carries human consent
+wording. A capability declaration or approval does not itself confer runtime
+authority. The server derives and signs the exact selected permission atoms for
+the current revision and current policy ceiling.
 
-Generated Rust participant facades expose the equivalent canonical evidence and
-grant sets without defining a third artifact model.
+Capability approval is keyed by qualified capability ID and a consent digest of
+its description and consequence. Changing those words requires new approval;
+changing a title or the exact actions covered does not, provided newly selected
+actions remain within the approved capability and delegation ceiling. Public
+actions remain selected exact actions, not anonymous wildcard grants.
 
-## API artifact
+`GrantBinding` is the single current authority record. It stores exact grants,
+platform privileges, approval mode, approved capability fingerprints, approved
+resource commitments, and the delegation ceiling. Capability-mode approval and
+exact administrative grants remain distinct. Readiness reports missing required
+capabilities/resources separately from temporary provider liveness.
 
-`trellis.api.v1` is normalized and validated by `trellis_protocol`. Subjects are
-protocol-derived and are not authoring inputs. Authoring-only selections are
-lowered into protocol surfaces and removed from normalized output.
+## Participants and selection
 
-Capabilities are machine policy. Every declared capability is present, even when
-its `allows` list is empty. Each allow names an action and a protocol target.
-Consent is human-facing wording keyed by capability.
+Top-level participants are `service`, `device`, `app`, and `agent`. Only a
+device may contain one named optional or required `app` or `agent` companion.
+That companion is the device's lexical child, not an independently bootstrapped
+top-level participant. It is activated only through the parent device flow and
+uses a separate user-owned `GrantBinding`, ordinary login session, authorization
+context, resource bindings, and connection. Parent and child authority are never
+merged.
 
-## Participant artifact
+Companion activation exposes server-computed child consent. The user submits a
+separate child `Approval` fenced by the consent decision digest, installed
+revision, expected grant revision, and exact eligible capability/resource
+selections. Stale or mismatched consent is rejected; successful approval and
+device authority are committed before the child login session is created.
 
-`trellis.participant.v1` pins every implemented or used API by exact API id and
-digest. Uses select concrete RPC, operation, event, feed, and state surfaces.
-Required and optional uses remain distinct. Resources, job queues, and event
-consumer declarations belong to the participant.
+`implements Api;` means complete provider implementation. A nonempty
+`use Api { ... }` body is the sole interaction-selection location; `use Api;` is
+legal and selects nothing. An Operation selection includes its complete
+lifecycle and declared signals. There is no whole-API required/optional mode,
+action-level optional flag, participant-local schema, or API State declaration.
 
-Resolution requires the participant plus every referenced API artifact. The
-authoritative resolver validates pins and selections, normalizes artifacts,
-computes participant and needs digests, and derives required and optional
-grants.
+## Resource lifecycle
 
-## Authoring and generation
+State, KV, Store, Job, and Consumer declarations include a nonempty title and
+description and may be optional. Approval records kind-specific commitments: KV
+history/TTL/capacity, Store TTL/capacity, or enabled status for State, Job, and
+Consumer. Desired capacities are hints, not approval and not actual limits.
 
-Trellis IDL compiles declarative source into canonical protocol artifacts. Rust
-and TypeScript code generators consume those artifacts directly; neither
-language executes application source to discover APIs or participants.
+Physical resources have stable identity after first allocation. Removing a
+declaration detaches and revokes access but does not delete data created by this
+architecture. A compatible, newly authorized re-add of the same logical identity
+reattaches it; rename or kind change creates a new identity. Explicit
+administrator `Resources.Destroy` is the normal destructive path.
 
-Each selected language gets one ordinary generated package, with separate `apis`
-and `participants` module namespaces. Canonical JSON is tooling material inside
-that configured package at:
+State is one typed value per resource. KV is typed key/value history. Both use
+positive representation versions and direct historical-to-current SDK migrations
+for representations written by this architecture; reads and conflict projection
+never rewrite stored bytes. Store remains raw object bytes.
 
-- `artifacts/apis/<api-id>.json`
-- `artifacts/participants/<participant-id>.json`
+## Generation and runtime presentation
 
-Dependency APIs needed to resolve participants are included. Compilation and
-publication operate on canonical values in memory, not an intermediate artifact
-directory; `trellis publish` consumes the compiler's owned API values directly.
+Each selected language receives one ordinary generated package with APIs,
+participants, types, codecs, and descriptors. Generated packages need neither
+the compiler nor CLI at runtime. Clients connect through their generated
+participant facade; assignments, routes, exact grants, resources, and signed
+contexts are resolved by Trellis rather than supplied as bootstrap assertions.
 
-Generated API modules expose API identity and canonical API evidence. Generated
-participant modules expose participant identity, canonical participant data,
-needs digest, owned API evidence, and exact referenced API evidence.
-
-## Runtime presentation
-
-Clients, devices, and services resolve the normalized participant with its exact
-owned and referenced APIs before presentation. The runtime boundary compares the
-resolved API and participant digests with TypeScript's intrinsic identities and
-supplies the contextual needs digest. Bootstrap validates this evidence
-directly. There is no retry state for requesting another artifact shape.
-
-State declarations, writers, migrations, and admin views use the resolved
-participant binding's artifact digest. Compatible participant digest changes do
-not change the State namespace; namespace identity remains participant id,
-scope, owner, store, and state version.
-
-Protocol validation, contextual participant resolution, and grant derivation are
-authoritative in `trellis_protocol`. TypeScript computes intrinsic API and
-participant digests without WASM, then runtime paths use the narrow
-protocol-WASM boundary for contextual resolution.
+Operations are durable, restartable, at-least-once caller-visible workflows.
+Jobs are service-private queued execution. Durable Consumers use local
+per-process concurrency, managed retry, and per-Consumer Events DLQ history.
+These are distinct runtime facilities even when they share JetStream mechanics.

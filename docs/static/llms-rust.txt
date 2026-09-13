@@ -6,30 +6,26 @@ domain types, DI pattern, logging setup, or test framework.
 
 ## Generated Package
 
-Author native IDL and set `format = 1` and a local package `name` such as
-`orders-trellis` in `trellis.toml`. Root `Cargo.toml` selects Rust. A Rust-only
-project defaults to `trellis/`, optionally overridden by `[generate].output`;
-mixed-language projects require explicit Rust and TypeScript output tables.
-`trellis generate` is offline after dependencies are available in the global
-validated API cache.
+Author native IDL and set `[package]`, `[sources]`, and `[generate.rust].output`
+in `trellis.toml`. `trellis generate` is offline after dependencies are
+available in the global validated source-package cache.
 
-The output is one ordinary crate at version `0.0.0`, with
+The output is one ordinary crate at the source package version, with
 `orders_trellis::apis::<api>` and `orders_trellis::participants::<participant>`
 modules, not independent SDK or participant crates. Add an ordinary Cargo path
 dependency, for example `orders-trellis = { path = "trellis" }`. The generated
 crate declares the published runtime dependency matching the CLI. It has no
-generator build script, repository-relative runtime paths, or runtime-path config
-in `trellis.toml`. Use ordinary Cargo overrides when developing against a local
-runtime. Generation does not modify the consumer's Cargo manifest.
+generator build script, repository-relative runtime paths, or runtime-path
+config in `trellis.toml`. Use ordinary Cargo overrides when developing against a
+local runtime. Generation does not modify the consumer's Cargo manifest.
 
 Commit generated output when clones should build with Cargo alone, without the
-Trellis CLI or API cache. Regenerate rather than editing it. Canonical tooling
-JSON lives inside the package under `artifacts/apis` and `artifacts/participants`;
-it is not a language import surface.
+Trellis CLI/cache. Regenerate rather than editing it. Native source packages,
+not canonical API/participant JSON, are the publication and evidence boundary.
 
 An API SDK contains types and descriptors. The participant facade supplies the
 connection boundary and only the declared caller/provider surfaces. Its
-constants carry participant/API evidence; applications do not supply those
+constants carry source-package/participant evidence; applications do not supply
 digests to service bootstrap.
 
 ## Connection
@@ -46,19 +42,24 @@ let mut service = connect(
 ).await?;
 ```
 
-Trellis resolves deployment/instance assignment, installed participant/APIs,
-`GrantBinding`, resources, signed context, route JWT, and transport endpoints
+Trellis resolves deployment/instance assignment, installed package/participant
+evidence, exact grants, resources, signed context, route JWT, and endpoints
 server-side. Authorization state is process-memory-only and refreshes on
 reconnect; there is no context-store parameter.
 
 Register generated providers before `service.run().await`. The service lifecycle
-supervises its request host and workers. `with_timeout_ms(...)` bounds bootstrap,
-connect, and request operations.
+supervises its request host and workers. `with_timeout_ms(...)` bounds
+bootstrap, connect, and request operations.
 
 Apps/agents use user-login credentials (login session ID plus session seed) and
 perform context refresh before CONNECT. Devices retain their provisioned
 identity seed and use generated activation/connect options. Do not substitute a
 raw NATS URL/JWT or client-authored assignment for either lifecycle.
+
+A generated device companion is established only through the parent device's
+activation flow and separate user consent. It receives an independent ordinary
+App/Agent user session and cannot bootstrap standalone or use the parent's
+device authority.
 
 ## Typed Surfaces
 
@@ -73,27 +74,48 @@ declared-error variants directly; transport and unknown remote failures remain
 distinct. Operations expose generated invokers and typed references for start,
 wait, progress/watch, and optional cancellation/transfer.
 
-Owned event publication uses `publisher()`. Durable listeners use declared
-groups through `event_consumers()`; Trellis resolves their durable names and
-authority. Retain the returned listener guard while delivery is needed; dropping
-or aborting it removes that registration without stopping other registrations in
-the group. The service lifecycle reports shared pull-loop failures.
-Parameterized listeners match concrete subjects through their generated
-subscription patterns and verify each event with its matching registration.
-Unmatched messages are not acknowledged as completed work. Options select a
-declared group, mode, and concurrency, not a custom durable name. Delivery may
-repeat, so choose a side-effect strategy that handles duplicates.
+Owned event publication uses generated publishers. Durable handlers use declared
+Consumer resources; Trellis resolves durable identity, local concurrency, retry,
+authority, and scoped Events DLQ/replay. Delivery may repeat, so choose a
+side-effect strategy that handles duplicates. Subjects include the encoded
+qualified API identity and base64url parameter tokens; the signed descriptor
+binds the exact API, dotted event name, and parameter count. Success is
+acknowledged only after the handler succeeds;
+final exhaustion is durably recorded before source acknowledgement. Manual
+replay uses the same handler and a fresh retry budget without rewinding the
+original Consumer, and confirms resolution before acknowledgement.
 
 Jobs are private service queues. Use generated queue handles and cloneable
 `jobs_client()` handles for submission from other handlers. Worker registration
 and processing are supervised by the service lifecycle. Jobs expose durable
-state, retries, progress, cooperative cancellation, and optional live updates.
+state, retries, progress, cooperative cancellation, and live updates. Delivery
+progress acknowledgement is automatic. Waiting for keyed capacity extends the
+current delivery and does not consume an attempt before handler entry.
+`Jobs.Summary` computes all matching totals, groups, and statistics
+independently of a `Jobs.Query` page.
+
+Operation get, watch, signal, and cancel remain bound to the creator principal
+plus participant across reconnects rather than to one session key. Completed,
+failed, and cancelled records are immutable. Feed cancellation similarly binds
+the runtime-issued `feedId` and original caller identity.
 
 ## Resources And Atomicity
 
-Use the generated KV, store, State, and Jobs handles. Resolved binding payloads
-and transport subjects are runtime internals. This does not restrict use of an
-application-owned database or other storage system alongside Trellis.
+Use generated State, KV, Store, Consumer, and Job handles. State is one typed
+value without key/TTL; KV is typed history; Store is raw bytes. State/KV direct
+historical migration runs in SDK memory without write-on-read. Resolved binding
+payloads and subjects are runtime internals.
+
+Generated cursor-paginated RPCs add lazy fallible page/item streams. Missing
+`next_cursor` is the sole end signal; general keyset pagination does not promise
+a snapshot.
+
+`StoreResourceHandle::list_page` and file metadata listing are key-sorted keyset
+pagination with opaque cursors bound to the prefix query. The limit defaults to
+100 and must be at most 500. Desired resource capacities are sizing hints,
+approved commitments define authority, and generated bindings expose observed
+provider limits. Trellis does not adopt or destroy foreign-owned physical
+resources.
 
 Store readers/writers support bounded streaming through `write_from` and
 `read_into`; whole-buffer helpers remain available. Transfer-capable operation

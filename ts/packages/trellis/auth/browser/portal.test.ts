@@ -9,6 +9,24 @@ import {
 } from "./portal.ts";
 
 const binding = { secret: "portal-secret", digest: "portal-digest" };
+const consentView = {
+  participantId: "trellis-app.console@v1",
+  packageDigest: "digest",
+  installedRevision: 1,
+  expectedGrantRevision: 0,
+  capabilities: [{
+    id: "trellis.auth@v1::public",
+    title: "Public",
+    description: "Public access",
+    consequence: "The caller can use public access.",
+    consentDigest: "capability-digest",
+    required: true,
+    eligible: true,
+    alreadyApproved: false,
+  }],
+  resources: [],
+  decisionDigest: "consent-digest",
+};
 
 Deno.test("portalFlowIdFromUrl reads flowId from URL", () => {
   assertEquals(
@@ -84,17 +102,7 @@ Deno.test("fetchPortalFlowState returns auth-owned portal state directly", async
         registrationEnabled: false,
         federatedRegistrationEnabled: false,
         futureTopLevelHint: true,
-        consentView: {
-          participant: {
-            id: "trellis.portal-app@v1",
-            digest: "digest",
-            displayName: "Portal App",
-            description: "User-facing auth portal",
-            futureParticipantField: 1,
-          },
-          required: { permissions: [], capabilities: [] },
-          optionalBundles: [],
-        },
+        consentView,
       }));
     }) as typeof fetch;
 
@@ -108,7 +116,7 @@ Deno.test("fetchPortalFlowState returns auth-owned portal state directly", async
     assertEquals(flow.status, "choose_provider");
     if (flow.status === "choose_provider") {
       assertEquals(flow.providers.length, 2);
-      assertEquals(flow.app.displayName, "Portal App");
+      assertEquals(flow.app.displayName, "trellis-app.console@v1");
     }
   } finally {
     globalThis.fetch = originalFetch;
@@ -152,17 +160,8 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
           providers: ["local"],
           registrationEnabled: false,
           federatedRegistrationEnabled: false,
-          ...(call === 2 ? { consentViewDigest: "consent-digest" } : {}),
-          consentView: {
-            participant: {
-              id: "trellis-app.console@v1",
-              digest: "digest",
-              displayName: "Trellis Console",
-              description: "Admin console",
-            },
-            required: { permissions: [], capabilities: [] },
-            optionalBundles: [],
-          },
+          ...(call === 2 ? { decisionDigest: "consent-digest" } : {}),
+          consentView,
           ...(call === 2
             ? {
               user: {
@@ -186,10 +185,21 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
         "trellis-portal-binding": binding.secret,
       });
       const body = JSON.parse(String(init?.body));
-      assertEquals(body.approved, true);
-      assertEquals(body.consentViewDigest, "consent-digest");
-      assertEquals(body.selectedOptionalBundles, []);
-      assertEquals(body.idempotencyKey, undefined);
+      assertEquals(body, {
+        decision: "approve",
+        approval: {
+          mode: "capabilities",
+          installedRevision: 1,
+          expectedGrantRevision: 0,
+          decisionDigest: "consent-digest",
+          approvedCapabilities: [{
+            id: "trellis.auth@v1::public",
+            consentDigest: "capability-digest",
+          }],
+          approvedResources: [],
+          companionApproved: false,
+        },
+      });
 
       return new Response(JSON.stringify({
         flowId: "flow-1",
@@ -198,17 +208,8 @@ Deno.test("submitPortalApproval posts decision and parses next state", async () 
         providers: [],
         registrationEnabled: false,
         federatedRegistrationEnabled: false,
-        consentViewDigest: "consent-digest",
-        consentView: {
-          participant: {
-            id: "trellis-app.console@v1",
-            digest: "digest",
-            displayName: "Trellis Console",
-            description: "Admin console",
-          },
-          required: { permissions: [], capabilities: [] },
-          optionalBundles: [],
-        },
+        decisionDigest: "consent-digest",
+        consentView,
         user: { origin: "trellis", id: "usr-1", name: "Admin" },
         redirectTarget: "https://app.example.com/callback?portalCallback=token",
       }));

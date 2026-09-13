@@ -37,6 +37,15 @@ and this project adheres to
   trusted local registration, atomic provenance, automatic authority
   convergence, and live multi-connection session recovery after policy
   reduction, revocation, restoration, or expansion.
+- Added native Trellis source packages for the platform-owned Auth, Core,
+  Events, Health, Jobs, and State APIs, with generated TypeScript and Rust
+  clients, provider descriptors, semantic permissions, and cursor paging.
+- Added Core-owned State, KV, Store, Consumer, and Job Queue resource
+  reconciliation, generated client handles, durable file transfer, and
+  approval-bound device companion activation.
+- Added repository-backed Operations with restart and replica recovery, plus
+  Events-owned signed history, Consumer delivery reporting, dead-letter replay,
+  and Jobs-owned retry and exhaustion handling.
 
 ### Changed
 
@@ -47,6 +56,8 @@ and this project adheres to
 - Replaced the obsolete TypeScript Trellis runtime image with the Rust
   `trellis-server` image and removed the withdrawn TypeScript runtime source and
   release path.
+- Replaced `eventlog-runtime` and handwritten platform contract surfaces with
+  `events-runtime` and generated native built-in API packages.
 
 - Local bootstrap now creates an offline authorization root and online issuer;
   runtime configuration never references the root seed.

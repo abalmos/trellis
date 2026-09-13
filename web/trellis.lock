@@ -1,38 +1,28 @@
-format = 1
-manifest-digest = "J9quVhEuj50A1aBaWF3E4r9AsBXvXFqRZHVBnJ7JbVg"
+format = 2
+root = "trellis-web-generated"
 
-[[api]]
-id = "trellis.auth@v1"
-version = "1.0.0"
-api-digest = "2SIHWPDpaMZDtLkeROx_n12RMcraO2dUcqk-GVstWgQ"
-path = "../rust/crates/runtime"
+[[packages]]
+name = "trellis"
+version = "0.12.0"
+digest = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY"
+distribution-digest = "sha256:cc15320aca48e1019f205d4ab4f31de0780b27d27480169913d30b30f3677721"
+dependencies = []
 
-[[api]]
-id = "trellis.core@v1"
-version = "1.0.0"
-api-digest = "WKuZkcLP-PPVvg5vymwb6n-QTpb43djf3DokC6UNqKE"
-path = "../rust/crates/runtime"
+[packages.source]
+kind = "path"
+path = "./../rust/crates/runtime"
 
-[[api]]
-id = "trellis.eventlog@v1"
-version = "1.0.0"
-api-digest = "0dHI0vCQ_7EhGPQY10aK_hc5cEnnwdPIZrSIjwo7Nwg"
-path = "../rust/crates/eventlog-runtime"
+[[packages]]
+name = "trellis-web-generated"
+version = "0.12.0"
+digest = "95FJ9yd6tawJjZ2dKaEQcKnpfgbcEEYvqeJEIgwstdU"
+distribution-digest = "sha256:acdcec8f62e83a53da8a08d2220c69a158cf4a7c291385fc453b261107c07627"
 
-[[api]]
-id = "trellis.health@v1"
-version = "1.0.0"
-api-digest = "8GFaxY8gvKvagqRIF43iaRpUN_40ukCylk_nwmFaZkg"
-path = "../rust/crates/runtime"
+[[packages.dependencies]]
+name = "trellis"
+version = "0.12.0"
+digest = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY"
 
-[[api]]
-id = "trellis.jobs@v1"
-version = "1.0.0"
-api-digest = "PE0Zr_66Vaypj1-XksXfaDOViTirdGw6DuoaKpWtFXs"
-path = "../rust/crates/jobs-runtime"
-
-[[api]]
-id = "trellis.state@v1"
-version = "1.0.0"
-api-digest = "1WHxeF9WLJh3v-mmHiV5mql3a67tmPNpEUFxxUIF9-Y"
-path = "../rust/crates/runtime"
+[packages.source]
+kind = "path"
+path = "."

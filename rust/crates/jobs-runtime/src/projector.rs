@@ -24,6 +24,7 @@ const PROJECTOR_BATCH_SIZE: usize = 100;
 struct ProjectorEvent {
     event: JobEvent,
     raw_event: Value,
+    stream_sequence: u64,
 }
 
 pub struct JobsProjectorHandle {
@@ -114,7 +115,14 @@ pub async fn start_jobs_projector(
                 .collect::<Vec<_>>();
             let batch_store = store.clone();
             let projected = tokio::task::spawn_blocking(move || {
-                project_job_events_with_payloads(&batch_store, &events)
+                let projected = project_job_events_with_payloads(&batch_store, &events)?;
+                let horizon = events
+                    .iter()
+                    .map(|event| event.stream_sequence)
+                    .max()
+                    .unwrap_or_default();
+                batch_store.advance_projected_sequence(horizon)?;
+                Ok::<_, SqliteJobsStoreError>(projected)
             })
             .await
             .map_err(|error| ServerError::Nats(format!("jobs projector task failed: {error}")))?
@@ -178,6 +186,7 @@ async fn collect_projector_message(
 }
 
 fn parse_projector_message(message: &JobsRuntimeMessage) -> Option<ProjectorEvent> {
+    let stream_sequence = message.stream_sequence().ok()?;
     let mut raw_event = serde_json::from_slice::<Value>(message.payload()).ok()?;
     if let Value::Object(fields) = &mut raw_event {
         fields.insert(
@@ -186,7 +195,11 @@ fn parse_projector_message(message: &JobsRuntimeMessage) -> Option<ProjectorEven
         );
     }
     let event = serde_json::from_value::<JobEvent>(raw_event.clone()).ok()?;
-    Some(ProjectorEvent { event, raw_event })
+    Some(ProjectorEvent {
+        event,
+        raw_event,
+        stream_sequence,
+    })
 }
 
 fn projector_consumer_name(projection_id: &str) -> String {
@@ -706,7 +719,11 @@ mod tests {
                     None,
                 );
                 let raw_event = serde_json::to_value(&event).expect("event should encode");
-                ProjectorEvent { event, raw_event }
+                ProjectorEvent {
+                    event,
+                    raw_event,
+                    stream_sequence: index as u64 + 1,
+                }
             })
             .collect::<Vec<_>>();
 

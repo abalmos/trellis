@@ -8,38 +8,35 @@ tools are application choices. Neither Zod nor an ORM is required.
 The npm packages `@qlever-llc/trellis` and `@qlever-llc/result` contain ESM
 JavaScript and TypeScript declarations. Use `import`. CommonJS output and
 `require()` support have intentionally been removed, with no compatibility
-fallback. Node and Deno adapters remain ESM subpaths; JSR publication remains
-supported.
+fallback. The shared ESM `/service` entrypoint supports Node-compatible native
+runtimes, including Deno; JSR publication remains supported.
 
 ## Generate And Connect
 
 Author native IDL, run `trellis update` after dependency changes, and run
-`trellis generate` after IDL changes. Set `format = 1` and the local package
-`name` in `trellis.toml`. A root `package.json`, `deno.json`, or `deno.jsonc`
-selects TypeScript/JavaScript. A single language defaults to `trellis/`, with
-optional `[generate].output`; mixed-language projects require explicit Rust and
-TypeScript output tables.
+`trellis generate` after IDL changes. Set `[package]`, `[sources]`, and
+`[generate.typescript].output` in `trellis.toml`.
 
-Import `apis` and `participants` from that one ordinary local package, for example
-`import { participants } from "orders-trellis"` and
-`participants.acmeOrdersService.participant`. There are no per-API or participant
-packages. Output is executable ESM JavaScript plus declarations and `package.json`,
-always version `0.0.0`, depending on the published runtime matching the CLI. No
+Import `apis` and `participants` from that one ordinary local package, for
+example `import { participants } from "orders-trellis"` and the generated
+participant export. There are no per-API or participant packages. Output is
+executable ESM JavaScript plus declarations and `package.json`, at the source
+package version, depending on the published runtime matching the CLI. No
 consumer transpiler, generated Deno configuration, or runtime-path setting is
 required. Configure ordinary npm dependencies or Deno import mappings yourself;
-generation never edits them. Commit authored files and the lock, and commit output
-when ordinary clones should build without the Trellis CLI or API cache. Generation
-is offline once locked dependencies are available in the validated global cache.
-There is no TypeScript contract-authoring execution step.
+generation never edits them. Commit authored files and the lock, and commit
+output when ordinary clones should build without the Trellis CLI or
+source-package cache. Generation is offline once locked dependencies are
+available in the validated global cache. There is no TypeScript
+contract-authoring execution step.
 
-Services import `TrellisService` from `@qlever-llc/trellis/service/deno` or
-`@qlever-llc/trellis/service/node`. Connect with the generated participant,
-provisioned identity seed, and Trellis URL; `name` is optional. Set
-`telemetry: false` to disable automatic telemetry. Optional `runtime` controls
-service logging (including `false` to disable it), default request timeout,
-event stream selection, no-responder retry, and health heartbeat interval.
-Deployment/instance assignment,
-installed participant/APIs, `GrantBinding`, resources, signed context, route
+Services import `TrellisService` from `@qlever-llc/trellis/service`. Connect
+with the generated participant, provisioned identity seed, and Trellis URL;
+`name` is optional. Set `telemetry: false` to disable automatic telemetry.
+Optional `runtime` controls service logging (including `false` to disable it),
+default request timeout, event stream selection, no-responder retry, and health
+heartbeat interval. Deployment/instance assignment, installed
+package/participant evidence, exact grants, resources, signed context, route
 JWT, and transport endpoints are resolved server-side. Authorization state is
 process-memory-only and refreshes on reconnect; no authorization-context store
 or client-supplied deployment/digest fields exist. The complete example is in
@@ -89,8 +86,9 @@ Declare wire models and expected errors in IDL. The generator owns the runtime
 schemas and generated error types. Handlers can return declared errors through
 `Result.err(...)`; callers can distinguish them from runtime/transport failures.
 `.orThrow()` converts a failed result to an exception where that matches the
-application's control flow. Trellis's optional pagination utilities do not
-require all application list APIs to use one envelope.
+application's control flow. Native cursor-paginated RPCs add lazy `.pages()` and
+`.items()` iterators. Missing `nextCursor` is the sole end signal; general
+keyset pagination does not promise a snapshot.
 
 ## Events And Feeds
 
@@ -105,12 +103,22 @@ await service.onOrdersChanged(({ event }) => {
 ```
 
 The `event` is the typed payload; `context` carries runtime metadata. Durable
-service consumers come from declared event consumer groups. The runtime owns
-their durable names and proof verification. A normal publish happens
-immediately; it is not a database commit fence.
+delivery comes from declared Consumer resources. The runtime owns durable
+identity, local concurrency, retry, proof verification, and scoped Events DLQ.
+Subjects include the encoded qualified API identity and base64url parameter
+tokens; the message proof binds the exact API, dotted event name, and parameter
+count. Handler success is
+acknowledged only after it completes; final exhaustion is durably recorded
+before source acknowledgement. Manual replay uses the same handler with a fresh
+retry budget, does not rewind the original Consumer, and durably resolves before
+acknowledgement. A normal publish happens immediately; it is not a database
+commit fence.
 
 Feed providers receive an abort signal. Stop connection-scoped work when it
-aborts, and close or abort a caller subscription when no longer needed.
+aborts, and close or abort a caller subscription when no longer needed. Control
+uses the runtime-issued `feedId` and original caller identity; reconnect may
+change the session key but does not let another principal or participant cancel
+the feed.
 
 ## Operations And Jobs
 
@@ -122,23 +130,35 @@ const terminal = await operation.wait().orThrow();
 if (terminal.state === "completed") console.log(terminal.output);
 ```
 
-The provider registers with `service.handleReportsGenerate(...)` and uses its
-`op` argument to start, report progress, complete, or fail the operation.
-Transfer-capable invocations return a transfer-aware result; consult its
-generated type rather than assuming the ordinary operation result shape.
+The provider registers through its generated participant facade. Acceptance,
+progress, signals, cancellation, and terminal state use the durable repository.
+Get, watch, signal, and cancel remain bound to the creator principal and
+participant across reconnects. Completed, failed, and cancelled states cannot be
+changed. Transfer-capable invocations return a transfer-aware result; consult
+its generated type rather than assuming the ordinary operation result shape.
 
 Private queues are available as `service.jobs.<queue>`. Register handlers with
 `handle(...)`, create work with `create(...)`, and observe the returned job
-reference. TypeScript retryable failures use `RetryJobError` from
-`@qlever-llc/trellis/jobs`; ordinary errors are terminal. Worker concurrency is
-an implementation option, while `keyConcurrency` is a declared queue policy.
-Live updates are separate from durable progress and terminal results.
+reference. Retry and automatic delivery acknowledgement are runtime-owned.
+Worker concurrency is local; optional keyed concurrency is a declared semantic
+policy. Waiting for keyed capacity maintains the current delivery and does not
+consume an attempt before the handler starts. `Jobs.Summary` computes matching
+totals, groups, and statistics independently of a `Jobs.Query` page. Live
+updates are separate from durable progress and terminal results.
 
 ## Resources And Transactional Events
 
-Use `service.kv`, `service.store`, and `service.jobs` for declared resources.
-App/device state uses `client.state.<name>`. These are Trellis-managed handles,
-not an application database abstraction.
+Use generated State, KV, Store, Consumer, and Job handles. State is one typed
+value without key/TTL; KV is typed history; Store is raw bytes. State/KV
+historical migration runs in SDK memory without write-on-read. These are
+Trellis-managed handles, not an application database abstraction.
+
+`TypedStore.list(...)` and file metadata lists use key-sorted keyset pagination
+with opaque cursors bound to the prefix query. The limit defaults to 100 and
+must be at most 500; only absent `nextCursor` means completion. Desired resource
+capacities are sizing hints, approved commitments are authority, and runtime
+handles expose observed provider limits. Trellis does not adopt or destroy
+foreign-owned physical resources.
 
 When SQL writes and event/job intents need one atomic commit, configure
 `service.createSqlOutbox(...)` with `dialect`, an `executor`, and a
@@ -181,6 +201,10 @@ Browser apps use
 "browser" })` or the
 [Svelte integration](llms-svelte.txt). Let the Trellis client own its auth
 installation, refresh, reconnect, and normal `logout()`.
+
+A generated device companion is established only through the parent device's
+activation flow and separate user consent. It has its own ordinary App/Agent
+session and cannot use standalone bootstrap or the parent device's authority.
 
 For real-runtime tests, use the Deno `TrellisTestRuntime` package and generated
 participants. See `/guides/testing-trellis-services` for a complete test rather

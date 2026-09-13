@@ -15,11 +15,25 @@ struct DeviceEnrollmentRequest {
     #[serde(rename = "iat")]
     _iat: i64,
     participant_id: String,
+    #[serde(rename = "packageEvidence")]
+    _package_evidence: Value,
+    participant_path: String,
+    package_digest: String,
     challenge_digest: String,
     confirmation_code: String,
     provisioning_secret: Option<String>,
     name: Option<String>,
+    companion: Option<DeviceCompanionClaim>,
     proof: Value,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeviceCompanionClaim {
+    participant_id: String,
+    kind: trellis_protocol::ParticipantKind,
+    installation_public_key: String,
+    request_proof: String,
 }
 
 #[derive(Serialize)]
@@ -51,6 +65,7 @@ where
     R: AccountRepository
         + AuthorityEvidenceRepository
         + DeploymentRepository
+        + GrantRepository
         + OutboxRepository
         + PortalRepository
         + ProvisioningRepository
@@ -105,6 +120,35 @@ where
         state.proof_policy,
     )
     .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+    let companion_request_proof_digest = if let Some(companion) = &request.companion {
+        let mut enrollment = raw.clone();
+        let enrollment = enrollment
+            .as_object_mut()
+            .ok_or_else(|| HttpError::bad_request("invalid_device_enrollment"))?;
+        enrollment.remove("proof");
+        enrollment.remove("companion");
+        let claim = json!({
+            "participantId": companion.participant_id,
+            "kind": companion.kind,
+            "installationPublicKey": companion.installation_public_key,
+        });
+        let digest = trellis_protocol::digest_json(&json!({
+            "format": "trellis.device.user-companion.v1",
+            "origin": state.public_origin,
+            "enrollment": enrollment,
+            "claim": claim,
+        }))
+        .map_err(|_| HttpError::bad_request("invalid_device_enrollment"))?;
+        crate::platform::auth::verify_detached_ed25519_proof(
+            &companion.installation_public_key,
+            &digest,
+            &companion.request_proof,
+        )
+        .map_err(|_| HttpError::unauthorized("invalid_companion_proof"))?;
+        Some(digest)
+    } else {
+        None
+    };
 
     let now = now_ms()?;
     let existing_identity = state
@@ -195,6 +239,33 @@ where
         .get_deployment_evidence(&identity.deployment_id)
         .await?
         .ok_or_else(|| HttpError::unauthorized("deployment_not_found"))?;
+    let (_, installed) = state
+        .service
+        .repository()
+        .get_installed_participant_record(request.participant_id.clone(), None)
+        .await?
+        .ok_or_else(|| HttpError::unauthorized("participant_not_installed"))?;
+    let expected_companion = installed.resolve()?;
+    if installed.participant_path != request.participant_path
+        || installed.package_digest != request.package_digest
+    {
+        return Err(HttpError::unauthorized("participant_evidence_mismatch"));
+    }
+    match (
+        &request.companion,
+        &expected_companion.companion_participant_id,
+    ) {
+        (None, None) => {}
+        (Some(claim), Some(expected_id))
+            if claim.participant_id == *expected_id
+                && Some(claim.kind) == expected_companion.companion_participant_kind
+                && matches!(
+                    claim.kind,
+                    trellis_protocol::ParticipantKind::App
+                        | trellis_protocol::ParticipantKind::Agent
+                ) => {}
+        _ => return Err(HttpError::unauthorized("companion_claim_mismatch")),
+    }
     let device = state
         .service
         .repository()
@@ -262,17 +333,9 @@ where
             .await?
             .ok_or_else(|| HttpError::unauthorized("deployment_not_found"))?;
         let actions = (profile.review_mode == Some(DeviceReviewMode::Required))
-            .then(|| PostCommitActionRecord {
-                predecessor_action_id: None,
-                action_id: crate::platform::auth::activation_review_event_action_id(
-                    &review_id,
-                    "review-requested",
-                )
-                .expect("valid activation review event action"),
-                kind: PostCommitActionKind::Event,
-                payload: json!({
+            .then(|| {
+                let mut payload = json!({
                     "eventType": "Auth.DeviceUserAuthorities.ReviewRequested",
-                    "eventSubject": format!("events.v1.Auth.DeviceUserAuthorities.ReviewRequested.{}", identity.deployment_id),
                     "eventId": format!("evt_{}", digest_parts(&[&review_id, "review-requested"])),
                     "occurredAt": now,
                     "reviewId": review_id,
@@ -280,13 +343,25 @@ where
                     "instanceId": identity.instance_id,
                     "requestedAt": now,
                     "expiresAt": expires_at,
-                }),
+                });
+                payload["eventSubject"] = json!(crate::platform::auth::auth_event_subject::<
+                    trellis_runtime_apis::apis::trellis_auth_v1::events::DeviceUserAuthoritiesReviewRequested,
+                >(&payload).expect("valid device review event subject"));
+                PostCommitActionRecord {
+                predecessor_action_id: None,
+                action_id: crate::platform::auth::activation_review_event_action_id(
+                    &review_id,
+                    "review-requested",
+                )
+                .expect("valid activation review event action"),
+                kind: PostCommitActionKind::Event,
+                payload,
                 created_at: now,
                 attempts: 0,
                 next_attempt_at: now,
                 claimed_until: None,
                 last_error: None,
-            })
+            }})
             .into_iter()
             .collect();
         let outcome = state
@@ -303,6 +378,14 @@ where
                     "participantId": request.participant_id,
                     "confirmationCode": request.confirmation_code,
                     "expiresAt": expires_at,
+                    "companion": request.companion.as_ref().map(|companion| json!({
+                        "participantId": companion.participant_id,
+                        "kind": companion.kind,
+                        "installationPublicKey": companion.installation_public_key,
+                        "requestProof": companion.request_proof,
+                        "requestProofDigest": companion_request_proof_digest,
+                    })),
+                    "companionRequired": expected_companion.companion_required,
                 }),
                 requested_at: now,
                 expires_at,

@@ -31,7 +31,7 @@ pub(crate) fn participant(id: &str) -> Option<BuiltinParticipant> {
 
 fn api_0() -> ApiRuntimeProjection {
     ApiRuntimeProjection {
-        digest: "yq6ATxM5WBjmIJQDSkL5OeZ2L6E8y0hbSvY_ElbZA2U".into(),
+        digest: "sNLVgGp5fF1O6yg5mO9eYhfKtOqfQAWaTkZieEdvkGY".into(),
         major: 1,
         actions: BTreeMap::from([
             (
@@ -297,6 +297,15 @@ fn api_0() -> ApiRuntimeProjection {
             ),
             (
                 "rpc:Participants.Install".into(),
+                ActionRuntimeProjection {
+                    kind: RuntimeActionKind::Rpc,
+                    upload: false,
+                    download: false,
+                    event_parameter_count: 0,
+                },
+            ),
+            (
+                "rpc:Participants.List".into(),
                 ActionRuntimeProjection {
                     kind: RuntimeActionKind::Rpc,
                     upload: false,
@@ -680,6 +689,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Authorities Mutate".into(),
                     description: "Allows authorities mutate.".into(),
+                    consequence: "The caller can use authorities mutate.".into(),
+                    consent_digest: "MIGWLwTYRa9BIqy3iukm98m9-xN0pDp3_UgavGA-iKk".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -731,6 +743,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Authorities Read".into(),
                     description: "Allows authorities read.".into(),
+                    consequence: "The caller can use authorities read.".into(),
+                    consent_digest: "2IhD0wb7rw9K2LMwl5w-e6vWYFzEV-5vXoLECMsQVaY".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -750,6 +765,12 @@ fn api_0() -> ApiRuntimeProjection {
                             "Participants.Get",
                             PermissionAction::Call,
                         ),
+                        api_permission(
+                            "trellis.auth@v1",
+                            ApiSurfaceKind::Rpc,
+                            "Participants.List",
+                            PermissionAction::Call,
+                        ),
                     ],
                 },
             ),
@@ -758,6 +779,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Capabilities Read".into(),
                     description: "Allows capabilities read.".into(),
+                    consequence: "The caller can use capabilities read.".into(),
+                    consent_digest: "gpaJJ90oPyPu0dGA5rfTgLJjv3umvMh0Uny73mifzXY".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -785,6 +809,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Connections Kick".into(),
                     description: "Allows connections kick.".into(),
+                    consequence: "The caller can use connections kick.".into(),
+                    consent_digest: "8MLc-tWJOCiUbvyeRFy1seWnMvLc9PQC35eiyJwvHkk".into(),
+                    public: false,
                     allows: vec![api_permission(
                         "trellis.auth@v1",
                         ApiSurfaceKind::Rpc,
@@ -798,6 +825,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Connections Read".into(),
                     description: "Allows connections read.".into(),
+                    consequence: "The caller can use connections read.".into(),
+                    consent_digest: "zbf-dnjeDYFskfxXz3R53YUNWeO24MQ8Lwzh_hCyK1s".into(),
+                    public: false,
                     allows: vec![api_permission(
                         "trellis.auth@v1",
                         ApiSurfaceKind::Rpc,
@@ -811,6 +841,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Deployments Mutate".into(),
                     description: "Allows deployments mutate.".into(),
+                    consequence: "The caller can use deployments mutate.".into(),
+                    consent_digest: "GeZvXWHMF2rU2Tcp13co4RBfrEVHFxro29bzzBl2jlw".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -844,6 +877,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Deployments Read".into(),
                     description: "Allows deployments read.".into(),
+                    consequence: "The caller can use deployments read.".into(),
+                    consent_digest: "CSlIM9oYHbepWTKOmK4BO74YuoYHPIOY4QS5uayWhVo".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -865,6 +901,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Devices Mutate".into(),
                     description: "Allows devices mutate.".into(),
+                    consequence: "The caller can use devices mutate.".into(),
+                    consent_digest: "dowbqsnbA_OZieHmjhS6nORzaNNYuYaTIvSue9l5Qk8".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -904,6 +943,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Devices Read".into(),
                     description: "Allows devices read.".into(),
+                    consequence: "The caller can use devices read.".into(),
+                    consent_digest: "RN4qMT-CTTBcah5n8bci_piLnwehmykIqdT2Jw-4H7E".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -925,6 +967,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Devices Review".into(),
                     description: "Allows devices review.".into(),
+                    consequence: "The caller can use devices review.".into(),
+                    consent_digest: "mf9bGUzJpQlq9lTqzoUBiuGPPhYUVsaJF6fQdJa_yKo".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -946,6 +991,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Events Stream".into(),
                     description: "Allows events stream.".into(),
+                    consequence: "The caller can use events stream.".into(),
+                    consent_digest: "e4bqW456bRBgLlh-nhm3mwn9vg09FmuU9GfBECaLE4Y".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -1003,6 +1051,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Portals Mutate".into(),
                     description: "Allows portals mutate.".into(),
+                    consequence: "The caller can use portals mutate.".into(),
+                    consent_digest: "2dXATXuhbxaMp_V-tHSV56d5Dlh0Mtyf0oS2KwQyrhA".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -1054,6 +1105,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Portals Read".into(),
                     description: "Allows portals read.".into(),
+                    consequence: "The caller can use portals read.".into(),
+                    consent_digest: "EcceFZ0MQ_GlLehwdNQL9k7vP-TnVnibDf5xTboRuf8".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -1087,6 +1141,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "".into(),
                     description: "".into(),
+                    consequence: "".into(),
+                    consent_digest: "QIth2ibu2FmDwWnWadZpAWpF7tHyTSz2PH2OKvVVYC4".into(),
+                    public: true,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -1222,6 +1279,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Services Mutate".into(),
                     description: "Allows services mutate.".into(),
+                    consequence: "The caller can use services mutate.".into(),
+                    consent_digest: "RVuId87LI8Rj-6TtlIDrnf28q6wC8DNJFFjAaG5H6tA".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -1255,6 +1315,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Services Read".into(),
                     description: "Allows services read.".into(),
+                    consequence: "The caller can use services read.".into(),
+                    consent_digest: "mC0vNO7A6BMMeNPK6N4JWs7rB_kGDc3k2bmBaTib3xw".into(),
+                    public: false,
                     allows: vec![api_permission(
                         "trellis.auth@v1",
                         ApiSurfaceKind::Rpc,
@@ -1268,6 +1331,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Sessions Read".into(),
                     description: "Allows sessions read.".into(),
+                    consequence: "The caller can use sessions read.".into(),
+                    consent_digest: "wRj-aHJnRl4TkGAJeqLqj9oLmIY8XOZ7Ypzw32RF_jE".into(),
+                    public: false,
                     allows: vec![api_permission(
                         "trellis.auth@v1",
                         ApiSurfaceKind::Rpc,
@@ -1281,6 +1347,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Sessions Revoke".into(),
                     description: "Allows sessions revoke.".into(),
+                    consequence: "The caller can use sessions revoke.".into(),
+                    consent_digest: "fASue_VnuC7-WAyY0jiU-oCY3fve7gEa9isNqgyL84g".into(),
+                    public: false,
                     allows: vec![api_permission(
                         "trellis.auth@v1",
                         ApiSurfaceKind::Rpc,
@@ -1294,6 +1363,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Users Mutate".into(),
                     description: "Allows users mutate.".into(),
+                    consequence: "The caller can use users mutate.".into(),
+                    consent_digest: "4KCL9kT1DKvtTqvHhSF71T8r6YRTTIa1mM8k6AidIN8".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -1321,6 +1393,9 @@ fn api_0() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Users Read".into(),
                     description: "Allows users read.".into(),
+                    consequence: "The caller can use users read.".into(),
+                    consent_digest: "09cIbRCunl0ry8aIBRxi7Ak2zpmVSdY-08_t87sq3bc".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.auth@v1",
@@ -1349,23 +1424,55 @@ fn api_0() -> ApiRuntimeProjection {
 
 fn api_1() -> ApiRuntimeProjection {
     ApiRuntimeProjection {
-        digest: "fXmSRF8ZanEn015Qk-M3WvUGzQ-7kguhGdItKunXQyo".into(),
+        digest: "aUohKUjAdrsQhEPqCsJQkF0Ehqmva2xK1Kju1yLRDxM".into(),
         major: 1,
-        actions: BTreeMap::from([(
-            "rpc:Surface.Status".into(),
-            ActionRuntimeProjection {
-                kind: RuntimeActionKind::Rpc,
-                upload: false,
-                download: false,
-                event_parameter_count: 0,
-            },
-        )]),
+        actions: BTreeMap::from([
+            (
+                "rpc:Resources.Destroy".into(),
+                ActionRuntimeProjection {
+                    kind: RuntimeActionKind::Rpc,
+                    upload: false,
+                    download: false,
+                    event_parameter_count: 0,
+                },
+            ),
+            (
+                "rpc:Resources.Inspect".into(),
+                ActionRuntimeProjection {
+                    kind: RuntimeActionKind::Rpc,
+                    upload: false,
+                    download: false,
+                    event_parameter_count: 0,
+                },
+            ),
+            (
+                "rpc:Resources.Query".into(),
+                ActionRuntimeProjection {
+                    kind: RuntimeActionKind::Rpc,
+                    upload: false,
+                    download: false,
+                    event_parameter_count: 0,
+                },
+            ),
+            (
+                "rpc:Surface.Status".into(),
+                ActionRuntimeProjection {
+                    kind: RuntimeActionKind::Rpc,
+                    upload: false,
+                    download: false,
+                    event_parameter_count: 0,
+                },
+            ),
+        ]),
         capabilities: BTreeMap::from([
             (
                 "trellis.core@v1::authority_read".into(),
                 CapabilityRuntimeProjection {
                     display_name: "Authority Read".into(),
-                    description: "Allows authority read.".into(),
+                    description: "Inspect Trellis runtime surfaces.".into(),
+                    consequence: "The caller can inspect runtime surface readiness.".into(),
+                    consent_digest: "bFNvSi5TgaaC92v2kVRhuye7EQ5-kTBRblGKqCXu5KE".into(),
+                    public: false,
                     allows: vec![api_permission(
                         "trellis.core@v1",
                         ApiSurfaceKind::Rpc,
@@ -1379,7 +1486,51 @@ fn api_1() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "".into(),
                     description: "".into(),
+                    consequence: "".into(),
+                    consent_digest: "RZvBpkyl3FwjmL_xDzqHgHOMqKS0JZ18u5wN-wOnuNY".into(),
+                    public: true,
                     allows: vec![],
+                },
+            ),
+            (
+                "trellis.core@v1::resources_destroy".into(),
+                CapabilityRuntimeProjection {
+                    display_name: "Resources Destroy".into(),
+                    description: "Destroy Trellis-managed resources.".into(),
+                    consequence: "The caller can permanently delete managed resource data.".into(),
+                    consent_digest: "BPK_HkVekkLTfMxaBbE9l_fUS0R8JklApT9AHNJ2G78".into(),
+                    public: false,
+                    allows: vec![api_permission(
+                        "trellis.core@v1",
+                        ApiSurfaceKind::Rpc,
+                        "Resources.Destroy",
+                        PermissionAction::Call,
+                    )],
+                },
+            ),
+            (
+                "trellis.core@v1::resources_read".into(),
+                CapabilityRuntimeProjection {
+                    display_name: "Resources Read".into(),
+                    description: "Inspect Trellis-managed resources.".into(),
+                    consequence: "The caller can read resource configuration, status, and history."
+                        .into(),
+                    consent_digest: "3tpkViUZwcvViVyy9vm-tuksTt9D4kIF4-9o_xNXz9E".into(),
+                    public: false,
+                    allows: vec![
+                        api_permission(
+                            "trellis.core@v1",
+                            ApiSurfaceKind::Rpc,
+                            "Resources.Inspect",
+                            PermissionAction::Call,
+                        ),
+                        api_permission(
+                            "trellis.core@v1",
+                            ApiSurfaceKind::Rpc,
+                            "Resources.Query",
+                            PermissionAction::Call,
+                        ),
+                    ],
                 },
             ),
         ]),
@@ -1388,132 +1539,56 @@ fn api_1() -> ApiRuntimeProjection {
 
 fn api_2() -> ApiRuntimeProjection {
     ApiRuntimeProjection {
-        digest: "oJlY-7SaNj7LSVf14gq3H5DWYUovxBhfkVHa0ysIr1Y".into(),
+        digest: "ByInt82orMBbflrAMLFBGWM8wUI97_J8ci4ra39Sby0".into(),
         major: 1,
         actions: BTreeMap::from([
-            (
-                "rpc:Consumers.Inspect".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "rpc:Consumers.Query".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "rpc:Inspect".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "rpc:Metrics".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "rpc:Query".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "feed:Watch".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Feed,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
+            ("rpc:Consumers.Inspect".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:Consumers.Query".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:Consumers.ReportDelivery".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:DeadLetters.Dismiss".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:DeadLetters.Inspect".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:DeadLetters.Query".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:DeadLetters.Replay".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:Diagnostics".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:Inspect".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:Metrics".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:Query".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("feed:Watch".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Feed, upload: false, download: false, event_parameter_count: 0 }),
         ]),
         capabilities: BTreeMap::from([
-            (
-                "trellis.events@v1::public".into(),
-                CapabilityRuntimeProjection {
-                    display_name: "".into(),
-                    description: "".into(),
-                    allows: vec![],
-                },
-            ),
-            (
-                "trellis.events@v1::read".into(),
-                CapabilityRuntimeProjection {
-                    display_name: "Read".into(),
-                    description: "Allows read.".into(),
-                    allows: vec![
-                        api_permission(
-                            "trellis.events@v1",
-                            ApiSurfaceKind::Rpc,
-                            "Consumers.Inspect",
-                            PermissionAction::Call,
-                        ),
-                        api_permission(
-                            "trellis.events@v1",
-                            ApiSurfaceKind::Rpc,
-                            "Consumers.Query",
-                            PermissionAction::Call,
-                        ),
-                        api_permission(
-                            "trellis.events@v1",
-                            ApiSurfaceKind::Rpc,
-                            "Inspect",
-                            PermissionAction::Call,
-                        ),
-                        api_permission(
-                            "trellis.events@v1",
-                            ApiSurfaceKind::Rpc,
-                            "Metrics",
-                            PermissionAction::Call,
-                        ),
-                        api_permission(
-                            "trellis.events@v1",
-                            ApiSurfaceKind::Rpc,
-                            "Query",
-                            PermissionAction::Call,
-                        ),
-                    ],
-                },
-            ),
-            (
-                "trellis.events@v1::stream".into(),
-                CapabilityRuntimeProjection {
-                    display_name: "Stream".into(),
-                    description: "Allows stream.".into(),
-                    allows: vec![api_permission(
-                        "trellis.events@v1",
-                        ApiSurfaceKind::Feed,
-                        "Watch",
-                        PermissionAction::Subscribe,
-                    )],
-                },
-            ),
+            ("trellis.events@v1::manage_consumers".into(), CapabilityRuntimeProjection { display_name: "Manage Consumers".into(), description: "Inspect and control managed Consumers across owners.".into(), consequence: "The caller can view, replay, and dismiss another owner's Consumer dead letters when also authorized as an administrator.".into(), consent_digest: "ssCWWzibtjWoOCaepAJqIxnSJ-P5SqHpY0FhiJazgG4".into(), public: false, allows: vec![
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "Consumers.Inspect", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "Consumers.Query", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "DeadLetters.Dismiss", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "DeadLetters.Inspect", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "DeadLetters.Query", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "DeadLetters.Replay", PermissionAction::Call),
+            ] }),
+            ("trellis.events@v1::public".into(), CapabilityRuntimeProjection { display_name: "".into(), description: "".into(), consequence: "".into(), consent_digest: "12kn1_mzsF-iNrP4XRCQ8U1OZyWDTwlKxFn8dyGQAP4".into(), public: true, allows: vec![
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "Consumers.Inspect", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "Consumers.Query", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "Consumers.ReportDelivery", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "DeadLetters.Dismiss", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "DeadLetters.Inspect", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "DeadLetters.Query", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "DeadLetters.Replay", PermissionAction::Call),
+            ] }),
+            ("trellis.events@v1::read".into(), CapabilityRuntimeProjection { display_name: "Read Events".into(), description: "Inspect event history, metrics, and projection diagnostics.".into(), consequence: "The caller can read retained event data and operational diagnostics.".into(), consent_digest: "ZOv1nV8r73VQ5jBI7CuCKYzxApUzYD9S6-BLZ_XdVTE".into(), public: false, allows: vec![
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "Diagnostics", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "Inspect", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "Metrics", PermissionAction::Call),
+                api_permission("trellis.events@v1", ApiSurfaceKind::Rpc, "Query", PermissionAction::Call),
+            ] }),
+            ("trellis.events@v1::stream".into(), CapabilityRuntimeProjection { display_name: "Stream".into(), description: "Allows stream.".into(), consequence: "The caller can use stream.".into(), consent_digest: "cPu0p-jxLppGoKv4GuzPuCg9veBCsm31KlsTJvRhr0Y".into(), public: false, allows: vec![
+                api_permission("trellis.events@v1", ApiSurfaceKind::Feed, "Watch", PermissionAction::Subscribe),
+            ] }),
         ]),
     }
 }
 
 fn api_3() -> ApiRuntimeProjection {
     ApiRuntimeProjection {
-        digest: "JU0A9xciAKdsoOrnsOES61Q99KyP31_NuVNNbf29sF8".into(),
+        digest: "850itezlC9qjm-ndTCwrmkEQBCkVmnLqSguqNkYVgaA".into(),
         major: 1,
         actions: BTreeMap::from([
             (
@@ -1536,6 +1611,15 @@ fn api_3() -> ApiRuntimeProjection {
             ),
             (
                 "rpc:Query".into(),
+                ActionRuntimeProjection {
+                    kind: RuntimeActionKind::Rpc,
+                    upload: false,
+                    download: false,
+                    event_parameter_count: 0,
+                },
+            ),
+            (
+                "rpc:Summary".into(),
                 ActionRuntimeProjection {
                     kind: RuntimeActionKind::Rpc,
                     upload: false,
@@ -1568,6 +1652,9 @@ fn api_3() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "".into(),
                     description: "".into(),
+                    consequence: "".into(),
+                    consent_digest: "pjF_Iyk8V3oDeXIBtqI_CRDjRbnJISa7q3WPOrHIZk8".into(),
+                    public: true,
                     allows: vec![api_permission(
                         "trellis.health@v1",
                         ApiSurfaceKind::Event,
@@ -1581,6 +1668,9 @@ fn api_3() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Read".into(),
                     description: "Allows read.".into(),
+                    consequence: "The caller can use read.".into(),
+                    consent_digest: "0IO7vyEdUVaghdw3eqq1uyWbmRA93NlmVQHsX8-ljks".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.health@v1",
@@ -1598,6 +1688,12 @@ fn api_3() -> ApiRuntimeProjection {
                             "trellis.health@v1",
                             ApiSurfaceKind::Rpc,
                             "Query",
+                            PermissionAction::Call,
+                        ),
+                        api_permission(
+                            "trellis.health@v1",
+                            ApiSurfaceKind::Rpc,
+                            "Summary",
                             PermissionAction::Call,
                         ),
                         api_permission(
@@ -1621,7 +1717,7 @@ fn api_3() -> ApiRuntimeProjection {
 
 fn api_4() -> ApiRuntimeProjection {
     ApiRuntimeProjection {
-        digest: "Uxl2pWwTTXUl2MewG1JK06Fin2tqkUvnyMJ5YFKaq4U".into(),
+        digest: "pgIp9PftLViyn-1-PKqw2kkCsEWAJYHurAEA158ylso".into(),
         major: 1,
         actions: BTreeMap::from([
             (
@@ -1715,6 +1811,15 @@ fn api_4() -> ApiRuntimeProjection {
                 },
             ),
             (
+                "rpc:Summary".into(),
+                ActionRuntimeProjection {
+                    kind: RuntimeActionKind::Rpc,
+                    upload: false,
+                    download: false,
+                    event_parameter_count: 0,
+                },
+            ),
+            (
                 "feed:Watch".into(),
                 ActionRuntimeProjection {
                     kind: RuntimeActionKind::Feed,
@@ -1730,6 +1835,9 @@ fn api_4() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Mutate".into(),
                     description: "Allows mutate.".into(),
+                    consequence: "The caller can use mutate.".into(),
+                    consent_digest: "tmynoy4P7kjLiYdFfDfHJR0WP1x5upghMVMEdHdb_oo".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.jobs@v1",
@@ -1763,6 +1871,9 @@ fn api_4() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "".into(),
                     description: "".into(),
+                    consequence: "".into(),
+                    consent_digest: "yTgU5oRYsytLlQr7vu6upoyaZL7orDkadm324jHJUWc".into(),
+                    public: true,
                     allows: vec![],
                 },
             ),
@@ -1771,6 +1882,9 @@ fn api_4() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Read".into(),
                     description: "Allows read.".into(),
+                    consequence: "The caller can use read.".into(),
+                    consent_digest: "WdG3bWif7DOg47U2-VR1OC6Yr1s4HABwHQ6C1t01yTI".into(),
+                    public: false,
                     allows: vec![
                         api_permission(
                             "trellis.jobs@v1",
@@ -1808,6 +1922,12 @@ fn api_4() -> ApiRuntimeProjection {
                             "Query",
                             PermissionAction::Call,
                         ),
+                        api_permission(
+                            "trellis.jobs@v1",
+                            ApiSurfaceKind::Rpc,
+                            "Summary",
+                            PermissionAction::Call,
+                        ),
                     ],
                 },
             ),
@@ -1816,6 +1936,9 @@ fn api_4() -> ApiRuntimeProjection {
                 CapabilityRuntimeProjection {
                     display_name: "Stream".into(),
                     description: "Allows stream.".into(),
+                    consequence: "The caller can use stream.".into(),
+                    consent_digest: "Mojxd9X2kZ9E9zTR5dqkc2TFdRrAaGw6tmF_50lN7lE".into(),
+                    public: false,
                     allows: vec![api_permission(
                         "trellis.jobs@v1",
                         ApiSurfaceKind::Feed,
@@ -1830,141 +1953,25 @@ fn api_4() -> ApiRuntimeProjection {
 
 fn api_5() -> ApiRuntimeProjection {
     ApiRuntimeProjection {
-        digest: "-uBNjrcPUFVtLKe8dzqBzmnF8jt9xcXjDtUAOhnCCZ0".into(),
+        digest: "bqIK645jHWh6xBk0V8kejZI_2AWodtWsDwG0rawTvo8".into(),
         major: 1,
         actions: BTreeMap::from([
-            (
-                "rpc:Admin.Delete".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "rpc:Admin.Get".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "rpc:Admin.List".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "rpc:Delete".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "rpc:Get".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "rpc:List".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
-            (
-                "rpc:Put".into(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Rpc,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            ),
+            ("rpc:Delete".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:Get".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:Put".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:Resources.Inspect".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
+            ("rpc:Resources.Query".into(), ActionRuntimeProjection { kind: RuntimeActionKind::Rpc, upload: false, download: false, event_parameter_count: 0 }),
         ]),
         capabilities: BTreeMap::from([
-            (
-                "trellis.state@v1::mutate".into(),
-                CapabilityRuntimeProjection {
-                    display_name: "Mutate".into(),
-                    description: "Allows mutate.".into(),
-                    allows: vec![api_permission(
-                        "trellis.state@v1",
-                        ApiSurfaceKind::Rpc,
-                        "Admin.Delete",
-                        PermissionAction::Call,
-                    )],
-                },
-            ),
-            (
-                "trellis.state@v1::public".into(),
-                CapabilityRuntimeProjection {
-                    display_name: "".into(),
-                    description: "".into(),
-                    allows: vec![
-                        api_permission(
-                            "trellis.state@v1",
-                            ApiSurfaceKind::Rpc,
-                            "Delete",
-                            PermissionAction::Call,
-                        ),
-                        api_permission(
-                            "trellis.state@v1",
-                            ApiSurfaceKind::Rpc,
-                            "Get",
-                            PermissionAction::Call,
-                        ),
-                        api_permission(
-                            "trellis.state@v1",
-                            ApiSurfaceKind::Rpc,
-                            "List",
-                            PermissionAction::Call,
-                        ),
-                        api_permission(
-                            "trellis.state@v1",
-                            ApiSurfaceKind::Rpc,
-                            "Put",
-                            PermissionAction::Call,
-                        ),
-                    ],
-                },
-            ),
-            (
-                "trellis.state@v1::read".into(),
-                CapabilityRuntimeProjection {
-                    display_name: "Read".into(),
-                    description: "Allows read.".into(),
-                    allows: vec![
-                        api_permission(
-                            "trellis.state@v1",
-                            ApiSurfaceKind::Rpc,
-                            "Admin.Get",
-                            PermissionAction::Call,
-                        ),
-                        api_permission(
-                            "trellis.state@v1",
-                            ApiSurfaceKind::Rpc,
-                            "Admin.List",
-                            PermissionAction::Call,
-                        ),
-                    ],
-                },
-            ),
+            ("trellis.state@v1::public".into(), CapabilityRuntimeProjection { display_name: "".into(), description: "".into(), consequence: "".into(), consent_digest: "oKRz_yEiVrMzE9y-vB-Gib1Z8sLHfM7FneGUmMAICqU".into(), public: true, allows: vec![
+                api_permission("trellis.state@v1", ApiSurfaceKind::Rpc, "Delete", PermissionAction::Call),
+                api_permission("trellis.state@v1", ApiSurfaceKind::Rpc, "Get", PermissionAction::Call),
+                api_permission("trellis.state@v1", ApiSurfaceKind::Rpc, "Put", PermissionAction::Call),
+            ] }),
+            ("trellis.state@v1::resources_read".into(), CapabilityRuntimeProjection { display_name: "State Resources Read".into(), description: "Inspect State resource identities, representations, and readiness.".into(), consequence: "The caller can inspect State resources across explicit administrative scope.".into(), consent_digest: "uI5TuyropJ6YM7eZSLHpdy-R5t0_itpyukX2byTFVxU".into(), public: false, allows: vec![
+                api_permission("trellis.state@v1", ApiSurfaceKind::Rpc, "Resources.Inspect", PermissionAction::Call),
+                api_permission("trellis.state@v1", ApiSurfaceKind::Rpc, "Resources.Query", PermissionAction::Call),
+            ] }),
         ]),
     }
 }
@@ -1972,14 +1979,20 @@ fn api_5() -> ApiRuntimeProjection {
 fn participant_0() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "no-rnHIgP9b_6jKiDGLHCgkpAoBT1Ro4noeKEvlRKOk",
-        needs_digest: "jqHImxgrzlhNt2BgnWIyo1yyrmkElCfUOmuiG53kYRM",
+        participant_digest: "6dqsIxLLOaugs5W8n30acE1shox9jSLgZHqoG32a0zo",
+        needs_digest: "1VpFnVNp_Oos0bv0pp2vFBq-J9JJBJa9eRLhzw-JWzI",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.cli".into(),
             participant_kind: ParticipantKind::App,
             display_name: "cli".into(),
             implemented_apis: BTreeMap::from([]),
-            referenced_apis: BTreeMap::from([("trellis.auth@v1".into(), api_0())]),
+            referenced_apis: BTreeMap::from([
+                ("trellis.auth@v1".into(), api_0()),
+                ("trellis.events@v1".into(), api_2()),
+                ("trellis.health@v1".into(), api_3()),
+                ("trellis.jobs@v1".into(), api_4()),
+                ("trellis.state@v1".into(), api_5()),
+            ]),
             resources: BTreeMap::from([]),
             required_grants: GrantSet::new(vec![
                 api_permission(
@@ -2165,6 +2178,12 @@ fn participant_0() -> BuiltinParticipant {
                 api_permission(
                     "trellis.auth@v1",
                     ApiSurfaceKind::Rpc,
+                    "Participants.List",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.auth@v1",
+                    ApiSurfaceKind::Rpc,
                     "Portals.Get",
                     PermissionAction::Call,
                 ),
@@ -2342,6 +2361,78 @@ fn participant_0() -> BuiltinParticipant {
                     "Users.Update",
                     PermissionAction::Call,
                 ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Consumers.Inspect",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Consumers.Query",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "DeadLetters.Dismiss",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "DeadLetters.Inspect",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "DeadLetters.Query",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "DeadLetters.Replay",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Query",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.health@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Query",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.jobs@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Query",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.state@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Delete",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.state@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Resources.Inspect",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.state@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Resources.Query",
+                    PermissionAction::Call,
+                ),
             ]),
             optional_grant_bundles: BTreeMap::from([]),
             required_capabilities: vec![
@@ -2363,8 +2454,16 @@ fn participant_0() -> BuiltinParticipant {
                 "trellis.auth@v1::sessions_revoke".into(),
                 "trellis.auth@v1::users_mutate".into(),
                 "trellis.auth@v1::users_read".into(),
+                "trellis.events@v1::manage_consumers".into(),
+                "trellis.events@v1::read".into(),
+                "trellis.health@v1::read".into(),
+                "trellis.jobs@v1::read".into(),
+                "trellis.state@v1::resources_read".into(),
             ],
             optional_capability_definitions: BTreeMap::from([]),
+            companion_participant_id: None,
+            companion_participant_kind: None,
+            companion_required: false,
         },
     }
 }
@@ -2372,8 +2471,8 @@ fn participant_0() -> BuiltinParticipant {
 fn participant_1() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "bcTdddgQvqwbSgbUWT-i50K5KC96dy9GX9_mbqpZUx0",
-        needs_digest: "VfNxvbrQqb7peJ7cJF9r-Wedk8PLAOT1ItuSFQhh868",
+        participant_digest: "6-f8UmJOA1y9djIemNMczcHVhdgOIl3pOfi3A33tGB8",
+        needs_digest: "Ag7zTGQquyoPXZYi7xisoMhfOgmdhuTrV3hS0WxS7IQ",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.console".into(),
             participant_kind: ParticipantKind::App,
@@ -2381,6 +2480,7 @@ fn participant_1() -> BuiltinParticipant {
             implemented_apis: BTreeMap::from([]),
             referenced_apis: BTreeMap::from([
                 ("trellis.auth@v1".into(), api_0()),
+                ("trellis.core@v1".into(), api_1()),
                 ("trellis.events@v1".into(), api_2()),
                 ("trellis.health@v1".into(), api_3()),
                 ("trellis.jobs@v1".into(), api_4()),
@@ -2589,6 +2689,12 @@ fn participant_1() -> BuiltinParticipant {
                 api_permission(
                     "trellis.auth@v1",
                     ApiSurfaceKind::Rpc,
+                    "Participants.List",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.auth@v1",
+                    ApiSurfaceKind::Rpc,
                     "Portals.Get",
                     PermissionAction::Call,
                 ),
@@ -2767,6 +2873,24 @@ fn participant_1() -> BuiltinParticipant {
                     PermissionAction::Call,
                 ),
                 api_permission(
+                    "trellis.core@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Resources.Destroy",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.core@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Resources.Inspect",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.core@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Resources.Query",
+                    PermissionAction::Call,
+                ),
+                api_permission(
                     "trellis.events@v1",
                     ApiSurfaceKind::Feed,
                     "Watch",
@@ -2787,6 +2911,42 @@ fn participant_1() -> BuiltinParticipant {
                 api_permission(
                     "trellis.events@v1",
                     ApiSurfaceKind::Rpc,
+                    "Consumers.ReportDelivery",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "DeadLetters.Dismiss",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "DeadLetters.Inspect",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "DeadLetters.Query",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "DeadLetters.Replay",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Diagnostics",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.events@v1",
+                    ApiSurfaceKind::Rpc,
                     "Inspect",
                     PermissionAction::Call,
                 ),
@@ -2824,6 +2984,12 @@ fn participant_1() -> BuiltinParticipant {
                     "trellis.health@v1",
                     ApiSurfaceKind::Rpc,
                     "Query",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.health@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Summary",
                     PermissionAction::Call,
                 ),
                 api_permission(
@@ -2893,21 +3059,9 @@ fn participant_1() -> BuiltinParticipant {
                     PermissionAction::Call,
                 ),
                 api_permission(
-                    "trellis.state@v1",
+                    "trellis.jobs@v1",
                     ApiSurfaceKind::Rpc,
-                    "Admin.Delete",
-                    PermissionAction::Call,
-                ),
-                api_permission(
-                    "trellis.state@v1",
-                    ApiSurfaceKind::Rpc,
-                    "Admin.Get",
-                    PermissionAction::Call,
-                ),
-                api_permission(
-                    "trellis.state@v1",
-                    ApiSurfaceKind::Rpc,
-                    "Admin.List",
+                    "Summary",
                     PermissionAction::Call,
                 ),
                 api_permission(
@@ -2925,13 +3079,19 @@ fn participant_1() -> BuiltinParticipant {
                 api_permission(
                     "trellis.state@v1",
                     ApiSurfaceKind::Rpc,
-                    "List",
+                    "Put",
                     PermissionAction::Call,
                 ),
                 api_permission(
                     "trellis.state@v1",
                     ApiSurfaceKind::Rpc,
-                    "Put",
+                    "Resources.Inspect",
+                    PermissionAction::Call,
+                ),
+                api_permission(
+                    "trellis.state@v1",
+                    ApiSurfaceKind::Rpc,
+                    "Resources.Query",
                     PermissionAction::Call,
                 ),
             ]),
@@ -2955,16 +3115,21 @@ fn participant_1() -> BuiltinParticipant {
                 "trellis.auth@v1::sessions_revoke".into(),
                 "trellis.auth@v1::users_mutate".into(),
                 "trellis.auth@v1::users_read".into(),
+                "trellis.core@v1::resources_destroy".into(),
+                "trellis.core@v1::resources_read".into(),
+                "trellis.events@v1::manage_consumers".into(),
                 "trellis.events@v1::read".into(),
                 "trellis.events@v1::stream".into(),
                 "trellis.health@v1::read".into(),
                 "trellis.jobs@v1::mutate".into(),
                 "trellis.jobs@v1::read".into(),
                 "trellis.jobs@v1::stream".into(),
-                "trellis.state@v1::mutate".into(),
-                "trellis.state@v1::read".into(),
+                "trellis.state@v1::resources_read".into(),
             ],
             optional_capability_definitions: BTreeMap::from([]),
+            companion_participant_id: None,
+            companion_participant_kind: None,
+            companion_required: false,
         },
     }
 }
@@ -2972,8 +3137,8 @@ fn participant_1() -> BuiltinParticipant {
 fn participant_2() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "dR1iXgyaAR04PTBB5o-E1P7EYTLL8p93hynYt6Z6DJE",
-        needs_digest: "K_IBeUYB2JBu4PaWdXoG1tsYJK584_kO5MjLVsh6zxk",
+        participant_digest: "bmr6kjzYp_7zLZ3P2pxE4b5-rnunq8xYkXzpgx79o80",
+        needs_digest: "nrpA92V88wrQ6w6DZddFX7NnGCDHEk04IesH8QkdxmU",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.eventsRuntime".into(),
             participant_kind: ParticipantKind::Service,
@@ -2985,6 +3150,9 @@ fn participant_2() -> BuiltinParticipant {
             optional_grant_bundles: BTreeMap::from([]),
             required_capabilities: vec![],
             optional_capability_definitions: BTreeMap::from([]),
+            companion_participant_id: None,
+            companion_participant_kind: None,
+            companion_required: false,
         },
     }
 }
@@ -2992,8 +3160,8 @@ fn participant_2() -> BuiltinParticipant {
 fn participant_3() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "0d2kFwlAW-ZuDirTdxZCZ4oLSFvqKd5ECRn1No0i8G8",
-        needs_digest: "1Y71vgplBknlDycGcsMmQnYkWmFccQCt6dNoj3upybk",
+        participant_digest: "ZG7g76jCDAEzk3awrWcjnmb78gmV1wfsCdmrxyUqwWQ",
+        needs_digest: "xt0QZdlhFJqP_wI_WzODAjkXZc405t6DhI0Ve6YP39c",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.healthRuntime".into(),
             participant_kind: ParticipantKind::Service,
@@ -3005,6 +3173,9 @@ fn participant_3() -> BuiltinParticipant {
             optional_grant_bundles: BTreeMap::from([]),
             required_capabilities: vec![],
             optional_capability_definitions: BTreeMap::from([]),
+            companion_participant_id: None,
+            companion_participant_kind: None,
+            companion_required: false,
         },
     }
 }
@@ -3012,8 +3183,8 @@ fn participant_3() -> BuiltinParticipant {
 fn participant_4() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "n2F9K70uH7tl51FYK9wSERpDfdK7VckFbCLS5xWJMe8",
-        needs_digest: "g1QcBtmd_ByNv0aD2FXWlAbE-CFBFz-_MV82FMoAaKE",
+        participant_digest: "-H0Vd-SVVUyCPxJGofHWRROkliNRWN0CPJtDIWHoEXA",
+        needs_digest: "s1sF4rZcb9pzn9b14rSNLyXwE17pNPnwGt4n2byuMWI",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.jobsRuntime".into(),
             participant_kind: ParticipantKind::Service,
@@ -3025,6 +3196,9 @@ fn participant_4() -> BuiltinParticipant {
             optional_grant_bundles: BTreeMap::from([]),
             required_capabilities: vec![],
             optional_capability_definitions: BTreeMap::from([]),
+            companion_participant_id: None,
+            companion_participant_kind: None,
+            companion_required: false,
         },
     }
 }
@@ -3032,8 +3206,8 @@ fn participant_4() -> BuiltinParticipant {
 fn participant_5() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "2b-meba_DMlsbcMZRAl8ATUXsZwkTFfH7I53Vp54qDs",
-        needs_digest: "Kss_ehzPO12ZGw4SPioXUfRB1nxFNdxdmtyJ2eUsKK0",
+        participant_digest: "xrDWh0dk9B7eJ3duCYKT2XaxeNCPZJ7YdPkS0KMCc9c",
+        needs_digest: "ZcN6jKWZ5OKOgNTtiH0T5VcNQBhJ04c9v-eytdI_Z9k",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.platform".into(),
             participant_kind: ParticipantKind::Service,
@@ -3049,129 +3223,30 @@ fn participant_5() -> BuiltinParticipant {
                 ("trellis.state@v1".into(), api_5()),
             ]),
             resources: BTreeMap::from([
-                (
-                    "browserFlows".into(),
-                    ResourceRuntimeProjection {
-                        kind: ParticipantResourceKind::Kv,
-                        optional: false,
-                        history: Some(1),
-                        ttl_ms: Some(86400000),
-                        desired_max_value: Some(65536),
-                        desired_max_object: None,
-                        desired_max_total: None,
-                        deadline_ms: None,
-                        payload_schema: None,
-                        result_schema: None,
-                        update_schema: None,
-                        retry_attempts: None,
-                        retry_backoff_ms: vec![],
-                        consumer_events: BTreeMap::from([]),
-                        consumer_concurrency: None,
-                        consumer_replay_all: false,
-                    },
-                ),
-                (
-                    "connections".into(),
-                    ResourceRuntimeProjection {
-                        kind: ParticipantResourceKind::Kv,
-                        optional: false,
-                        history: Some(1),
-                        ttl_ms: Some(120000),
-                        desired_max_value: Some(16384),
-                        desired_max_object: None,
-                        desired_max_total: None,
-                        deadline_ms: None,
-                        payload_schema: None,
-                        result_schema: None,
-                        update_schema: None,
-                        retry_attempts: None,
-                        retry_backoff_ms: vec![],
-                        consumer_events: BTreeMap::from([]),
-                        consumer_concurrency: None,
-                        consumer_replay_all: false,
-                    },
-                ),
-                (
-                    "oauthStates".into(),
-                    ResourceRuntimeProjection {
-                        kind: ParticipantResourceKind::Kv,
-                        optional: false,
-                        history: Some(1),
-                        ttl_ms: Some(900000),
-                        desired_max_value: Some(16384),
-                        desired_max_object: None,
-                        desired_max_total: None,
-                        deadline_ms: None,
-                        payload_schema: None,
-                        result_schema: None,
-                        update_schema: None,
-                        retry_attempts: None,
-                        retry_backoff_ms: vec![],
-                        consumer_events: BTreeMap::from([]),
-                        consumer_concurrency: None,
-                        consumer_replay_all: false,
-                    },
-                ),
+                ("browserFlows".into(), ResourceRuntimeProjection { kind: ParticipantResourceKind::Kv, optional: false, title: "Browser flows".into(), description: "Short-lived browser authentication and activation flow state.".into(), representation: Some(super::evidence::ResourceRepresentationRuntimeProjection { schema: serde_json::from_str("{\"$defs\":{\"trellis.AuthBrowserFlow\":{\"additionalProperties\":true,\"properties\":{\"authenticatedProviderId\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"authenticatedRoles\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"claimOwner\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"claimedAt\":{\"anyOf\":[{\"pattern\":\"^(0|-?[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"int64\",\"x-trellis-maximum\":\"9223372036854775807\",\"x-trellis-minimum\":\"-9223372036854775808\"},{\"type\":\"null\"}]},\"completedAt\":{\"anyOf\":[{\"pattern\":\"^(0|-?[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"int64\",\"x-trellis-maximum\":\"9223372036854775807\",\"x-trellis-minimum\":\"-9223372036854775808\"},{\"type\":\"null\"}]},\"consent\":{\"contentEncoding\":\"base64\",\"type\":\"string\",\"x-trellis-base64\":\"standard-padded\"},\"createdAt\":{\"pattern\":\"^(0|-?[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"int64\",\"x-trellis-maximum\":\"9223372036854775807\",\"x-trellis-minimum\":\"-9223372036854775808\"},\"durableResultDigest\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"expiresAt\":{\"pattern\":\"^(0|-?[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"int64\",\"x-trellis-maximum\":\"9223372036854775807\",\"x-trellis-minimum\":\"-9223372036854775808\"},\"flowId\":{\"type\":\"string\"},\"format\":{\"type\":\"string\"},\"kind\":{\"type\":\"string\"},\"participantDigest\":{\"type\":\"string\"},\"participantId\":{\"type\":\"string\"},\"participantNeedsDigest\":{\"type\":\"string\"},\"portalBindingDigest\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"portalId\":{\"type\":\"string\"},\"principalId\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"redirectTarget\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"requestDigest\":{\"type\":\"string\"},\"requestId\":{\"type\":\"string\"},\"sessionNkey\":{\"type\":\"string\"},\"sessionPublicKey\":{\"type\":\"string\"},\"state\":{\"type\":\"string\"},\"version\":{\"pattern\":\"^(0|[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"uint64\",\"x-trellis-maximum\":\"18446744073709551615\",\"x-trellis-minimum\":\"0\"}},\"required\":[\"authenticatedRoles\",\"consent\",\"createdAt\",\"expiresAt\",\"flowId\",\"format\",\"kind\",\"participantDigest\",\"participantId\",\"participantNeedsDigest\",\"portalId\",\"requestDigest\",\"requestId\",\"sessionNkey\",\"sessionPublicKey\",\"state\",\"version\"],\"type\":\"object\"}},\"$ref\":\"#/$defs/trellis.AuthBrowserFlow\",\"$schema\":\"https://json-schema.org/draft/2020-12/schema\"}").expect("generated representation schema"), version: 1, accepts: BTreeMap::from([]) }), history: Some(1), ttl_ms: Some(86400000), desired_max_value: Some(65536), desired_max_object: None, desired_max_total: None, deadline_ms: None, payload_schema: None, result_schema: None, update_schema: None, job_key_path: None, job_key_policy: None, retry_attempts: None, retry_backoff_ms: vec![], consumer_events: BTreeMap::from([]), consumer_concurrency: None, consumer_replay_all: false }),
+                ("connections".into(), ResourceRuntimeProjection { kind: ParticipantResourceKind::Kv, optional: false, title: "Connections".into(), description: "Current operational NATS connection presence.".into(), representation: Some(super::evidence::ResourceRepresentationRuntimeProjection { schema: serde_json::from_str("{\"$defs\":{\"trellis.AuthConnectionPresence\":{\"additionalProperties\":true,\"properties\":{\"clientId\":{\"type\":\"string\"},\"connectedAt\":{\"pattern\":\"^(0|-?[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"int64\",\"x-trellis-maximum\":\"9223372036854775807\",\"x-trellis-minimum\":\"-9223372036854775808\"},\"connectionId\":{\"type\":\"string\"},\"contextDigest\":{\"type\":\"string\"},\"format\":{\"type\":\"string\"},\"lastSeenAt\":{\"pattern\":\"^(0|-?[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"int64\",\"x-trellis-maximum\":\"9223372036854775807\",\"x-trellis-minimum\":\"-9223372036854775808\"},\"remoteAddress\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"serverId\":{\"type\":\"string\"},\"sessionId\":{\"type\":\"string\"},\"userNkey\":{\"type\":\"string\"},\"version\":{\"pattern\":\"^(0|[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"uint64\",\"x-trellis-maximum\":\"18446744073709551615\",\"x-trellis-minimum\":\"0\"}},\"required\":[\"clientId\",\"connectedAt\",\"connectionId\",\"contextDigest\",\"format\",\"lastSeenAt\",\"serverId\",\"sessionId\",\"userNkey\",\"version\"],\"type\":\"object\"}},\"$ref\":\"#/$defs/trellis.AuthConnectionPresence\",\"$schema\":\"https://json-schema.org/draft/2020-12/schema\"}").expect("generated representation schema"), version: 1, accepts: BTreeMap::from([]) }), history: Some(1), ttl_ms: Some(120000), desired_max_value: Some(16384), desired_max_object: None, desired_max_total: None, deadline_ms: None, payload_schema: None, result_schema: None, update_schema: None, job_key_path: None, job_key_policy: None, retry_attempts: None, retry_backoff_ms: vec![], consumer_events: BTreeMap::from([]), consumer_concurrency: None, consumer_replay_all: false }),
+                ("oauthStates".into(), ResourceRuntimeProjection { kind: ParticipantResourceKind::Kv, optional: false, title: "OAuth states".into(), description: "CAS-consumed OAuth state and recovery records.".into(), representation: Some(super::evidence::ResourceRepresentationRuntimeProjection { schema: serde_json::from_str("{\"$defs\":{\"trellis.AuthOAuthState\":{\"additionalProperties\":true,\"properties\":{\"authenticatedEmail\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"authenticatedPrincipalId\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"authenticatedProviderSubject\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"authenticatedRoles\":{\"items\":{\"type\":\"string\"},\"type\":\"array\"},\"browserBindingDigest\":{\"type\":\"string\"},\"browserFlowId\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"claimOwner\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"createdAt\":{\"pattern\":\"^(0|-?[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"int64\",\"x-trellis-maximum\":\"9223372036854775807\",\"x-trellis-minimum\":\"-9223372036854775808\"},\"expiresAt\":{\"pattern\":\"^(0|-?[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"int64\",\"x-trellis-maximum\":\"9223372036854775807\",\"x-trellis-minimum\":\"-9223372036854775808\"},\"flowId\":{\"type\":\"string\"},\"format\":{\"type\":\"string\"},\"kind\":{\"type\":\"string\"},\"nonce\":{\"type\":\"string\"},\"pkceVerifier\":{\"type\":\"string\"},\"portalBindingDigest\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"portalId\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"portalPolicyDigest\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"providerId\":{\"type\":\"string\"},\"redirectUri\":{\"type\":\"string\"},\"resultDigest\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}]},\"stateId\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"version\":{\"pattern\":\"^(0|[1-9][0-9]*)$\",\"type\":\"string\",\"x-trellis-integer\":\"uint64\",\"x-trellis-maximum\":\"18446744073709551615\",\"x-trellis-minimum\":\"0\"}},\"required\":[\"authenticatedRoles\",\"browserBindingDigest\",\"createdAt\",\"expiresAt\",\"flowId\",\"format\",\"kind\",\"nonce\",\"pkceVerifier\",\"providerId\",\"redirectUri\",\"stateId\",\"status\",\"version\"],\"type\":\"object\"}},\"$ref\":\"#/$defs/trellis.AuthOAuthState\",\"$schema\":\"https://json-schema.org/draft/2020-12/schema\"}").expect("generated representation schema"), version: 1, accepts: BTreeMap::from([]) }), history: Some(1), ttl_ms: Some(900000), desired_max_value: Some(16384), desired_max_object: None, desired_max_total: None, deadline_ms: None, payload_schema: None, result_schema: None, update_schema: None, job_key_path: None, job_key_policy: None, retry_attempts: None, retry_backoff_ms: vec![], consumer_events: BTreeMap::from([]), consumer_concurrency: None, consumer_replay_all: false }),
             ]),
             required_grants: GrantSet::new(vec![
-                resource_permission(
-                    "trellis.platform",
-                    ParticipantResourceKind::Kv,
-                    "browserFlows",
-                    PermissionAction::Delete,
-                ),
-                resource_permission(
-                    "trellis.platform",
-                    ParticipantResourceKind::Kv,
-                    "browserFlows",
-                    PermissionAction::Read,
-                ),
-                resource_permission(
-                    "trellis.platform",
-                    ParticipantResourceKind::Kv,
-                    "browserFlows",
-                    PermissionAction::Write,
-                ),
-                resource_permission(
-                    "trellis.platform",
-                    ParticipantResourceKind::Kv,
-                    "connections",
-                    PermissionAction::Delete,
-                ),
-                resource_permission(
-                    "trellis.platform",
-                    ParticipantResourceKind::Kv,
-                    "connections",
-                    PermissionAction::Read,
-                ),
-                resource_permission(
-                    "trellis.platform",
-                    ParticipantResourceKind::Kv,
-                    "connections",
-                    PermissionAction::Write,
-                ),
-                resource_permission(
-                    "trellis.platform",
-                    ParticipantResourceKind::Kv,
-                    "oauthStates",
-                    PermissionAction::Delete,
-                ),
-                resource_permission(
-                    "trellis.platform",
-                    ParticipantResourceKind::Kv,
-                    "oauthStates",
-                    PermissionAction::Read,
-                ),
-                resource_permission(
-                    "trellis.platform",
-                    ParticipantResourceKind::Kv,
-                    "oauthStates",
-                    PermissionAction::Write,
-                ),
+                resource_permission("trellis.platform", ParticipantResourceKind::Kv, "browserFlows", PermissionAction::Delete),
+                resource_permission("trellis.platform", ParticipantResourceKind::Kv, "browserFlows", PermissionAction::Read),
+                resource_permission("trellis.platform", ParticipantResourceKind::Kv, "browserFlows", PermissionAction::Write),
+                resource_permission("trellis.platform", ParticipantResourceKind::Kv, "connections", PermissionAction::Delete),
+                resource_permission("trellis.platform", ParticipantResourceKind::Kv, "connections", PermissionAction::Read),
+                resource_permission("trellis.platform", ParticipantResourceKind::Kv, "connections", PermissionAction::Write),
+                resource_permission("trellis.platform", ParticipantResourceKind::Kv, "oauthStates", PermissionAction::Delete),
+                resource_permission("trellis.platform", ParticipantResourceKind::Kv, "oauthStates", PermissionAction::Read),
+                resource_permission("trellis.platform", ParticipantResourceKind::Kv, "oauthStates", PermissionAction::Write),
             ]),
-            optional_grant_bundles: BTreeMap::from([]),
-            required_capabilities: vec![],
-            optional_capability_definitions: BTreeMap::from([]),
+            optional_grant_bundles: BTreeMap::from([
+            ]),
+            required_capabilities: vec![
+            ],
+            optional_capability_definitions: BTreeMap::from([
+            ]),
+            companion_participant_id: None,
+            companion_participant_kind: None,
+            companion_required: false,
         },
     }
 }
@@ -3179,8 +3254,8 @@ fn participant_5() -> BuiltinParticipant {
 fn participant_6() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "-AvvdwWE7H7Sj9gjQcy32lrQXlywTRwxYCQWnpl9E4U",
-        needs_digest: "oFp-oEQOjU2BKhdzxuCWyUtr43zT5BeAR0FOBbBG2jg",
+        participant_digest: "cEJGKiXSG-DR6lshlUuWGtt58N_0J1V8yXDyA2O7_Ik",
+        needs_digest: "9FwCNBGCpYHNNkUah8bnWJ7NGD-1nwqmbmnrE8FWoyE",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.portal".into(),
             participant_kind: ParticipantKind::App,
@@ -3211,6 +3286,9 @@ fn participant_6() -> BuiltinParticipant {
             optional_grant_bundles: BTreeMap::from([]),
             required_capabilities: vec![],
             optional_capability_definitions: BTreeMap::from([]),
+            companion_participant_id: None,
+            companion_participant_kind: None,
+            companion_required: false,
         },
     }
 }
@@ -3242,4 +3320,4 @@ fn resource_permission(
     .expect("generated resource permission")
 }
 
-pub(crate) const PACKAGE_DIGEST: &str = "dFhZVY_OE-u7vTumZQdeVYfsqOVheQ0AjtYZZuqMez4";
+pub(crate) const PACKAGE_DIGEST: &str = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY";

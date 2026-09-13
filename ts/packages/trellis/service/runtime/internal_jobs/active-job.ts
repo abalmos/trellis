@@ -19,7 +19,7 @@ export type ActiveJobRuntimeMetadata = {
 
 export class JobCancellationToken {
   readonly #controller = new AbortController();
-  #reason: "none" | "job" | "shutdown" = "none";
+  #reason: "none" | "job" | "shutdown" | "lease-lost" = "none";
 
   cancel(): void {
     if (this.#reason === "shutdown") {
@@ -32,6 +32,12 @@ export class JobCancellationToken {
   cancelForShutdown(): void {
     this.#reason = "shutdown";
     this.#controller.abort("shutdown");
+  }
+
+  cancelForLeaseLoss(): void {
+    if (this.#reason !== "none") return;
+    this.#reason = "lease-lost";
+    this.#controller.abort("lease-lost");
   }
 
   get signal(): AbortSignal {
@@ -48,6 +54,10 @@ export class JobCancellationToken {
 
   isHostShutdown(): boolean {
     return this.#reason === "shutdown";
+  }
+
+  isLeaseLost(): boolean {
+    return this.#reason === "lease-lost";
   }
 }
 

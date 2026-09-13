@@ -118,7 +118,7 @@ pub struct CursorQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub limit: Option<Uint64>,
+    pub limit: Option<u32>,
 }
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,6 +133,77 @@ pub struct CursorPageInfo {
     pub next_cursor: Option<String>,
 }
 pub mod trellis {
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct Approval {
+        #[serde(rename = "approvedCapabilities")]
+        pub approved_capabilities: Vec<crate::__types::trellis::ApprovedCapability>,
+        #[serde(rename = "approvedResources")]
+        pub approved_resources: Vec<crate::__types::trellis::ApprovedResource>,
+        #[serde(rename = "companionApproved")]
+        pub companion_approved: bool,
+        #[serde(rename = "decisionDigest")]
+        pub decision_digest: String,
+        #[serde(rename = "delegationCeiling")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub delegation_ceiling: Option<crate::__types::trellis::DelegationCeiling>,
+        #[serde(rename = "expectedGrantRevision")]
+        pub expected_grant_revision: crate::__types::Uint64,
+        #[serde(rename = "installedRevision")]
+        pub installed_revision: crate::__types::Uint64,
+        pub mode: crate::__types::trellis::ApprovalMode,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum ApprovalMode {
+        Capabilities,
+        Exact,
+        Unknown(String),
+    }
+    impl ApprovalMode {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Capabilities => "capabilities",
+                Self::Exact => "exact",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for ApprovalMode {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for ApprovalMode {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for ApprovalMode {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for ApprovalMode {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "capabilities" => Self::Capabilities,
+                "exact" => Self::Exact,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ApprovedCapability {
+        #[serde(rename = "consentDigest")]
+        pub consent_digest: String,
+        pub id: String,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ApprovedResource {
+        pub commitment: crate::__types::trellis::ResourceCommitment,
+        pub kind: crate::__types::trellis::ResourceKind,
+        pub name: String,
+    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthApiSurfaceTarget {
         pub api: crate::__types::trellis::AuthApiSurfaceTargetApi,
@@ -337,9 +408,7 @@ pub mod trellis {
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthCapabilitiesListRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthCapabilitiesListRequestCursor>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthCapabilitiesListRequestLimit>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(rename = "sourceApi")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub source_api: Option<crate::__types::trellis::AuthCapabilitiesListRequestSourceApi>,
@@ -412,12 +481,9 @@ pub mod trellis {
             formatter.write_str(self.as_ref())
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthCapabilitiesListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthCapabilitiesListResponseentriesItem>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthCapabilitiesListResponse = crate::__types::CursorPage<
+        crate::__types::trellis::AuthCapabilitiesListResponseentriesItem,
+    >;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthCapabilitiesListResponseentriesItem {
         pub allows: Vec<crate::__types::trellis::AuthCapabilitiesListResponseentriesItemallowsItem>,
@@ -1228,9 +1294,8 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthCapabilityGroupsListRequest {
-        pub limit: crate::__types::trellis::AuthCapabilityGroupsListRequestLimit,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
+        pub page: Option<crate::__types::CursorQuery>,
     }
     #[derive(
         Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -1248,16 +1313,9 @@ pub mod trellis {
             Self(value)
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthCapabilityGroupsListResponse {
-        pub count: crate::__types::Uint64,
-        pub entries: Vec<crate::__types::trellis::AuthCapabilityGroupsListResponseentriesItem>,
-        pub limit: crate::__types::Uint64,
-        #[serde(rename = "nextOffset")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub next_offset: Option<crate::__types::Uint64>,
-        pub offset: crate::__types::Uint64,
-    }
+    pub type AuthCapabilityGroupsListResponse = crate::__types::CursorPage<
+        crate::__types::trellis::AuthCapabilityGroupsListResponseentriesItem,
+    >;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthCapabilityGroupsListResponseentriesItem {
         pub capabilities: Vec<
@@ -2125,9 +2183,7 @@ pub mod trellis {
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthConnectionsListRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthConnectionsListRequestCursor>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthConnectionsListRequestLimit>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(rename = "sessionId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub session_id: Option<crate::__types::trellis::AuthConnectionsListRequestSessionId>,
@@ -2200,12 +2256,8 @@ pub mod trellis {
             formatter.write_str(self.as_ref())
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthConnectionsListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthConnectionsListResponseentriesItem>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthConnectionsListResponse =
+        crate::__types::CursorPage<crate::__types::trellis::AuthConnectionsListResponseentriesItem>;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthConnectionsListResponseentriesItem {
         #[serde(rename = "clientId")]
@@ -2759,17 +2811,14 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDeploymentsApplyRequest {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub approval: Option<crate::__types::trellis::Approval>,
         #[serde(rename = "deploymentId")]
         pub deployment_id: crate::__types::trellis::AuthDeploymentsApplyRequestDeploymentId,
         #[serde(rename = "expectedRevision")]
         pub expected_revision: crate::__types::trellis::AuthDeploymentsApplyRequestExpectedRevision,
         #[serde(rename = "idempotencyKey")]
         pub idempotency_key: crate::__types::trellis::AuthDeploymentsApplyRequestIdempotencyKey,
-        #[serde(rename = "optionalCapabilities")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub optional_capabilities: Option<
-            Vec<crate::__types::trellis::AuthDeploymentsApplyRequestOptionalCapabilitiesItem>,
-        >,
         #[serde(rename = "packageDigest")]
         pub package_digest: String,
         #[serde(rename = "packageEvidence")]
@@ -2845,35 +2894,11 @@ pub mod trellis {
             formatter.write_str(self.as_ref())
         }
     }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct AuthDeploymentsApplyRequestOptionalCapabilitiesItem(pub String);
-    impl std::ops::Deref for AuthDeploymentsApplyRequestOptionalCapabilitiesItem {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for AuthDeploymentsApplyRequestOptionalCapabilitiesItem {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for AuthDeploymentsApplyRequestOptionalCapabilitiesItem {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for AuthDeploymentsApplyRequestOptionalCapabilitiesItem {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDeploymentsApplyResponse {
         pub binding: crate::__types::trellis::AuthGrantBinding,
+        #[serde(rename = "consentRequest")]
+        pub consent_request: crate::__types::trellis::ConsentRequest,
         pub deployment: crate::__types::trellis::AuthDeploymentsCreateResponsedeployment,
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -4167,11 +4192,9 @@ pub mod trellis {
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDeploymentsListRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthDeploymentsListRequestCursor>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         pub kind: Option<crate::__types::trellis::AuthDeploymentsListRequestKind>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthDeploymentsListRequestLimit>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub state: Option<crate::__types::trellis::AuthDeploymentsListRequestState>,
     }
@@ -4300,12 +4323,8 @@ pub mod trellis {
             })
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthDeploymentsListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthDeploymentsListResponseentriesItem>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthDeploymentsListResponse =
+        crate::__types::CursorPage<crate::__types::trellis::AuthDeploymentsListResponseentriesItem>;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDeploymentsListResponseentriesItem {
         #[serde(rename = "createdAt")]
@@ -5135,14 +5154,12 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDeviceUserAuthoritiesListRequest {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthDeviceUserAuthoritiesListRequestCursor>,
         #[serde(rename = "deploymentId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub deployment_id:
             Option<crate::__types::trellis::AuthDeviceUserAuthoritiesListRequestDeploymentId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthDeviceUserAuthoritiesListRequestLimit>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(rename = "principalId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub principal_id:
@@ -5242,12 +5259,9 @@ pub mod trellis {
             formatter.write_str(self.as_ref())
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthDeviceUserAuthoritiesListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthDeviceUserAuthoritiesListResponseentriesItem>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthDeviceUserAuthoritiesListResponse = crate::__types::CursorPage<
+        crate::__types::trellis::AuthDeviceUserAuthoritiesListResponseentriesItem,
+    >;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDeviceUserAuthoritiesListResponseentriesItem {
         pub device: crate::__types::trellis::AuthDeviceUserAuthoritiesListResponseentriesItemdevice,
@@ -5719,6 +5733,9 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDeviceUserAuthoritiesResolveProgress {
+        #[serde(rename = "companionConsent")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub companion_consent: Option<crate::__types::trellis::ConsentRequest>,
         #[serde(rename = "retryAfterMs")]
         pub retry_after_ms: crate::__types::Uint64,
         pub state: crate::__types::trellis::AuthDeviceUserAuthoritiesResolveProgressState,
@@ -5768,6 +5785,9 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDeviceUserAuthoritiesResolveRequest {
+        #[serde(rename = "companionApproval")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub companion_approval: Option<crate::__types::trellis::Approval>,
         #[serde(rename = "confirmationCode")]
         pub confirmation_code:
             crate::__types::trellis::AuthDeviceUserAuthoritiesResolveRequestConfirmationCode,
@@ -7078,17 +7098,13 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDeviceUserAuthoritiesReviewsListRequest {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor:
-            Option<crate::__types::trellis::AuthDeviceUserAuthoritiesReviewsListRequestCursor>,
         #[serde(rename = "deploymentId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub deployment_id: Option<
             crate::__types::trellis::AuthDeviceUserAuthoritiesReviewsListRequestDeploymentId,
         >,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit:
-            Option<crate::__types::trellis::AuthDeviceUserAuthoritiesReviewsListRequestLimit>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub state:
             Option<crate::__types::trellis::AuthDeviceUserAuthoritiesReviewsListRequestState>,
@@ -7210,13 +7226,9 @@ pub mod trellis {
             })
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthDeviceUserAuthoritiesReviewsListResponse {
-        pub entries:
-            Vec<crate::__types::trellis::AuthDeviceUserAuthoritiesReviewsListResponseentriesItem>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthDeviceUserAuthoritiesReviewsListResponse = crate::__types::CursorPage<
+        crate::__types::trellis::AuthDeviceUserAuthoritiesReviewsListResponseentriesItem,
+    >;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDeviceUserAuthoritiesReviewsListResponseentriesItem {
         #[serde(rename = "activatedByUserPrincipalId")]
@@ -8857,13 +8869,11 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDevicesListRequest {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthDevicesListRequestCursor>,
         #[serde(rename = "deploymentId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub deployment_id: Option<crate::__types::trellis::AuthDevicesListRequestDeploymentId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthDevicesListRequestLimit>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub state: Option<crate::__types::trellis::AuthDevicesListRequestState>,
     }
@@ -8981,12 +8991,8 @@ pub mod trellis {
             })
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthDevicesListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthDevicesListResponseentriesItem>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthDevicesListResponse =
+        crate::__types::CursorPage<crate::__types::trellis::AuthDevicesListResponseentriesItem>;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthDevicesListResponseentriesItem {
         #[serde(rename = "administrativeApproval")]
@@ -10150,6 +10156,9 @@ pub mod trellis {
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthErrorDetails {
         pub code: crate::__types::trellis::AuthErrorDetailsCode,
+        #[serde(rename = "consentRequest")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub consent_request: Option<crate::__types::trellis::ConsentRequest>,
         pub field: crate::__types::Nullable<String>,
         pub message: crate::__types::trellis::AuthErrorDetailsMessage,
         pub retryable: bool,
@@ -10208,6 +10217,9 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthGrantBinding {
+        pub approval: crate::__types::trellis::Approval,
+        #[serde(rename = "approvalMode")]
+        pub approval_mode: crate::__types::trellis::ApprovalMode,
         #[serde(rename = "createdAt")]
         pub created_at: crate::__types::trellis::AuthGrantBindingCreatedAt,
         #[serde(rename = "expiresAt")]
@@ -10604,16 +10616,14 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthGrantsListRequest {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthGrantsListRequestCursor>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthGrantsListRequestLimit>,
         #[serde(rename = "ownerId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub owner_id: Option<crate::__types::trellis::AuthGrantsListRequestOwnerId>,
         #[serde(rename = "ownerKind")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub owner_kind: Option<crate::__types::trellis::AuthGrantsListRequestOwnerKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(rename = "participantId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub participant_id: Option<crate::__types::trellis::AuthGrantsListRequestParticipantId>,
@@ -10794,12 +10804,8 @@ pub mod trellis {
             })
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthGrantsListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthGrantBinding>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthGrantsListResponse =
+        crate::__types::CursorPage<crate::__types::trellis::AuthGrantBinding>;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthGrantsMutationResponse {
         pub binding: crate::__types::trellis::AuthGrantBinding,
@@ -12104,6 +12110,15 @@ pub mod trellis {
         pub participant: crate::__types::trellis::InstalledParticipantSummary,
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct AuthParticipantsListRequest {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub kind: Option<crate::__types::trellis::ResourceOwnerKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub page: Option<crate::__types::CursorQuery>,
+    }
+    pub type AuthParticipantsListResponse =
+        crate::__types::CursorPage<crate::__types::trellis::InstalledParticipantSummary>;
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthPermissionAtom {
         pub action: crate::__types::trellis::AuthPermissionAtomAction,
         pub target: crate::__types::Bytes,
@@ -12510,9 +12525,8 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthPortalsGrantOverridesListRequest {
-        pub limit: crate::__types::trellis::AuthPortalsGrantOverridesListRequestLimit,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(rename = "participantId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub participant_id:
@@ -12590,16 +12604,9 @@ pub mod trellis {
             formatter.write_str(self.as_ref())
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthPortalsGrantOverridesListResponse {
-        pub count: crate::__types::Uint64,
-        pub entries: Vec<crate::__types::trellis::AuthPortalsGrantOverridesListResponseentriesItem>,
-        pub limit: crate::__types::Uint64,
-        #[serde(rename = "nextOffset")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub next_offset: Option<crate::__types::Uint64>,
-        pub offset: crate::__types::Uint64,
-    }
+    pub type AuthPortalsGrantOverridesListResponse = crate::__types::CursorPage<
+        crate::__types::trellis::AuthPortalsGrantOverridesListResponseentriesItem,
+    >;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthPortalsGrantOverridesListResponseentriesItem {
         #[serde(rename = "capabilityGroupKeys")]
@@ -13791,11 +13798,9 @@ pub mod trellis {
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthPortalsListRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthPortalsListRequestCursor>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         pub disabled: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthPortalsListRequestLimit>,
+        pub page: Option<crate::__types::CursorQuery>,
     }
     #[derive(
         Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -13839,12 +13844,8 @@ pub mod trellis {
             Self(value)
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthPortalsListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthPortalsListResponseentriesItem>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthPortalsListResponse =
+        crate::__types::CursorPage<crate::__types::trellis::AuthPortalsListResponseentriesItem>;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthPortalsListResponseentriesItem {
         #[serde(rename = "builtIn")]
@@ -16852,14 +16853,12 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthServiceInstancesListRequest {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthServiceInstancesListRequestCursor>,
         #[serde(rename = "deploymentId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub deployment_id:
             Option<crate::__types::trellis::AuthServiceInstancesListRequestDeploymentId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthServiceInstancesListRequestLimit>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub state: Option<crate::__types::trellis::AuthServiceInstancesListRequestState>,
     }
@@ -16977,12 +16976,9 @@ pub mod trellis {
             })
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthServiceInstancesListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthServiceInstancesListResponseentriesItem>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthServiceInstancesListResponse = crate::__types::CursorPage<
+        crate::__types::trellis::AuthServiceInstancesListResponseentriesItem,
+    >;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthServiceInstancesListResponseentriesItem {
         #[serde(rename = "createdAt")]
@@ -17921,9 +17917,7 @@ pub mod trellis {
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthSessionsListRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthSessionsListRequestCursor>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthSessionsListRequestLimit>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(rename = "participantId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub participant_id: Option<crate::__types::trellis::AuthSessionsListRequestParticipantId>,
@@ -18070,12 +18064,8 @@ pub mod trellis {
             })
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthSessionsListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthLoginSession>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthSessionsListResponse =
+        crate::__types::CursorPage<crate::__types::trellis::AuthLoginSession>;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthSessionsLogoutRequest {}
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -18317,9 +18307,7 @@ pub mod trellis {
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthUserIdentitiesListRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthUserIdentitiesListRequestCursor>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthUserIdentitiesListRequestLimit>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(rename = "providerId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub provider_id: Option<crate::__types::trellis::AuthUserIdentitiesListRequestProviderId>,
@@ -18392,12 +18380,9 @@ pub mod trellis {
             formatter.write_str(self.as_ref())
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthUserIdentitiesListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthUserIdentitiesListResponseentriesItem>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthUserIdentitiesListResponse = crate::__types::CursorPage<
+        crate::__types::trellis::AuthUserIdentitiesListResponseentriesItem,
+    >;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthUserIdentitiesListResponseentriesItem {
         #[serde(rename = "createdAt")]
@@ -19388,9 +19373,9 @@ pub mod trellis {
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthUsersListRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub cursor: Option<crate::__types::trellis::AuthUsersListRequestCursor>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::AuthUsersListRequestLimit>,
+        pub search: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub state: Option<crate::__types::trellis::AuthUsersListRequestState>,
     }
@@ -19479,12 +19464,8 @@ pub mod trellis {
             })
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct AuthUsersListResponse {
-        pub entries: Vec<crate::__types::trellis::AuthUsersListResponseentriesItem>,
-        #[serde(rename = "nextCursor")]
-        pub next_cursor: crate::__types::Nullable<String>,
-    }
+    pub type AuthUsersListResponse =
+        crate::__types::CursorPage<crate::__types::trellis::AuthUsersListResponseentriesItem>;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct AuthUsersListResponseentriesItem {
         #[serde(rename = "createdAt")]
@@ -20791,6 +20772,168 @@ pub mod trellis {
         }
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ConsentCapability {
+        #[serde(rename = "alreadyApproved")]
+        pub already_approved: bool,
+        #[serde(rename = "consentDigest")]
+        pub consent_digest: String,
+        pub consequence: String,
+        pub description: String,
+        pub eligible: bool,
+        pub id: String,
+        pub required: bool,
+        pub title: String,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ConsentCompanion {
+        pub capabilities: Vec<crate::__types::trellis::ConsentCapability>,
+        pub kind: crate::__types::trellis::ResourceOwnerKind,
+        #[serde(rename = "participantId")]
+        pub participant_id: String,
+        pub required: bool,
+        pub resources: Vec<crate::__types::trellis::ConsentResource>,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ConsentDecision {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub approval: Option<crate::__types::trellis::Approval>,
+        pub decision: crate::__types::trellis::ConsentDecisionKind,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub reason: Option<String>,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum ConsentDecisionKind {
+        Approve,
+        Reject,
+        Unknown(String),
+    }
+    impl ConsentDecisionKind {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Approve => "approve",
+                Self::Reject => "reject",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for ConsentDecisionKind {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for ConsentDecisionKind {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for ConsentDecisionKind {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for ConsentDecisionKind {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "approve" => Self::Approve,
+                "reject" => Self::Reject,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ConsentRequest {
+        pub capabilities: Vec<crate::__types::trellis::ConsentCapability>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub companion: Option<crate::__types::trellis::ConsentCompanion>,
+        #[serde(rename = "decisionDigest")]
+        pub decision_digest: String,
+        #[serde(rename = "expectedGrantRevision")]
+        pub expected_grant_revision: crate::__types::Uint64,
+        #[serde(rename = "installedRevision")]
+        pub installed_revision: crate::__types::Uint64,
+        #[serde(rename = "packageDigest")]
+        pub package_digest: String,
+        #[serde(rename = "participantId")]
+        pub participant_id: String,
+        pub resources: Vec<crate::__types::trellis::ConsentResource>,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ConsentResource {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub actual: Option<crate::__types::trellis::ResourceActual>,
+        #[serde(rename = "alreadyApproved")]
+        pub already_approved: bool,
+        pub change: crate::__types::trellis::ConsentResourceChange,
+        pub description: String,
+        pub eligible: bool,
+        pub kind: crate::__types::trellis::ResourceKind,
+        pub name: String,
+        #[serde(rename = "requestedCommitment")]
+        pub requested_commitment: crate::__types::trellis::ResourceCommitment,
+        pub required: bool,
+        pub title: String,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum ConsentResourceChange {
+        Detached,
+        Expanded,
+        Incompatible,
+        New,
+        Reduced,
+        Unchanged,
+        Unknown(String),
+    }
+    impl ConsentResourceChange {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Detached => "detached",
+                Self::Expanded => "expanded",
+                Self::Incompatible => "incompatible",
+                Self::New => "new",
+                Self::Reduced => "reduced",
+                Self::Unchanged => "unchanged",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for ConsentResourceChange {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for ConsentResourceChange {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for ConsentResourceChange {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for ConsentResourceChange {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "detached" => Self::Detached,
+                "expanded" => Self::Expanded,
+                "incompatible" => Self::Incompatible,
+                "new" => Self::New,
+                "reduced" => Self::Reduced,
+                "unchanged" => Self::Unchanged,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct DelegationCeiling {
+        pub capabilities: Vec<crate::__types::trellis::ApprovedCapability>,
+        #[serde(rename = "exactRestrictions")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub exact_restrictions: Option<crate::__types::trellis::AuthGrantSet>,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct Empty {}
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct EventConsumerStatusRow {
@@ -20826,6 +20969,8 @@ pub mod trellis {
         pub pending: crate::__types::Int64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub redelivered: Option<crate::__types::Int64>,
+        #[serde(rename = "resourceId")]
+        pub resource_id: String,
         pub status: crate::__types::trellis::EventConsumerStatusRowStatus,
         pub stream: String,
         #[serde(rename = "waitingPulls")]
@@ -20934,13 +21079,13 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct EventsConsumersInspectRequest {
-        #[serde(rename = "consumerName")]
-        pub consumer_name: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub stream: Option<String>,
+        #[serde(rename = "resourceId")]
+        pub resource_id: String,
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct EventsConsumersInspectResponse {}
+    pub struct EventsConsumersInspectResponse {
+        pub consumer: crate::__types::trellis::EventConsumerStatusRow,
+    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct EventsConsumersQueryRequest {
         #[serde(rename = "contractId")]
@@ -20949,12 +21094,14 @@ pub mod trellis {
         #[serde(rename = "deploymentId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub deployment_id: Option<String>,
-        pub limit: crate::__types::trellis::EventsConsumersQueryRequestLimit,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
         #[serde(rename = "ownerContractId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub owner_contract_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub page: Option<crate::__types::CursorQuery>,
+        #[serde(rename = "resourceId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub resource_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub status: Option<Vec<crate::__types::trellis::EventsConsumersQueryRequestStatus>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -21034,12 +21181,308 @@ pub mod trellis {
             })
         }
     }
+    pub type EventsConsumersQueryResponse =
+        crate::__types::CursorPage<crate::__types::trellis::EventConsumerStatusRow>;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct EventsConsumersQueryResponse {
-        pub consumers: Vec<crate::__types::trellis::EventConsumerStatusRow>,
-        pub limit: crate::__types::Int64,
-        pub offset: crate::__types::Int64,
-        pub total: crate::__types::Int64,
+    pub struct EventsConsumersReportDeliveryRequest {
+        #[serde(rename = "deliveryCount")]
+        pub delivery_count: u32,
+        #[serde(rename = "deliveryProof")]
+        pub delivery_proof: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub error: Option<String>,
+        pub outcome: crate::__types::trellis::EventsDeliveryOutcome,
+        #[serde(rename = "replayGeneration")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub replay_generation: Option<u32>,
+        #[serde(rename = "resourceId")]
+        pub resource_id: String,
+        #[serde(rename = "sourceSequence")]
+        pub source_sequence: crate::__types::Uint64,
+        #[serde(rename = "sourceStream")]
+        pub source_stream: String,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsConsumersReportDeliveryResponse {
+        #[serde(rename = "deadLetter")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub dead_letter: Option<crate::__types::trellis::EventsDeadLetter>,
+        pub stale: bool,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDeadLetter {
+        #[serde(rename = "deadLetterId")]
+        pub dead_letter_id: String,
+        pub deliveries: u32,
+        pub generation: u32,
+        #[serde(rename = "lastError")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub last_error: Option<String>,
+        #[serde(rename = "originalSequence")]
+        pub original_sequence: crate::__types::Uint64,
+        #[serde(rename = "originalStream")]
+        pub original_stream: String,
+        #[serde(rename = "resourceId")]
+        pub resource_id: String,
+        pub revision: crate::__types::Uint64,
+        pub state: crate::__types::trellis::EventsDeadLetterState,
+        #[serde(rename = "updatedAt")]
+        pub updated_at: String,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDeadLetterCounts {
+        pub dead: crate::__types::Uint64,
+        pub dismissed: crate::__types::Uint64,
+        #[serde(rename = "replayPending")]
+        pub replay_pending: crate::__types::Uint64,
+        pub replaying: crate::__types::Uint64,
+        pub resolved: crate::__types::Uint64,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDeadLetterDetail {
+        #[serde(rename = "deadLetter")]
+        pub dead_letter: crate::__types::trellis::EventsDeadLetter,
+        #[serde(rename = "originalHeaders")]
+        pub original_headers: std::collections::BTreeMap<String, String>,
+        #[serde(rename = "originalPayload")]
+        pub original_payload: crate::__types::Bytes,
+        #[serde(rename = "originalSubject")]
+        pub original_subject: String,
+        #[serde(rename = "transitionReferences")]
+        pub transition_references: Vec<crate::__types::Uint64>,
+        #[serde(rename = "verificationStatus")]
+        pub verification_status: crate::__types::trellis::EventsDeadLetterVerificationStatus,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum EventsDeadLetterState {
+        Dead,
+        Dismissed,
+        ReplayPending,
+        Replaying,
+        Resolved,
+        Unknown(String),
+    }
+    impl EventsDeadLetterState {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Dead => "dead",
+                Self::Dismissed => "dismissed",
+                Self::ReplayPending => "replayPending",
+                Self::Replaying => "replaying",
+                Self::Resolved => "resolved",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for EventsDeadLetterState {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for EventsDeadLetterState {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for EventsDeadLetterState {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for EventsDeadLetterState {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "dead" => Self::Dead,
+                "dismissed" => Self::Dismissed,
+                "replayPending" => Self::ReplayPending,
+                "replaying" => Self::Replaying,
+                "resolved" => Self::Resolved,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum EventsDeadLetterVerificationStatus {
+        Invalid,
+        Revoked,
+        Unavailable,
+        Verified,
+        Unknown(String),
+    }
+    impl EventsDeadLetterVerificationStatus {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Invalid => "invalid",
+                Self::Revoked => "revoked",
+                Self::Unavailable => "unavailable",
+                Self::Verified => "verified",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for EventsDeadLetterVerificationStatus {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for EventsDeadLetterVerificationStatus {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for EventsDeadLetterVerificationStatus {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for EventsDeadLetterVerificationStatus {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "invalid" => Self::Invalid,
+                "revoked" => Self::Revoked,
+                "unavailable" => Self::Unavailable,
+                "verified" => Self::Verified,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDeadLettersDismissRequest {
+        #[serde(rename = "deadLetterId")]
+        pub dead_letter_id: String,
+        #[serde(rename = "expectedRevision")]
+        pub expected_revision: crate::__types::Uint64,
+        #[serde(rename = "requestId")]
+        pub request_id: String,
+        #[serde(rename = "resourceId")]
+        pub resource_id: String,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDeadLettersDismissResponse {
+        #[serde(rename = "deadLetter")]
+        pub dead_letter: crate::__types::trellis::EventsDeadLetter,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDeadLettersInspectRequest {
+        #[serde(rename = "deadLetterId")]
+        pub dead_letter_id: String,
+        #[serde(rename = "resourceId")]
+        pub resource_id: String,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDeadLettersInspectResponse {
+        #[serde(rename = "deadLetter")]
+        pub dead_letter: crate::__types::trellis::EventsDeadLetterDetail,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDeadLettersQueryRequest {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub page: Option<crate::__types::CursorQuery>,
+        #[serde(rename = "resourceId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub resource_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub state: Option<Vec<crate::__types::trellis::EventsDeadLetterState>>,
+    }
+    pub type EventsDeadLettersQueryResponse =
+        crate::__types::CursorPage<crate::__types::trellis::EventsDeadLetter>;
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDeadLettersReplayRequest {
+        #[serde(rename = "deadLetterId")]
+        pub dead_letter_id: String,
+        #[serde(rename = "expectedRevision")]
+        pub expected_revision: crate::__types::Uint64,
+        #[serde(rename = "requestId")]
+        pub request_id: String,
+        #[serde(rename = "resourceId")]
+        pub resource_id: String,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDeadLettersReplayResponse {
+        #[serde(rename = "deadLetter")]
+        pub dead_letter: crate::__types::trellis::EventsDeadLetter,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum EventsDeliveryOutcome {
+        Exhausted,
+        Succeeded,
+        Unreplayable,
+        Unknown(String),
+    }
+    impl EventsDeliveryOutcome {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Exhausted => "exhausted",
+                Self::Succeeded => "succeeded",
+                Self::Unreplayable => "unreplayable",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for EventsDeliveryOutcome {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for EventsDeliveryOutcome {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for EventsDeliveryOutcome {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for EventsDeliveryOutcome {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "exhausted" => Self::Exhausted,
+                "succeeded" => Self::Succeeded,
+                "unreplayable" => Self::Unreplayable,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDiagnosticsRequest {}
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsDiagnosticsResponse {
+        #[serde(rename = "asOf")]
+        pub as_of: String,
+        #[serde(rename = "completeSince")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub complete_since: Option<String>,
+        #[serde(rename = "gapDetected")]
+        pub gap_detected: bool,
+        #[serde(rename = "lastStreamSequence")]
+        pub last_stream_sequence: crate::__types::Uint64,
+        #[serde(rename = "retainedFrom")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub retained_from: Option<String>,
+        pub revision: crate::__types::Uint64,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsErrorData {
+        pub code: String,
+        #[serde(rename = "currentRevision")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub current_revision: Option<crate::__types::Uint64>,
+        #[serde(rename = "deadLetterId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub dead_letter_id: Option<String>,
+        #[serde(rename = "resourceId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub resource_id: Option<String>,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct EventsEventDetail {
+        pub headers: std::collections::BTreeMap<String, String>,
+        pub payload: crate::__types::Bytes,
+        pub row: crate::__types::trellis::EventsRow,
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct EventsInspectRequest {
@@ -21051,9 +21494,14 @@ pub mod trellis {
         pub stream_sequence: Option<crate::__types::Int64>,
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct EventsInspectResponse {}
+    pub struct EventsInspectResponse {
+        pub event: crate::__types::trellis::EventsEventDetail,
+    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct EventsMetricsRequest {
+        #[serde(rename = "resourceId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub resource_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub window: Option<String>,
     }
@@ -21115,6 +21563,8 @@ pub mod trellis {
         #[serde(rename = "byVerificationStatus")]
         pub by_verification_status:
             crate::__types::trellis::EventsMetricsResponsesummarybyVerificationStatus,
+        #[serde(rename = "deadLettersByState")]
+        pub dead_letters_by_state: crate::__types::trellis::EventsDeadLetterCounts,
         #[serde(rename = "eventTypes")]
         pub event_types: Vec<crate::__types::trellis::EventsMetricsResponsesummaryeventTypesItem>,
         #[serde(rename = "integrityExceptions")]
@@ -21211,7 +21661,17 @@ pub mod trellis {
         }
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct EventsNotFoundErrorDatacontext {}
+    pub struct EventsNotFoundErrorDatacontext {
+        #[serde(rename = "eventId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub event_id: Option<String>,
+        #[serde(rename = "resourceId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub resource_id: Option<String>,
+        #[serde(rename = "streamSequence")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub stream_sequence: Option<crate::__types::Uint64>,
+    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct EventsQueryRequest {
         #[serde(rename = "consumerDeploymentId")]
@@ -21231,15 +21691,14 @@ pub mod trellis {
         #[serde(rename = "integrityExceptionOnly")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub integrity_exception_only: Option<bool>,
-        pub limit: crate::__types::trellis::EventsQueryRequestLimit,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
         #[serde(rename = "ownerContractId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub owner_contract_id: Option<String>,
         #[serde(rename = "ownerEventName")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub owner_event_name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(rename = "publisherDeploymentId")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub publisher_deployment_id: Option<String>,
@@ -21372,14 +21831,11 @@ pub mod trellis {
         pub owner_event_name: String,
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct EventsQueryRequestsort {}
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct EventsQueryResponse {
-        pub events: Vec<crate::__types::trellis::EventsRow>,
-        pub limit: crate::__types::Int64,
-        pub offset: crate::__types::Int64,
-        pub total: crate::__types::Int64,
+    pub struct EventsQueryRequestsort {
+        pub direction: crate::__types::trellis::EventsSortDirection,
+        pub field: crate::__types::trellis::EventsSortField,
     }
+    pub type EventsQueryResponse = crate::__types::CursorPage<crate::__types::trellis::EventsRow>;
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct EventsRow {
         #[serde(rename = "eventId")]
@@ -21544,10 +22000,129 @@ pub mod trellis {
             })
         }
     }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum EventsSortDirection {
+        Asc,
+        Desc,
+        Unknown(String),
+    }
+    impl EventsSortDirection {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Asc => "asc",
+                Self::Desc => "desc",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for EventsSortDirection {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for EventsSortDirection {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for EventsSortDirection {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for EventsSortDirection {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "asc" => Self::Asc,
+                "desc" => Self::Desc,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum EventsSortField {
+        EventTime,
+        PayloadSize,
+        StreamSequence,
+        Unknown(String),
+    }
+    impl EventsSortField {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::EventTime => "eventTime",
+                Self::PayloadSize => "payloadSize",
+                Self::StreamSequence => "streamSequence",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for EventsSortField {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for EventsSortField {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for EventsSortField {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for EventsSortField {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "eventTime" => Self::EventTime,
+                "payloadSize" => Self::PayloadSize,
+                "streamSequence" => Self::StreamSequence,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct EventsWatchFrame {}
+    pub struct EventsWatchFrame {
+        pub events: Vec<crate::__types::trellis::EventsEventDetail>,
+        #[serde(rename = "lastStreamSequence")]
+        pub last_stream_sequence: crate::__types::Uint64,
+    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct EventsWatchRequest {}
+    pub struct EventsWatchRequest {
+        #[serde(rename = "consumerDeploymentId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub consumer_deployment_id: Option<String>,
+        #[serde(rename = "consumerName")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub consumer_name: Option<String>,
+        #[serde(rename = "excludeEventTypes")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub exclude_event_types:
+            Option<Vec<crate::__types::trellis::EventsQueryRequestexcludeEventTypesItem>>,
+        #[serde(rename = "includeEventTypes")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub include_event_types:
+            Option<Vec<crate::__types::trellis::EventsQueryRequestincludeEventTypesItem>>,
+        #[serde(rename = "ownerContractId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub owner_contract_id: Option<String>,
+        #[serde(rename = "ownerEventName")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub owner_event_name: Option<String>,
+        #[serde(rename = "publisherDeploymentId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub publisher_deployment_id: Option<String>,
+        #[serde(rename = "publisherParticipantId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub publisher_participant_id: Option<String>,
+        #[serde(rename = "resourceId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub resource_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub subject: Option<String>,
+    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct HealthHeartbeatSample {
         pub checks: Vec<crate::__types::trellis::HealthHeartbeatSamplechecksItem>,
@@ -23585,9 +24160,7 @@ pub mod trellis {
         pub deployment_ids:
             Option<Vec<crate::__types::trellis::HealthQueryRequestDeploymentIdsItem>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub limit: Option<crate::__types::trellis::HealthQueryRequestLimit>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(rename = "participantKinds")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub participant_kinds:
@@ -23777,16 +24350,8 @@ pub mod trellis {
             })
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct HealthQueryResponse {
-        #[serde(rename = "asOf")]
-        pub as_of: String,
-        pub count: crate::__types::Uint64,
-        pub entries: Vec<crate::__types::trellis::HealthQueryResponseentriesItem>,
-        pub limit: crate::__types::trellis::HealthQueryResponseLimit,
-        pub offset: crate::__types::Uint64,
-        pub projection: crate::__types::trellis::HealthQueryResponseprojection,
-    }
+    pub type HealthQueryResponse =
+        crate::__types::CursorPage<crate::__types::trellis::HealthQueryResponseentriesItem>;
     #[derive(
         Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
     )]
@@ -24242,6 +24807,31 @@ pub mod trellis {
             })
         }
     }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct HealthSummaryRequest {
+        #[serde(rename = "contractIds")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub contract_ids: Option<Vec<crate::__types::trellis::HealthQueryRequestContractIdsItem>>,
+        #[serde(rename = "deploymentIds")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub deployment_ids:
+            Option<Vec<crate::__types::trellis::HealthQueryRequestDeploymentIdsItem>>,
+        #[serde(rename = "participantKinds")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub participant_kinds:
+            Option<Vec<crate::__types::trellis::HealthQueryRequestParticipantKinds>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub search: Option<crate::__types::trellis::HealthQueryRequestSearch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub statuses: Option<Vec<crate::__types::trellis::HealthQueryRequestStatuses>>,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct HealthSummaryResponse {
+        #[serde(rename = "asOf")]
+        pub as_of: String,
+        pub count: crate::__types::Uint64,
+        pub projection: crate::__types::trellis::HealthQueryResponseprojection,
+    }
     #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     #[serde(transparent)]
     pub struct HealthWatchFrame(pub crate::__types::Bytes);
@@ -24533,6 +25123,11 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct InstalledParticipantDetail {
+        #[serde(rename = "companionParticipantId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub companion_participant_id: Option<String>,
+        #[serde(rename = "companionRequired")]
+        pub companion_required: bool,
         #[serde(rename = "installedAt")]
         pub installed_at: crate::__types::trellis::InstalledParticipantDetailInstalledAt,
         #[serde(rename = "optionalBundles")]
@@ -24659,6 +25254,11 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct InstalledParticipantSummary {
+        #[serde(rename = "companionParticipantId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub companion_participant_id: Option<String>,
+        #[serde(rename = "companionRequired")]
+        pub companion_required: bool,
         #[serde(rename = "installedAt")]
         pub installed_at: crate::__types::trellis::InstalledParticipantSummaryInstalledAt,
         #[serde(rename = "packageDigest")]
@@ -32285,9 +32885,8 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct JobsListDLQRequest {
-        pub limit: crate::__types::trellis::JobsListDLQRequestLimit,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub service: Option<crate::__types::trellis::JobsListDLQRequestService>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -32363,16 +32962,8 @@ pub mod trellis {
             formatter.write_str(self.as_ref())
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct JobsListDLQResponse {
-        pub count: crate::__types::Uint64,
-        pub entries: Vec<crate::__types::trellis::JobsListDLQResponseentriesItem>,
-        pub limit: crate::__types::trellis::JobsListDLQResponseLimit,
-        #[serde(rename = "nextOffset")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub next_offset: Option<crate::__types::Uint64>,
-        pub offset: crate::__types::Uint64,
-    }
+    pub type JobsListDLQResponse =
+        crate::__types::CursorPage<crate::__types::trellis::JobsListDLQResponseentriesItem>;
     #[derive(
         Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
     )]
@@ -33411,9 +34002,8 @@ pub mod trellis {
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct JobsListServicesRequest {
-        pub limit: crate::__types::trellis::JobsListServicesRequestLimit,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
+        pub page: Option<crate::__types::CursorQuery>,
     }
     #[derive(
         Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
@@ -33431,16 +34021,8 @@ pub mod trellis {
             Self(value)
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct JobsListServicesResponse {
-        pub count: crate::__types::Uint64,
-        pub entries: Vec<crate::__types::trellis::JobsListServicesResponseentriesItem>,
-        pub limit: crate::__types::trellis::JobsListServicesResponseLimit,
-        #[serde(rename = "nextOffset")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub next_offset: Option<crate::__types::Uint64>,
-        pub offset: crate::__types::Uint64,
-    }
+    pub type JobsListServicesResponse =
+        crate::__types::CursorPage<crate::__types::trellis::JobsListServicesResponseentriesItem>;
     #[derive(
         Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
     )]
@@ -34253,9 +34835,8 @@ pub mod trellis {
         #[serde(rename = "groupBy")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub group_by: Option<crate::__types::trellis::JobsQueryRequestGroupBy>,
-        pub limit: crate::__types::trellis::JobsQueryRequestLimit,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
+        pub page: Option<crate::__types::CursorQuery>,
         #[serde(rename = "queueKey")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub queue_key: Option<String>,
@@ -34608,18 +35189,8 @@ pub mod trellis {
             })
         }
     }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct JobsQueryResponse {
-        pub count: crate::__types::Uint64,
-        pub entries: Vec<crate::__types::trellis::JobsQueryResponseentriesItem>,
-        pub groups: Vec<crate::__types::trellis::JobsQueryResponsegroupsItem>,
-        pub limit: crate::__types::trellis::JobsQueryResponseLimit,
-        #[serde(rename = "nextOffset")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub next_offset: Option<crate::__types::Uint64>,
-        pub offset: crate::__types::Uint64,
-        pub stats: crate::__types::trellis::JobsQueryResponsestats,
-    }
+    pub type JobsQueryResponse =
+        crate::__types::CursorPage<crate::__types::trellis::JobsQueryResponseentriesItem>;
     #[derive(
         Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
     )]
@@ -37599,6 +38170,36 @@ pub mod trellis {
             formatter.write_str(self.as_ref())
         }
     }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct JobsSummaryRequest {
+        #[serde(rename = "groupBy")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub group_by: Option<crate::__types::trellis::JobsQueryRequestGroupBy>,
+        #[serde(rename = "queueKey")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub queue_key: Option<String>,
+        #[serde(rename = "runtimeBand")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub runtime_band: Option<crate::__types::trellis::JobsQueryRequestRuntimeBand>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub search: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub service: Option<crate::__types::trellis::JobsQueryRequestService>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub state: Option<Vec<crate::__types::trellis::JobsQueryRequestState>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub trigger: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub r#type: Option<crate::__types::trellis::JobsQueryRequestType>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub window: Option<String>,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct JobsSummaryResponse {
+        pub count: crate::__types::Uint64,
+        pub groups: Vec<crate::__types::trellis::JobsQueryResponsegroupsItem>,
+        pub stats: crate::__types::trellis::JobsQueryResponsestats,
+    }
     #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     #[serde(transparent)]
     pub struct JobsWatchFrame(pub crate::__types::Bytes);
@@ -38001,9 +38602,6 @@ pub mod trellis {
         #[serde(rename = "groupBy")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub group_by: Option<crate::__types::trellis::JobsWatchRequestqueryGroupBy>,
-        pub limit: crate::__types::trellis::JobsWatchRequestqueryLimit,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
         #[serde(rename = "queueKey")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub queue_key: Option<String>,
@@ -38075,22 +38673,6 @@ pub mod trellis {
                 "type" => Self::Type,
                 _ => Self::Unknown(value),
             })
-        }
-    }
-    #[derive(
-        Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct JobsWatchRequestqueryLimit(pub crate::__types::Int64);
-    impl std::ops::Deref for JobsWatchRequestqueryLimit {
-        type Target = crate::__types::Int64;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<crate::__types::Int64> for JobsWatchRequestqueryLimit {
-        fn from(value: crate::__types::Int64) -> Self {
-            Self(value)
         }
     }
     #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39588,20 +40170,6 @@ pub mod trellis {
             formatter.write_str(self.as_ref())
         }
     }
-    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    #[serde(transparent)]
-    pub struct JsonValue(pub crate::__types::Bytes);
-    impl std::ops::Deref for JsonValue {
-        type Target = crate::__types::Bytes;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<crate::__types::Bytes> for JsonValue {
-        fn from(value: crate::__types::Bytes) -> Self {
-            Self(value)
-        }
-    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct PortalGrantProvenance {
         #[serde(rename = "effectivePolicyDigest")]
@@ -39690,2736 +40258,606 @@ pub mod trellis {
             formatter.write_str(self.as_ref())
         }
     }
-    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequest(pub crate::__types::Bytes);
-    impl std::ops::Deref for StateAdminDeleteRequest {
-        type Target = crate::__types::Bytes;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<crate::__types::Bytes> for StateAdminDeleteRequest {
-        fn from(value: crate::__types::Bytes) -> Self {
-            Self(value)
-        }
-    }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminDeleteRequestValue1 {
-        #[serde(rename = "contractDigest")]
-        pub contract_digest: crate::__types::trellis::StateAdminDeleteRequestValue1ContractDigest,
-        #[serde(rename = "contractId")]
-        pub contract_id: crate::__types::trellis::StateAdminDeleteRequestValue1ContractId,
-        #[serde(rename = "expectedRevision")]
+    pub struct ResourceActual {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expected_revision:
-            Option<crate::__types::trellis::StateAdminDeleteRequestValue1ExpectedRevision>,
+        pub history: Option<crate::__types::trellis::ResourceHistory>,
+        #[serde(rename = "maxObjectBytes")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateAdminDeleteRequestValue1Key>,
-        pub scope: crate::__types::trellis::StateAdminDeleteRequestValue1Scope,
-        pub store: crate::__types::trellis::StateAdminDeleteRequestValue1Store,
-        #[serde(rename = "userId")]
-        pub user_id: crate::__types::trellis::StateAdminDeleteRequestValue1UserId,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue1ContractDigest(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue1ContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue1ContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue1ContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue1ContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue1ContractId(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue1ContractId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue1ContractId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue1ContractId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue1ContractId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue1ExpectedRevision(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue1ExpectedRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue1ExpectedRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue1ExpectedRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue1ExpectedRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue1Key(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue1Key {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue1Key {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue1Key {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue1Key {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub enum StateAdminDeleteRequestValue1Scope {
-        UserApp,
-        Unknown(String),
-    }
-    impl StateAdminDeleteRequestValue1Scope {
-        pub fn as_str(&self) -> &str {
-            match self {
-                Self::UserApp => "userApp",
-                Self::Unknown(value) => value,
-            }
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue1Scope {
-        fn as_ref(&self) -> &str {
-            self.as_str()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue1Scope {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_str())
-        }
-    }
-    impl serde::Serialize for StateAdminDeleteRequestValue1Scope {
-        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serializer.serialize_str(self.as_str())
-        }
-    }
-    impl<'de> serde::Deserialize<'de> for StateAdminDeleteRequestValue1Scope {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-            Ok(match value.as_str() {
-                "userApp" => Self::UserApp,
-                _ => Self::Unknown(value),
-            })
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue1Store(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue1Store {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue1Store {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue1Store {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue1Store {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue1UserId(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue1UserId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue1UserId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue1UserId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue1UserId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminDeleteRequestValue2 {
-        #[serde(rename = "contractDigest")]
-        pub contract_digest: crate::__types::trellis::StateAdminDeleteRequestValue2ContractDigest,
-        #[serde(rename = "contractId")]
-        pub contract_id: crate::__types::trellis::StateAdminDeleteRequestValue2ContractId,
-        #[serde(rename = "deviceId")]
-        pub device_id: crate::__types::trellis::StateAdminDeleteRequestValue2DeviceId,
-        #[serde(rename = "expectedRevision")]
+        pub max_object_bytes: Option<crate::__types::trellis::ResourceCapacityBytes>,
+        #[serde(rename = "maxTotalBytes")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expected_revision:
-            Option<crate::__types::trellis::StateAdminDeleteRequestValue2ExpectedRevision>,
+        pub max_total_bytes: Option<crate::__types::trellis::ResourceCapacityBytes>,
+        #[serde(rename = "maxValueBytes")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateAdminDeleteRequestValue2Key>,
-        pub scope: crate::__types::trellis::StateAdminDeleteRequestValue2Scope,
-        pub store: crate::__types::trellis::StateAdminDeleteRequestValue2Store,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue2ContractDigest(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue2ContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue2ContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue2ContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue2ContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue2ContractId(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue2ContractId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue2ContractId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue2ContractId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue2ContractId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue2DeviceId(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue2DeviceId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue2DeviceId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue2DeviceId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue2DeviceId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue2ExpectedRevision(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue2ExpectedRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue2ExpectedRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue2ExpectedRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue2ExpectedRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue2Key(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue2Key {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue2Key {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue2Key {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue2Key {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub enum StateAdminDeleteRequestValue2Scope {
-        DeviceApp,
-        Unknown(String),
-    }
-    impl StateAdminDeleteRequestValue2Scope {
-        pub fn as_str(&self) -> &str {
-            match self {
-                Self::DeviceApp => "deviceApp",
-                Self::Unknown(value) => value,
-            }
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue2Scope {
-        fn as_ref(&self) -> &str {
-            self.as_str()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue2Scope {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_str())
-        }
-    }
-    impl serde::Serialize for StateAdminDeleteRequestValue2Scope {
-        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serializer.serialize_str(self.as_str())
-        }
-    }
-    impl<'de> serde::Deserialize<'de> for StateAdminDeleteRequestValue2Scope {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-            Ok(match value.as_str() {
-                "deviceApp" => Self::DeviceApp,
-                _ => Self::Unknown(value),
-            })
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminDeleteRequestValue2Store(pub String);
-    impl std::ops::Deref for StateAdminDeleteRequestValue2Store {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminDeleteRequestValue2Store {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminDeleteRequestValue2Store {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminDeleteRequestValue2Store {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminDeleteResponse {
-        pub deleted: bool,
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequest(pub crate::__types::Bytes);
-    impl std::ops::Deref for StateAdminGetRequest {
-        type Target = crate::__types::Bytes;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<crate::__types::Bytes> for StateAdminGetRequest {
-        fn from(value: crate::__types::Bytes) -> Self {
-            Self(value)
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminGetRequestValue1 {
-        #[serde(rename = "contractDigest")]
-        pub contract_digest: crate::__types::trellis::StateAdminGetRequestValue1ContractDigest,
-        #[serde(rename = "contractId")]
-        pub contract_id: crate::__types::trellis::StateAdminGetRequestValue1ContractId,
+        pub max_value_bytes: Option<crate::__types::trellis::ResourceCapacityBytes>,
+        #[serde(rename = "representationVersion")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateAdminGetRequestValue1Key>,
-        pub scope: crate::__types::trellis::StateAdminGetRequestValue1Scope,
-        pub store: crate::__types::trellis::StateAdminGetRequestValue1Store,
-        #[serde(rename = "userId")]
-        pub user_id: crate::__types::trellis::StateAdminGetRequestValue1UserId,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequestValue1ContractDigest(pub String);
-    impl std::ops::Deref for StateAdminGetRequestValue1ContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetRequestValue1ContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue1ContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue1ContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequestValue1ContractId(pub String);
-    impl std::ops::Deref for StateAdminGetRequestValue1ContractId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetRequestValue1ContractId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue1ContractId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue1ContractId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequestValue1Key(pub String);
-    impl std::ops::Deref for StateAdminGetRequestValue1Key {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetRequestValue1Key {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue1Key {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue1Key {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub enum StateAdminGetRequestValue1Scope {
-        UserApp,
-        Unknown(String),
-    }
-    impl StateAdminGetRequestValue1Scope {
-        pub fn as_str(&self) -> &str {
-            match self {
-                Self::UserApp => "userApp",
-                Self::Unknown(value) => value,
-            }
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue1Scope {
-        fn as_ref(&self) -> &str {
-            self.as_str()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue1Scope {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_str())
-        }
-    }
-    impl serde::Serialize for StateAdminGetRequestValue1Scope {
-        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serializer.serialize_str(self.as_str())
-        }
-    }
-    impl<'de> serde::Deserialize<'de> for StateAdminGetRequestValue1Scope {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-            Ok(match value.as_str() {
-                "userApp" => Self::UserApp,
-                _ => Self::Unknown(value),
-            })
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequestValue1Store(pub String);
-    impl std::ops::Deref for StateAdminGetRequestValue1Store {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetRequestValue1Store {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue1Store {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue1Store {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequestValue1UserId(pub String);
-    impl std::ops::Deref for StateAdminGetRequestValue1UserId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetRequestValue1UserId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue1UserId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue1UserId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminGetRequestValue2 {
-        #[serde(rename = "contractDigest")]
-        pub contract_digest: crate::__types::trellis::StateAdminGetRequestValue2ContractDigest,
-        #[serde(rename = "contractId")]
-        pub contract_id: crate::__types::trellis::StateAdminGetRequestValue2ContractId,
-        #[serde(rename = "deviceId")]
-        pub device_id: crate::__types::trellis::StateAdminGetRequestValue2DeviceId,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateAdminGetRequestValue2Key>,
-        pub scope: crate::__types::trellis::StateAdminGetRequestValue2Scope,
-        pub store: crate::__types::trellis::StateAdminGetRequestValue2Store,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequestValue2ContractDigest(pub String);
-    impl std::ops::Deref for StateAdminGetRequestValue2ContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetRequestValue2ContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue2ContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue2ContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequestValue2ContractId(pub String);
-    impl std::ops::Deref for StateAdminGetRequestValue2ContractId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetRequestValue2ContractId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue2ContractId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue2ContractId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequestValue2DeviceId(pub String);
-    impl std::ops::Deref for StateAdminGetRequestValue2DeviceId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetRequestValue2DeviceId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue2DeviceId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue2DeviceId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequestValue2Key(pub String);
-    impl std::ops::Deref for StateAdminGetRequestValue2Key {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetRequestValue2Key {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue2Key {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue2Key {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub enum StateAdminGetRequestValue2Scope {
-        DeviceApp,
-        Unknown(String),
-    }
-    impl StateAdminGetRequestValue2Scope {
-        pub fn as_str(&self) -> &str {
-            match self {
-                Self::DeviceApp => "deviceApp",
-                Self::Unknown(value) => value,
-            }
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue2Scope {
-        fn as_ref(&self) -> &str {
-            self.as_str()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue2Scope {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_str())
-        }
-    }
-    impl serde::Serialize for StateAdminGetRequestValue2Scope {
-        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serializer.serialize_str(self.as_str())
-        }
-    }
-    impl<'de> serde::Deserialize<'de> for StateAdminGetRequestValue2Scope {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-            Ok(match value.as_str() {
-                "deviceApp" => Self::DeviceApp,
-                _ => Self::Unknown(value),
-            })
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetRequestValue2Store(pub String);
-    impl std::ops::Deref for StateAdminGetRequestValue2Store {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetRequestValue2Store {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetRequestValue2Store {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetRequestValue2Store {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    #[serde(transparent)]
-    pub struct StateAdminGetResponse(pub crate::__types::Bytes);
-    impl std::ops::Deref for StateAdminGetResponse {
-        type Target = crate::__types::Bytes;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<crate::__types::Bytes> for StateAdminGetResponse {
-        fn from(value: crate::__types::Bytes) -> Self {
-            Self(value)
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminGetResponseValue1 {
-        pub found: bool,
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminGetResponseValue2 {
-        pub entry: crate::__types::trellis::StateAdminGetResponseValue2entry,
-        pub found: bool,
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminGetResponseValue2entry {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateAdminGetResponseValue2entryKey>,
-        pub revision: crate::__types::trellis::StateAdminGetResponseValue2entryRevision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetResponseValue2entryKey(pub String);
-    impl std::ops::Deref for StateAdminGetResponseValue2entryKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetResponseValue2entryKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetResponseValue2entryKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetResponseValue2entryKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetResponseValue2entryRevision(pub String);
-    impl std::ops::Deref for StateAdminGetResponseValue2entryRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetResponseValue2entryRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetResponseValue2entryRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetResponseValue2entryRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminGetResponseValue3 {
-        #[serde(rename = "currentStateVersion")]
-        pub current_state_version:
-            crate::__types::trellis::StateAdminGetResponseValue3CurrentStateVersion,
-        pub entry: crate::__types::trellis::StateAdminGetResponseValue3entry,
-        #[serde(rename = "migrationRequired")]
-        pub migration_required: bool,
-        #[serde(rename = "stateVersion")]
-        pub state_version: crate::__types::trellis::StateAdminGetResponseValue3StateVersion,
-        #[serde(rename = "writerContractDigest")]
-        pub writer_contract_digest:
-            crate::__types::trellis::StateAdminGetResponseValue3WriterContractDigest,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetResponseValue3CurrentStateVersion(pub String);
-    impl std::ops::Deref for StateAdminGetResponseValue3CurrentStateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetResponseValue3CurrentStateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetResponseValue3CurrentStateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetResponseValue3CurrentStateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetResponseValue3StateVersion(pub String);
-    impl std::ops::Deref for StateAdminGetResponseValue3StateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetResponseValue3StateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetResponseValue3StateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetResponseValue3StateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetResponseValue3WriterContractDigest(pub String);
-    impl std::ops::Deref for StateAdminGetResponseValue3WriterContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetResponseValue3WriterContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetResponseValue3WriterContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetResponseValue3WriterContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminGetResponseValue3entry {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateAdminGetResponseValue3entryKey>,
-        pub revision: crate::__types::trellis::StateAdminGetResponseValue3entryRevision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetResponseValue3entryKey(pub String);
-    impl std::ops::Deref for StateAdminGetResponseValue3entryKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetResponseValue3entryKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetResponseValue3entryKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetResponseValue3entryKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminGetResponseValue3entryRevision(pub String);
-    impl std::ops::Deref for StateAdminGetResponseValue3entryRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminGetResponseValue3entryRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminGetResponseValue3entryRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminGetResponseValue3entryRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    #[serde(transparent)]
-    pub struct StateAdminListRequest(pub crate::__types::Bytes);
-    impl std::ops::Deref for StateAdminListRequest {
-        type Target = crate::__types::Bytes;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<crate::__types::Bytes> for StateAdminListRequest {
-        fn from(value: crate::__types::Bytes) -> Self {
-            Self(value)
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminListRequestValue1 {
-        #[serde(rename = "contractDigest")]
-        pub contract_digest: crate::__types::trellis::StateAdminListRequestValue1ContractDigest,
-        #[serde(rename = "contractId")]
-        pub contract_id: crate::__types::trellis::StateAdminListRequestValue1ContractId,
-        pub limit: crate::__types::Uint64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub prefix: Option<crate::__types::trellis::StateAdminListRequestValue1Prefix>,
-        pub scope: crate::__types::trellis::StateAdminListRequestValue1Scope,
-        pub store: crate::__types::trellis::StateAdminListRequestValue1Store,
-        #[serde(rename = "userId")]
-        pub user_id: crate::__types::trellis::StateAdminListRequestValue1UserId,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListRequestValue1ContractDigest(pub String);
-    impl std::ops::Deref for StateAdminListRequestValue1ContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListRequestValue1ContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue1ContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue1ContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListRequestValue1ContractId(pub String);
-    impl std::ops::Deref for StateAdminListRequestValue1ContractId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListRequestValue1ContractId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue1ContractId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue1ContractId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListRequestValue1Prefix(pub String);
-    impl std::ops::Deref for StateAdminListRequestValue1Prefix {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListRequestValue1Prefix {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue1Prefix {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue1Prefix {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub enum StateAdminListRequestValue1Scope {
-        UserApp,
-        Unknown(String),
-    }
-    impl StateAdminListRequestValue1Scope {
-        pub fn as_str(&self) -> &str {
-            match self {
-                Self::UserApp => "userApp",
-                Self::Unknown(value) => value,
-            }
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue1Scope {
-        fn as_ref(&self) -> &str {
-            self.as_str()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue1Scope {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_str())
-        }
-    }
-    impl serde::Serialize for StateAdminListRequestValue1Scope {
-        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serializer.serialize_str(self.as_str())
-        }
-    }
-    impl<'de> serde::Deserialize<'de> for StateAdminListRequestValue1Scope {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-            Ok(match value.as_str() {
-                "userApp" => Self::UserApp,
-                _ => Self::Unknown(value),
-            })
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListRequestValue1Store(pub String);
-    impl std::ops::Deref for StateAdminListRequestValue1Store {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListRequestValue1Store {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue1Store {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue1Store {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListRequestValue1UserId(pub String);
-    impl std::ops::Deref for StateAdminListRequestValue1UserId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListRequestValue1UserId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue1UserId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue1UserId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminListRequestValue2 {
-        #[serde(rename = "contractDigest")]
-        pub contract_digest: crate::__types::trellis::StateAdminListRequestValue2ContractDigest,
-        #[serde(rename = "contractId")]
-        pub contract_id: crate::__types::trellis::StateAdminListRequestValue2ContractId,
-        #[serde(rename = "deviceId")]
-        pub device_id: crate::__types::trellis::StateAdminListRequestValue2DeviceId,
-        pub limit: crate::__types::Uint64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub prefix: Option<crate::__types::trellis::StateAdminListRequestValue2Prefix>,
-        pub scope: crate::__types::trellis::StateAdminListRequestValue2Scope,
-        pub store: crate::__types::trellis::StateAdminListRequestValue2Store,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListRequestValue2ContractDigest(pub String);
-    impl std::ops::Deref for StateAdminListRequestValue2ContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListRequestValue2ContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue2ContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue2ContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListRequestValue2ContractId(pub String);
-    impl std::ops::Deref for StateAdminListRequestValue2ContractId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListRequestValue2ContractId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue2ContractId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue2ContractId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListRequestValue2DeviceId(pub String);
-    impl std::ops::Deref for StateAdminListRequestValue2DeviceId {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListRequestValue2DeviceId {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue2DeviceId {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue2DeviceId {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListRequestValue2Prefix(pub String);
-    impl std::ops::Deref for StateAdminListRequestValue2Prefix {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListRequestValue2Prefix {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue2Prefix {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue2Prefix {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub enum StateAdminListRequestValue2Scope {
-        DeviceApp,
-        Unknown(String),
-    }
-    impl StateAdminListRequestValue2Scope {
-        pub fn as_str(&self) -> &str {
-            match self {
-                Self::DeviceApp => "deviceApp",
-                Self::Unknown(value) => value,
-            }
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue2Scope {
-        fn as_ref(&self) -> &str {
-            self.as_str()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue2Scope {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_str())
-        }
-    }
-    impl serde::Serialize for StateAdminListRequestValue2Scope {
-        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serializer.serialize_str(self.as_str())
-        }
-    }
-    impl<'de> serde::Deserialize<'de> for StateAdminListRequestValue2Scope {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-            Ok(match value.as_str() {
-                "deviceApp" => Self::DeviceApp,
-                _ => Self::Unknown(value),
-            })
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListRequestValue2Store(pub String);
-    impl std::ops::Deref for StateAdminListRequestValue2Store {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListRequestValue2Store {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListRequestValue2Store {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListRequestValue2Store {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminListResponse {
-        pub count: crate::__types::Uint64,
-        pub entries: Vec<crate::__types::Bytes>,
-        pub limit: crate::__types::Uint64,
-        #[serde(rename = "nextOffset")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub next_offset: Option<crate::__types::Uint64>,
-        pub offset: crate::__types::Uint64,
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminListResponseentriesItem1 {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateAdminListResponseentriesItem1Key>,
-        pub revision: crate::__types::trellis::StateAdminListResponseentriesItem1Revision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListResponseentriesItem1Key(pub String);
-    impl std::ops::Deref for StateAdminListResponseentriesItem1Key {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListResponseentriesItem1Key {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListResponseentriesItem1Key {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListResponseentriesItem1Key {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListResponseentriesItem1Revision(pub String);
-    impl std::ops::Deref for StateAdminListResponseentriesItem1Revision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListResponseentriesItem1Revision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListResponseentriesItem1Revision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListResponseentriesItem1Revision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminListResponseentriesItem2 {
-        #[serde(rename = "currentStateVersion")]
-        pub current_state_version:
-            crate::__types::trellis::StateAdminListResponseentriesItem2CurrentStateVersion,
-        pub entry: crate::__types::trellis::StateAdminListResponseentriesItem2entry,
-        #[serde(rename = "migrationRequired")]
-        pub migration_required: bool,
-        #[serde(rename = "stateVersion")]
-        pub state_version: crate::__types::trellis::StateAdminListResponseentriesItem2StateVersion,
-        #[serde(rename = "writerContractDigest")]
-        pub writer_contract_digest:
-            crate::__types::trellis::StateAdminListResponseentriesItem2WriterContractDigest,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListResponseentriesItem2CurrentStateVersion(pub String);
-    impl std::ops::Deref for StateAdminListResponseentriesItem2CurrentStateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListResponseentriesItem2CurrentStateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListResponseentriesItem2CurrentStateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListResponseentriesItem2CurrentStateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListResponseentriesItem2StateVersion(pub String);
-    impl std::ops::Deref for StateAdminListResponseentriesItem2StateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListResponseentriesItem2StateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListResponseentriesItem2StateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListResponseentriesItem2StateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListResponseentriesItem2WriterContractDigest(pub String);
-    impl std::ops::Deref for StateAdminListResponseentriesItem2WriterContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListResponseentriesItem2WriterContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListResponseentriesItem2WriterContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListResponseentriesItem2WriterContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateAdminListResponseentriesItem2entry {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateAdminListResponseentriesItem2entryKey>,
-        pub revision: crate::__types::trellis::StateAdminListResponseentriesItem2entryRevision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListResponseentriesItem2entryKey(pub String);
-    impl std::ops::Deref for StateAdminListResponseentriesItem2entryKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListResponseentriesItem2entryKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListResponseentriesItem2entryKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListResponseentriesItem2entryKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateAdminListResponseentriesItem2entryRevision(pub String);
-    impl std::ops::Deref for StateAdminListResponseentriesItem2entryRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateAdminListResponseentriesItem2entryRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateAdminListResponseentriesItem2entryRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateAdminListResponseentriesItem2entryRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateDeleteRequest {
-        #[serde(rename = "expectedRevision")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expected_revision: Option<crate::__types::trellis::StateDeleteRequestExpectedRevision>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateDeleteRequestKey>,
-        pub store: crate::__types::trellis::StateDeleteRequestStore,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateDeleteRequestExpectedRevision(pub String);
-    impl std::ops::Deref for StateDeleteRequestExpectedRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateDeleteRequestExpectedRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateDeleteRequestExpectedRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateDeleteRequestExpectedRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateDeleteRequestKey(pub String);
-    impl std::ops::Deref for StateDeleteRequestKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateDeleteRequestKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateDeleteRequestKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateDeleteRequestKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateDeleteRequestStore(pub String);
-    impl std::ops::Deref for StateDeleteRequestStore {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateDeleteRequestStore {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateDeleteRequestStore {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateDeleteRequestStore {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateDeleteResponse {
-        pub deleted: bool,
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateEntry {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateEntryKey>,
-        pub revision: crate::__types::trellis::StateEntryRevision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateEntryKey(pub String);
-    impl std::ops::Deref for StateEntryKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateEntryKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateEntryKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateEntryKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateEntryRevision(pub String);
-    impl std::ops::Deref for StateEntryRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateEntryRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateEntryRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateEntryRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateGetRequest {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateGetRequestKey>,
-        pub store: crate::__types::trellis::StateGetRequestStore,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateGetRequestKey(pub String);
-    impl std::ops::Deref for StateGetRequestKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateGetRequestKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateGetRequestKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateGetRequestKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateGetRequestStore(pub String);
-    impl std::ops::Deref for StateGetRequestStore {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateGetRequestStore {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateGetRequestStore {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateGetRequestStore {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    #[serde(transparent)]
-    pub struct StateGetResponse(pub crate::__types::Bytes);
-    impl std::ops::Deref for StateGetResponse {
-        type Target = crate::__types::Bytes;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<crate::__types::Bytes> for StateGetResponse {
-        fn from(value: crate::__types::Bytes) -> Self {
-            Self(value)
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateGetResponseValue1 {
-        pub found: bool,
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateGetResponseValue2 {
-        pub entry: crate::__types::trellis::StateGetResponseValue2entry,
-        pub found: bool,
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateGetResponseValue2entry {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateGetResponseValue2entryKey>,
-        pub revision: crate::__types::trellis::StateGetResponseValue2entryRevision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateGetResponseValue2entryKey(pub String);
-    impl std::ops::Deref for StateGetResponseValue2entryKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateGetResponseValue2entryKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateGetResponseValue2entryKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateGetResponseValue2entryKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateGetResponseValue2entryRevision(pub String);
-    impl std::ops::Deref for StateGetResponseValue2entryRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateGetResponseValue2entryRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateGetResponseValue2entryRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateGetResponseValue2entryRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateGetResponseValue3 {
-        #[serde(rename = "currentStateVersion")]
-        pub current_state_version:
-            crate::__types::trellis::StateGetResponseValue3CurrentStateVersion,
-        pub entry: crate::__types::trellis::StateGetResponseValue3entry,
-        #[serde(rename = "migrationRequired")]
-        pub migration_required: bool,
-        #[serde(rename = "stateVersion")]
-        pub state_version: crate::__types::trellis::StateGetResponseValue3StateVersion,
-        #[serde(rename = "writerContractDigest")]
-        pub writer_contract_digest:
-            crate::__types::trellis::StateGetResponseValue3WriterContractDigest,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateGetResponseValue3CurrentStateVersion(pub String);
-    impl std::ops::Deref for StateGetResponseValue3CurrentStateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateGetResponseValue3CurrentStateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateGetResponseValue3CurrentStateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateGetResponseValue3CurrentStateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateGetResponseValue3StateVersion(pub String);
-    impl std::ops::Deref for StateGetResponseValue3StateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateGetResponseValue3StateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateGetResponseValue3StateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateGetResponseValue3StateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateGetResponseValue3WriterContractDigest(pub String);
-    impl std::ops::Deref for StateGetResponseValue3WriterContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateGetResponseValue3WriterContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateGetResponseValue3WriterContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateGetResponseValue3WriterContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateGetResponseValue3entry {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateGetResponseValue3entryKey>,
-        pub revision: crate::__types::trellis::StateGetResponseValue3entryRevision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateGetResponseValue3entryKey(pub String);
-    impl std::ops::Deref for StateGetResponseValue3entryKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateGetResponseValue3entryKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateGetResponseValue3entryKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateGetResponseValue3entryKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateGetResponseValue3entryRevision(pub String);
-    impl std::ops::Deref for StateGetResponseValue3entryRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateGetResponseValue3entryRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateGetResponseValue3entryRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateGetResponseValue3entryRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateListRequest {
-        pub limit: crate::__types::Uint64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub offset: Option<crate::__types::Uint64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub prefix: Option<crate::__types::trellis::StateListRequestPrefix>,
-        pub store: crate::__types::trellis::StateListRequestStore,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateListRequestPrefix(pub String);
-    impl std::ops::Deref for StateListRequestPrefix {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateListRequestPrefix {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateListRequestPrefix {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateListRequestPrefix {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateListRequestStore(pub String);
-    impl std::ops::Deref for StateListRequestStore {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateListRequestStore {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateListRequestStore {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateListRequestStore {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateListResponse {
-        pub count: crate::__types::Uint64,
-        pub entries: Vec<crate::__types::Bytes>,
-        pub limit: crate::__types::Uint64,
-        #[serde(rename = "nextOffset")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub next_offset: Option<crate::__types::Uint64>,
-        pub offset: crate::__types::Uint64,
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateListResponseentriesItem1 {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateListResponseentriesItem1Key>,
-        pub revision: crate::__types::trellis::StateListResponseentriesItem1Revision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateListResponseentriesItem1Key(pub String);
-    impl std::ops::Deref for StateListResponseentriesItem1Key {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateListResponseentriesItem1Key {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateListResponseentriesItem1Key {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateListResponseentriesItem1Key {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateListResponseentriesItem1Revision(pub String);
-    impl std::ops::Deref for StateListResponseentriesItem1Revision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateListResponseentriesItem1Revision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateListResponseentriesItem1Revision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateListResponseentriesItem1Revision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateListResponseentriesItem2 {
-        #[serde(rename = "currentStateVersion")]
-        pub current_state_version:
-            crate::__types::trellis::StateListResponseentriesItem2CurrentStateVersion,
-        pub entry: crate::__types::trellis::StateListResponseentriesItem2entry,
-        #[serde(rename = "migrationRequired")]
-        pub migration_required: bool,
-        #[serde(rename = "stateVersion")]
-        pub state_version: crate::__types::trellis::StateListResponseentriesItem2StateVersion,
-        #[serde(rename = "writerContractDigest")]
-        pub writer_contract_digest:
-            crate::__types::trellis::StateListResponseentriesItem2WriterContractDigest,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateListResponseentriesItem2CurrentStateVersion(pub String);
-    impl std::ops::Deref for StateListResponseentriesItem2CurrentStateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateListResponseentriesItem2CurrentStateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateListResponseentriesItem2CurrentStateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateListResponseentriesItem2CurrentStateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateListResponseentriesItem2StateVersion(pub String);
-    impl std::ops::Deref for StateListResponseentriesItem2StateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateListResponseentriesItem2StateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateListResponseentriesItem2StateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateListResponseentriesItem2StateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateListResponseentriesItem2WriterContractDigest(pub String);
-    impl std::ops::Deref for StateListResponseentriesItem2WriterContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateListResponseentriesItem2WriterContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateListResponseentriesItem2WriterContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateListResponseentriesItem2WriterContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateListResponseentriesItem2entry {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateListResponseentriesItem2entryKey>,
-        pub revision: crate::__types::trellis::StateListResponseentriesItem2entryRevision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateListResponseentriesItem2entryKey(pub String);
-    impl std::ops::Deref for StateListResponseentriesItem2entryKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateListResponseentriesItem2entryKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateListResponseentriesItem2entryKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateListResponseentriesItem2entryKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateListResponseentriesItem2entryRevision(pub String);
-    impl std::ops::Deref for StateListResponseentriesItem2entryRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateListResponseentriesItem2entryRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateListResponseentriesItem2entryRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateListResponseentriesItem2entryRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateMigrationRequired {
-        #[serde(rename = "currentStateVersion")]
-        pub current_state_version:
-            crate::__types::trellis::StateMigrationRequiredCurrentStateVersion,
-        pub entry: crate::__types::trellis::StateMigrationRequiredentry,
-        #[serde(rename = "migrationRequired")]
-        pub migration_required: bool,
-        #[serde(rename = "stateVersion")]
-        pub state_version: crate::__types::trellis::StateMigrationRequiredStateVersion,
-        #[serde(rename = "writerContractDigest")]
-        pub writer_contract_digest:
-            crate::__types::trellis::StateMigrationRequiredWriterContractDigest,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateMigrationRequiredCurrentStateVersion(pub String);
-    impl std::ops::Deref for StateMigrationRequiredCurrentStateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateMigrationRequiredCurrentStateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateMigrationRequiredCurrentStateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateMigrationRequiredCurrentStateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateMigrationRequiredStateVersion(pub String);
-    impl std::ops::Deref for StateMigrationRequiredStateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateMigrationRequiredStateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateMigrationRequiredStateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateMigrationRequiredStateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateMigrationRequiredWriterContractDigest(pub String);
-    impl std::ops::Deref for StateMigrationRequiredWriterContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateMigrationRequiredWriterContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateMigrationRequiredWriterContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateMigrationRequiredWriterContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StateMigrationRequiredentry {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StateMigrationRequiredentryKey>,
-        pub revision: crate::__types::trellis::StateMigrationRequiredentryRevision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateMigrationRequiredentryKey(pub String);
-    impl std::ops::Deref for StateMigrationRequiredentryKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateMigrationRequiredentryKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateMigrationRequiredentryKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateMigrationRequiredentryKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StateMigrationRequiredentryRevision(pub String);
-    impl std::ops::Deref for StateMigrationRequiredentryRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StateMigrationRequiredentryRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StateMigrationRequiredentryRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StateMigrationRequiredentryRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StatePutRequest {
-        #[serde(rename = "expectedRevision")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expected_revision: Option<
-            crate::__types::Nullable<crate::__types::trellis::StatePutRequestExpectedRevision>,
-        >,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StatePutRequestKey>,
-        pub store: crate::__types::trellis::StatePutRequestStore,
+        pub representation_version: Option<crate::__types::trellis::StateRepresentationVersion>,
         #[serde(rename = "ttlMs")]
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub ttl_ms: Option<crate::__types::trellis::StatePutRequestTtlMs>,
-        pub value: crate::__types::Bytes,
+        pub ttl_ms: Option<crate::__types::Uint64>,
     }
     #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+        Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
     )]
     #[serde(transparent)]
-    pub struct StatePutRequestExpectedRevision(pub String);
-    impl std::ops::Deref for StatePutRequestExpectedRevision {
-        type Target = String;
+    pub struct ResourceBindingRevision(pub crate::__types::Int64);
+    impl std::ops::Deref for ResourceBindingRevision {
+        type Target = crate::__types::Int64;
         fn deref(&self) -> &Self::Target {
             &self.0
         }
     }
-    impl From<String> for StatePutRequestExpectedRevision {
-        fn from(value: String) -> Self {
+    impl From<crate::__types::Int64> for ResourceBindingRevision {
+        fn from(value: crate::__types::Int64) -> Self {
             Self(value)
-        }
-    }
-    impl AsRef<str> for StatePutRequestExpectedRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StatePutRequestExpectedRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StatePutRequestKey(pub String);
-    impl std::ops::Deref for StatePutRequestKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StatePutRequestKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StatePutRequestKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StatePutRequestKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StatePutRequestStore(pub String);
-    impl std::ops::Deref for StatePutRequestStore {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StatePutRequestStore {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StatePutRequestStore {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StatePutRequestStore {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
         }
     }
     #[derive(
         Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
     )]
     #[serde(transparent)]
-    pub struct StatePutRequestTtlMs(pub crate::__types::Int64);
-    impl std::ops::Deref for StatePutRequestTtlMs {
+    pub struct ResourceCapacityBytes(pub crate::__types::Uint64);
+    impl std::ops::Deref for ResourceCapacityBytes {
+        type Target = crate::__types::Uint64;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl From<crate::__types::Uint64> for ResourceCapacityBytes {
+        fn from(value: crate::__types::Uint64) -> Self {
+            Self(value)
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ResourceCommitment {
+        #[serde(rename = "desiredMaxObjectBytes")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub desired_max_object_bytes: Option<crate::__types::trellis::ResourceCapacityBytes>,
+        #[serde(rename = "desiredMaxTotalBytes")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub desired_max_total_bytes: Option<crate::__types::trellis::ResourceCapacityBytes>,
+        #[serde(rename = "desiredMaxValueBytes")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub desired_max_value_bytes: Option<crate::__types::trellis::ResourceCapacityBytes>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub history: Option<crate::__types::trellis::ResourceHistory>,
+        #[serde(rename = "ttlMs")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub ttl_ms: Option<crate::__types::Uint64>,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ResourceDesired {
+        pub commitment: crate::__types::trellis::ResourceCommitment,
+        #[serde(rename = "representationVersion")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub representation_version: Option<crate::__types::trellis::StateRepresentationVersion>,
+    }
+    #[derive(
+        Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    )]
+    #[serde(transparent)]
+    pub struct ResourceHistory(pub crate::__types::Uint64);
+    impl std::ops::Deref for ResourceHistory {
+        type Target = crate::__types::Uint64;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl From<crate::__types::Uint64> for ResourceHistory {
+        fn from(value: crate::__types::Uint64) -> Self {
+            Self(value)
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ResourceHistoryEntry {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub actual: Option<crate::__types::trellis::ResourceActual>,
+        #[serde(rename = "changedAt")]
+        pub changed_at: String,
+        pub desired: crate::__types::trellis::ResourceDesired,
+        pub state: crate::__types::trellis::ResourceLifecycleState,
+        pub version: crate::__types::trellis::ResourceVersion,
+    }
+    #[derive(
+        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    )]
+    #[serde(transparent)]
+    pub struct ResourceId(pub String);
+    impl std::ops::Deref for ResourceId {
+        type Target = String;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl From<String> for ResourceId {
+        fn from(value: String) -> Self {
+            Self(value)
+        }
+    }
+    impl AsRef<str> for ResourceId {
+        fn as_ref(&self) -> &str {
+            self.0.as_ref()
+        }
+    }
+    impl std::fmt::Display for ResourceId {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_ref())
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ResourceInspection {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub actual: Option<crate::__types::trellis::ResourceActual>,
+        #[serde(rename = "bindingRevision")]
+        pub binding_revision: crate::__types::trellis::ResourceBindingRevision,
+        pub commitment: crate::__types::trellis::ResourceCommitment,
+        #[serde(rename = "createdAt")]
+        pub created_at: String,
+        pub desired: crate::__types::trellis::ResourceDesired,
+        pub history: Vec<crate::__types::trellis::ResourceHistoryEntry>,
+        pub kind: crate::__types::trellis::ResourceKind,
+        #[serde(rename = "localName")]
+        pub local_name: crate::__types::trellis::ResourceLocalName,
+        #[serde(rename = "ownerId")]
+        pub owner_id: crate::__types::trellis::ResourceOwnerId,
+        #[serde(rename = "ownerKind")]
+        pub owner_kind: crate::__types::trellis::ResourceOwnerKind,
+        #[serde(rename = "participantId")]
+        pub participant_id: crate::__types::trellis::ResourceParticipantId,
+        #[serde(rename = "physicalId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub physical_id: Option<crate::__types::trellis::ResourcePhysicalId>,
+        pub readiness: crate::__types::trellis::ResourceReadiness,
+        #[serde(rename = "resourceId")]
+        pub resource_id: crate::__types::trellis::ResourceId,
+        pub state: crate::__types::trellis::ResourceLifecycleState,
+        #[serde(rename = "updatedAt")]
+        pub updated_at: String,
+        pub version: crate::__types::trellis::ResourceVersion,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum ResourceKind {
+        Consumer,
+        Job,
+        Kv,
+        State,
+        Store,
+        Unknown(String),
+    }
+    impl ResourceKind {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Consumer => "consumer",
+                Self::Job => "job",
+                Self::Kv => "kv",
+                Self::State => "state",
+                Self::Store => "store",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for ResourceKind {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for ResourceKind {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for ResourceKind {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for ResourceKind {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "consumer" => Self::Consumer,
+                "job" => Self::Job,
+                "kv" => Self::Kv,
+                "state" => Self::State,
+                "store" => Self::Store,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum ResourceLifecycleState {
+        Destroying,
+        Detached,
+        Failed,
+        Pending,
+        Ready,
+        Unknown(String),
+    }
+    impl ResourceLifecycleState {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Destroying => "destroying",
+                Self::Detached => "detached",
+                Self::Failed => "failed",
+                Self::Pending => "pending",
+                Self::Ready => "ready",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for ResourceLifecycleState {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for ResourceLifecycleState {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for ResourceLifecycleState {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for ResourceLifecycleState {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "destroying" => Self::Destroying,
+                "detached" => Self::Detached,
+                "failed" => Self::Failed,
+                "pending" => Self::Pending,
+                "ready" => Self::Ready,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
+    #[derive(
+        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    )]
+    #[serde(transparent)]
+    pub struct ResourceLocalName(pub String);
+    impl std::ops::Deref for ResourceLocalName {
+        type Target = String;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl From<String> for ResourceLocalName {
+        fn from(value: String) -> Self {
+            Self(value)
+        }
+    }
+    impl AsRef<str> for ResourceLocalName {
+        fn as_ref(&self) -> &str {
+            self.0.as_ref()
+        }
+    }
+    impl std::fmt::Display for ResourceLocalName {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_ref())
+        }
+    }
+    #[derive(
+        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    )]
+    #[serde(transparent)]
+    pub struct ResourceOwnerId(pub String);
+    impl std::ops::Deref for ResourceOwnerId {
+        type Target = String;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl From<String> for ResourceOwnerId {
+        fn from(value: String) -> Self {
+            Self(value)
+        }
+    }
+    impl AsRef<str> for ResourceOwnerId {
+        fn as_ref(&self) -> &str {
+            self.0.as_ref()
+        }
+    }
+    impl std::fmt::Display for ResourceOwnerId {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_ref())
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum ResourceOwnerKind {
+        Agent,
+        App,
+        Device,
+        Service,
+        Unknown(String),
+    }
+    impl ResourceOwnerKind {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Agent => "agent",
+                Self::App => "app",
+                Self::Device => "device",
+                Self::Service => "service",
+                Self::Unknown(value) => value,
+            }
+        }
+    }
+    impl AsRef<str> for ResourceOwnerKind {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for ResourceOwnerKind {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for ResourceOwnerKind {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for ResourceOwnerKind {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "agent" => Self::Agent,
+                "app" => Self::App,
+                "device" => Self::Device,
+                "service" => Self::Service,
+                _ => Self::Unknown(value),
+            })
+        }
+    }
+    #[derive(
+        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    )]
+    #[serde(transparent)]
+    pub struct ResourceParticipantId(pub String);
+    impl std::ops::Deref for ResourceParticipantId {
+        type Target = String;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl From<String> for ResourceParticipantId {
+        fn from(value: String) -> Self {
+            Self(value)
+        }
+    }
+    impl AsRef<str> for ResourceParticipantId {
+        fn as_ref(&self) -> &str {
+            self.0.as_ref()
+        }
+    }
+    impl std::fmt::Display for ResourceParticipantId {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_ref())
+        }
+    }
+    #[derive(
+        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    )]
+    #[serde(transparent)]
+    pub struct ResourcePhysicalId(pub String);
+    impl std::ops::Deref for ResourcePhysicalId {
+        type Target = String;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl From<String> for ResourcePhysicalId {
+        fn from(value: String) -> Self {
+            Self(value)
+        }
+    }
+    impl AsRef<str> for ResourcePhysicalId {
+        fn as_ref(&self) -> &str {
+            self.0.as_ref()
+        }
+    }
+    impl std::fmt::Display for ResourcePhysicalId {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_ref())
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ResourceReadiness {
+        pub ready: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub reason: Option<String>,
+    }
+    #[derive(
+        Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    )]
+    #[serde(transparent)]
+    pub struct ResourceVersion(pub crate::__types::Int64);
+    impl std::ops::Deref for ResourceVersion {
         type Target = crate::__types::Int64;
         fn deref(&self) -> &Self::Target {
             &self.0
         }
     }
-    impl From<crate::__types::Int64> for StatePutRequestTtlMs {
+    impl From<crate::__types::Int64> for ResourceVersion {
         fn from(value: crate::__types::Int64) -> Self {
             Self(value)
         }
     }
-    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    #[serde(transparent)]
-    pub struct StatePutResponse(pub crate::__types::Bytes);
-    impl std::ops::Deref for StatePutResponse {
-        type Target = crate::__types::Bytes;
-        fn deref(&self) -> &Self::Target {
-            &self.0
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ResourcesDestroyRequest {
+        #[serde(rename = "confirmPhysicalId")]
+        pub confirm_physical_id: crate::__types::trellis::ResourcePhysicalId,
+        #[serde(rename = "expectedRevision")]
+        pub expected_revision: crate::__types::trellis::ResourceBindingRevision,
+        #[serde(rename = "resourceId")]
+        pub resource_id: crate::__types::trellis::ResourceId,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ResourcesDestroyResponse {
+        pub destroyed: bool,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ResourcesInspectRequest {
+        #[serde(rename = "resourceId")]
+        pub resource_id: crate::__types::trellis::ResourceId,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ResourcesInspectResponse {
+        pub resource: crate::__types::trellis::ResourceInspection,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct ResourcesQueryRequest {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub kind: Option<crate::__types::trellis::ResourceKind>,
+        #[serde(rename = "ownerId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub owner_id: Option<crate::__types::trellis::ResourceOwnerId>,
+        #[serde(rename = "ownerKind")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub owner_kind: Option<crate::__types::trellis::ResourceOwnerKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub page: Option<crate::__types::CursorQuery>,
+        #[serde(rename = "participantId")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub participant_id: Option<crate::__types::trellis::ResourceParticipantId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub state: Option<crate::__types::trellis::ResourceLifecycleState>,
+    }
+    pub type ResourcesQueryResponse =
+        crate::__types::CursorPage<crate::__types::trellis::ResourceInspection>;
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct StateConflict {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub current: Option<crate::__types::trellis::StoredState>,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct StateDeleteRequest {
+        #[serde(rename = "resourceName")]
+        pub resource_name: crate::__types::trellis::StateResourceName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub revision: Option<crate::__types::trellis::StateRevision>,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct StateDeleteResponse {
+        pub deleted: bool,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct StateGetRequest {
+        #[serde(rename = "resourceName")]
+        pub resource_name: crate::__types::trellis::StateResourceName,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct StateGetResponse {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub entry: Option<crate::__types::trellis::StoredState>,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum StatePutMode {
+        Create,
+        Replace,
+        Set,
+        Unknown(String),
+    }
+    impl StatePutMode {
+        pub fn as_str(&self) -> &str {
+            match self {
+                Self::Create => "create",
+                Self::Replace => "replace",
+                Self::Set => "set",
+                Self::Unknown(value) => value,
+            }
         }
     }
-    impl From<crate::__types::Bytes> for StatePutResponse {
-        fn from(value: crate::__types::Bytes) -> Self {
-            Self(value)
+    impl AsRef<str> for StatePutMode {
+        fn as_ref(&self) -> &str {
+            self.as_str()
+        }
+    }
+    impl std::fmt::Display for StatePutMode {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str(self.as_str())
+        }
+    }
+    impl serde::Serialize for StatePutMode {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str())
+        }
+    }
+    impl<'de> serde::Deserialize<'de> for StatePutMode {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            Ok(match value.as_str() {
+                "create" => Self::Create,
+                "replace" => Self::Replace,
+                "set" => Self::Set,
+                _ => Self::Unknown(value),
+            })
         }
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StatePutResponseValue1 {
-        pub applied: bool,
-        pub entry: crate::__types::trellis::StatePutResponseValue1entry,
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StatePutResponseValue1entry {
-        #[serde(rename = "expiresAt")]
+    pub struct StatePutRequest {
+        pub mode: crate::__types::trellis::StatePutMode,
+        #[serde(rename = "representationVersion")]
+        pub representation_version: crate::__types::trellis::StateRepresentationVersion,
+        #[serde(rename = "resourceName")]
+        pub resource_name: crate::__types::trellis::StateResourceName,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StatePutResponseValue1entryKey>,
-        pub revision: crate::__types::trellis::StatePutResponseValue1entryRevision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
+        pub revision: Option<crate::__types::trellis::StateRevision>,
         pub value: crate::__types::Bytes,
     }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct StatePutResponse {
+        pub entry: crate::__types::trellis::StoredState,
+    }
+    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    pub struct StateRepresentationError {
+        #[serde(rename = "representationVersion")]
+        pub representation_version: crate::__types::trellis::StateRepresentationVersion,
+        #[serde(rename = "resourceName")]
+        pub resource_name: crate::__types::trellis::StateResourceName,
+    }
+    #[derive(
+        Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+    )]
+    #[serde(transparent)]
+    pub struct StateRepresentationVersion(pub u32);
+    impl std::ops::Deref for StateRepresentationVersion {
+        type Target = u32;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+    impl From<u32> for StateRepresentationVersion {
+        fn from(value: u32) -> Self {
+            Self(value)
+        }
+    }
     #[derive(
         Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
     )]
     #[serde(transparent)]
-    pub struct StatePutResponseValue1entryKey(pub String);
-    impl std::ops::Deref for StatePutResponseValue1entryKey {
+    pub struct StateResourceName(pub String);
+    impl std::ops::Deref for StateResourceName {
         type Target = String;
         fn deref(&self) -> &Self::Target {
             &self.0
         }
     }
-    impl From<String> for StatePutResponseValue1entryKey {
+    impl From<String> for StateResourceName {
         fn from(value: String) -> Self {
             Self(value)
         }
     }
-    impl AsRef<str> for StatePutResponseValue1entryKey {
+    impl AsRef<str> for StateResourceName {
         fn as_ref(&self) -> &str {
             self.0.as_ref()
         }
     }
-    impl std::fmt::Display for StatePutResponseValue1entryKey {
+    impl std::fmt::Display for StateResourceName {
         fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             formatter.write_str(self.as_ref())
         }
@@ -42428,254 +40866,38 @@ pub mod trellis {
         Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
     )]
     #[serde(transparent)]
-    pub struct StatePutResponseValue1entryRevision(pub String);
-    impl std::ops::Deref for StatePutResponseValue1entryRevision {
+    pub struct StateRevision(pub String);
+    impl std::ops::Deref for StateRevision {
         type Target = String;
         fn deref(&self) -> &Self::Target {
             &self.0
         }
     }
-    impl From<String> for StatePutResponseValue1entryRevision {
+    impl From<String> for StateRevision {
         fn from(value: String) -> Self {
             Self(value)
         }
     }
-    impl AsRef<str> for StatePutResponseValue1entryRevision {
+    impl AsRef<str> for StateRevision {
         fn as_ref(&self) -> &str {
             self.0.as_ref()
         }
     }
-    impl std::fmt::Display for StatePutResponseValue1entryRevision {
+    impl std::fmt::Display for StateRevision {
         fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             formatter.write_str(self.as_ref())
         }
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StatePutResponseValue2 {
-        pub applied: bool,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub entry: Option<crate::__types::Bytes>,
-        pub found: bool,
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StatePutResponseValue2entry1 {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StatePutResponseValue2entry1Key>,
-        pub revision: crate::__types::trellis::StatePutResponseValue2entry1Revision,
+    pub struct StoredState {
+        #[serde(rename = "createdAt")]
+        pub created_at: trellis_rs::generated::Timestamp,
+        #[serde(rename = "representationVersion")]
+        pub representation_version: crate::__types::trellis::StateRepresentationVersion,
+        pub revision: crate::__types::trellis::StateRevision,
         #[serde(rename = "updatedAt")]
-        pub updated_at: String,
+        pub updated_at: trellis_rs::generated::Timestamp,
         pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StatePutResponseValue2entry1Key(pub String);
-    impl std::ops::Deref for StatePutResponseValue2entry1Key {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StatePutResponseValue2entry1Key {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StatePutResponseValue2entry1Key {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StatePutResponseValue2entry1Key {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StatePutResponseValue2entry1Revision(pub String);
-    impl std::ops::Deref for StatePutResponseValue2entry1Revision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StatePutResponseValue2entry1Revision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StatePutResponseValue2entry1Revision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StatePutResponseValue2entry1Revision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StatePutResponseValue2entry2 {
-        #[serde(rename = "currentStateVersion")]
-        pub current_state_version:
-            crate::__types::trellis::StatePutResponseValue2entry2CurrentStateVersion,
-        pub entry: crate::__types::trellis::StatePutResponseValue2entry2entry,
-        #[serde(rename = "migrationRequired")]
-        pub migration_required: bool,
-        #[serde(rename = "stateVersion")]
-        pub state_version: crate::__types::trellis::StatePutResponseValue2entry2StateVersion,
-        #[serde(rename = "writerContractDigest")]
-        pub writer_contract_digest:
-            crate::__types::trellis::StatePutResponseValue2entry2WriterContractDigest,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StatePutResponseValue2entry2CurrentStateVersion(pub String);
-    impl std::ops::Deref for StatePutResponseValue2entry2CurrentStateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StatePutResponseValue2entry2CurrentStateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StatePutResponseValue2entry2CurrentStateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StatePutResponseValue2entry2CurrentStateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StatePutResponseValue2entry2StateVersion(pub String);
-    impl std::ops::Deref for StatePutResponseValue2entry2StateVersion {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StatePutResponseValue2entry2StateVersion {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StatePutResponseValue2entry2StateVersion {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StatePutResponseValue2entry2StateVersion {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StatePutResponseValue2entry2WriterContractDigest(pub String);
-    impl std::ops::Deref for StatePutResponseValue2entry2WriterContractDigest {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StatePutResponseValue2entry2WriterContractDigest {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StatePutResponseValue2entry2WriterContractDigest {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StatePutResponseValue2entry2WriterContractDigest {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-    pub struct StatePutResponseValue2entry2entry {
-        #[serde(rename = "expiresAt")]
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub expires_at: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub key: Option<crate::__types::trellis::StatePutResponseValue2entry2entryKey>,
-        pub revision: crate::__types::trellis::StatePutResponseValue2entry2entryRevision,
-        #[serde(rename = "updatedAt")]
-        pub updated_at: String,
-        pub value: crate::__types::Bytes,
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StatePutResponseValue2entry2entryKey(pub String);
-    impl std::ops::Deref for StatePutResponseValue2entry2entryKey {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StatePutResponseValue2entry2entryKey {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StatePutResponseValue2entry2entryKey {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StatePutResponseValue2entry2entryKey {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
-    }
-    #[derive(
-        Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-    )]
-    #[serde(transparent)]
-    pub struct StatePutResponseValue2entry2entryRevision(pub String);
-    impl std::ops::Deref for StatePutResponseValue2entry2entryRevision {
-        type Target = String;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-    impl From<String> for StatePutResponseValue2entry2entryRevision {
-        fn from(value: String) -> Self {
-            Self(value)
-        }
-    }
-    impl AsRef<str> for StatePutResponseValue2entry2entryRevision {
-        fn as_ref(&self) -> &str {
-            self.0.as_ref()
-        }
-    }
-    impl std::fmt::Display for StatePutResponseValue2entry2entryRevision {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str(self.as_ref())
-        }
     }
     #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
     pub struct TrellisSurfaceStatusRequest {

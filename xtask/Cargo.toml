@@ -14,6 +14,8 @@ tokio = { version = "1.51.1", features = ["rt-multi-thread"] }
 trellis-cli = { path = "../rust/crates/cli", default-features = false }
 trellis-codegen-ts = { path = "../rust/crates/codegen-ts" }
 trellis-codegen-rust = { path = "../rust/crates/codegen-rust" }
+trellis-idl = { path = "../rust/crates/idl" }
+trellis-protocol = { path = "../rust/crates/protocol" }
 wasm-bindgen-cli-support = "=0.2.125"
 
 [[bin]]

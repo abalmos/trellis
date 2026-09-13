@@ -5,14 +5,14 @@ name = "trellis"
 version = "0.12.0"
 
 [sources]
-types = "contracts/types.trellis"
-auth = "contracts/auth.trellis"
-core = "contracts/core.trellis"
-state = "contracts/state.trellis"
-health = "contracts/health.trellis"
-jobs = "contracts/jobs.trellis"
-events = "contracts/events.trellis"
-participants = "contracts/participants.trellis"
+types = "src/builtin_source/types.trellis"
+auth = "src/builtin_source/auth.trellis"
+core = "src/builtin_source/core.trellis"
+state = "src/builtin_source/state.trellis"
+health = "src/builtin_source/health.trellis"
+jobs = "src/builtin_source/jobs.trellis"
+events = "src/builtin_source/events.trellis"
+participants = "src/builtin_source/participants.trellis"
 
 [registries.trellis]
 prefix = "ghcr.io/qlever-llc/trellis-apis"

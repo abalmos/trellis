@@ -480,7 +480,7 @@ ${storage("jobs")}
 transport_retention_hours = 1
 transport_max_bytes = 16777216
 ${storage("health")}
-${storage("eventlog")}
+${storage("events")}
 `,
   );
   return configPath;

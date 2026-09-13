@@ -1,35 +1,42 @@
-# Use object stores
+# Use Store resources from TypeScript
 
-Declare the store on the participant and generate the project:
+Declare a `store` resource with title, description, TTL, and optional desired
+capacity. Store is raw object bytes plus metadata; it has no schema or
+representation migration.
 
 ```trellis
-participant "acme.documents@v1" service {
-  implements "acme.documents-api@v1";
+service Documents {
   store documents {
-    purpose "Document objects.";
-    ttl_ms 0;
-    max_object_bytes 1048576;
-    max_total_bytes 104857600;
+    title "Documents";
+    description "Document objects.";
+    ttl 0;
+    desired_max_object 1MiB;
+    desired_max_total 100MiB;
   }
 }
 ```
 
-Use the resolved `service.store` handle after `TrellisService.connect(...)`; do not construct store bindings in application code.
+`desired_max_object` and `desired_max_total` are planning hints. They do not
+grant approval, determine readiness, configure an enforced limit, or report the
+limits the service actually receives.
 
-For example, after connecting and registering the service lifecycle:
+Connect through the generated participant and use its Store handle. Trellis
+resolves physical identity and actual limits. Stream reads/writes, preserve
+checksums, and propagate cancellation; do not derive bucket names or buffer
+large objects for JSON validation.
 
-```ts
-const store = await service.store.documents.open().orThrow();
-const entry = await store.get("invoice.pdf").orThrow();
-const bytes = await entry.bytes().orThrow();
-console.log(bytes.length);
-```
+Bindings report observed or effective `ttlMs`, `maxTotalBytes`, and
+`maxObjectBytes`. `maxObjectBytes` is present only when the runtime write path
+actually enforces it; do not infer it from `desired_max_object`.
 
-Keys are logical object names within this service's resolved store. Store limits
-are runtime-enforced. Do not construct a bucket name or grant access by passing
-binding metadata to another participant.
+List with `{ prefix?, cursor?, limit? }`. Results contain only `entries` and an
+optional `nextCursor`, ordered by object key. The default limit is `100`, and
+the maximum is `500`.
 
-For caller uploads or downloads, declare a transfer-capable operation and bind
-it to this store in the provider participant. Transfer completion verifies the
-exact byte count and SHA-256 digest; an operation response alone is not evidence
-that the bytes arrived intact. Prefer streaming bodies for large objects.
+Pass `nextCursor` unchanged with the same prefix. A malformed cursor or one from
+a different query is rejected. No `nextCursor` means the listing is complete.
+Listing is live rather than a snapshot, but inserting or deleting keys before
+the continuation does not duplicate or skip remaining keys after it.
+
+Trellis never adopts a foreign store as the declared resource and never destroys
+a store without matching Trellis ownership evidence.

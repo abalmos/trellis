@@ -17,7 +17,7 @@ https://raw.githubusercontent.com/qlever-llc/trellis/main/docs/static/llms-types
 ## Browser app setup
 
 Author the app in `contract.trellis`, run `trellis generate`, and pass its
-generated participant module to the Svelte integration. Set `format = 1` and a
+generated participant module to the Svelte integration. Set `[package]` and a
 package `name`, here `dashboard-trellis`, in `trellis.toml`. Install the resulting
 ordinary ESM package through your application's package manager.
 
@@ -104,9 +104,9 @@ records, `Auth.Users.Resolve` resolves explicit ids without requesting directory
 access. Application-owned profiles or user tables remain an application choice.
 
 ```trellis
-participant "acme.dashboard@v1" app {
+app Dashboard {
   implements "acme.dashboard@v1";
-  use required orders "acme.orders@v1" {
+  use orders {
     call rpc "Orders.Get";
   }
 }

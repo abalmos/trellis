@@ -4,14 +4,14 @@ import { type participants } from "../../../trellis/index.js";
 import { recordActivity } from "../activity/index.ts";
 
 type Handler = RpcHandler<
-  typeof participants.demoService.participant,
+  typeof participants.Service.participant,
   "Evidence.Delete"
 >;
 
 /** Deletes a stored evidence object from the demo evidence locker. */
 export const deleteEvidence: Handler = async ({ input, client }) => {
-  const uploads = await client.store.uploads.open().orThrow();
-  await uploads.delete(input.key).orThrow();
+  await (await client.store.uploads.open().orThrow()).delete(input.key)
+    .orThrow();
   await recordActivity(client, {
     kind: "evidence-deleted",
     message: `Deleted evidence upload ${input.key}`,

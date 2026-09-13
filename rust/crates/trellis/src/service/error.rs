@@ -238,7 +238,7 @@ pub enum ServerError {
 
     #[error("operation '{operation_id}' is already terminal in state '{state}'")]
     #[doc(hidden)]
-    OperationTerminal { operation_id: String, state: String },
+    OperationAlreadyTerminal { operation_id: String, state: String },
 
     #[error("operation '{operation}' does not support '{action}'")]
     #[doc(hidden)]
@@ -263,6 +263,15 @@ pub enum ServerError {
         resource_kind: String,
         resource_name: String,
         reason: String,
+    },
+
+    /// A retained resource handle no longer names the current usable binding.
+    #[error("{resource_kind} resource binding '{resource_name}' is no longer available")]
+    ResourceUnavailable {
+        /// Resource family.
+        resource_kind: String,
+        /// Participant-local resource name.
+        resource_name: String,
     },
 
     /// Waiting for an object-store key exceeded the configured timeout.
@@ -325,6 +334,26 @@ pub enum ServerError {
     /// A bound object-store download was cancelled.
     #[error("store object download cancelled")]
     StoreReadCancelled,
+
+    /// A durable operation value exceeded its storage capacity.
+    #[error("operation {field} exceeds capacity: {actual_bytes} bytes, max {max_bytes} bytes")]
+    OperationCapacityExceeded {
+        /// Persisted field that exceeded its limit.
+        field: &'static str,
+        /// Encoded size that was rejected.
+        actual_bytes: usize,
+        /// Maximum encoded size.
+        max_bytes: usize,
+    },
+
+    /// An idempotency key was reused with different operation content.
+    #[error("operation {kind} id '{request_id}' was already accepted with different content")]
+    OperationIdempotencyConflict {
+        /// Kind of idempotent request.
+        kind: &'static str,
+        /// Reused request identifier.
+        request_id: String,
+    },
 
     /// Object metadata publication may have committed without a definitive acknowledgement.
     #[error("store object commit is indeterminate for key {key}: {message}")]

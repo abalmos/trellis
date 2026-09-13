@@ -1,6 +1,6 @@
 import type {
-  AuthDeviceUserAuthoritiesResolveOutput,
-  AuthDeviceUserAuthoritiesResolveProgress,
+  DeviceUserAuthoritiesResolveOutput,
+  DeviceUserAuthoritiesResolveProgress,
 } from "@qlever-llc/trellis/auth";
 import type { TerminalOperation } from "@qlever-llc/trellis";
 
@@ -10,7 +10,7 @@ export type DeviceActivationView =
   | {
     mode: "pending_review";
     flowId: string;
-    state: AuthDeviceUserAuthoritiesResolveProgress["state"];
+    state: DeviceUserAuthoritiesResolveProgress["state"];
   }
   | {
     mode: "activated";
@@ -23,11 +23,11 @@ export type DeviceActivationView =
   | { mode: "expired"; flowId: string; reason: string }
   | { mode: "invalid_flow"; reason: string; flowId?: string };
 
-function isoString(value: string | number | Date): string {
+function isoString(value: string | number | bigint | Date): string {
   return value instanceof Date
     ? value.toISOString()
-    : typeof value === "number"
-    ? new Date(value).toISOString()
+    : typeof value === "number" || typeof value === "bigint"
+    ? new Date(Number(value)).toISOString()
     : value;
 }
 
@@ -63,7 +63,7 @@ export function createInvalidDeviceActivationView(
 
 export function mapDeviceActivationOutput(
   flowId: string,
-  result: AuthDeviceUserAuthoritiesResolveOutput,
+  result: DeviceUserAuthoritiesResolveOutput,
 ): DeviceActivationView {
   if (result.review.state === "approved") {
     return {
@@ -86,7 +86,7 @@ export function mapDeviceActivationOutput(
 
 export function mapDeviceActivationProgress(
   flowId: string,
-  progress: AuthDeviceUserAuthoritiesResolveProgress,
+  progress: DeviceUserAuthoritiesResolveProgress,
 ): DeviceActivationView {
   return {
     mode: "pending_review",
@@ -149,7 +149,7 @@ export function mapDeviceActivationFailure(
 
 export function mapDeviceActivationTerminal(
   flowId: string,
-  terminal: TerminalOperation<unknown, AuthDeviceUserAuthoritiesResolveOutput>,
+  terminal: TerminalOperation<unknown, DeviceUserAuthoritiesResolveOutput>,
 ): DeviceActivationView | null {
   if (terminal.state === "completed") {
     return terminal.output

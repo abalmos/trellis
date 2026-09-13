@@ -991,15 +991,8 @@ export class ServiceTransfer {
     }
     session.cancellation.abort(error);
     session.queue.fail(error);
-    void (async () => {
-      const putResult = (await session.putPromise).take();
-      await session.onError?.(
-        isErr(putResult) ? error : new TransferError({
-          operation: "put",
-          context: { reason: "failed_upload_committed" },
-        }),
-      );
-    })();
+    void session.onError?.(error);
+    void session.putPromise;
     this.#cleanupUploadSession(subject);
   }
 

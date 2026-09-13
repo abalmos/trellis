@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::super::application::repository::OutboxRepository;
+use super::super::application::repository::{OutboxRepository, PostCommitActionClaim};
 use super::super::{AuthorizationStateError, IdempotencyResultRecord, PostCommitActionRecord};
 use super::common::{
     decode_enum, decode_json, encode_enum, encode_json, from_sql_u32, map_write_error, sql_error,
@@ -66,7 +66,7 @@ impl OutboxRepository for SqliteAuthorizationStore {
         action_id: &str,
         now: i64,
         claimed_until: i64,
-    ) -> Result<Option<PostCommitActionRecord>, AuthorizationStateError> {
+    ) -> Result<Option<PostCommitActionClaim>, AuthorizationStateError> {
         super::super::domain::require_protocol_timestamp("now", now)?;
         super::super::domain::require_protocol_timestamp("claimedUntil", claimed_until)?;
         if claimed_until <= now {
@@ -75,36 +75,35 @@ impl OutboxRepository for SqliteAuthorizationStore {
             ));
         }
         let action_id = action_id.to_owned();
+        let claim_token = ulid::Ulid::new().to_string();
         self.run(move |connection| {
-            let Some(current) = load_post_commit_action(connection, &action_id)? else {
-                return Ok(None);
-            };
-            if current.claimed_until == Some(claimed_until) {
-                return Ok(Some(current));
-            }
-            if current.next_attempt_at > now
-                || current.claimed_until.is_some_and(|until| until > now)
-            {
-                return Ok(None);
-            }
-            let attempts = if current.claimed_until.is_some() {
-                current.attempts.checked_add(1).ok_or_else(|| {
-                    AuthorizationStateError::InvalidRecord("attempts overflow".to_owned())
-                })?
-            } else {
-                current.attempts
-            };
             let changed = connection
                 .execute(
-                    "UPDATE auth_post_commit_actions SET claimed_until = ?1, attempts = ?2
-                  WHERE action_id = ?3 AND next_attempt_at <= ?4 AND (claimed_until IS NULL OR claimed_until <= ?4)",
-                    params![claimed_until, i64::from(attempts), action_id, now],
+                    "UPDATE auth_post_commit_actions
+                     SET claimed_until = ?1, claim_token = ?2, attempts = attempts + 1
+                     WHERE action_id = ?3 AND next_attempt_at <= ?4
+                       AND (claimed_until IS NULL OR claimed_until <= ?4)
+                       AND attempts < ?5",
+                    params![
+                        claimed_until,
+                        claim_token,
+                        action_id,
+                        now,
+                        i64::from(u32::MAX)
+                    ],
                 )
                 .map_err(map_write_error)?;
             if changed == 0 {
                 return Ok(None);
             }
-            load_post_commit_action(connection, &action_id)
+            Ok(
+                load_post_commit_action(connection, &action_id)?.map(|action| {
+                    PostCommitActionClaim {
+                        action,
+                        token: claim_token,
+                    }
+                }),
+            )
         })
         .await
     }
@@ -112,21 +111,16 @@ impl OutboxRepository for SqliteAuthorizationStore {
     async fn prepare_post_commit_event_delivery(
         &self,
         action_id: &str,
-        expected_claimed_until: i64,
-        expected_attempts: u32,
+        claim_token: &str,
         delivery: serde_json::Value,
     ) -> Result<serde_json::Value, AuthorizationStateError> {
-        super::super::domain::require_protocol_timestamp(
-            "expectedClaimedUntil",
-            expected_claimed_until,
-        )?;
         let action_id = action_id.to_owned();
+        let claim_token = claim_token.to_owned();
         self.run(move |connection| {
             let current = load_post_commit_action(connection, &action_id)?
                 .ok_or(AuthorizationStateError::StorageConflict)?;
             if current.kind != super::super::PostCommitActionKind::Event
-                || current.claimed_until != Some(expected_claimed_until)
-                || current.attempts != expected_attempts
+                || !post_commit_claim_matches(connection, &action_id, &claim_token)?
             {
                 return Err(AuthorizationStateError::StorageConflict);
             }
@@ -143,25 +137,16 @@ impl OutboxRepository for SqliteAuthorizationStore {
             connection
                 .execute(
                     "UPDATE auth_post_commit_actions SET event_delivery_json = ?1
-                     WHERE action_id = ?2 AND claimed_until = ?3 AND attempts = ?4
+                     WHERE action_id = ?2 AND claim_token = ?3
                        AND event_delivery_json IS NULL",
-                    params![
-                        encode_json(&delivery)?,
-                        action_id,
-                        expected_claimed_until,
-                        i64::from(expected_attempts),
-                    ],
+                    params![encode_json(&delivery)?, action_id, claim_token,],
                 )
                 .map_err(map_write_error)?;
             connection
                 .query_row(
                     "SELECT event_delivery_json FROM auth_post_commit_actions
-                     WHERE action_id = ?1 AND claimed_until = ?2 AND attempts = ?3",
-                    params![
-                        action_id,
-                        expected_claimed_until,
-                        i64::from(expected_attempts)
-                    ],
+                     WHERE action_id = ?1 AND claim_token = ?2",
+                    params![action_id, claim_token],
                     |row| row.get::<_, Option<String>>(0),
                 )
                 .map_err(sql_error)?
@@ -174,36 +159,24 @@ impl OutboxRepository for SqliteAuthorizationStore {
     async fn fail_post_commit_action(
         &self,
         action_id: &str,
-        expected_claimed_until: i64,
+        claim_token: &str,
         next_attempt_at: i64,
         error: String,
     ) -> Result<PostCommitActionRecord, AuthorizationStateError> {
-        super::super::domain::require_protocol_timestamp(
-            "expectedClaimedUntil",
-            expected_claimed_until,
-        )?;
         super::super::domain::require_protocol_timestamp("nextAttemptAt", next_attempt_at)?;
         super::super::domain::require_nonempty("error", &error)?;
         let action_id = action_id.to_owned();
+        let claim_token = claim_token.to_owned();
         self.run(move |connection| {
-            let current = load_post_commit_action(connection, &action_id)?
-                .ok_or(AuthorizationStateError::StorageConflict)?;
-            if current.claimed_until.is_none()
-                && current.next_attempt_at == next_attempt_at
-                && current.last_error.as_deref() == Some(error.as_str())
-            {
-                return Ok(current);
-            }
             let changed = connection
                 .execute(
-                    "UPDATE auth_post_commit_actions SET attempts = attempts + 1, next_attempt_at = ?1, claimed_until = NULL, last_error = ?2
-                  WHERE action_id = ?3 AND claimed_until = ?4 AND attempts < ?5",
+                    "UPDATE auth_post_commit_actions SET next_attempt_at = ?1, claimed_until = NULL, claim_token = NULL, last_error = ?2
+                  WHERE action_id = ?3 AND claim_token = ?4",
                     params![
                         next_attempt_at,
                         error,
                         action_id,
-                        expected_claimed_until,
-                        i64::from(u32::MAX)
+                        claim_token,
                     ],
                 )
                 .map_err(map_write_error)?;
@@ -219,24 +192,18 @@ impl OutboxRepository for SqliteAuthorizationStore {
     async fn acknowledge_post_commit_action(
         &self,
         action_id: &str,
-        expected_claimed_until: i64,
+        claim_token: &str,
     ) -> Result<(), AuthorizationStateError> {
-        super::super::domain::require_protocol_timestamp(
-            "expectedClaimedUntil",
-            expected_claimed_until,
-        )?;
         let action_id = action_id.to_owned();
+        let claim_token = claim_token.to_owned();
         self.run(move |connection| {
-            let Some(current) = load_post_commit_action(connection, &action_id)? else {
-                return Ok(());
-            };
-            if current.claimed_until != Some(expected_claimed_until) {
+            if !post_commit_claim_matches(connection, &action_id, &claim_token)? {
                 return Err(AuthorizationStateError::StorageConflict);
             }
             let changed = connection
                 .execute(
-                    "DELETE FROM auth_post_commit_actions WHERE action_id = ?1 AND claimed_until = ?2",
-                    params![action_id, expected_claimed_until],
+                    "DELETE FROM auth_post_commit_actions WHERE action_id = ?1 AND claim_token = ?2",
+                    params![action_id, claim_token],
                 )
                 .map_err(map_write_error)?;
             if changed != 1 {
@@ -246,6 +213,58 @@ impl OutboxRepository for SqliteAuthorizationStore {
         })
         .await
     }
+}
+
+impl SqliteAuthorizationStore {
+    pub(crate) async fn enqueue_post_commit_actions(
+        &self,
+        actions: Vec<PostCommitActionRecord>,
+    ) -> Result<(), AuthorizationStateError> {
+        for action in &actions {
+            super::super::application::validation::validate_post_commit_action(action)?;
+        }
+        self.run(move |connection| {
+            let transaction = connection.transaction().map_err(sql_error)?;
+            insert_sql_post_commit_actions(&transaction, &actions)?;
+            transaction.commit().map_err(sql_error)
+        })
+        .await
+    }
+
+    pub(crate) async fn enqueue_idempotent_post_commit_actions(
+        &self,
+        idempotency: IdempotencyResultRecord,
+        actions: Vec<PostCommitActionRecord>,
+    ) -> Result<bool, AuthorizationStateError> {
+        super::super::application::validation::validate_idempotency_and_actions(
+            &idempotency,
+            &actions,
+        )?;
+        self.run(move |connection| {
+            let transaction = connection.transaction().map_err(sql_error)?;
+            if sqlite_idempotency_replay(&transaction, &idempotency)?.is_some() {
+                return Ok(false);
+            }
+            insert_sql_idempotency_and_actions(&transaction, &idempotency, &actions)?;
+            transaction.commit().map_err(sql_error)?;
+            Ok(true)
+        })
+        .await
+    }
+}
+
+fn post_commit_claim_matches(
+    connection: &Connection,
+    action_id: &str,
+    claim_token: &str,
+) -> Result<bool, AuthorizationStateError> {
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM auth_post_commit_actions WHERE action_id = ?1 AND claim_token = ?2)",
+            params![action_id, claim_token],
+            |row| row.get(0),
+        )
+        .map_err(sql_error)
 }
 
 pub(in crate::platform::auth) fn sqlite_idempotency_replay(
@@ -325,6 +344,13 @@ pub(in crate::platform::auth) fn insert_sql_idempotency_and_actions(
         ],
     )
     .map_err(map_write_error)?;
+    insert_sql_post_commit_actions(connection, actions)
+}
+
+pub(in crate::platform::auth) fn insert_sql_post_commit_actions(
+    connection: &Connection,
+    actions: &[PostCommitActionRecord],
+) -> Result<(), AuthorizationStateError> {
     let mut predecessor_action_id: Option<&str> = None;
     for action in actions {
         let action_predecessor_id = action
@@ -461,15 +487,15 @@ mod tests {
             .await
             .expect("claim event")
             .expect("claimed event");
+        assert!(store
+            .claim_post_commit_action(&action_id, NOW, claimed_until)
+            .await
+            .expect("competing claim")
+            .is_none());
         let first = json!({"proof": "first"});
         assert_eq!(
             store
-                .prepare_post_commit_event_delivery(
-                    &action_id,
-                    claimed_until,
-                    claimed.attempts,
-                    first.clone(),
-                )
+                .prepare_post_commit_event_delivery(&action_id, &claimed.token, first.clone(),)
                 .await
                 .expect("prepare first delivery"),
             first
@@ -478,8 +504,7 @@ mod tests {
             store
                 .prepare_post_commit_event_delivery(
                     &action_id,
-                    claimed_until,
-                    claimed.attempts,
+                    &claimed.token,
                     json!({"proof": "replacement"}),
                 )
                 .await
@@ -488,7 +513,7 @@ mod tests {
         );
 
         store
-            .fail_post_commit_action(&action_id, claimed_until, NOW + 31_000, "retry".to_owned())
+            .fail_post_commit_action(&action_id, &claimed.token, NOW + 31_000, "retry".to_owned())
             .await
             .expect("schedule retry");
         let reclaimed_until = NOW + 61_000;
@@ -498,10 +523,17 @@ mod tests {
             .expect("reclaim event")
             .expect("reclaimed event");
         assert!(store
+            .acknowledge_post_commit_action(&action_id, &claimed.token)
+            .await
+            .is_err());
+        assert!(store
+            .fail_post_commit_action(&action_id, &claimed.token, NOW + 62_000, "stale".to_owned(),)
+            .await
+            .is_err());
+        assert!(store
             .prepare_post_commit_event_delivery(
                 &action_id,
-                claimed_until,
-                claimed.attempts,
+                &claimed.token,
                 json!({"proof": "stale"}),
             )
             .await
@@ -510,8 +542,7 @@ mod tests {
             store
                 .prepare_post_commit_event_delivery(
                     &action_id,
-                    reclaimed_until,
-                    reclaimed.attempts,
+                    &reclaimed.token,
                     json!({"proof": "new"}),
                 )
                 .await

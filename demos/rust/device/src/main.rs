@@ -4,24 +4,24 @@ use std::time::Duration;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use clap::Parser;
-use device_trellis::apis::demo_service::types::{
-    AssignmentsListRequest, EvidenceDownloadRequest, EvidenceListRequest, EvidenceUploadInput,
-    ReportsGenerateInput, SitesListRequest, SitesListResponseEntriesItem,
+use device_trellis::participants::demo_device_device::{
+    types::{DraftInspectionState, SelectedSiteState},
+    Client as ConnectedClient,
 };
-use device_trellis::participants::demo_device::state::{DraftInspectionState, SelectedSiteState};
-use device_trellis::participants::demo_device::ConnectedClient;
+use device_trellis::types::{
+    AssignmentsListRequest, EvidenceDownloadRequest, EvidenceListRequest, EvidenceUploadRequest,
+    ReportsGenerateRequest, SiteSummary, SitesListRequest,
+};
 use futures_util::StreamExt;
 use trellis_rs::{
     auth::{
         check_device_activation, derive_device_identity, wait_for_device_activation,
         DeviceActivationOptions, DeviceActivationStatus,
     },
-    client::download_transfer_grant_from_value,
+    client::EventSubscribeOptions,
 };
 
 const DEMO_TIMESTAMP: &str = "2026-04-30T16:00:00.000Z";
-const LIST_LIMIT: i64 = 50;
-const LIST_OFFSET: i64 = 0;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -79,7 +79,7 @@ async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<Conn
     let identity = derive_device_identity(&root_secret)?;
     let activation = DeviceActivationOptions::new(
         trellis_rs::client::DeviceConnectOptions::<
-            device_trellis::participants::demo_device::Participant,
+            device_trellis::participants::demo_device_device::Participant,
         >::new(trellis_url, &identity.identity_seed_base64url)
         .with_timeout_ms(10_000),
         &identity.activation_key_base64url,
@@ -97,12 +97,15 @@ async fn connect_device_if_configured(args: &Args) -> anyhow::Result<Option<Conn
         }
     };
     Ok(Some(
-        ConnectedClient::connect_activated(activation, session).await?,
+        ConnectedClient::connect(activation.into_connect_options(session)?).await?,
     ))
 }
 
 async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
-    let mut activity = client.field_ops().subscribe_audit_recorded().await?;
+    let mut activity = client
+        .demo_service_fieldops_v1()
+        .subscribe_audit_recorded(EventSubscribeOptions::default())
+        .await?;
     tokio::spawn(async move {
         while let Some(event) = activity.next().await {
             match event {
@@ -112,7 +115,10 @@ async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
         }
     });
 
-    let mut evidence = client.field_ops().subscribe_evidence_uploaded().await?;
+    let mut evidence = client
+        .demo_service_fieldops_v1()
+        .subscribe_evidence_uploaded(EventSubscribeOptions::default())
+        .await?;
     tokio::spawn(async move {
         while let Some(event) = evidence.next().await {
             match event {
@@ -122,7 +128,10 @@ async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
         }
     });
 
-    let mut reports = client.field_ops().subscribe_reports_published().await?;
+    let mut reports = client
+        .demo_service_fieldops_v1()
+        .subscribe_reports_published(EventSubscribeOptions::default())
+        .await?;
     tokio::spawn(async move {
         while let Some(event) = reports.next().await {
             match event {
@@ -132,7 +141,10 @@ async fn spawn_event_watchers(client: &ConnectedClient) -> anyhow::Result<()> {
         }
     });
 
-    let mut sites = client.field_ops().subscribe_sites_refreshed().await?;
+    let mut sites = client
+        .demo_service_fieldops_v1()
+        .subscribe_sites_refreshed(EventSubscribeOptions::default())
+        .await?;
     tokio::spawn(async move {
         while let Some(event) = sites.next().await {
             match event {
@@ -172,13 +184,10 @@ async fn wizard_loop(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
 async fn list_sites(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     let sites = if let Some(client) = client {
         client
-            .field_ops()
-            .sites_list(&SitesListRequest {
-                limit: LIST_LIMIT,
-                offset: Some(LIST_OFFSET),
-            })
+            .demo_service_fieldops_v1()
+            .sites_list(&SitesListRequest { page: None })
             .await?
-            .entries
+            .items
     } else {
         offline_sites()
     };
@@ -198,7 +207,7 @@ async fn list_sites(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
 
 async fn save_selected_site(
     client: Option<&ConnectedClient>,
-    sites: &[SitesListResponseEntriesItem],
+    sites: &[SiteSummary],
 ) -> anyhow::Result<()> {
     if sites.is_empty() {
         return Ok(());
@@ -209,14 +218,14 @@ async fn save_selected_site(
         return Ok(());
     }
 
-    let Some(site) = sites.iter().find(|site| site.site_id == site_id) else {
+    let Some(site) = sites.iter().find(|site| site.site_id.as_ref() == site_id) else {
         println!("No listed site matched {site_id}; selected site state unchanged.");
         return Ok(());
     };
 
     let selected_site = SelectedSiteState {
-        site_id: site.site_id.clone(),
-        site_name: site.site_name.clone(),
+        site_id: site.site_id.to_string(),
+        site_name: site.site_name.to_string(),
         selected_at: DEMO_TIMESTAMP.to_string(),
     };
 
@@ -228,12 +237,7 @@ async fn save_selected_site(
         return Ok(());
     };
 
-    client
-        .client()
-        .state()
-        .selected_site()
-        .put(&selected_site)
-        .await?;
+    client.selected_site()?.set(&selected_site).await?;
     println!("Selected site state saved: {}", selected_site.site_id);
 
     Ok(())
@@ -242,13 +246,10 @@ async fn save_selected_site(
 async fn list_assignments(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     if let Some(client) = client {
         let response = client
-            .field_ops()
-            .assignments_list(&AssignmentsListRequest {
-                limit: LIST_LIMIT,
-                offset: Some(LIST_OFFSET),
-            })
+            .demo_service_fieldops_v1()
+            .assignments_list(&AssignmentsListRequest { page: None })
             .await?;
-        for assignment in response.entries {
+        for assignment in response.items {
             println!(
                 "{} - {} / {} ({})",
                 assignment.inspection_id,
@@ -266,15 +267,14 @@ async fn list_assignments(client: Option<&ConnectedClient>) -> anyhow::Result<()
 async fn list_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     if let Some(client) = client {
         let response = client
-            .field_ops()
+            .demo_service_fieldops_v1()
             .evidence_list(&EvidenceListRequest {
-                limit: LIST_LIMIT,
-                offset: Some(LIST_OFFSET),
+                page: None,
                 prefix: None,
             })
             .await?;
-        for evidence in response.entries {
-            println!("{} - {} bytes", evidence.key, evidence.size);
+        for evidence in response.items {
+            println!("{} - {} bytes", evidence.key, *evidence.size);
         }
     } else {
         println!("site-north/transformer-a/photo.txt - 42 bytes");
@@ -289,23 +289,21 @@ async fn download_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<(
         return Ok(());
     };
 
-    let service = client.field_ops();
+    let service = client.demo_service_fieldops_v1();
     let response = service
-        .evidence_download(&EvidenceDownloadRequest { key })
+        .evidence_download(&EvidenceDownloadRequest { key: key.into() })
         .await?;
-    let grant = download_transfer_grant_from_value(serde_json::to_value(response.transfer)?)?;
-    let bytes = service.download_transfer(&grant).await?;
-    println!("Downloaded {} bytes for {}", bytes.len(), grant.info.key);
+    println!("Evidence {} is {} bytes", response.key, *response.size);
     Ok(())
 }
 
 async fn upload_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<()> {
     let key = prompt("Evidence key")?;
     let content = prompt("Text content")?;
-    let input = EvidenceUploadInput {
-        content_type: Some("text/plain".to_string()),
-        evidence_type: "photo".to_string(),
-        key: key.clone(),
+    let input = EvidenceUploadRequest {
+        content_type: Some("text/plain".to_string().into()),
+        evidence_type: "photo".to_string().into(),
+        key: key.clone().into(),
         metadata: None,
     };
 
@@ -318,16 +316,9 @@ async fn upload_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<()>
         return Ok(());
     };
 
-    let started = client
-        .field_ops()
-        .evidence_upload()
-        .input(&input)
-        .transfer(content.as_bytes())
-        .start()
-        .await
-        .map_err(|error| anyhow::anyhow!("evidence upload failed: {}", error.source()))?;
-
-    let file = started.file_info();
+    let service = client.demo_service_fieldops_v1();
+    let started = service.evidence_upload().start(&input).await?;
+    let file = started.upload(content.as_bytes()).await?;
     println!(
         "Uploaded {} ({} bytes, content type: {})",
         file.key,
@@ -335,7 +326,7 @@ async fn upload_evidence(client: Option<&ConnectedClient>) -> anyhow::Result<()>
         file.content_type.as_deref().unwrap_or("unknown")
     );
 
-    let snapshot = started.operation_ref().wait().await?;
+    let snapshot = started.wait().await?;
     if let Some(output) = snapshot.output {
         println!("Evidence upload operation completed: {:?}", output);
     } else {
@@ -367,12 +358,12 @@ async fn generate_report(client: Option<&ConnectedClient>) -> anyhow::Result<()>
         return Ok(());
     };
 
-    let operation = client
-        .field_ops()
+    let service = client.demo_service_fieldops_v1();
+    let operation = service
         .reports_generate()
-        .start(&ReportsGenerateInput {
-            inspection_id,
-            report_comment: comment,
+        .start(&ReportsGenerateRequest {
+            inspection_id: inspection_id.into(),
+            report_comment: comment.into(),
         })
         .await?;
     let snapshot = operation.wait().await?;
@@ -393,9 +384,8 @@ async fn save_draft_inspection(
     };
 
     client
-        .client()
-        .state()
         .draft_inspections()
+        .await?
         .put(&draft.inspection_id, &draft)
         .await?;
     println!("Draft inspection state saved: {}", draft.inspection_id);
@@ -411,13 +401,13 @@ fn prompt(label: &str) -> anyhow::Result<String> {
     Ok(input.trim().to_string())
 }
 
-fn offline_sites() -> Vec<SitesListResponseEntriesItem> {
-    vec![SitesListResponseEntriesItem {
-        site_id: "site-north".to_string(),
-        site_name: "North Ridge Substation".to_string(),
+fn offline_sites() -> Vec<SiteSummary> {
+    vec![SiteSummary {
+        site_id: "site-north".to_string().into(),
+        site_name: "North Ridge Substation".to_string().into(),
         open_inspections: 2,
         overdue_inspections: 1,
-        latest_status: "attention".to_string(),
-        last_report_at: DEMO_TIMESTAMP.to_string(),
+        latest_status: "attention".to_string().into(),
+        last_report_at: DEMO_TIMESTAMP.to_string().into(),
     }]
 }

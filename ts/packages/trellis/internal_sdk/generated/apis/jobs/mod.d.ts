@@ -56,6 +56,8 @@ export type ReplayDLQInput = Types0.JobsReplayDLQRequest;
 export type ReplayDLQOutput = Types0.JobsReplayDLQResponse;
 export type RetryInput = Types0.JobsRetryRequest;
 export type RetryOutput = Types0.JobsRetryResponse;
+export type SummaryInput = Types0.JobsSummaryRequest;
+export type SummaryOutput = Types0.JobsSummaryResponse;
 export type WatchInput = Types0.JobsWatchRequest;
 export type WatchEvent = Types0.JobsWatchFrame;
 declare const __api: {
@@ -104,7 +106,7 @@ declare const __api: {
 			readonly output: typeof Types0.JobsListDLQResponseCodec;
 			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:ListServices": {
 			readonly kind: "rpc";
@@ -113,7 +115,7 @@ declare const __api: {
 			readonly output: typeof Types0.JobsListServicesResponseCodec;
 			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:Metrics": {
 			readonly kind: "rpc";
@@ -131,7 +133,7 @@ declare const __api: {
 			readonly output: typeof Types0.JobsQueryResponseCodec;
 			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
 			readonly download: false;
-			readonly pagination: undefined;
+			readonly pagination: "cursor";
 		};
 		readonly "rpc:ReplayDLQ": {
 			readonly kind: "rpc";
@@ -151,6 +153,15 @@ declare const __api: {
 			readonly download: false;
 			readonly pagination: undefined;
 		};
+		readonly "rpc:Summary": {
+			readonly kind: "rpc";
+			readonly descriptorName: "rpc:Summary";
+			readonly input: typeof Types0.JobsSummaryRequestCodec;
+			readonly output: typeof Types0.JobsSummaryResponseCodec;
+			readonly errors: readonly [typeof UnexpectedError, typeof ValidationError];
+			readonly download: false;
+			readonly pagination: undefined;
+		};
 		readonly "feed:Watch": {
 			readonly kind: "feed";
 			readonly descriptorName: "feed:Watch";
@@ -161,5 +172,5 @@ declare const __api: {
 	readonly packageEvidence: unknown;
 };
 export declare const API: typeof __api;
-export declare const API_DIGEST: "Uxl2pWwTTXUl2MewG1JK06Fin2tqkUvnyMJ5YFKaq4U";
+export declare const API_DIGEST: "pgIp9PftLViyn-1-PKqw2kkCsEWAJYHurAEA158ylso";
 export {};

@@ -434,7 +434,7 @@ fn render_bounds(value: &Bounds, string: bool) -> String {
 fn numeric_bound(value: NumericBound) -> String {
     match value {
         NumericBound::Integer(value) => value.to_string(),
-        NumericBound::Number(value) if value == 0.0 => "0".to_owned(),
+        NumericBound::Number(0.0) => "0".to_owned(),
         NumericBound::Number(value) => value.to_string(),
     }
 }
@@ -771,8 +771,6 @@ fn render_resource(
             payload,
             result,
             update,
-            deadline_ms,
-            retry,
             key_concurrency,
             ..
         } => {
@@ -783,16 +781,16 @@ fn render_resource(
             if let Some(value) = update {
                 writeln!(output, "    update {};", imports.ty(value)).unwrap();
             }
-            if let Some(value) = deadline_ms {
-                writeln!(output, "    deadline {value}ms;").unwrap();
-            }
-            render_retry(output, retry);
             if let Some(value) = key_concurrency {
                 writeln!(
                     output,
                     "    key_concurrency {{\n      path {};\n      policy {};\n    }}",
                     value.path.join("."),
-                    key_policy(value.policy)
+                    match value.policy {
+                        KeyConcurrencyPolicy::Queue => "queue",
+                        KeyConcurrencyPolicy::Reject => "reject",
+                        KeyConcurrencyPolicy::Supersede => "supersede",
+                    }
                 )
                 .unwrap();
             }
@@ -871,14 +869,6 @@ fn render_retry(output: &mut String, retry: &Option<RetryPolicy>) {
         .unwrap();
     }
 }
-fn key_policy(value: KeyConcurrencyPolicy) -> &'static str {
-    match value {
-        KeyConcurrencyPolicy::Queue => "queue",
-        KeyConcurrencyPolicy::Reject => "reject",
-        KeyConcurrencyPolicy::Supersede => "supersede",
-    }
-}
-
 fn collect_type_definition(
     value: &TypeDefinition,
     root: &PackageId,

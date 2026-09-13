@@ -75,7 +75,7 @@ pub fn bootstrap_service_host<V>(
     validator: V,
 ) -> ServiceHost<AuthenticatedRouter<V>>
 where
-    V: RequestValidator,
+    V: RequestValidator + 'static,
 {
     let authenticated_router = AuthenticatedRouter::new(router, validator);
     ServiceHost::new(service_name.to_string(), binding, authenticated_router)

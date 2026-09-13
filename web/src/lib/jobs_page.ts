@@ -1,19 +1,17 @@
 import { AsyncResult, BaseError, isErr } from "@qlever-llc/result";
 import { type apis } from "trellis-web-generated";
 
-export type JobInspection = apis.jobs.JobsInspectOutput;
+export type JobInspection = apis.jobs.InspectOutput;
 
 export type JobsPageData = {
   available: boolean;
   message?: string;
-  services: apis.jobs.JobsListServicesOutput["entries"];
-  jobs: apis.jobs.JobsQueryOutput["entries"];
-  groups: apis.jobs.JobsQueryOutput["groups"];
-  stats: apis.jobs.JobsQueryOutput["stats"];
-  count: apis.jobs.JobsQueryOutput["count"];
-  offset: apis.jobs.JobsQueryOutput["offset"];
-  limit: apis.jobs.JobsQueryOutput["limit"];
-  nextOffset?: apis.jobs.JobsQueryOutput["nextOffset"];
+  services: apis.jobs.ListServicesOutput["items"];
+  jobs: apis.jobs.QueryOutput["items"];
+  groups: apis.jobs.SummaryOutput["groups"];
+  stats: apis.jobs.SummaryOutput["stats"];
+  count: apis.jobs.SummaryOutput["count"];
+  nextCursor?: string;
 };
 
 export type JobsDetailData = {
@@ -24,17 +22,20 @@ export type JobsDetailData = {
 
 type JobsPageRpc = {
   listServices(
-    input: apis.jobs.JobsListServicesInput,
-  ): AsyncResult<apis.jobs.JobsListServicesOutput, BaseError>;
+    input: apis.jobs.ListServicesInput,
+  ): AsyncResult<apis.jobs.ListServicesOutput, BaseError>;
   queryJobs(
-    filter: apis.jobs.JobsQueryInput,
-  ): AsyncResult<apis.jobs.JobsQueryOutput, BaseError>;
+    filter: apis.jobs.QueryInput,
+  ): AsyncResult<apis.jobs.QueryOutput, BaseError>;
+  summarizeJobs(
+    filter: apis.jobs.SummaryInput,
+  ): AsyncResult<apis.jobs.SummaryOutput, BaseError>;
 };
 
 type JobsDetailRpc = {
   inspect(
-    input: apis.jobs.JobsInspectInput,
-  ): AsyncResult<apis.jobs.JobsInspectOutput, BaseError>;
+    input: apis.jobs.InspectInput,
+  ): AsyncResult<apis.jobs.InspectOutput, BaseError>;
 };
 
 type JobsActionRpc<TOutput> = {
@@ -59,19 +60,15 @@ function normalizedJobsUnavailable(error: unknown): string | null {
     message = String(error);
   }
 
-  if (
-    message.includes("Permissions Violation") &&
-    message.includes("rpc.v1.Jobs.")
-  ) {
+  if (message.toLowerCase().includes("permissions violation")) {
     return "Your current session is not approved for Jobs RPCs. Sign out and sign back in to refresh permissions.";
   }
 
   const normalizedMessage = message.toLowerCase();
   if (
     normalizedMessage.includes("no responders") ||
-    message.includes("No responders available for request") ||
-    message.includes("references inactive contract") ||
-    message.includes("not currently reachable")
+    normalizedMessage.includes("references inactive contract") ||
+    normalizedMessage.includes("not currently reachable")
   ) {
     return "Jobs admin runtime is not currently reachable.";
   }
@@ -94,34 +91,52 @@ async function takeOrThrow<T>(result: AsyncResult<T, BaseError>): Promise<T> {
 /** Queries Jobs workbench data through the typed Jobs.Query RPC boundary. */
 export function queryJobs(
   rpc: Pick<JobsPageRpc, "queryJobs">,
-  filter: apis.jobs.JobsQueryInput,
-): AsyncResult<apis.jobs.JobsQueryOutput, BaseError> {
+  filter: apis.jobs.QueryInput,
+): AsyncResult<apis.jobs.QueryOutput, BaseError> {
   return rpc.queryJobs(filter);
 }
 
 /** Loads the Jobs list page data and normalizes unavailable Jobs runtime errors. */
 export async function loadJobsPageData(
   rpc: JobsPageRpc,
-  filter: apis.jobs.JobsQueryInput = { limit: 50 },
+  filter: apis.jobs.QueryInput = { page: { limit: 50 } },
 ): Promise<JobsPageData> {
   try {
-    const servicesResponse = rpc.listServices({ limit: 500 });
+    const servicesResponse = (async () => {
+      const items: apis.jobs.ListServicesOutput["items"] = [];
+      const seenCursors = new Set<string>();
+      let cursor: string | undefined;
+      while (true) {
+        const value = await takeOrThrow(rpc.listServices({
+          page: { ...(cursor ? { cursor } : {}), limit: 500 },
+        }));
+        items.push(...value.items);
+        const nextCursor = value.page.nextCursor;
+        if (!nextCursor) return items;
+        if (seenCursors.has(nextCursor)) {
+          throw new Error("Jobs.ListServices returned a cursor cycle");
+        }
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+      }
+    })();
     const jobsResponse = queryJobs(rpc, filter);
-    const [servicesValue, jobsValue] = await Promise.all([
-      takeOrThrow(servicesResponse),
+    const { page: _page, sort: _sort, ...summaryFilter } = filter;
+    const summaryResponse = rpc.summarizeJobs(summaryFilter);
+    const [servicesValue, jobsValue, summaryValue] = await Promise.all([
+      servicesResponse,
       takeOrThrow(jobsResponse),
+      takeOrThrow(summaryResponse),
     ]);
 
     return {
       available: true,
-      services: servicesValue.entries,
-      jobs: jobsValue.entries,
-      groups: jobsValue.groups,
-      stats: jobsValue.stats,
-      count: jobsValue.count,
-      offset: jobsValue.offset,
-      limit: jobsValue.limit,
-      nextOffset: jobsValue.nextOffset,
+      services: servicesValue,
+      jobs: jobsValue.items,
+      groups: summaryValue.groups,
+      stats: summaryValue.stats,
+      count: summaryValue.count,
+      nextCursor: jobsValue.page.nextCursor,
     };
   } catch (error) {
     const message = normalizedJobsUnavailable(error);
@@ -132,10 +147,8 @@ export async function loadJobsPageData(
         services: [],
         jobs: [],
         groups: [],
-        stats: { byState: {}, total: 0 },
-        count: 0,
-        offset: 0,
-        limit: filter.limit,
+        stats: { byState: {}, total: 0n },
+        count: 0n,
       };
     }
     throw error;
@@ -164,32 +177,32 @@ export async function loadJobDetailData(
 
 /** Cancels a cancellable job by id. */
 export async function cancelJob(
-  rpc: JobsActionRpc<apis.jobs.JobsCancelOutput>,
+  rpc: JobsActionRpc<apis.jobs.CancelOutput>,
   id: string,
-): Promise<apis.jobs.JobsCancelOutput> {
+): Promise<apis.jobs.CancelOutput> {
   return takeOrThrow(rpc.action({ id }));
 }
 
 /** Retries a failed job by id. */
 export async function retryJob(
-  rpc: JobsActionRpc<apis.jobs.JobsRetryOutput>,
+  rpc: JobsActionRpc<apis.jobs.RetryOutput>,
   id: string,
-): Promise<apis.jobs.JobsRetryOutput> {
+): Promise<apis.jobs.RetryOutput> {
   return takeOrThrow(rpc.action({ id }));
 }
 
 /** Replays a dead-lettered job by id. */
 export async function replayDlqJob(
-  rpc: JobsActionRpc<apis.jobs.JobsReplayDLQOutput>,
+  rpc: JobsActionRpc<apis.jobs.ReplayDLQOutput>,
   id: string,
-): Promise<apis.jobs.JobsReplayDLQOutput> {
+): Promise<apis.jobs.ReplayDLQOutput> {
   return takeOrThrow(rpc.action({ id }));
 }
 
 /** Dismisses a dead-lettered job by id. */
 export async function dismissDlqJob(
-  rpc: JobsActionRpc<apis.jobs.JobsDismissDLQOutput>,
+  rpc: JobsActionRpc<apis.jobs.DismissDLQOutput>,
   id: string,
-): Promise<apis.jobs.JobsDismissDLQOutput> {
+): Promise<apis.jobs.DismissDLQOutput> {
   return takeOrThrow(rpc.action({ id }));
 }

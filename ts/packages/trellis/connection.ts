@@ -49,7 +49,7 @@ export type TrellisConnectionOptions = {
   initialStatus?: TrellisConnectionStatus;
   availability?: TrellisAvailability;
   close?: () => Promise<void>;
-  stopObserving?: () => void;
+  stopObserving?: () => void | Promise<void>;
   log?: LoggerLike | false;
 };
 
@@ -114,7 +114,9 @@ export class TrellisConnection {
     (availability: TrellisAvailability) => void
   >();
   #closeTransport: () => Promise<void>;
-  #stopObserving: () => void;
+  #stopObserving: () => void | Promise<void>;
+  #observationStopped: Promise<void> = Promise.resolve();
+  #observationFailure: unknown;
   #log: LoggerLike;
   #stopped = false;
 
@@ -123,7 +125,7 @@ export class TrellisConnection {
     this.#status = options.initialStatus ??
       createStatus(options.kind, "connected");
     this.#closeTransport = options.close ?? (async () => {});
-    this.#stopObserving = options.stopObserving ?? (() => {});
+    this.#stopObserving = options.stopObserving ?? (async () => {});
     this.#log = options.log === false ? noopLogger : options.log ?? noopLogger;
     this.#availability = options.availability
       ? immutableAvailability(options.availability)
@@ -142,17 +144,18 @@ export class TrellisConnection {
 
   /** Yields the current availability and each subsequent installed replacement. */
   watchAvailability(): AsyncIterable<TrellisAvailability> {
-    const connection = this;
+    const availabilityListeners = this.#availabilityListeners;
+    const initialAvailability = this.#availability;
     return {
       async *[Symbol.asyncIterator]() {
-        const pending = [connection.#availability];
+        const pending = [initialAvailability];
         let wake: (() => void) | undefined;
         const listener = (availability: TrellisAvailability) => {
           pending.push(availability);
           wake?.();
           wake = undefined;
         };
-        connection.#availabilityListeners.add(listener);
+        availabilityListeners.add(listener);
         try {
           while (true) {
             if (pending.length === 0) {
@@ -164,7 +167,7 @@ export class TrellisConnection {
             if (next) yield next;
           }
         } finally {
-          connection.#availabilityListeners.delete(listener);
+          availabilityListeners.delete(listener);
         }
       },
     };
@@ -200,7 +203,11 @@ export class TrellisConnection {
     }
 
     this.#stopped = true;
-    this.#stopObserving();
+    this.#observationStopped = Promise.resolve().then(() =>
+      this.#stopObserving()
+    ).catch((error) => {
+      this.#observationFailure = error;
+    });
   }
 
   /** Closes the underlying transport and publishes a terminal closed status. */
@@ -208,6 +215,10 @@ export class TrellisConnection {
     this.stopObserving();
     try {
       await this.#closeTransport();
+      await this.#observationStopped;
+      if (this.#observationFailure !== undefined) {
+        throw this.#observationFailure;
+      }
       this.setStatus(createStatus(this.#status.kind, "closed"));
     } catch (error) {
       this.setStatus(createStatus(this.#status.kind, "error", { error }));
@@ -252,10 +263,24 @@ export function observeTrellisConnection(
   options: ObserveTrellisConnectionOptions,
 ): TrellisConnection {
   let stopped = false;
+  const statusStream = options.transport.status;
+  const statusIterator = typeof statusStream === "function"
+    ? statusStream.call(options.transport)[Symbol.asyncIterator]()
+    : undefined;
+  let statusTask: Promise<void> | undefined;
+  let closedFailure: unknown;
+  let closedTask = Promise.resolve();
   const connection = new TrellisConnection({
     kind: options.kind,
     availability: options.availability,
-    close: () => options.transport.close(),
+    close: async () => {
+      const alreadyClosed = options.transport.isClosed?.() ?? false;
+      await options.transport.close();
+      await statusIterator?.return?.();
+      await statusTask;
+      await closedTask;
+      if (!alreadyClosed && closedFailure !== undefined) throw closedFailure;
+    },
     stopObserving: () => {
       stopped = true;
     },
@@ -267,11 +292,13 @@ export function observeTrellisConnection(
     options.transportName,
   );
 
-  const statusStream = options.transport.status;
-  if (typeof statusStream === "function") {
-    void (async () => {
+  if (statusIterator) {
+    statusTask = (async () => {
       try {
-        for await (const event of statusStream.call(options.transport)) {
+        while (true) {
+          const next = await statusIterator.next();
+          if (next.done) return;
+          const event = next.value;
           if (stopped) {
             return;
           }
@@ -298,23 +325,31 @@ export function observeTrellisConnection(
     })();
   }
 
-  void options.transport.closed().then((closedError) => {
-    if (stopped) {
-      return;
-    }
-
-    if (closedError instanceof Error) {
-      logTransportClosed(options, closedError);
+  closedTask = options.transport.closed().then(
+    (closedError) => {
+      if (closedError instanceof Error) closedFailure = closedError;
+      if (stopped) return;
+      if (closedError instanceof Error) {
+        logTransportClosed(options, closedError);
+        connection.setStatus(createStatus(options.kind, "error", {
+          ...baseTransport,
+          error: closedError,
+        }));
+        return;
+      }
+      logTransportClosed(options);
+      connection.setStatus(createStatus(options.kind, "closed", baseTransport));
+    },
+    (error) => {
+      closedFailure = error;
+      if (stopped) return;
+      logTransportClosed(options, error);
       connection.setStatus(createStatus(options.kind, "error", {
         ...baseTransport,
-        error: closedError,
+        error,
       }));
-      return;
-    }
-
-    logTransportClosed(options);
-    connection.setStatus(createStatus(options.kind, "closed", baseTransport));
-  });
+    },
+  );
 
   return connection;
 }

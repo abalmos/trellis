@@ -13,11 +13,13 @@ class FakeStatusStream implements TrellisConnectionStatusTransport {
   #closed = false;
   #closedPromise: Promise<void | Error>;
   #resolveClosed: (value: void | Error) => void = () => {};
+  #rejectClosed: (error: unknown) => void = () => {};
   closeCalls = 0;
 
   constructor(private readonly server = "nats://127.0.0.1:4222") {
-    this.#closedPromise = new Promise((resolve) => {
+    this.#closedPromise = new Promise((resolve, reject) => {
       this.#resolveClosed = resolve;
+      this.#rejectClosed = reject;
     });
   }
 
@@ -68,6 +70,12 @@ class FakeStatusStream implements TrellisConnectionStatusTransport {
     this.#waiting?.();
     this.#waiting = undefined;
     this.#resolveClosed(error);
+  }
+
+  rejectClosed(error: unknown): void {
+    this.#closed = true;
+    this.#waiting?.();
+    this.#rejectClosed(error);
   }
 }
 
@@ -168,6 +176,22 @@ Deno.test("observeTrellisConnection publishes error transition from closed resul
 
   assertEquals(connection.status.phase, "error");
   assertEquals(connection.status.transport?.error, error);
+});
+
+Deno.test("observeTrellisConnection consumes a rejected transport close", async () => {
+  const stream = new FakeStatusStream();
+  const connection = observeTrellisConnection({
+    kind: "client",
+    transport: stream,
+  });
+  const error = new Error("read ECONNRESET");
+
+  stream.rejectClosed(error);
+  await delay();
+
+  assertEquals(connection.status.phase, "error");
+  assertEquals(connection.status.transport?.error, error);
+  await connection.close();
 });
 
 Deno.test("TrellisConnection unsubscribe and stopObserving prevent later updates", async () => {

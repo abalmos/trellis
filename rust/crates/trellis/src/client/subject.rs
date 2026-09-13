@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use serde_json::Value;
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
@@ -36,7 +38,8 @@ pub enum SubjectError {
     },
 }
 
-pub(crate) fn resolve_subject(template: &str, payload: &Value) -> Result<String, SubjectError> {
+/// Resolve canonical subject parameter tokens in a generated subject template.
+pub fn resolve_subject(template: &str, payload: &Value) -> Result<String, SubjectError> {
     let mut subject = String::with_capacity(template.len());
     let mut rest = template;
 
@@ -95,42 +98,7 @@ fn subject_value(pointer: &str, value: &Value) -> Result<String, SubjectError> {
 }
 
 fn encode_token(token: &str) -> String {
-    let mut encoded = String::with_capacity(token.len());
-    for character in token.chars() {
-        if is_forbidden(character) {
-            encoded.push('~');
-            encoded.push_str(&format!("{:X}", character as u32));
-            encoded.push('~');
-        } else {
-            encoded.push(character);
-        }
-    }
-
-    if encoded.is_empty() || encoded.starts_with('$') {
-        encoded.insert(0, '_');
-    }
-    encoded
-}
-
-fn is_forbidden(character: char) -> bool {
-    matches!(character, '\0' | '.' | '*' | '>' | '~') || is_ecmascript_whitespace(character)
-}
-
-fn is_ecmascript_whitespace(character: char) -> bool {
-    matches!(
-        character,
-        '\u{0009}'..='\u{000D}'
-            | '\u{0020}'
-            | '\u{00A0}'
-            | '\u{1680}'
-            | '\u{2000}'..='\u{200A}'
-            | '\u{2028}'
-            | '\u{2029}'
-            | '\u{202F}'
-            | '\u{205F}'
-            | '\u{3000}'
-            | '\u{FEFF}'
-    )
+    URL_SAFE_NO_PAD.encode(token.as_bytes())
 }
 
 fn value_kind(value: &Value) -> &'static str {
@@ -153,13 +121,14 @@ mod tests {
     #[test]
     fn encodes_cross_language_subject_vectors() {
         for (input, expected) in [
-            ("", "_"),
-            ("$SYS", "_$SYS"),
-            ("a.b", "a~2E~b"),
-            ("a b", "a~20~b"),
-            ("*", "~2A~"),
-            (">", "~3E~"),
-            ("~", "~7E~"),
+            ("", ""),
+            ("$SYS", "JFNZUw"),
+            ("a.b", "YS5i"),
+            ("a b", "YSBi"),
+            ("*", "Kg"),
+            (">", "Pg"),
+            ("~", "fg"),
+            ("😀", "8J-YgA"),
         ] {
             assert_eq!(encode_token(input), expected);
         }
@@ -174,7 +143,7 @@ mod tests {
                 &payload,
             )
             .unwrap(),
-            "events.v1.Auth.DeviceApproved.a~2E~b.1~2E~5",
+            "events.v1.Auth.DeviceApproved.YS5i.MS41",
         );
     }
 

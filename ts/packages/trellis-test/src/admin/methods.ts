@@ -1,14 +1,36 @@
 import type { CallerRuntime } from "@qlever-llc/trellis";
+import { RemoteError } from "@qlever-llc/trellis/errors";
 import type { Codec } from "@qlever-llc/trellis/generated";
 import { apis, participants } from "../../trellis/index.js";
 
-export const adminParticipant = participants.cli.participant;
+export const adminParticipant = {
+  ...participants.cli.participant,
+  id: "trellis.cli",
+  identity: "trellis.cli",
+} as const;
+
+/** @internal Returns the server-computed consent request from an approval-required error. */
+export function deploymentConsentRequest(error: unknown) {
+  let authError: apis.auth.AuthError;
+  if (error instanceof apis.auth.AuthError) {
+    authError = error;
+  } else if (error instanceof RemoteError) {
+    try {
+      authError = apis.auth.AuthError.fromSerializable(error.remoteError);
+    } catch {
+      return undefined;
+    }
+  } else {
+    return undefined;
+  }
+  return authError.data.code === "approval_required"
+    ? authError.data.consentRequest
+    : undefined;
+}
 
 export const ADMIN_USERNAME = "admin";
 
-export type AdminClient = CallerRuntime<
-  typeof participants.cli.participant
->;
+export type AdminClient = CallerRuntime<typeof adminParticipant>;
 
 function adminMethod<I, O>(
   descriptor: { input: Codec<I>; output: Codec<O> },
@@ -63,17 +85,13 @@ export const adminMethods = {
     apis.auth.API.actions["rpc:Devices.Provision"],
     (client, input) => client.devicesProvision(input).orThrow(),
   ),
-  stateAdminDelete: adminMethod(
-    apis.state.API.actions["rpc:Admin.Delete"],
-    (client, input) => client.adminDelete(input).orThrow(),
+  stateResourcesInspect: adminMethod(
+    apis.state.API.actions["rpc:Resources.Inspect"],
+    (client, input) => client.resourcesInspect(input).orThrow(),
   ),
-  stateAdminGet: adminMethod(
-    apis.state.API.actions["rpc:Admin.Get"],
-    (client, input) => client.adminGet(input).orThrow(),
-  ),
-  stateAdminList: adminMethod(
-    apis.state.API.actions["rpc:Admin.List"],
-    (client, input) => client.adminList(input).orThrow(),
+  stateResourcesQuery: adminMethod(
+    apis.state.API.actions["rpc:Resources.Query"],
+    (client, input) => client.resourcesQuery(input).orThrow(),
   ),
   authDeploymentsCreate: adminMethod(
     apis.auth.API.actions["rpc:Deployments.Create"],
@@ -111,9 +129,29 @@ export const adminMethods = {
     apis.auth.API.actions["rpc:ServiceInstances.Provision"],
     (client, input) => client.serviceInstancesProvision(input).orThrow(),
   ),
+  authServiceInstancesDisable: adminMethod(
+    apis.auth.API.actions["rpc:ServiceInstances.Disable"],
+    (client, input) => client.serviceInstancesDisable(input).orThrow(),
+  ),
   authSessionsRevoke: adminMethod(
     apis.auth.API.actions["rpc:Sessions.Revoke"],
     (client, input) => client.sessionsRevoke(input).orThrow(),
+  ),
+  eventsConsumersQuery: adminMethod(
+    apis.events.API.actions["rpc:Consumers.Query"],
+    (client, input) => client.consumersQuery(input).orThrow(),
+  ),
+  eventsDeadLettersQuery: adminMethod(
+    apis.events.API.actions["rpc:DeadLetters.Query"],
+    (client, input) => client.deadLettersQuery(input).orThrow(),
+  ),
+  eventsDeadLettersInspect: adminMethod(
+    apis.events.API.actions["rpc:DeadLetters.Inspect"],
+    (client, input) => client.deadLettersInspect(input).orThrow(),
+  ),
+  eventsDeadLettersReplay: adminMethod(
+    apis.events.API.actions["rpc:DeadLetters.Replay"],
+    (client, input) => client.deadLettersReplay(input).orThrow(),
   ),
 } as const;
 

@@ -20,11 +20,11 @@
     entryUrl: string | null;
     builtIn: boolean;
     disabled: boolean;
-    version: number;
+    version: bigint;
     routeCount: number;
     activeRouteCount: number;
-    createdAt: number;
-    updatedAt: number;
+    createdAt: bigint;
+    updatedAt: bigint;
   };
 
   const trellis = getTrellis();
@@ -50,12 +50,12 @@
     loading = true;
     error = null;
     try {
-      const portalsResponse = await trellis.authPortalsList({ limit: 100 }).take();
+      const portalsResponse = await trellis.portalsList({ limit: 100 }).take();
       if (isErr(portalsResponse)) {
         error = errorMessage(portalsResponse);
         return;
       }
-      portals = portalsResponse.entries.map((portal) => ({ ...portal, routeCount: 0, activeRouteCount: 0 }));
+      portals = portalsResponse.items.map((portal) => ({ ...portal, routeCount: 0, activeRouteCount: 0 }));
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -69,7 +69,7 @@
     error = null;
     saved = null;
     try {
-      const response = await trellis.authPortalsRemove({
+      const response = await trellis.portalsRemove({
         portalId: portal.portalId,
         expectedVersion: portal.version,
         idempotencyKey: ulid(),

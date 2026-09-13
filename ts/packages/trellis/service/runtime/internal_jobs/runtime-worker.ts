@@ -15,7 +15,7 @@ import {
 import { isTerminal, jobFromWorkEvent } from "./projection.ts";
 import type { Job, JobEvent } from "./types.ts";
 
-export type WorkerAckAction = "ack" | "nak";
+export type WorkerAckAction = "ack" | "nak" | "await-max-deliver";
 export type ProjectedWorkDecision = "process" | "skip-ack";
 export type SchemaRef = { schema: string };
 export type PayloadValidationArgs<TResult> = {
@@ -169,6 +169,8 @@ type StartQueueWorkerLoopOptions<TResult> = {
   handler: (job: ActiveJob<unknown, TResult>) => Promise<TResult>;
   instanceId?: string;
   deferralBackoffMs?: number;
+  backoffMs?: number[];
+  progressAckIntervalMs?: number;
 };
 
 function toWorkerConsumer(
@@ -227,12 +229,14 @@ export function lifecycleWorkDecision(
 
 export function ackActionForOutcome(
   outcome: JobProcessOutcome<unknown> | undefined,
+  maxDeliver = Number.MAX_SAFE_INTEGER,
 ): WorkerAckAction {
   if (!outcome) {
     return "ack";
   }
   switch (outcome.outcome) {
     case "retry":
+      return outcome.tries >= maxDeliver ? "await-max-deliver" : "nak";
     case "interrupted":
     case "deferred":
       return "nak";
@@ -349,48 +353,61 @@ export async function startQueueWorkerLoop<TResult>(
               tries: latestLifecycle.tries,
             }
             : job;
-          const outcome = await options.manager.processWithHeartbeat(
-            currentJob,
-            token,
-            async () => {
+          let outcome;
+          do {
+            outcome = await options.manager.processWithHeartbeat(
+              currentJob,
+              token,
+              async () => {
+                await msg.inProgress();
+              },
+              async (activeJob) => {
+                try {
+                  await options.validatePayload?.({
+                    schema: options.payloadSchema,
+                    job: activeJob.job(),
+                  });
+                } catch (error) {
+                  throw JobProcessError.failed(
+                    error instanceof Error ? error.message : String(error),
+                  );
+                }
+                return await options.handler(activeJob);
+              },
+              {
+                latestState: latestLifecycle?.state,
+                workEventType: event.eventType,
+                redeliveryCount: msg.info?.redeliveryCount,
+                instanceId: options.instanceId,
+                progressAckIntervalMs: options.progressAckIntervalMs,
+              },
+              {
+                validateResult: options.validateResult
+                  ? (result, resultJob) =>
+                    options.validateResult!({
+                      schema: options.resultSchema,
+                      result,
+                      job: resultJob,
+                    })
+                  : undefined,
+              },
+            );
+            if (outcome.outcome === "deferred") {
               await msg.inProgress();
-            },
-            async (activeJob) => {
-              try {
-                await options.validatePayload?.({
-                  schema: options.payloadSchema,
-                  job: activeJob.job(),
-                });
-              } catch (error) {
-                throw JobProcessError.failed(
-                  error instanceof Error ? error.message : String(error),
-                );
-              }
-              return await options.handler(activeJob);
-            },
-            {
-              latestState: latestLifecycle?.state,
-              workEventType: event.eventType,
-              redeliveryCount: msg.info?.redeliveryCount,
-              instanceId: options.instanceId,
-            },
-            {
-              validateResult: options.validateResult
-                ? (result, resultJob) =>
-                  options.validateResult!({
-                    schema: options.resultSchema,
-                    result,
-                    job: resultJob,
-                  })
-                : undefined,
-            },
-          );
-          if (ackActionForOutcome(outcome) === "ack") {
+              await new Promise((resolve) =>
+                setTimeout(resolve, options.progressAckIntervalMs ?? 1_000)
+              );
+            }
+          } while (outcome.outcome === "deferred" && !token.isCancelled());
+          const ackAction = ackActionForOutcome(outcome, job.maxTries);
+          if (ackAction === "ack") {
             await msg.ack();
+          } else if (ackAction === "await-max-deliver") {
+            continue;
           } else if (outcome?.outcome === "deferred") {
             await msg.nak(options.deferralBackoffMs ?? 1_000);
           } else {
-            await msg.nak();
+            await msg.nak(retryDelayMs(outcome?.tries ?? 1, options.backoffMs));
           }
         } finally {
           guard.dispose();
@@ -466,6 +483,7 @@ export async function startNatsWorkerHostFromBinding<TResult>(
         `Requested worker queue binding '${queueType}' is missing`,
       );
     }
+    progressAckIntervalMs(queue);
     const concurrency = options.queueConcurrency?.[queueType] ?? 1;
     if (!Number.isInteger(concurrency) || concurrency < 1) {
       throw new Error(
@@ -549,6 +567,8 @@ export async function startNatsWorkerHostFromBinding<TResult>(
           handler: options.handler,
           instanceId: options.instanceId,
           deferralBackoffMs: queue.backoffMs[0] ?? 1_000,
+          backoffMs: queue.backoffMs,
+          progressAckIntervalMs: progressAckIntervalMs(queue),
         }),
       );
     }
@@ -574,6 +594,28 @@ export async function startNatsWorkerHostFromBinding<TResult>(
       }
     },
   };
+}
+
+function retryDelayMs(
+  delivery: number,
+  configured: number[] | undefined,
+): number {
+  const schedule = configured?.length
+    ? configured
+    : [5_000, 30_000, 120_000, 600_000];
+  return schedule[Math.min(Math.max(0, delivery - 1), schedule.length - 1)]!;
+}
+
+export function progressAckIntervalMs(queue: JobsQueueBinding): number {
+  const wait = queue.backoffMs.length > 0
+    ? Math.min(...queue.backoffMs)
+    : queue.ackWaitMs;
+  if (!Number.isInteger(wait) || wait < 1) {
+    throw new Error(
+      `Worker queue '${queue.queueType}' has invalid acknowledgement wait ${wait}ms; expected a positive whole millisecond`,
+    );
+  }
+  return Math.max(1, Math.floor(wait / 3));
 }
 
 async function getConsumerInfo(

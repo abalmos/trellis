@@ -1,12 +1,24 @@
 import { Result, UnexpectedError } from "@qlever-llc/trellis";
-import type { JobHandler } from "@qlever-llc/trellis/service";
-import { type participants } from "../../../trellis/index.js";
+import type { ActiveJob } from "@qlever-llc/trellis/service";
+import type {
+  SiteRefreshJobPayload,
+  SiteRefreshJobResult,
+  SiteSummary,
+} from "../../../trellis/participants/Service/types.js";
 import type { FieldOpsDeps } from "../../deps.ts";
 
-type Handler = JobHandler<
-  typeof participants.demoService.participant,
-  "refreshSiteSummary"
->;
+type HandlerArgs = {
+  job: ActiveJob<SiteRefreshJobPayload, SiteRefreshJobResult, unknown>;
+  client: {
+    kv: {
+      siteSummaries: {
+        put(key: string, value: SiteSummary): {
+          orThrow(): Promise<unknown>;
+        };
+      };
+    };
+  };
+};
 
 function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -14,8 +26,8 @@ function pause(ms: number): Promise<void> {
 
 export function createRefreshSiteSummaryHandler(
   deps: FieldOpsDeps,
-): Handler {
-  return async ({ job, client }) => {
+) {
+  return async ({ job, client }: HandlerArgs) => {
     const siteSummary = deps.getSiteSummary(job.payload.siteId);
     console.info(
       `refreshSiteSummary job ${job.ref.id} request=${job.context.requestId} trace=${job.context.traceId}`,

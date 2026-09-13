@@ -25,6 +25,98 @@ pub use compile::SuppliedDependencies;
 pub use projection::json_schema;
 pub use semantic::*;
 
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, path::PathBuf};
+
+    use semver::Version;
+
+    use crate::{
+        compile_project,
+        project::{GenerateConfig, PackageManifest, PackageMetadata},
+        ActionDefinition, PackageGraph, Pagination, SourceUnit,
+    };
+
+    fn compile(source: impl Into<String>) -> miette::Result<PackageGraph> {
+        compile_project(
+            &PackageManifest {
+                package: PackageMetadata {
+                    name: "fixture".into(),
+                    version: Version::new(1, 0, 0),
+                },
+                sources: BTreeMap::from([("main".into(), "main.trellis".into())]),
+                dependencies: BTreeMap::new(),
+                generate: GenerateConfig::default(),
+                default_registry: None,
+                registries: BTreeMap::new(),
+            },
+            vec![SourceUnit {
+                alias: "main".into(),
+                path: PathBuf::from("main.trellis"),
+                source: source.into(),
+            }],
+            BTreeMap::new(),
+        )
+    }
+
+    #[test]
+    fn compiles_native_cursor_pagination_fixture() {
+        let graph = compile(include_str!("../fixtures/cursor-pagination.trellis")).unwrap();
+
+        let action = graph
+            .root_package()
+            .apis()
+            .values()
+            .next()
+            .unwrap()
+            .actions()
+            .values()
+            .next()
+            .unwrap();
+        assert!(matches!(
+            action,
+            ActionDefinition::Rpc {
+                pagination: Some(Pagination::Cursor),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_removed_job_authoring_knobs() {
+        for member in ["deadline 1m;", "retry { attempts 1; backoff []; }"] {
+            let source = format!(
+                "model Payload {{ value: string; }} service Worker {{ job Work {{ title \"Work\"; description \"Work queue.\"; payload Payload; {member} }} }}"
+            );
+            assert!(
+                compile(source).is_err(),
+                "accepted removed Job member: {member}"
+            );
+        }
+    }
+
+    #[test]
+    fn builtin_state_wire_contract_matches_wo04() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runtime");
+        let manifest = crate::project::read_manifest(&root.join("trellis.toml")).unwrap();
+        let sources = crate::project::load_sources(&root, &manifest).unwrap();
+        let graph = compile_project(&manifest, sources, BTreeMap::new()).unwrap();
+        let source =
+            crate::canonical_package(&graph, graph.root(), crate::CanonicalMode::Presentation)
+                .unwrap();
+
+        assert!(source.contains("type StateRepresentationVersion = uint32(min=1);"));
+        assert!(source.contains("createdAt: timestamp;"));
+        assert!(source.contains("updatedAt: timestamp;"));
+        assert!(source.contains("mode: StatePutMode;"));
+        assert!(source.contains("revision?: StateRevision;"));
+        assert!(source.contains("value: bytes;"));
+        assert!(source.contains("rpc Put {"));
+        assert!(!source.contains("rpc Set {"));
+        assert!(!source.contains("StateSetRequest"));
+    }
+}
+
 use project::{Dependency, GenerateConfig, PackageManifest, PackageMetadata};
 use semver::Version;
 use serde::{Deserialize, Serialize};

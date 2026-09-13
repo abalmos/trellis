@@ -1,9 +1,9 @@
 <script lang="ts">
   import { type apis } from "trellis-web-generated";
-  import { compactDuration } from "../format";
+  import { boundedNumber, compactDuration } from "../format";
 
   type Props = {
-    buckets: apis.jobs.JobsMetricsOutput["buckets"];
+    buckets: apis.jobs.MetricsOutput["buckets"];
     selectedKey?: string | null;
     windowLabel: string;
   };
@@ -14,9 +14,9 @@
     buckets.map((bucket) => {
       const groups = selectedKey ? bucket.groups.filter((group) => group.key === selectedKey) : bucket.groups;
       return {
-        completed: groups.reduce((sum, group) => sum + group.completed, 0),
-        failures: groups.reduce((sum, group) => sum + group.failed + group.dead, 0),
-        queueP95: Math.max(...groups.map((group) => group.queueWait.p95Ms ?? 0), 0),
+        completed: boundedNumber(groups.reduce((sum, group) => sum + group.completed, 0n)),
+        failures: boundedNumber(groups.reduce((sum, group) => sum + group.failed + group.dead, 0n)),
+        queueP95: Math.max(...groups.map((group) => boundedNumber(group.queueWait.p95Ms ?? 0n)), 0),
       };
     }),
   );

@@ -30,6 +30,13 @@ pub struct ResourceCompatibilityReport {
     pub issues: Vec<CompatibilityIssue>,
 }
 
+struct Comparison<'a> {
+    old_api: &'a ApiDefinition,
+    new_api: &'a ApiDefinition,
+    old_graph: &'a PackageGraph,
+    new_graph: &'a PackageGraph,
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct SelectedCompatibilityCacheKey {
     consumer_digest: String,
@@ -137,14 +144,17 @@ pub fn compare_implementation(
             Some(next) => {
                 let path = format!("api.{}.{}.{}", previous_api.name, kind(id.kind), id.name);
                 if id.kind == ActionKind::Event {
+                    let comparison = Comparison {
+                        old_api: previous_api,
+                        new_api: replacement_api,
+                        old_graph: previous.graph,
+                        new_graph: replacement.graph,
+                    };
                     compare_action(
                         action,
                         next,
                         InteractionDirection::Publish,
-                        previous_api,
-                        replacement_api,
-                        previous.graph,
-                        replacement.graph,
+                        &comparison,
                         &format!("{path}.publish"),
                         &mut issues,
                     );
@@ -152,10 +162,7 @@ pub fn compare_implementation(
                         action,
                         next,
                         InteractionDirection::Subscribe,
-                        previous_api,
-                        replacement_api,
-                        previous.graph,
-                        replacement.graph,
+                        &comparison,
                         &format!("{path}.subscribe"),
                         &mut issues,
                     );
@@ -171,10 +178,12 @@ pub fn compare_implementation(
                         action,
                         next,
                         direction,
-                        previous_api,
-                        replacement_api,
-                        previous.graph,
-                        replacement.graph,
+                        &Comparison {
+                            old_api: previous_api,
+                            new_api: replacement_api,
+                            old_graph: previous.graph,
+                            new_graph: replacement.graph,
+                        },
                         &path,
                         &mut issues,
                     );
@@ -233,10 +242,12 @@ pub fn compare_selected(
                 old,
                 new,
                 selected.direction,
-                consumer_api,
-                provider_api,
-                consumer,
-                provider,
+                &Comparison {
+                    old_api: consumer_api,
+                    new_api: provider_api,
+                    old_graph: consumer,
+                    new_graph: provider,
+                },
                 &path,
                 &mut issues,
             ),
@@ -254,13 +265,15 @@ fn compare_action(
     old: &ActionDefinition,
     new: &ActionDefinition,
     direction: InteractionDirection,
-    old_api: &ApiDefinition,
-    new_api: &ApiDefinition,
-    old_graph: &PackageGraph,
-    new_graph: &PackageGraph,
+    comparison: &Comparison<'_>,
     path: &str,
     issues: &mut Vec<CompatibilityIssue>,
 ) {
+    let Comparison {
+        old_graph,
+        new_graph,
+        ..
+    } = comparison;
     match (old, new) {
         (
             ActionDefinition::Rpc {
@@ -290,9 +303,7 @@ fn compare_action(
             if d != w || p != q {
                 issue(issues, path, "RPC transfer or pagination contract changed");
             }
-            compare_errors(
-                old, new, old_api, new_api, old_graph, new_graph, path, issues,
-            );
+            compare_errors(old, new, comparison, path, issues);
         }
         (
             ActionDefinition::Operation {
@@ -348,9 +359,7 @@ fn compare_action(
             if f != q {
                 issue(issues, path, "Operation upload contract changed");
             }
-            compare_errors(
-                old, new, old_api, new_api, old_graph, new_graph, path, issues,
-            );
+            compare_errors(old, new, comparison, path, issues);
         }
         (
             ActionDefinition::Event {
@@ -445,13 +454,16 @@ fn optional_subset(
 fn compare_errors(
     old: &ActionDefinition,
     new: &ActionDefinition,
-    old_api: &ApiDefinition,
-    new_api: &ApiDefinition,
-    old_graph: &PackageGraph,
-    new_graph: &PackageGraph,
+    comparison: &Comparison<'_>,
     path: &str,
     issues: &mut Vec<CompatibilityIssue>,
 ) {
+    let Comparison {
+        old_api,
+        new_api,
+        old_graph,
+        new_graph,
+    } = comparison;
     let (Some(old_errors), Some(new_errors)) = (action_errors(old), action_errors(new)) else {
         return;
     };

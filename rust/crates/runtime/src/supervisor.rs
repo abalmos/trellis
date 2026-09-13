@@ -24,7 +24,7 @@ use crate::resources::{stream_is_compatible, ExpectedRuntimeResources};
 use crate::shutdown::StopHandle;
 use crate::storage::{RuntimeStores, StoreError};
 use crate::{
-    eventlog, health, jobs, platform, RuntimeConfig, RuntimeMode, ServerError, SubsystemName,
+    events, health, jobs, platform, RuntimeConfig, RuntimeMode, ServerError, SubsystemName,
 };
 
 /// Replacement for configured NATS endpoints used by managed `trellis-server` startup.
@@ -402,6 +402,15 @@ pub enum RuntimeError {
     /// Runtime NATS connection failed.
     #[error("runtime NATS connection failed: {0}")]
     Nats(String),
+    /// An existing runtime-owned stream cannot be changed without changing its identity or
+    /// reducing its retained data.
+    #[error("incompatible runtime stream {name}: {reason}")]
+    IncompatibleResource {
+        /// Existing stream name.
+        name: String,
+        /// Configuration incompatibility.
+        reason: &'static str,
+    },
     /// The final runtime NATS flush failed during shutdown.
     #[error("runtime NATS flush failed during shutdown: {0}")]
     NatsFlush(String),
@@ -949,7 +958,7 @@ async fn start_subsystems(context: &RuntimeContext) -> Result<Vec<SubsystemHandl
             SubsystemName::Platform => platform::start(context).await,
             SubsystemName::Jobs => jobs::start(context).await,
             SubsystemName::Health => health::start(context).await,
-            SubsystemName::Eventlog => eventlog::start(context).await,
+            SubsystemName::Events => events::start(context).await,
         };
         match result {
             Ok(handle) => handles.push(handle),

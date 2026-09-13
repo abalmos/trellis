@@ -7,12 +7,12 @@ pub(super) async fn dispatch(
     caller: ValidatedRequest,
 ) -> Result<Value, AuthorizationStateError> {
     match subject {
-        "rpc.v1.Auth.Sessions.Me" => processor.sessions_me(caller).await,
-        "rpc.v1.Auth.Sessions.List" => processor.sessions_list(payload, &caller).await,
-        "rpc.v1.Auth.Sessions.Revoke" => processor.sessions_revoke(payload, Some(&caller)).await,
-        "rpc.v1.Auth.Sessions.Logout" => processor.sessions_logout(payload, &caller).await,
-        "rpc.v1.Auth.Connections.List" => processor.connections_list(payload, caller).await,
-        "rpc.v1.Auth.Connections.Kick" => processor.connections_kick(payload).await,
+        "rpc.v1.auth.Sessions.Me" => processor.sessions_me(caller).await,
+        "rpc.v1.auth.Sessions.List" => processor.sessions_list(payload, &caller).await,
+        "rpc.v1.auth.Sessions.Revoke" => processor.sessions_revoke(payload, Some(&caller)).await,
+        "rpc.v1.auth.Sessions.Logout" => processor.sessions_logout(payload, &caller).await,
+        "rpc.v1.auth.Connections.List" => processor.connections_list(payload, caller).await,
+        "rpc.v1.auth.Connections.Kick" => processor.connections_kick(payload, &caller).await,
         _ => unknown(subject),
     }
 }

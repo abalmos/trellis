@@ -18,7 +18,7 @@
   const trellis = getTrellis();
   const notifications = getNotifications();
 
-  type UserView = apis.auth.AuthUsersListOutput["entries"][number];
+  type UserView = apis.auth.UsersListOutput["items"][number];
   type IdentityView = { provider: string; subject: string; displayName?: string | null; email?: string | null };
   type PasswordResetResult = {
     name: string | null;
@@ -89,11 +89,11 @@
     error = null;
     sessionsWarning = null;
     try {
-      const usersResponse = await trellis.authUsersList({ limit: 100 }).take();
+      const usersResponse = await trellis.usersList({ limit: 100 }).take();
       if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
-      users = usersResponse.entries ?? [];
+      users = usersResponse.items ?? [];
 
-      const sessionsResponse = await trellis.authSessionsList({ limit: 100 }).take();
+      const sessionsResponse = await trellis.sessionsList({ limit: 100 }).take();
       if (isErr(sessionsResponse)) {
         sessionsWarning = `Last-auth metadata unavailable: ${errorMessage(sessionsResponse)}`;
         userLastAuth = {};
@@ -101,7 +101,7 @@
       }
 
       const lastAuthByUser: Record<string, string> = {};
-      for (const session of sessionsResponse.entries ?? []) {
+      for (const session of sessionsResponse.items ?? []) {
         const key = session.principalId;
         if (!lastAuthByUser[key] || session.lastAuthenticatedAt > Number(lastAuthByUser[key])) {
           lastAuthByUser[key] = String(session.lastAuthenticatedAt);
@@ -116,7 +116,7 @@
     if (resetPendingUserId) return;
     resetPendingUserId = user.userId;
     try {
-      const response = await trellis.authUsersPasswordResetCreate({
+      const response = await trellis.usersPasswordResetCreate({
         idempotencyKey: ulid(),
         returnTarget: null,
         userId: user.userId,

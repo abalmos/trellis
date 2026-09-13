@@ -74,12 +74,12 @@ Heartbeat behavior:
   `Health.Inspect`, and `Health.Metrics`, then uses `Health.Watch` as a
   post-commit invalidation feed
 
-### Runtime Health And Eventlog Views
+### Runtime Health And Events Views
 
-The Rust runtime has first-class `health` and `eventlog` subsystems. In
-all-in-one mode both run with the platform and jobs subsystems. In split mode,
-operators run `trellis-server health` for health projection and may omit
-`trellis-server eventlog` when projected event capture is not wanted.
+The Rust runtime has first-class `health` and `events` subsystems. In all-in-one
+mode both run with the platform and jobs subsystems. In split mode, operators
+run `trellis-server health` for health projection and may omit
+`trellis-server events` when projected event capture is not wanted.
 
 Health subsystem rules:
 
@@ -99,8 +99,8 @@ Health subsystem rules:
 - the health store retains only latest instance state, status intervals,
   five-minute metric buckets, bounded rejection diagnostics, and a transition
   outbox; it does not retain one SQL row per raw sample
-- health projection is independent from eventlog storage; it must not depend on
-  an eventlog store to answer latest or freshness queries
+- health projection is independent from Events storage; it must not depend on an
+  Events store to answer latest or freshness queries
 - health stores bounded history according to runtime config, with a default of
   30 days when not overridden
 - health projector and retention loops are singleton runtime loops coordinated
@@ -111,17 +111,17 @@ Health subsystem rules:
 - only meaningful effective-status transitions publish the durable
   `Health.StatusChanged` event on the normal event stream
 
-Eventlog subsystem rules:
+Events subsystem rules:
 
-- eventlog captures Trellis-owned event subjects under `events.v1.>` and stores
+- Events captures Trellis-owned event subjects under `events.v1.>` and stores
   queryable metadata plus raw payloads for those events
 - jobs lifecycle and worker-presence subjects are jobs subsystem stream traffic,
-  not initial eventlog input
-- eventlog stores full NATS-valid payloads unless a later explicit storage or
+  not initial Events input
+- Events stores full NATS-valid payloads unless a later explicit storage or
   retention policy defines a different bound
-- eventlog stores bounded history according to runtime config, with a default of
-  7 days when not overridden
-- eventlog projector and retention loops are singleton runtime loops coordinated
+- Events stores bounded history according to runtime config, with a default of 7
+  days when not overridden
+- Events projector and retention loops are singleton runtime loops coordinated
   with NATS KV leases
 
 Stats example:

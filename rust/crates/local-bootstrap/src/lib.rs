@@ -573,9 +573,9 @@ journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true
 
-[eventlog.storage]
+[events.storage]
 kind = "sqlite"
-path = "./data/eventlog.sqlite"
+path = "./data/events.sqlite"
 journal_mode = "wal"
 busy_timeout_ms = 5000
 single_writer = true
@@ -1257,7 +1257,7 @@ mod tests {
             "./data/platform.sqlite",
             "./data/jobs.sqlite",
             "./data/health.sqlite",
-            "./data/eventlog.sqlite",
+            "./data/events.sqlite",
         ] {
             assert!(config.contains(&format!("path = \"{path}\"")));
         }

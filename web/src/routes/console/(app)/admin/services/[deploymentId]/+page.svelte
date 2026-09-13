@@ -19,12 +19,12 @@
   );
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let detail = $state.raw<apis.auth.AuthDeploymentsGetOutput | null>(null);
+  let detail = $state.raw<apis.auth.DeploymentsGetOutput | null>(null);
 
   async function load() {
     loading = true;
     error = null;
-    const response = await trellis.authDeploymentsGet({ deploymentId }).take();
+    const response = await trellis.deploymentsGet({ deploymentId }).take();
     if (isErr(response)) error = errorMessage(response);
     else detail = response;
     loading = false;

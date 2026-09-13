@@ -2,7 +2,67 @@ import type { StaticDecode, TSchema } from "typebox";
 
 import type { BaseError } from "@qlever-llc/result";
 import type { Codec } from "../generated.ts";
+import { sha256Base64urlSync } from "./json.ts";
 type SubjectParam = `/${string}`;
+
+function subjectToken(value: string): string {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(value)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "");
+}
+
+/** Encodes one exact generated event descriptor identity for signed metadata. */
+export function eventDescriptorIdentity(
+  apiId: string,
+  eventName: string,
+  parameterCount: number,
+): string {
+  if (!Number.isSafeInteger(parameterCount) || parameterCount < 0) {
+    throw new Error(
+      "event parameter count must be a non-negative safe integer",
+    );
+  }
+  return `v1.${subjectToken(apiId)}.${
+    subjectToken(eventName)
+  }.${parameterCount}`;
+}
+
+/** Derives one deployment-bound API request subject. */
+export function boundApiSubject(
+  family: "rpc" | "operation" | "feed",
+  apiId: string,
+  providerDeploymentId: string,
+  action: string,
+): string {
+  return `${family}.v1.${subjectToken(apiId)}.${
+    subjectToken(providerDeploymentId)
+  }.${action}`;
+}
+
+/** Derives one API-qualified event subject template. */
+export function eventSubject(apiId: string, action: string): string {
+  return `events.v1.${subjectToken(apiId)}.${action}`;
+}
+
+/** Derives an owner control subscription or an exact subject for one Feed instance. */
+export function feedControlSubject(
+  feedSubject: string,
+  ownerInstanceId: string,
+  feedId?: string,
+): string {
+  const ownerSubject = `${feedSubject}.control.${
+    subjectToken(ownerInstanceId)
+  }`;
+  return feedId === undefined
+    ? `${ownerSubject}.*`
+    : `${ownerSubject}.${subjectToken(feedId)}`;
+}
+
+/** Derives the stable queue shared by replicas subscribed to an exact route. */
+export function routeQueueGroup(subject: string): string {
+  return `trellis.${sha256Base64urlSync(subject)}`;
+}
 
 export type Schema<T> = {
   schema: unknown;
@@ -44,6 +104,7 @@ export type InferRuntimeRpcError<T extends RuntimeRpcErrorDesc> = T extends
   : never;
 
 export type InferSchemaType<S> = S extends Schema<infer T> ? T
+  : S extends { decode(value: unknown): infer T } ? T
   : S extends TSchema ? StaticDecode<S>
   : unknown;
 
@@ -108,6 +169,8 @@ export type RPCDesc<
 
 export type EventDesc<S extends SchemaLike = SchemaLike> = {
   subject: string;
+  /** Canonical API, event, and parameter-shape identity bound into proofs. */
+  descriptorIdentity: string;
   params?: readonly SubjectParam[];
   event: S;
   /** Exact permission required to publish this event. */

@@ -95,7 +95,7 @@ fn runtime_config() -> RuntimeConfig {
         platform: None,
         jobs: None,
         health: None,
-        eventlog: None,
+        events: None,
     }
 }
 
@@ -179,6 +179,9 @@ fn sqlite_platform_store_creates_complete_fresh_schema() -> Result<(), Box<dyn s
     assert_table(&path, "auth_authorization_contexts")?;
     assert_table(&path, "auth_bootstrap_administrator")?;
     assert_table(&path, "auth_package_evidence")?;
+    assert_table(&path, "auth_api_bindings")?;
+    assert_table(&path, "auth_resources")?;
+    assert_table(&path, "auth_resource_history")?;
     let connection = Connection::open(&path)?;
     let mut statement = connection.prepare("PRAGMA table_info(auth_installed_participants)")?;
     let columns = statement
@@ -192,6 +195,19 @@ fn sqlite_platform_store_creates_complete_fresh_schema() -> Result<(), Box<dyn s
             .collect::<Vec<_>>(),
         ["participant_digest", "needs_digest", "package_digest"]
     );
+    let columns = connection
+        .prepare("PRAGMA table_info(auth_device_delegations)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    assert!(columns.contains(&"device_grant_revision".to_owned()));
+    assert!(columns.contains(&"child_grant_revision".to_owned()));
+    let columns = connection
+        .prepare("PRAGMA table_info(auth_resources)")?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for required in ["commitment_json", "actual_json", "readiness_reason"] {
+        assert!(columns.contains(&required.to_owned()));
+    }
     for retired in [
         "auth_participant_bindings",
         "auth_identity_authorities",
@@ -293,16 +309,113 @@ fn sqlite_health_projection_store_creates_parent_directory_and_migrates(
 }
 
 #[test]
-fn sqlite_eventlog_store_migrates_marker_schema() -> Result<(), Box<dyn std::error::Error>> {
+fn sqlite_events_store_migrates_marker_schema() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
-    let path = temp_dir.path().join("eventlog.sqlite");
-    let store = SqliteStore::new(SubsystemName::Eventlog, sqlite_config(path.clone()));
+    let path = temp_dir.path().join("events.sqlite");
+    let store = SqliteStore::new(SubsystemName::Events, sqlite_config(path.clone()));
 
     store.migrate()?;
 
     assert!(path.exists());
-    assert_marker(&path, "trellis_eventlog_store_marker")?;
-    assert_migration(&path, 4000, "eventlog_init")?;
+    assert_marker(&path, "trellis_events_store_marker")?;
+    assert_migration(&path, 4000, "events_init")?;
+    Ok(())
+}
+
+#[test]
+fn sqlite_events_migration_matches_events_store_timestamp_schema(
+) -> Result<(), Box<dyn std::error::Error>> {
+    use trellis_events_runtime::dead_letters::{
+        dead_letter_id, DeadLetterCause, DeadLetterState, DeadLetterTransition, OriginalEvent,
+    };
+    use trellis_events_runtime::storage::{EventsFilter, EventsStore, ProjectedEvent};
+
+    let temp_dir = tempfile::tempdir()?;
+    let path = temp_dir.path().join("events.sqlite");
+    let runtime_store = SqliteStore::new(SubsystemName::Events, sqlite_config(path.clone()));
+    runtime_store.migrate()?;
+    runtime_store.check_migrations()?;
+    let events = EventsStore::open(&path)?;
+
+    for (sequence, event_time) in [(1, "2026-01-01T00:00:00.1Z"), (2, "2026-01-01T00:00:00Z")] {
+        events.insert_event(&ProjectedEvent {
+            stream_sequence: sequence,
+            event_id: Some(format!("event-{sequence}")),
+            event_time: event_time.to_owned(),
+            subject: "events.v1.Test.Created".to_owned(),
+            owner_contract_id: None,
+            owner_event_name: None,
+            resolution: "resolved".to_owned(),
+            verification_status: "verified".to_owned(),
+            publisher_kind: None,
+            publisher_deployment_id: None,
+            publisher_instance_id: None,
+            publisher_participant_id: None,
+            publisher_principal_id: None,
+            publisher_connection_id: None,
+            publisher_login_session_id: None,
+            authorization_context_digest: None,
+            trace_id: None,
+            traceparent: None,
+            payload_bytes: Vec::new(),
+            headers_json: "{}".to_owned(),
+            payload_json: None,
+            payload_text: None,
+            decode_error: None,
+            projected_at: "2026-01-01T00:00:01Z".to_owned(),
+        })?;
+    }
+    let (event_rows, _) = events.query_events(&EventsFilter {
+        limit: 2,
+        sort_field: "eventTime".to_owned(),
+        sort_direction: "asc".to_owned(),
+        ..Default::default()
+    })?;
+    assert_eq!(event_rows[0]["streamSequence"], 2);
+    assert_eq!(event_rows[1]["streamSequence"], 1);
+
+    for (sequence, occurred_at) in [(1, "2026-01-01T00:00:00.1Z"), (2, "2026-01-01T00:00:00Z")] {
+        events.project_dead_letter(
+            &DeadLetterTransition {
+                id: dead_letter_id("consumer-1", "trellis", sequence),
+                resource_id: "consumer-1".to_owned(),
+                revision: 1,
+                previous_subject_sequence: 0,
+                generation: 0,
+                state: DeadLetterState::Dead,
+                occurred_at: occurred_at.to_owned(),
+                request_id: None,
+                request_digest: None,
+                cause: DeadLetterCause::Exhausted,
+                original: Some(OriginalEvent {
+                    stream: "trellis".to_owned(),
+                    sequence,
+                    event_id: Some(format!("event-{sequence}")),
+                    subject: "events.v1.Test.Created".to_owned(),
+                    payload_bytes: Vec::new(),
+                    headers: std::collections::BTreeMap::new(),
+                    api_id: Some("test@v1".to_owned()),
+                    event_name: Some("Created".to_owned()),
+                    context_digest: None,
+                    verification_status: "verified".to_owned(),
+                }),
+                original_record_sequence: 0,
+                deliveries: 1,
+                last_error: Some("failed".to_owned()),
+                replay_stream_sequence: None,
+            },
+            sequence,
+        )?;
+    }
+    let dead_letters = events.query_dead_letters(Some("consumer-1"), &[], None, 2)?;
+    assert_eq!(
+        dead_letters["items"][0]["updatedAt"],
+        "2026-01-01T00:00:00.1Z"
+    );
+    assert_eq!(
+        dead_letters["items"][1]["updatedAt"],
+        "2026-01-01T00:00:00Z"
+    );
     Ok(())
 }
 
@@ -314,12 +427,12 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     let platform_path = temp_dir.path().join("platform.sqlite");
     let jobs_path = temp_dir.path().join("jobs.sqlite");
     let health_path = temp_dir.path().join("health.sqlite");
-    let eventlog_path = temp_dir.path().join("eventlog.sqlite");
+    let events_path = temp_dir.path().join("events.sqlite");
     let mut config = runtime_config();
     config.platform = Some(subsystem_config(platform_path.clone()));
     config.jobs = Some(subsystem_config(jobs_path.clone()));
     config.health = Some(subsystem_config(health_path.clone()));
-    config.eventlog = Some(subsystem_config(eventlog_path.clone()));
+    config.events = Some(subsystem_config(events_path.clone()));
 
     config.validate_for_mode(RuntimeMode::All)?;
     let stores = RuntimeStores::from_config(&config, RuntimeMode::All)?;
@@ -328,15 +441,15 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert!(stores.platform.is_some());
     assert!(stores.jobs.is_some());
     assert!(stores.health.is_some());
-    assert!(stores.eventlog.is_some());
+    assert!(stores.events.is_some());
     assert_marker(&platform_path, "trellis_platform_store_marker")?;
     assert_marker(&jobs_path, "trellis_jobs_projection_store_marker")?;
     assert_marker(&health_path, "trellis_health_projection_store_marker")?;
-    assert_marker(&eventlog_path, "trellis_eventlog_store_marker")?;
+    assert_marker(&events_path, "trellis_events_store_marker")?;
     assert_migration_order(&platform_path, &[1000])?;
     assert_migration_order(&jobs_path, &[2000])?;
     assert_migration_order(&health_path, &[3000, 3001])?;
-    assert_migration_order(&eventlog_path, &[4000])?;
+    assert_migration_order(&events_path, &[4000])?;
     Ok(())
 }
 
@@ -357,7 +470,7 @@ fn runtime_stores_split_mode_ignores_unselected_storage() -> Result<(), Box<dyn 
     assert!(stores.platform.is_none());
     assert!(stores.jobs.is_some());
     assert!(stores.health.is_none());
-    assert!(stores.eventlog.is_none());
+    assert!(stores.events.is_none());
     assert_marker(&jobs_path, "trellis_jobs_projection_store_marker")?;
     assert_migration(&jobs_path, 2000, "jobs_projection_init")?;
     Ok(())

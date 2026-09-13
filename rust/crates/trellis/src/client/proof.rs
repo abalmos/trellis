@@ -39,29 +39,43 @@ pub fn new_request_id() -> String {
 }
 
 /// Verify a context-bound v1 event proof against the raw published values.
+#[derive(Clone, Copy, Debug)]
+pub struct VerifyEventProofInput<'a> {
+    /// Base64url Ed25519 session public key.
+    pub public_session_key: &'a str,
+    /// Base64url authorization-context digest.
+    pub context_digest: &'a str,
+    /// Canonical event descriptor identity.
+    pub descriptor_identity: &'a str,
+    /// Concrete published NATS subject.
+    pub subject: &'a str,
+    /// Raw published payload.
+    pub payload: &'a [u8],
+    /// Publisher-assigned event ID.
+    pub event_id: &'a str,
+    /// Canonical event timestamp.
+    pub event_time: &'a str,
+    /// Base64url Ed25519 proof.
+    pub proof_base64url: &'a str,
+}
+
+/// Verify a context-bound v1 event proof against the raw published values.
 #[doc = concat!("Trellis API operation `", stringify!(verify_event_proof), "`.")]
-pub fn verify_event_proof(
-    public_session_key: &str,
-    context_digest: &str,
-    subject: &str,
-    payload: &[u8],
-    event_id: &str,
-    event_time: &str,
-    proof_base64url: &str,
-) -> Result<bool, TrellisClientError> {
-    let context_digest = decode_context_digest(context_digest)?;
-    let input = trellis_protocol::build_authorization_event_proof_input(
+pub fn verify_event_proof(input: VerifyEventProofInput<'_>) -> Result<bool, TrellisClientError> {
+    let context_digest = decode_context_digest(input.context_digest)?;
+    let proof_input = trellis_protocol::build_authorization_event_proof_input(
         &context_digest,
-        subject,
-        payload,
-        event_id,
-        event_time,
+        input.descriptor_identity,
+        input.subject,
+        input.payload,
+        input.event_id,
+        input.event_time,
     )
     .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
     Ok(verify_signature(
-        public_session_key,
-        input.digest(),
-        proof_base64url,
+        input.public_session_key,
+        proof_input.digest(),
+        input.proof_base64url,
     ))
 }
 

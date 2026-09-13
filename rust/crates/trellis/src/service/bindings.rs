@@ -35,6 +35,8 @@ pub struct ServiceResourceBindings {
 #[serde(rename_all = "camelCase")]
 #[doc = concat!("Public Trellis data type `", stringify!(EventConsumerResourceBinding), "`.")]
 pub struct EventConsumerResourceBinding {
+    /// Stable logical Consumer resource identity.
+    pub resource_id: String,
     /// JetStream stream that owns the durable consumer.
     #[doc = concat!("The `", stringify!(stream), "` value.")]
     pub stream: String,
@@ -47,9 +49,9 @@ pub struct EventConsumerResourceBinding {
     /// Replay policy used when the consumer was provisioned.
     #[doc = concat!("The `", stringify!(replay), "` value.")]
     pub replay: EventConsumerReplay,
-    /// Ordering policy used by the consumer group.
-    #[doc = concat!("The `", stringify!(ordering), "` value.")]
-    pub ordering: EventConsumerOrdering,
+    /// Local handler concurrency declared for this consumer.
+    #[doc = concat!("The `", stringify!(concurrency), "` value.")]
+    pub concurrency: u32,
     /// Ack wait in milliseconds for the durable consumer.
     #[doc = concat!("The `", stringify!(ack_wait_ms), "` value.")]
     pub ack_wait_ms: i64,
@@ -59,6 +61,18 @@ pub struct EventConsumerResourceBinding {
     /// Redelivery backoff schedule in milliseconds.
     #[doc = concat!("The `", stringify!(backoff_ms), "` value.")]
     pub backoff_ms: Vec<i64>,
+    /// Targeted replay durable paired with the original durable.
+    pub replay_binding: EventConsumerReplayBinding,
+}
+
+/// Bound targeted replay durable for a Consumer.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventConsumerReplayBinding {
+    /// Replay stream.
+    pub stream: String,
+    /// Pre-provisioned replay durable name.
+    pub consumer_name: String,
 }
 
 /// Replay policy attached to an event consumer binding.
@@ -70,19 +84,6 @@ pub enum EventConsumerReplay {
     New,
     /// Replay all retained events before live delivery.
     All,
-    /// Preserve an unrecognized future wire value.
-    Unknown,
-}
-
-/// Ordering policy attached to an event consumer binding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[doc = concat!("Public Trellis value set `", stringify!(EventConsumerOrdering), "`.")]
-pub enum EventConsumerOrdering {
-    /// Process one event at a time in stream order.
-    Strict,
-    /// Allow concurrent event processing.
-    Parallel,
     /// Preserve an unrecognized future wire value.
     Unknown,
 }
@@ -193,15 +194,6 @@ pub struct JobsQueueResourceBinding {
     #[doc = concat!("The `", stringify!(default_deadline_ms), "` value.")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_deadline_ms: Option<i64>,
-    /// Whether progress events are enabled for this queue.
-    #[doc = concat!("The `", stringify!(progress), "` value.")]
-    pub progress: bool,
-    /// Whether log events are enabled for this queue.
-    #[doc = concat!("The `", stringify!(logs), "` value.")]
-    pub logs: bool,
-    /// Whether dead-letter handling is enabled for this queue.
-    #[doc = concat!("The `", stringify!(dlq), "` value.")]
-    pub dlq: bool,
     /// Optional normalized keyed concurrency policy for this queue.
     #[doc = concat!("The `", stringify!(key_concurrency), "` value.")]
     #[serde(skip_serializing_if = "Option::is_none")]

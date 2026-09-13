@@ -9,25 +9,12 @@ export const SiteSummary = Type.Object({
   lastReportAt: Type.String({ minLength: 1 }),
 });
 
-export const SitesListRequest = Type.Object({
-  limit: Type.Integer({ minimum: 0, maximum: 500 }),
-  offset: Type.Optional(Type.Integer({ minimum: 0 })),
-});
-export const SitesListResponse = Type.Object({
-  entries: Type.Array(SiteSummary),
-  count: Type.Integer({ minimum: 0 }),
-  offset: Type.Integer({ minimum: 0 }),
-  limit: Type.Integer({ minimum: 0 }),
-  nextOffset: Type.Optional(Type.Integer({ minimum: 0 })),
-});
-
 export const SitesGetRequest = Type.Object({
   siteId: Type.String({ minLength: 1 }),
 });
 export const SitesGetResponse = Type.Object({
   site: Type.Optional(SiteSummary),
 });
-
 export const SitesRefreshRequest = Type.Object({
   siteId: Type.String({ minLength: 1 }),
 });
@@ -40,7 +27,6 @@ export const SitesRefreshResponse = Type.Object({
   site: SiteSummary,
   status: Type.String({ minLength: 1 }),
 });
-
 export const SiteRefreshJobPayload = Type.Object({
   siteId: Type.String({ minLength: 1 }),
 });
@@ -49,7 +35,6 @@ export const SiteRefreshJobResult = Type.Object({
   site: SiteSummary,
   status: Type.String({ minLength: 1 }),
 });
-
 export const SitesRefreshedEvent = Type.Object({
   refreshId: Type.String({ minLength: 1 }),
   site: SiteSummary,

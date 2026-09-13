@@ -48,17 +48,3 @@ export {
   TrellisService,
   type TrellisServiceConnectOpts,
 } from "./service.ts";
-
-// Re-export subscription types
-export {
-  createEventContext,
-  type EventContext,
-  type EventHandler,
-  type GroupedSubscription,
-  isGroupedSubscription,
-  type MultiEventSubscription,
-  type MultiSubscribeOpts,
-  type OrderingGroup,
-  type SingleSubscription,
-  type SubscribeOpts,
-} from "./subscription.ts";

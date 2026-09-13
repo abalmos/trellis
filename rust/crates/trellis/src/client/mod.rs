@@ -13,6 +13,7 @@ mod events;
 mod http_error;
 mod operations;
 mod proof;
+mod resources;
 mod subject;
 mod transfer;
 
@@ -60,15 +61,23 @@ pub use operations::{
     OperationTransferStartError, OperationTransport, OperationUpdateEvent, OperationUpdateEvidence,
     StartedOperationTransfer, TransferOperationDescriptor,
 };
-pub use proof::verify_event_proof;
+pub use proof::{verify_event_proof, VerifyEventProofInput};
+#[doc(hidden)]
+pub use resources::{BoundStateResourceClient, ConnectedStateHandle};
+pub use resources::{
+    ConsumerDescriptor, ConsumerHandle, RawStateValue, RawStateWriteError, ResourceCodec,
+    ResourceCodecError, ResourceRevision, StateHandle, StateReadError, StateResourceClient,
+    StateValue, StateWriteError, StateWriteMode,
+};
+#[cfg(any(test, feature = "runtime-internals"))]
+#[doc(hidden)]
+pub use subject::resolve_subject;
+#[cfg(not(any(test, feature = "runtime-internals")))]
 pub(crate) use subject::resolve_subject;
 pub use subject::SubjectError;
 pub use transfer::{
     download_transfer_grant_from_value, DownloadTransferDirection, DownloadTransferGrant, FileInfo,
     TransferCancellation, TransferGrantType, UploadTransferDirection, UploadTransferGrant,
 };
-mod pagination;
-pub use pagination::{PageRequest, PageResponse};
-
 #[cfg(test)]
 mod tests;

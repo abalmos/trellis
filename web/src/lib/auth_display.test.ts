@@ -7,57 +7,25 @@ import {
   participantKindLabel,
 } from "./auth_display.ts";
 
-Deno.test("describeSessionPrincipal renders explicit user app and agent metadata", () => {
+Deno.test("describeSessionPrincipal renders generated session identity", () => {
   deepEqual(
     describeSessionPrincipal({
-      key: "github.123.sk_app",
-      sessionKey: "sk_app",
+      createdAt: 1n,
+      expiresAt: null,
+      lastAuthenticatedAt: 2n,
+      participantId: "console",
       participantKind: "app",
-      principal: {
-        type: "user",
-        userId: "usr_123",
-        name: "Ada Lovelace",
-        identity: {
-          identityId: "idn_github_123",
-          provider: "github",
-          subject: "123",
-        },
-      },
-      contractId: "trellis-app.console@v1",
-      contractDisplayName: "Trellis Console",
-      createdAt: Date.parse("2026-04-10T00:00:00.000Z"),
-      lastAuth: Date.parse("2026-04-10T01:00:00.000Z"),
+      principalId: "usr_123",
+      revokedAt: null,
+      sessionId: "ses_app",
+      sessionKeyId: "key_app",
+      sessionPublicKey: "pub_app",
+      state: "active",
+      version: 1n,
     }),
     {
       title: "usr_123",
-      details:
-        "Ada Lovelace • github:123 • idn_github_123 • Trellis Console (trellis-app.console@v1)",
-    },
-  );
-
-  deepEqual(
-    describeSessionPrincipal({
-      key: "github.123.sk_agent",
-      sessionKey: "sk_agent",
-      participantKind: "agent",
-      principal: {
-        type: "user",
-        userId: "usr_123",
-        name: "",
-        identity: {
-          identityId: "idn_github_123",
-          provider: "github",
-          subject: "123",
-        },
-      },
-      contractId: "trellis.agent@v1",
-      contractDisplayName: "Trellis Agent",
-      createdAt: Date.parse("2026-04-10T00:00:00.000Z"),
-      lastAuth: Date.parse("2026-04-10T01:00:00.000Z"),
-    }),
-    {
-      title: "usr_123",
-      details: "github:123 • idn_github_123 • Trellis Agent (trellis.agent@v1)",
+      details: "ses_app",
     },
   );
 });

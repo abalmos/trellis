@@ -15,8 +15,8 @@
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type Review = apis.auth.AuthDeviceUserAuthoritiesReviewsListOutput["entries"][number];
-  type DeviceInstance = apis.auth.AuthDevicesListOutput["entries"][number];
+  type Review = apis.auth.DeviceUserAuthoritiesReviewsListOutput["items"][number];
+  type DeviceInstance = apis.auth.DevicesListOutput["items"][number];
 
   const understoodMetadataKeys = ["name", "serialNumber", "modelNumber"] as const;
   const trellis = getTrellis();
@@ -54,15 +54,15 @@
     error = null;
     try {
       const [reviewsResponse, instancesResponse] = await Promise.all([
-        trellis.authDeviceUserAuthoritiesReviewsList({ state: "pending", limit: 100 }).take(),
-        trellis.authDevicesList({ limit: 100 }).take(),
+        trellis.deviceUserAuthoritiesReviewsList({ state: "pending", limit: 100 }).take(),
+        trellis.devicesList({ limit: 100 }).take(),
       ]);
       if (isErr(reviewsResponse)) { error = errorMessage(reviewsResponse); return; }
       if (isErr(instancesResponse)) { error = errorMessage(instancesResponse); return; }
-      const loadedReviews = reviewsResponse.entries ?? [];
+      const loadedReviews = reviewsResponse.items ?? [];
       const loadedPendingReviews = loadedReviews.filter((review) => review.state === "pending");
       reviews = loadedReviews;
-      deviceInstances = instancesResponse.entries ?? [];
+      deviceInstances = instancesResponse.items ?? [];
       if (selectedReviewId && !loadedPendingReviews.some((review) => review.reviewId === selectedReviewId)) {
         selectedReviewId = "";
       }
@@ -81,13 +81,13 @@
     pending = true;
     error = null;
     try {
-      const response = await trellis.authDeviceUserAuthoritiesReviewsDecide({
+      const response = await trellis.deviceUserAuthoritiesReviewsDecide({
           reviewId: selectedReview.reviewId,
           decision,
           expectedVersion: selectedReview.version,
           idempotencyKey: ulid(),
           reason: decision === "reject" && reason.trim() ? reason.trim() : null,
-        } satisfies apis.auth.AuthDeviceUserAuthoritiesReviewsDecideInput,
+        } satisfies apis.auth.DeviceUserAuthoritiesReviewsDecideInput,
       ).take();
       if (isErr(response)) { error = errorMessage(response); return; }
       notifications.success(`Review ${selectedReview.reviewId} ${decision === "approve" ? "approved" : "rejected"}.`, decision === "approve" ? "Approved" : "Rejected");

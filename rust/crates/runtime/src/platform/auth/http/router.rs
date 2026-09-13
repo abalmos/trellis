@@ -428,6 +428,7 @@ where
         ))
     })?;
     let state = AuthHttpState {
+        nats: options.nats,
         service: options.service,
         ephemeral: options.ephemeral,
         issuer: options.issuer,

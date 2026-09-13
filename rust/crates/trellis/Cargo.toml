@@ -45,6 +45,7 @@ url = "2.5.8"
 tempfile = "3.27.0"
 trellis-test = { path = "../trellis-test" }
 trellis-local-nats = { path = "../local-nats" }
+trellis-bootstrap = { path = "../bootstrap" }
 
 [lints]
 workspace = true

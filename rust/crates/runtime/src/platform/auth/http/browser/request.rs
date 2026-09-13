@@ -100,7 +100,17 @@ where
         tracing::warn!(participant_id = %request.participant_id, "auth request participant binding is unresolved");
         return Err(HttpError::bad_request("participant_binding_mismatch"));
     }
-    let consent = browser_consent(&binding)?;
+    if state
+        .service
+        .repository()
+        .is_companion_participant(binding.participant_id.clone())
+        .await?
+    {
+        return Err(HttpError::bad_request(
+            "companion_requires_parent_activation",
+        ));
+    }
+    let consent = browser_consent(&binding, installed_revision)?;
     let flow_id = request.request_id.clone();
     let flow = AuthBrowserFlow {
         format: BROWSER_FLOW_FORMAT.to_owned(),

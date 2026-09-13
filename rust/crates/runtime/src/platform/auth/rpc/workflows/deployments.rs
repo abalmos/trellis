@@ -11,31 +11,31 @@ pub(super) async fn dispatch(
 ) -> Result<Value, AuthorizationStateError> {
     require_admin(&caller)?;
     match subject {
-        "rpc.v1.Auth.Deployments.Create" => processor.deployments_create(payload, &caller).await,
-        "rpc.v1.Auth.Deployments.List" => processor.deployments_list(payload).await,
-        "rpc.v1.Auth.Deployments.Get" => processor.deployments_get(payload, &caller).await,
-        "rpc.v1.Auth.Deployments.Enable" => {
+        "rpc.v1.auth.Deployments.Create" => processor.deployments_create(payload, &caller).await,
+        "rpc.v1.auth.Deployments.List" => processor.deployments_list(payload).await,
+        "rpc.v1.auth.Deployments.Get" => processor.deployments_get(payload, &caller).await,
+        "rpc.v1.auth.Deployments.Enable" => {
             processor
                 .deployments_set_state(payload, &caller, DeploymentProfileState::Active)
                 .await
         }
-        "rpc.v1.Auth.Deployments.Disable" => {
+        "rpc.v1.auth.Deployments.Disable" => {
             processor
                 .deployments_set_state(payload, &caller, DeploymentProfileState::Disabled)
                 .await
         }
-        "rpc.v1.Auth.Deployments.Remove" => {
+        "rpc.v1.auth.Deployments.Remove" => {
             processor
                 .deployments_set_state(payload, &caller, DeploymentProfileState::Removed)
                 .await
         }
-        "rpc.v1.Auth.ServiceInstances.Provision" => {
+        "rpc.v1.auth.ServiceInstances.Provision" => {
             processor
                 .service_instances_provision(payload, &caller)
                 .await
         }
-        "rpc.v1.Auth.ServiceInstances.List" => processor.service_instances_list(payload).await,
-        "rpc.v1.Auth.ServiceInstances.Enable" => {
+        "rpc.v1.auth.ServiceInstances.List" => processor.service_instances_list(payload).await,
+        "rpc.v1.auth.ServiceInstances.Enable" => {
             processor
                 .provisioned_instance_set_state(
                     payload,
@@ -45,7 +45,7 @@ pub(super) async fn dispatch(
                 )
                 .await
         }
-        "rpc.v1.Auth.ServiceInstances.Disable" => {
+        "rpc.v1.auth.ServiceInstances.Disable" => {
             processor
                 .provisioned_instance_set_state(
                     payload,
@@ -55,7 +55,7 @@ pub(super) async fn dispatch(
                 )
                 .await
         }
-        "rpc.v1.Auth.ServiceInstances.Remove" => {
+        "rpc.v1.auth.ServiceInstances.Remove" => {
             processor
                 .provisioned_instance_set_state(
                     payload,

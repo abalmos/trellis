@@ -17,11 +17,11 @@ pub use device_activation::{
     DeviceActivationError, DeviceActivationOptions, DeviceActivationPending,
     DeviceActivationSession, DeviceActivationStatus,
 };
-pub use device_identity::derive_device_identity;
+pub use device_identity::{derive_device_identity, derive_device_user_companion};
 pub use error::TrellisAuthError;
 pub use models::{
     AdminLoginOutcome, AdminReauthOutcome, AdminSessionState, AgentLoginChallenge, BoundSession,
-    DeviceIdentity, StartAgentLoginOpts,
+    DeviceCompanionIdentity, DeviceIdentity, StartAgentLoginOpts,
 };
 pub use protocol::AuthenticatedUser;
 pub use session_store::{clear_admin_session, load_admin_session, save_admin_session};

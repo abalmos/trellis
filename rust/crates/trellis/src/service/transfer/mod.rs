@@ -1,10 +1,11 @@
 mod download;
 mod protocol;
+pub(crate) use protocol::upload_subject_prefix;
 mod upload;
 
 pub use download::run_download_transfer_endpoint;
 pub(crate) use protocol::transfer_frame_proof_payload;
-use protocol::{download_subject_prefix, upload_subject_prefix, UploadTransferControl};
+use protocol::{download_subject_prefix, UploadTransferCompletionResult, UploadTransferControl};
 pub use protocol::{
     DownloadTransferGrant, DownloadTransferGrantPlan, FileTransferInfo, TransferDownloadGrantArgs,
     TransferUploadGrantArgs, UploadTransferAck, UploadTransferChunk, UploadTransferCompletion,
@@ -94,7 +95,7 @@ async fn run_upload_transfer_endpoint_inner<C, V, F>(
     store: C,
     validator: V,
     on_progress: F,
-    mut completion: Option<oneshot::Sender<Result<FileTransferInfo, ServerError>>>,
+    mut completion: Option<oneshot::Sender<UploadTransferCompletionResult>>,
 ) -> Result<(), ServerError>
 where
     C: StoreResourceClient,
@@ -110,10 +111,13 @@ where
             _ = &mut expiry => {
                 session.abort().await;
                 if let Some(sender) = completion.take() {
-                    let _ = sender.send(Err(ServerError::TransferExpired {
-                        transfer_id: session.plan.grant.transfer_id.clone(),
-                        expires_at: session.plan.grant.expires_at.clone(),
-                    }));
+                    let _ = sender.send((
+                        Err(ServerError::TransferExpired {
+                            transfer_id: session.plan.grant.transfer_id.clone(),
+                            expires_at: session.plan.grant.expires_at.clone(),
+                        }),
+                        None,
+                    ));
                 }
                 return Ok(());
             }
@@ -195,10 +199,13 @@ where
             Outcome::Expired => {
                 session.abort().await;
                 if let Some(sender) = completion.take() {
-                    let _ = sender.send(Err(ServerError::TransferExpired {
-                        transfer_id: session.plan.grant.transfer_id.clone(),
-                        expires_at: session.plan.grant.expires_at.clone(),
-                    }));
+                    let _ = sender.send((
+                        Err(ServerError::TransferExpired {
+                            transfer_id: session.plan.grant.transfer_id.clone(),
+                            expires_at: session.plan.grant.expires_at.clone(),
+                        }),
+                        None,
+                    ));
                 }
                 return Ok(());
             }
@@ -206,9 +213,12 @@ where
             Outcome::Cancelled(cancel_reply) => {
                 session.abort().await;
                 if let Some(sender) = completion.take() {
-                    let _ = sender.send(Err(ServerError::TransferCancelled {
-                        transfer_id: session.plan.grant.transfer_id.clone(),
-                    }));
+                    let _ = sender.send((
+                        Err(ServerError::TransferCancelled {
+                            transfer_id: session.plan.grant.transfer_id.clone(),
+                        }),
+                        None,
+                    ));
                 }
                 if let Some(cancel_reply) = cancel_reply {
                     client
@@ -229,7 +239,27 @@ where
                         }
                         UploadTransferAck::Complete { info } => {
                             if let Some(sender) = completion.take() {
-                                let _ = sender.send(Ok(info.clone()));
+                                let (persisted, persisted_result) = oneshot::channel();
+                                if sender.send((Ok(info.clone()), Some(persisted))).is_err() {
+                                    return Err(ServerError::Nats(
+                                        "upload transfer completion receiver closed".to_string(),
+                                    ));
+                                }
+                                match persisted_result.await {
+                                    Ok(Ok(())) => {}
+                                    Ok(Err(error)) => {
+                                        if let Some(reply_to) = reply_to {
+                                            publish_error_reply(&client, reply_to, &error).await?;
+                                        }
+                                        return Ok(());
+                                    }
+                                    Err(_) => {
+                                        return Err(ServerError::Nats(
+                                            "upload transfer persistence acknowledgement closed"
+                                                .to_string(),
+                                        ));
+                                    }
+                                }
                             }
                         }
                         UploadTransferAck::Continue | UploadTransferAck::Cancelled => {}
@@ -250,7 +280,7 @@ where
                 Err(error) => {
                     session.abort().await;
                     if let Some(sender) = completion.take() {
-                        let _ = sender.send(Err(transfer_completion_error(&error)));
+                        let _ = sender.send((Err(transfer_completion_error(&error)), None));
                     }
                     if let Some(reply_to) = reply_to {
                         if matches!(error, ServerError::TransferCancelled { .. }) {
@@ -273,9 +303,12 @@ where
 
     session.abort().await;
     if let Some(sender) = completion.take() {
-        let _ = sender.send(Err(ServerError::TransferMissingEof {
-            transfer_id: session.plan.grant.transfer_id.clone(),
-        }));
+        let _ = sender.send((
+            Err(ServerError::TransferMissingEof {
+                transfer_id: session.plan.grant.transfer_id.clone(),
+            }),
+            None,
+        ));
     }
 
     Ok(())
@@ -645,6 +678,8 @@ where
 
 fn transfer_request_context(message: &async_nats::Message) -> RequestContext {
     RequestContext {
+        resuming: false,
+        operation_progress: None,
         subject: message.subject.to_string(),
         session_key: message
             .headers
@@ -953,7 +988,7 @@ fn parse_transfer_time(value: &str) -> Result<OffsetDateTime, ServerError> {
     })
 }
 
-fn transfer_subject(prefix: &str, session_key: &str, transfer_id: &str) -> String {
+pub(crate) fn transfer_subject(prefix: &str, session_key: &str, transfer_id: &str) -> String {
     let session_prefix: String = session_key.chars().take(16).collect();
     format!("{prefix}.{session_prefix}.{transfer_id}")
 }
@@ -973,7 +1008,7 @@ fn validate_transfer_id(transfer_id: &str) -> Result<(), ServerError> {
     Ok(())
 }
 
-fn transfer_digests_match(left: &str, right: &str) -> bool {
+pub(super) fn transfer_digests_match(left: &str, right: &str) -> bool {
     left.trim_end_matches('=') == right.trim_end_matches('=')
 }
 
@@ -995,6 +1030,12 @@ mod tests {
     use crate::service::{RequestValidation, StoreObjectInfo, VerifiedCaller};
 
     use super::*;
+
+    #[test]
+    fn transfer_digest_comparison_accepts_object_store_padding() {
+        assert!(transfer_digests_match("abc=", "abc"));
+        assert!(!transfer_digests_match("SHA-256=abc", "abc"));
+    }
 
     #[derive(Debug, Clone)]
     struct CountingValidator {
@@ -1289,6 +1330,13 @@ mod tests {
                 })
             })
         }
+
+        fn revalidate_current<'a>(
+            &'a self,
+            _context: &'a RequestContext,
+        ) -> BoxFuture<'a, Result<bool, ServerError>> {
+            Box::pin(async { Ok(self.allowed) })
+        }
     }
 
     #[tokio::test]
@@ -1300,6 +1348,8 @@ mod tests {
             session_key: "wrong-session",
         };
         let context = RequestContext {
+            resuming: false,
+            operation_progress: None,
             subject: "transfer.v1.upload.session.transfer-1".to_string(),
             session_key: Some("expected-session".to_string()),
             proof: Some("proof".to_string()),
@@ -1341,6 +1391,8 @@ mod tests {
             session_key: "wrong-session",
         };
         let context = RequestContext {
+            resuming: false,
+            operation_progress: None,
             subject: "transfer.v1.upload.session.transfer-1".to_string(),
             session_key: None,
             proof: None,
@@ -1378,6 +1430,8 @@ mod tests {
             session_key: "expected-session",
         };
         let context = RequestContext {
+            resuming: false,
+            operation_progress: None,
             subject: "transfer.v1.download.session.transfer-1".to_string(),
             session_key: Some("expected-session".to_string()),
             proof: Some("proof".to_string()),

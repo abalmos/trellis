@@ -1,6 +1,9 @@
 # Install a service from source
 
-Clone the project, install its declared language dependencies, then run `trellis update` and `trellis generate`. The CLI reads only native `.trellis` source and canonical installed artifacts; it never executes TypeScript or Rust authoring code.
+Clone the project, install its declared language dependencies, then run
+`trellis install` and `trellis generate`. The CLI reads native `.trellis` source
+packages and frozen resolution metadata; it never executes TypeScript or Rust
+authoring code.
 
 For local API dependencies, use a `path` entry in `trellis.toml`. Registry dependencies remain exact and digest-verified through `trellis.lock`.
 
@@ -15,7 +18,7 @@ artifacts or rewrite imports as an installation step.
 ## Install and apply the participant
 
 Log in to the target runtime with `trellis login <url>`. Create the service
-deployment, apply its generated canonical API and participant artifacts, and
+deployment, apply the selected participant directly from verified source, and
 provision an instance using `trellis svc <id> create`, `apply`, and `provision`.
 `apply --source <project-root>` compiles and installs the selected participant,
 updates deployment resources, and writes its participant-scoped grant. See

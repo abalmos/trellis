@@ -11,7 +11,7 @@ runtime is Trellis infrastructure that implements its admin behavior:
 
 - **SQL projection** — a disposable query view of current job state derived from
   the `JOBS` JetStream source of truth
-- **Global RPCs** — `Jobs.Query`, `Jobs.Inspect`, `Jobs.GetKey`,
+- **Global RPCs** — `Jobs.Query`, `Jobs.Summary`, `Jobs.Inspect`, `Jobs.GetKey`,
   `Jobs.Cancel`, `Jobs.Retry`, `Jobs.ReplayDLQ`, `Jobs.DismissDLQ`,
   `Jobs.ListDLQ`, `Jobs.ListServices`
 - **Workbench feed** — `Jobs.Watch` invalidation frames for live query and
@@ -48,6 +48,10 @@ workbenches. Full-text search covers safe fields only: ids, service/type/state,
 request and trace context, queue key/policy text, progress/log text, and error
 text. Payload and result bodies are not searched by default.
 
+Use `Jobs.Summary` with the same filters when the UI needs aggregate data. It
+computes `count`, state totals/statistics, and optional groups across the full
+filtered result set, independent of the current `Jobs.Query` page or cursor.
+
 **Inspect a specific job:**
 
 ```ts
@@ -75,7 +79,7 @@ databases, object stores, or polling loops.
 
 ## Inspecting keyed concurrency
 
-Jobs that declare `keyConcurrency` expose their derived key in admin
+Jobs that declare keyed concurrency expose their derived key in admin
 projection. Use `Jobs.GetKey` to inspect why work is waiting or rejected for a
 logical key:
 
@@ -122,8 +126,8 @@ actions.
 
 ### `failed` jobs
 
-A job enters the `failed` state when it has exhausted its automatic retries. Use
-`Jobs.Retry` to re-enqueue it:
+A job enters the `failed` state when its handler reports a non-retryable failure.
+Use `Jobs.Retry` to re-enqueue it:
 
 ```ts
 await client.rpc.jobs.retry({
@@ -136,9 +140,10 @@ This transitions the job back to `pending` for re-processing.
 
 ### `dead` jobs
 
-A job enters the `dead` state when it exhausts its `maxDeliver` retry attempts.
-Example: a `charge-payment` job failed 5 consecutive times because the payment
-provider was down.
+A job enters the `dead` state when retryable handler failures exhaust its
+declared retry attempts. Capacity blocking for a keyed queue does not spend
+attempts or cause dead-lettering. Example: a `charge-payment` handler ran and
+reported a retryable provider outage 5 consecutive times.
 
 The `dead` state is **not terminal** — dead jobs can be either replayed or
 dismissed.

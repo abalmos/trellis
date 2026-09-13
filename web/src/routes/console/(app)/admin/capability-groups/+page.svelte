@@ -15,7 +15,7 @@
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
 
-  type CapabilityGroupView = apis.auth.AuthCapabilityGroupsListOutput["entries"][number];
+  type CapabilityGroupView = apis.auth.CapabilityGroupsListOutput["items"][number];
 
   const trellis = getTrellis();
 
@@ -46,12 +46,12 @@
     loading = true;
     error = null;
     try {
-      const response = await trellis.authCapabilityGroupsList({ limit: 500, offset: 0 }).take();
+      const response = await trellis.capabilityGroupsList({ limit: 500, offset: 0 }).take();
       if (isErr(response)) {
         error = errorMessage(response);
         return;
       }
-      groups = response.entries ?? [];
+      groups = response.items ?? [];
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -65,7 +65,7 @@
     error = null;
     saved = null;
     try {
-      const response = await trellis.authCapabilityGroupsDelete({
+      const response = await trellis.capabilityGroupsDelete({
         groupKey: group.groupKey,
         expectedVersion: group.version,
         idempotencyKey: ulid(),

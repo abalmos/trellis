@@ -4,7 +4,7 @@
   let { trellis }: { trellis: TrellisConsoleClient } = $props();
 
   function displayParticipantKind(
-    kind: "app" | "agent" | "device" | "service",
+    kind: string,
   ): string {
     return kind;
   }
@@ -14,7 +14,7 @@
   }
 </script>
 
-{#await trellis.authSessionsMe({}).orThrow() then me}
+{#await trellis.sessionsMe({}).orThrow() then me}
   <span>{displayParticipantKind(me.connection.participantKind)}</span>
   <span>{displayDeviceId(me.connection.instanceId)}</span>
 {/await}

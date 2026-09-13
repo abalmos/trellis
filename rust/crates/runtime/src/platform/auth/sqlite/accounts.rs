@@ -70,10 +70,14 @@ impl AccountRepository for SqliteAuthorizationStore {
 
     async fn list_user_accounts(
         &self,
-        cursor: Option<&str>,
+        cursor: Option<&(i64, String)>,
+        state: Option<&str>,
+        search: Option<&str>,
         limit: usize,
     ) -> Result<Vec<(PrincipalRecord, UserProfileRecord)>, AuthorizationStateError> {
-        let cursor = cursor.map(str::to_owned);
+        let cursor = cursor.cloned();
+        let state = state.map(str::to_owned);
+        let search = search.map(str::to_owned);
         self.run_read(move |connection| {
             let mut statement = connection
                 .prepare(
@@ -83,15 +87,24 @@ impl AccountRepository for SqliteAuthorizationStore {
                             u.created_at, u.updated_at, u.version
                      FROM auth_principals p
                      JOIN auth_user_profiles u ON u.principal_id = p.principal_id
-                     WHERE p.kind = ?1 AND (?2 IS NULL OR p.principal_id > ?2)
-                     ORDER BY p.principal_id ASC LIMIT ?3",
+                     WHERE p.kind = ?1
+                       AND (?2 IS NULL OR p.state = ?2)
+                       AND (?3 IS NULL OR instr(lower(p.principal_id), lower(?3)) > 0
+                            OR instr(lower(coalesce(u.display_name, '')), lower(?3)) > 0
+                            OR instr(lower(coalesce(u.email, '')), lower(?3)) > 0)
+                       AND (?4 IS NULL OR (p.created_at, p.principal_id) > (?4, ?5))
+                     ORDER BY p.created_at ASC, p.principal_id ASC
+                     LIMIT ?6",
                 )
                 .map_err(sql_error)?;
             let accounts = statement
                 .query_map(
                     params![
                         encode_enum(PrincipalKind::User)?,
-                        cursor,
+                        state,
+                        search,
+                        cursor.as_ref().map(|cursor| cursor.0),
+                        cursor.as_ref().map(|cursor| cursor.1.as_str()),
                         i64::try_from(limit).map_err(|_| {
                             AuthorizationStateError::InvalidRecord(
                                 "user account list limit is invalid".to_owned(),

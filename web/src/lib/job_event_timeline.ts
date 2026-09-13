@@ -1,4 +1,6 @@
-import { compactDuration } from "./format.ts";
+import { boundedNumber, compactDuration } from "./format.ts";
+
+type Numeric = number | bigint;
 
 /** A wait relationship recorded in a job lifecycle event. */
 export type JobTimelineWaitEdge = {
@@ -8,7 +10,7 @@ export type JobTimelineWaitEdge = {
   target: {
     id?: string;
     operationId?: string;
-    kind: "job" | "operation" | "external";
+    kind: string;
     key?: string;
     label?: string;
     operation?: string;
@@ -20,28 +22,28 @@ export type JobTimelineWaitEdge = {
 
 /** The Console fields used to render one projected job lifecycle event. */
 export type JobTimelineEvent = {
-  sequence: number;
+  sequence: Numeric;
   timestamp: string;
   state: string;
   previousState?: string;
   type: string;
   message?: string;
   progress?: {
-    current?: number;
+    current?: Numeric;
     message?: string;
     step?: string;
-    total?: number;
+    total?: Numeric;
   };
   reason?: string;
   error?: string;
   logs?: Array<{
     timestamp: string;
-    level: "info" | "warn" | "error";
+    level: string;
     message: string;
   }>;
   waitEdge?: JobTimelineWaitEdge;
   workerInstanceId?: string;
-  tries?: number;
+  tries?: Numeric;
 };
 
 /** A paired dependency interval within an execution attempt. */
@@ -101,7 +103,7 @@ export type JobTimelineExecutionPhase = {
   startedType: string;
   endedAt?: string;
   duration?: string;
-  attempt?: number;
+  attempt?: Numeric;
   workerInstanceId?: string;
   transition?: string;
   steps: JobTimelineStep[];
@@ -160,7 +162,9 @@ const TERMINAL_STATES = new Set([
 export function buildJobTimeline(
   events: JobTimelineEvent[],
 ): JobTimelinePhase[] {
-  const sorted = [...events].sort((a, b) => a.sequence - b.sequence);
+  const sorted = [...events].sort((a, b) =>
+    boundedNumber(a.sequence) - boundedNumber(b.sequence)
+  );
   const phases: JobTimelinePhase[] = [];
   const openWaits = new Map<string, JobTimelineWait>();
   let queue: JobTimelineQueuePhase | undefined;
@@ -388,7 +392,7 @@ function runtimeEvent(
 /** Selects one attempt plus the queue boundary that immediately preceded it. */
 export function jobTimelineEventsForAttempt(
   events: JobTimelineEvent[],
-  attempt: number,
+  attempt: Numeric,
 ): JobTimelineEvent[] {
   const selected = events.filter((event) => event.tries === attempt);
   const started = selected.find((event) =>
@@ -407,10 +411,12 @@ export function jobTimelineEventsForAttempt(
       event.sequence < started.sequence &&
       QUEUE_ENTRY_TYPES.has(event.type.toLowerCase())
     )
-    .sort((a, b) => b.sequence - a.sequence)[0];
+    .sort((a, b) => boundedNumber(b.sequence) - boundedNumber(a.sequence))[0];
 
   return queueEntry
-    ? [...selected, queueEntry].sort((a, b) => a.sequence - b.sequence)
+    ? [...selected, queueEntry].sort((a, b) =>
+      boundedNumber(a.sequence) - boundedNumber(b.sequence)
+    )
     : selected;
 }
 

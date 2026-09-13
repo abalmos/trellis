@@ -95,6 +95,7 @@ impl From<AuthorizationStateError> for HttpError {
             tracing::debug!(%error, "auth HTTP request denied");
         }
         match error {
+            AuthorizationStateError::ApprovalRequired { .. } => Self::conflict("approval_required"),
             AuthorizationStateError::NotAuthorized => Self::forbidden("not_authorized"),
             AuthorizationStateError::WrongPrincipalKind => Self::forbidden("wrong_principal_kind"),
             AuthorizationStateError::InvalidRecord(message)

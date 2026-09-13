@@ -11,8 +11,8 @@ use serde_json::Map;
 use sha2::{Digest as _, Sha256};
 use trellis_protocol::{
     canonicalize_json, sign_authorization_context, AuthorizationIssuerKey,
-    AuthorizationIssuerState, AuthorizationPrincipalKind, GrantSet, ParticipantKind,
-    PlatformPrivilege, UnsignedAuthorizationContext, AUTHORIZATION_CONTEXT_FORMAT_V1,
+    AuthorizationIssuerState, AuthorizationPrincipalKind, ParticipantKind, PlatformPrivilege,
+    UnsignedAuthorizationContext, AUTHORIZATION_CONTEXT_FORMAT_V1,
 };
 
 pub(super) const NOW: i64 = 1_800_000_000_000;
@@ -47,15 +47,8 @@ pub(crate) async fn install_login_mutation_actor(
     store.activate_issuer(issuer.clone(), now).await?;
     let participant = builtins::cli_participant_binding(now)?;
     let participant_id = participant.participant_id.clone();
-    let installed_revision = store
-        .run(move |connection| {
-            crate::platform::auth::sqlite::grants::install_participant(
-                connection,
-                &participant,
-                None,
-            )
-        })
-        .await?;
+    let grants = participant.resolve()?.required_grants.clone();
+    let installed_revision = store.put_participant_binding(participant).await?;
     let principal_id = ulid::Ulid::new().to_string();
     let session_id = ulid::Ulid::new().to_string();
     let connection_id = ulid::Ulid::new().to_string();
@@ -88,7 +81,7 @@ pub(crate) async fn install_login_mutation_actor(
         issued_at: now_seconds,
         not_before: now_seconds,
         expires_at: now_seconds + 3_600,
-        grants: GrantSet::new(Vec::new()),
+        grants: grants.clone(),
         platform_privileges: vec![PlatformPrivilege::Admin],
         extensions: Map::new(),
         critical: Vec::new(),
@@ -106,8 +99,13 @@ pub(crate) async fn install_login_mutation_actor(
         login_session_id: Some(session_id.clone()),
         session_public_key: public_key.clone(),
     };
-    let grants_json = serde_json::to_string(&GrantSet::new(Vec::new()))?;
+    let grants_json = serde_json::to_string(&grants)?;
     let privileges_json = serde_json::to_string(&vec![PlatformPrivilege::Admin])?;
+    let ceiling_json = serde_json::to_string(&super::super::super::DelegationCeiling {
+        capabilities: Vec::new(),
+        exact_restrictions: Some(grants),
+        platform_privileges: vec![PlatformPrivilege::Admin],
+    })?;
     store
         .run(move |connection| {
             connection
@@ -125,13 +123,20 @@ pub(crate) async fn install_login_mutation_actor(
                 .map_err(sql_error)?;
             connection
                 .execute(
-                    "INSERT INTO auth_grant_bindings (owner_kind, owner_id, participant_id, installed_revision, grants_json, platform_privileges_json, revision, state, expires_at, provenance_json, created_at, updated_at)
-                     VALUES ('user', ?1, ?2, ?3, ?4, ?5, 1, 'active', NULL, NULL, ?6, ?6)",
+                    "INSERT INTO auth_grant_bindings (owner_kind, owner_id, participant_id, installed_revision,
+                         grants_json, approval_mode, approved_capabilities_json, approved_resources_json,
+                         delegation_ceiling_json, approval_decision_digest,
+                         approval_expected_grant_revision, companion_approved,
+                         platform_privileges_json, revision, state, expires_at, provenance_json, created_at, updated_at)
+                     VALUES ('user', ?1, ?2, ?3, ?4, 'exact', '[]', '[]', ?5,
+                         ?6, 0, 0, ?7, 1, 'active', NULL, NULL, ?8, ?8)",
                     params![
                         principal_id,
                         participant_id,
                         installed_revision,
                         grants_json,
+                        ceiling_json,
+                        "A".repeat(43),
                         privileges_json,
                         now,
                     ],
