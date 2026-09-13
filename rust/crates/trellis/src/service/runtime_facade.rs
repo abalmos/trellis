@@ -860,8 +860,8 @@ impl<C> ConnectedServiceRuntime<C> {
             _event_listener_cleanup: ServiceEventListenerRegistryCleanup::new(event_listeners),
             router,
             provider_deployment_id,
-            provider_instance_id,
-            operation_executor_id: ulid::Ulid::new().to_string(),
+            provider_instance_id: provider_instance_id.clone(),
+            operation_executor_id: provider_instance_id,
             operation_repository: None,
             operation_staging: None,
             service_name: service_name.into(),
@@ -1208,7 +1208,7 @@ impl<C> ConnectedServiceRuntime<C> {
         Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
     {
         self.router.register_operation_provider::<D, _>(
-            super::operations::RuntimeOperationProvider::new(
+            super::operations::RuntimeOperationProvider::new_authenticated(
                 super::operations::OperationHandlerRuntime {
                     service: self.service_name.clone(),
                     deployment_id: self.provider_deployment_id.clone(),
@@ -1226,6 +1226,10 @@ impl<C> ConnectedServiceRuntime<C> {
                     validator: self.auth.clone(),
                 },
                 handler,
+                self.client
+                    .participant_id()
+                    .expect("connected services always have a participant identity"),
+                Some(Arc::clone(&self.client)),
             ),
         );
         let subject = self.descriptor_subject("operation", D::API_ID, D::KEY);

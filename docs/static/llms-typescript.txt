@@ -145,6 +145,9 @@ policy. Waiting for keyed capacity maintains the current delivery and does not
 consume an attempt before the handler starts. `Jobs.Summary` computes matching
 totals, groups, and statistics independently of a `Jobs.Query` page. Live
 updates are separate from durable progress and terminal results.
+Job deadlines are creation-relative. Omitted retry means five deliveries with
+delays of 5s, 30s, 2m, and 10m; explicit retry requires exactly one fewer
+positive ordered backoffs than total attempts.
 
 ## Resources And Transactional Events
 

@@ -1405,7 +1405,9 @@ export async function connectClientWithDeps<
           authorizationContexts.runtimeBinding().transports,
         ),
       );
-      return nc.reconnect();
+      return connection.status.phase === "connected"
+        ? nc.reconnect()
+        : undefined;
     },
     onTerminalFailure: async () => {
       if (!nc.isClosed()) {

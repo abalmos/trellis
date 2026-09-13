@@ -1500,6 +1500,8 @@ fn resolve_resource(
                     "payload",
                     "result",
                     "update",
+                    "deadline",
+                    "retry",
                     "key_concurrency",
                 ],
             )?;
@@ -1526,6 +1528,15 @@ fn resolve_resource(
                 payload: type_ref("payload")?,
                 result: optional_type("result")?,
                 update: optional_type("update")?,
+                deadline_ms: match raw.members.get("deadline") {
+                    Some(ResourceValue::Duration(value)) if *value > 0 => Some(*value),
+                    Some(ResourceValue::Duration(_)) => {
+                        return Err(miette!("job deadline must be positive"));
+                    }
+                    None => None,
+                    _ => return Err(miette!("invalid deadline")),
+                },
+                retry: retry(raw)?,
                 key_concurrency,
             }
         }
@@ -2252,6 +2263,8 @@ fn resource_needs_json(
             payload,
             result,
             update,
+            deadline_ms,
+            retry: retry_value,
             key_concurrency,
             ..
         } => serde_json::json!({
@@ -2260,6 +2273,8 @@ fn resource_needs_json(
             "payload": schema(payload)?,
             "result": result.as_ref().map(schema).transpose()?,
             "update": update.as_ref().map(schema).transpose()?,
+            "deadlineMs": deadline_ms,
+            "retry": retry(retry_value),
             "keyConcurrency": key_concurrency.as_ref().map(|value| serde_json::json!({
                 "path": value.path,
                 "policy": match value.policy {

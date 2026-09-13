@@ -131,6 +131,27 @@ async fn operation_records_persist_and_lease_writes_are_fenced() {
         .claim(&operation_id, "executor-b", 2_000, 32_000)
         .await
         .is_err());
+    let renewed = repository
+        .renew(
+            &operation_id,
+            "executor-a",
+            first.record.owner_epoch,
+            2_000,
+            32_000,
+        )
+        .await
+        .unwrap();
+    assert_eq!(renewed.record.owner_epoch, first.record.owner_epoch);
+    assert!(repository
+        .renew(
+            &operation_id,
+            "executor-a",
+            first.record.owner_epoch,
+            32_000,
+            62_000,
+        )
+        .await
+        .is_err());
 
     let millisecond_fence_id = ulid::Ulid::new().to_string();
     repository

@@ -838,9 +838,6 @@ async fn observe_context_revocation(
                 .context_digest()
                 .is_ok_and(|digest| digest == watch_digest)
             {
-                if let Err(error) = own.clear() {
-                    tracing::warn!(%error, "cannot discard revoked own context");
-                }
                 own.request_refresh();
             }
         }

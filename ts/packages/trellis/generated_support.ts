@@ -400,6 +400,26 @@ function validateResource(resource: Record<string, unknown>): void {
   ) {
     fail("generated job descriptor");
   }
+  if (resource.kind === "job") {
+    if (
+      resource.deadlineMs !== undefined &&
+      (!Number.isInteger(resource.deadlineMs) ||
+        Number(resource.deadlineMs) <= 0)
+    ) fail("generated job descriptor");
+    if (resource.retry !== undefined) {
+      if (
+        !isRecord(resource.retry) ||
+        !Number.isInteger(resource.retry.attempts) ||
+        Number(resource.retry.attempts) <= 0 ||
+        !Array.isArray(resource.retry.backoffMs) ||
+        resource.retry.backoffMs.length !==
+          Number(resource.retry.attempts) - 1 ||
+        resource.retry.backoffMs.some((value) =>
+          !Number.isInteger(value) || Number(value) <= 0
+        )
+      ) fail("generated job descriptor");
+    }
+  }
 }
 
 function validatePackageEvidence(evidence: PackageEvidenceInput): void {

@@ -670,6 +670,8 @@ pub struct ParticipantBindingRecord {
     pub needs_digest: String,
     /// Exact immutable source-package digest.
     pub package_digest: String,
+    /// Exact canonical source-evidence document digest.
+    pub evidence_digest: String,
     /// Exact participant path within the verified package closure.
     pub participant_path: String,
     /// Read-only projection reconstructed from verified source evidence.
@@ -691,6 +693,7 @@ impl ParticipantBindingRecord {
         require_protocol_timestamp("installedAt", now)?;
         let (participant_digest, needs_digest, projection, evidence_json) =
             verify_package_evidence(input)?;
+        let evidence_digest = URL_SAFE_NO_PAD.encode(Sha256::digest(evidence_json.as_bytes()));
         Ok((
             Self {
                 participant_id: projection.participant_id.clone(),
@@ -698,6 +701,7 @@ impl ParticipantBindingRecord {
                 participant_digest,
                 needs_digest,
                 package_digest: input.package_digest.clone(),
+                evidence_digest,
                 participant_path: input.participant_path.clone(),
                 projection,
                 resolved_at: now,
@@ -726,7 +730,10 @@ impl ParticipantBindingRecord {
         {
             return Err(AuthorizationStateError::ParticipantDigestMismatch);
         }
-        if self.package_digest.len() != 43 || self.needs_digest.len() != 43 {
+        if self.package_digest.len() != 43
+            || self.evidence_digest.len() != 43
+            || self.needs_digest.len() != 43
+        {
             return Err(AuthorizationStateError::NeedsDigestMismatch);
         }
         if self.projection.companion_participant_id.is_some()

@@ -1112,6 +1112,8 @@ fn render_resources(participant: &ParticipantDefinition) -> String {
                 payload,
                 result,
                 update,
+                deadline_ms,
+                retry,
                 ..
             } => {
                 out.push_str(&format!(
@@ -1134,8 +1136,12 @@ fn render_resources(participant: &ParticipantDefinition) -> String {
                     .as_ref()
                     .map(type_path)
                     .unwrap_or_else(|| "()".to_owned());
+                let (attempts, backoff) = retry.as_ref().map_or_else(
+                    || ("None".to_owned(), String::new()),
+                    |retry| (format!("Some({})", retry.attempts), retry.backoff_ms.iter().map(u64::to_string).collect::<Vec<_>>().join(", ")),
+                );
                 out.push_str(&format!(
-                    "pub struct {rust_name};\nimpl {rust_name} {{ pub const NAME: &'static str = {:?}; pub const OPTIONAL: bool = {optional}; }}\nimpl trellis_rs::jobs::JobDescriptor for {rust_name} {{ type Payload = {}; type Result = {result_type}; const QUEUE_TYPE: &'static str = {:?}; }}\n",
+                    "pub struct {rust_name};\nimpl {rust_name} {{ pub const NAME: &'static str = {:?}; pub const OPTIONAL: bool = {optional}; pub const DEADLINE_MS: Option<u64> = {deadline_ms:?}; pub const RETRY_ATTEMPTS: Option<u32> = {attempts}; pub const RETRY_BACKOFF_MS: &'static [u64] = &[{backoff}]; }}\nimpl trellis_rs::jobs::JobDescriptor for {rust_name} {{ type Payload = {}; type Result = {result_type}; const QUEUE_TYPE: &'static str = {:?}; }}\n",
                     name.as_str(),
                     type_path(payload),
                     name.as_str()
@@ -1825,7 +1831,7 @@ mod tests {
             model Empty {}
              api first@v1 { title "First"; description "First API."; error Missing(Node); rpc Get { input Node; output Node; errors [Missing]; } capabilities { public { allows { rpc Get; operation Work; } } } operation Work { input Node; output Node; progress Node; errors [Missing]; } }
             api second@v2 { title "Second"; description "Second API."; event Changed { payload Node; } capabilities { public { allows { publish event Changed; subscribe event Changed; } } } }
-             service Backend { implements first; implements second; kv optional cache { title "Cache"; description "Cached node."; schema Node; version 2; accepts { 1: Empty; } history 3; ttl 5s; desired_max_value 1KiB; } job refresh { title "Refresh"; description "Refresh one node."; payload Node; result Empty; } consumer changes { title "Changes"; description "Changed node events."; events [second.Changed]; concurrency 2; replay all; retry { attempts 2; backoff [5s]; } } }
+             service Backend { implements first; implements second; kv optional cache { title "Cache"; description "Cached node."; schema Node; version 2; accepts { 1: Empty; } history 3; ttl 5s; desired_max_value 1KiB; } job refresh { title "Refresh"; description "Refresh one node."; payload Node; result Empty; deadline 45s; retry { attempts 3; backoff [5s, 30s]; } } consumer changes { title "Changes"; description "Changed node events."; events [second.Changed]; concurrency 2; replay all; retry { attempts 2; backoff [5s]; } } }
         "#,
         );
         let output = tempfile::tempdir().unwrap();
@@ -1862,6 +1868,9 @@ mod tests {
         assert!(participant.contains("impl trellis_rs::client::ConsumerDescriptor for Changes"));
         assert!(participant.contains("ConsumerHandle<resources::Changes>"));
         assert!(participant.contains("impl trellis_rs::jobs::JobDescriptor for Refresh"));
+        assert!(participant.contains("DEADLINE_MS: Option<u64> = Some(45000)"));
+        assert!(participant.contains("RETRY_ATTEMPTS: Option<u32> = Some(3)"));
+        assert!(participant.contains("RETRY_BACKOFF_MS: &'static [u64] = &[5000, 30000]"));
         assert!(participant.contains("pub async fn submit_refresh"));
         assert!(participant.contains("pub async fn register_refresh"));
         assert!(!participant.contains("JobHandle<resources::Refresh>"));

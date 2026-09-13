@@ -941,9 +941,10 @@ export async function connectDeviceWithDeps<
         throw error;
       }
     },
-    onRefresh: () => nc.reconnect(),
+    onRefresh: () =>
+      connection.status.phase === "connected" ? nc.reconnect() : undefined,
     onTerminalFailure: async () => {
-      if (!nc.isClosed()) await nc.drain();
+      if (!nc.isClosed()) await nc.close();
     },
   });
   void nc.closed().then(stopContextRefresh, stopContextRefresh);

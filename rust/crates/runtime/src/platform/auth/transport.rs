@@ -110,11 +110,11 @@ pub(crate) fn compile_transport_permissions(
             let name = key.split_once(':').map_or(key.as_str(), |(_, name)| name);
             compile_provider_action(
                 api_id,
-                deployment_id,
-                instance_id,
+                (deployment_id, instance_id),
                 session_prefix,
                 name,
                 action,
+                &mut publish,
                 &mut subscribe,
             )?;
         }
@@ -211,13 +211,14 @@ pub(crate) fn compile_transport_permissions(
 
 fn compile_provider_action(
     api_id: &str,
-    deployment_id: &str,
-    instance_id: &str,
+    provider: (&str, &str),
     session_prefix: &str,
     name: &str,
     action: &super::evidence::ActionRuntimeProjection,
+    publish: &mut BTreeSet<String>,
     subscribe: &mut BTreeSet<String>,
 ) -> Result<(), AuthorizationStateError> {
+    let (deployment_id, instance_id) = provider;
     match action.kind {
         RuntimeActionKind::Rpc => {
             subscribe.insert(
@@ -234,6 +235,8 @@ fn compile_provider_action(
                     .map_err(|error| invalid_error(error.to_string()))?;
             subscribe.insert(subject.clone());
             subscribe.insert(format!("{subject}.control"));
+            subscribe.insert(format!("{subject}.updates.*"));
+            publish.insert(format!("{subject}.updates.*"));
             if action.upload {
                 subscribe.insert(format!("transfer.v1.upload.{session_prefix}.*"));
             }
@@ -601,15 +604,16 @@ mod tests {
             download: false,
             event_parameter_count: 0,
         };
+        let mut publish = BTreeSet::new();
         let mut subscribe = BTreeSet::new();
 
         compile_provider_action(
             "fieldops.sites@v1",
-            "sites-deployment",
-            "sites-instance",
+            ("sites-deployment", "sites-instance"),
             "session-prefix",
             "Refresh",
             &action,
+            &mut publish,
             &mut subscribe,
         )
         .unwrap();
@@ -625,11 +629,13 @@ mod tests {
             BTreeSet::from([
                 subject.clone(),
                 format!("{subject}.control"),
+                format!("{subject}.updates.*"),
                 "transfer.v1.upload.session-prefix.*".to_owned(),
             ])
         );
         assert!(!subscribe.contains(&format!("{subject}.>")));
         assert!(!subscribe.contains("operations.>"));
+        assert_eq!(publish, BTreeSet::from([format!("{subject}.updates.*")]));
     }
 
     #[test]
@@ -776,15 +782,16 @@ mod tests {
             download: false,
             event_parameter_count: 0,
         };
+        let mut publish = BTreeSet::new();
         let mut subscribe = BTreeSet::new();
 
         compile_provider_action(
             "fieldops.sites@v1",
-            "sites-deployment",
-            "sites-instance",
+            ("sites-deployment", "sites-instance"),
             "session-prefix",
             "Watch",
             &action,
+            &mut publish,
             &mut subscribe,
         )
         .unwrap();

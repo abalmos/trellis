@@ -21,7 +21,7 @@ pub(crate) trait GrantRepository: Send + Sync {
 
     async fn get_installed_package_evidence(
         &self,
-        package_digest: &str,
+        evidence_digest: &str,
     ) -> Result<Option<trellis_idl::PackageEvidence>, AuthorizationStateError>;
 
     async fn get_api_binding(

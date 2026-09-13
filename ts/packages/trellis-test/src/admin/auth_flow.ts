@@ -3,6 +3,7 @@ import {
   createPortalBinding,
   fetchPortalFlowState,
   type PortalBinding,
+  type PortalFlowState,
   submitPortalApproval,
 } from "@qlever-llc/trellis/auth/browser";
 
@@ -55,6 +56,9 @@ export async function approveLocalFlowIfNeeded(args: {
   trellisUrl: string;
   flowId: string;
   binding: PortalBinding;
+  prepareApproval?: (
+    state: Extract<PortalFlowState, { status: "approval_required" }>,
+  ) => Promise<void>;
 }): Promise<void> {
   const startedAt = performance.now();
   const initialFetchStartedAt = performance.now();
@@ -80,6 +84,7 @@ export async function approveLocalFlowIfNeeded(args: {
     return;
   }
   if (state.status === "approval_required") {
+    await args.prepareApproval?.(state);
     const approvalStartedAt = performance.now();
     const approved = await submitPortalApproval(
       {

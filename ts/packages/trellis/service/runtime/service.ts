@@ -2896,11 +2896,7 @@ export function connectTrellisServiceWithRuntimeDeps<
             await nc.reconnect();
           },
           onTerminalFailure: async () => {
-            try {
-              await nc.reconnect();
-            } catch {
-              // The cleared context makes every bounded reconnect attempt fail closed.
-            }
+            if (!nc.isClosed()) await nc.close();
           },
         });
         recordTrellisDuration(

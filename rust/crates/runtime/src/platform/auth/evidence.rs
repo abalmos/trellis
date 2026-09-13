@@ -499,6 +499,8 @@ fn project_resource(
             payload,
             result,
             update,
+            deadline_ms,
+            retry,
             key_concurrency,
         } => {
             projection.kind = ParticipantResourceKind::JobQueue;
@@ -508,6 +510,11 @@ fn project_resource(
             projection.payload_schema = Some(payload.id.as_str().to_owned());
             projection.result_schema = result.as_ref().map(|value| value.id.as_str().to_owned());
             projection.update_schema = update.as_ref().map(|value| value.id.as_str().to_owned());
+            projection.deadline_ms = *deadline_ms;
+            if let Some(retry) = retry {
+                projection.retry_attempts = Some(retry.attempts);
+                projection.retry_backoff_ms = retry.backoff_ms.clone();
+            }
             if let Some(key_concurrency) = key_concurrency {
                 projection.job_key_path = Some(key_concurrency.path.clone());
                 projection.job_key_policy = Some(
@@ -636,6 +643,7 @@ main = "main.trellis"
                 source: r#"
 type Previous = string;
 type Current = string(min_length=1);
+model Payload { value: string; }
 device Sensor {
   state settings {
     title "Settings";
@@ -654,6 +662,15 @@ device Sensor {
     ttl 5m;
   }
   app Operator {}
+}
+service Worker {
+  job work {
+    title "Work";
+    description "Work queue.";
+    payload Payload;
+    deadline 45s;
+    retry { attempts 3; backoff [5s, 30s]; }
+  }
 }
 "#
                 .into(),
@@ -768,5 +785,17 @@ device Sensor {
         let mut evidence = resource_evidence();
         evidence.package_digest = "x".repeat(43);
         assert!(verify_package_evidence(&evidence).is_err());
+    }
+
+    #[test]
+    fn verified_job_projection_carries_declared_delivery_settings() {
+        let mut evidence = resource_evidence();
+        evidence.participant_path = "Worker".into();
+        let (_, _, projection, _) = verify_package_evidence(&evidence).expect("verify evidence");
+        let job = &projection.resources["work"];
+
+        assert_eq!(job.deadline_ms, Some(45_000));
+        assert_eq!(job.retry_attempts, Some(3));
+        assert_eq!(job.retry_backoff_ms, [5_000, 30_000]);
     }
 }

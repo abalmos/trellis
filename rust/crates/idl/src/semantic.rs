@@ -794,6 +794,10 @@ pub enum ResourceDefinition {
         result: Option<TypeRef>,
         /// Optional progress/update schema.
         update: Option<TypeRef>,
+        /// Optional creation-relative deadline in milliseconds.
+        deadline_ms: Option<u64>,
+        /// Optional authored retry override.
+        retry: Option<RetryPolicy>,
         /// Optional typed key concurrency policy.
         key_concurrency: Option<KeyConcurrency>,
     },

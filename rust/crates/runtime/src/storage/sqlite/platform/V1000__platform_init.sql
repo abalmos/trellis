@@ -31,7 +31,6 @@ CREATE TABLE auth_provider_identities (
 
 CREATE TABLE auth_package_evidence (
     package_digest TEXT PRIMARY KEY CHECK (length(package_digest) = 43),
-    evidence_json TEXT NOT NULL CHECK (json_valid(evidence_json)),
     platform_trusted INTEGER NOT NULL DEFAULT 0 CHECK (platform_trusted IN (0, 1)),
     accepted_at INTEGER NOT NULL CHECK (accepted_at BETWEEN 0 AND 9007199254740991),
     trusted_at INTEGER CHECK (trusted_at BETWEEN 0 AND 9007199254740991),
@@ -40,7 +39,7 @@ CREATE TABLE auth_package_evidence (
     CHECK (platform_trusted = 1 OR trusted_at IS NULL)
 );
 CREATE TRIGGER auth_package_evidence_body_is_immutable
-BEFORE UPDATE OF package_digest, evidence_json, accepted_at ON auth_package_evidence
+BEFORE UPDATE OF package_digest, accepted_at ON auth_package_evidence
 BEGIN
     SELECT RAISE(ABORT, 'accepted package evidence is immutable');
 END;
@@ -56,6 +55,25 @@ BEGIN
     SELECT RAISE(ABORT, 'accepted package evidence is retained');
 END;
 
+CREATE TABLE auth_package_evidence_documents (
+    evidence_digest TEXT PRIMARY KEY CHECK (length(evidence_digest) = 43),
+    package_digest TEXT NOT NULL REFERENCES auth_package_evidence(package_digest),
+    evidence_json TEXT NOT NULL CHECK (json_valid(evidence_json)),
+    created_at INTEGER NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991)
+);
+CREATE INDEX auth_package_evidence_documents_package_digest
+ON auth_package_evidence_documents(package_digest);
+CREATE TRIGGER auth_package_evidence_document_is_immutable
+BEFORE UPDATE ON auth_package_evidence_documents
+BEGIN
+    SELECT RAISE(ABORT, 'accepted package evidence document is immutable');
+END;
+CREATE TRIGGER auth_package_evidence_document_no_delete
+BEFORE DELETE ON auth_package_evidence_documents
+BEGIN
+    SELECT RAISE(ABORT, 'accepted package evidence document is retained');
+END;
+
 CREATE TABLE auth_installed_participants (
     participant_id TEXT NOT NULL CHECK (length(participant_id) > 0),
     revision INTEGER NOT NULL CHECK (revision BETWEEN 1 AND 9007199254740991),
@@ -63,6 +81,7 @@ CREATE TABLE auth_installed_participants (
     participant_digest TEXT NOT NULL CHECK (length(participant_digest) = 43),
     needs_digest TEXT NOT NULL CHECK (length(needs_digest) = 43),
     package_digest TEXT NOT NULL REFERENCES auth_package_evidence(package_digest),
+    evidence_digest TEXT NOT NULL REFERENCES auth_package_evidence_documents(evidence_digest),
     participant_path TEXT NOT NULL CHECK (length(participant_path) > 0),
     companion_participant_id TEXT CHECK (companion_participant_id IS NULL OR length(companion_participant_id) > 0),
     companion_participant_kind TEXT CHECK (companion_participant_kind IN ('service', 'app', 'device', 'agent')),

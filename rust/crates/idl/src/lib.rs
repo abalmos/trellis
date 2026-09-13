@@ -32,9 +32,9 @@ mod tests {
     use semver::Version;
 
     use crate::{
-        compile_project,
+        canonical_package, compile_project,
         project::{GenerateConfig, PackageManifest, PackageMetadata},
-        ActionDefinition, PackageGraph, Pagination, SourceUnit,
+        ActionDefinition, CanonicalMode, PackageGraph, Pagination, ResourceDefinition, SourceUnit,
     };
 
     fn compile(source: impl Into<String>) -> miette::Result<PackageGraph> {
@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn rejects_removed_job_authoring_knobs() {
-        for member in ["deadline 1m;", "retry { attempts 1; backoff []; }"] {
+        for member in ["features [progress];", "ack_wait 1m;", "heartbeat 1s;"] {
             let source = format!(
                 "model Payload {{ value: string; }} service Worker {{ job Work {{ title \"Work\"; description \"Work queue.\"; payload Payload; {member} }} }}"
             );
@@ -93,6 +93,35 @@ mod tests {
                 "accepted removed Job member: {member}"
             );
         }
+    }
+
+    #[test]
+    fn job_policy_fixture_round_trips_canonically() {
+        let graph = compile(include_str!("../fixtures/job-policy.trellis")).unwrap();
+        let resource = graph
+            .root_package()
+            .participants()
+            .values()
+            .next()
+            .unwrap()
+            .resources()
+            .values()
+            .next()
+            .unwrap();
+        let ResourceDefinition::Job {
+            deadline_ms, retry, ..
+        } = resource
+        else {
+            panic!("expected Job resource")
+        };
+        assert_eq!(*deadline_ms, Some(45_000));
+        assert_eq!(retry.as_ref().unwrap().attempts, 3);
+        assert_eq!(retry.as_ref().unwrap().backoff_ms, [5_000, 30_000]);
+
+        let canonical =
+            canonical_package(&graph, graph.root(), CanonicalMode::Presentation).unwrap();
+        let round_trip = compile(&canonical).unwrap();
+        assert_eq!(round_trip.root_digest(), graph.root_digest());
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { jetstreamManager } from "@nats-io/jetstream";
-import { credsAuthenticator } from "@nats-io/nats-core";
+import { credsAuthenticator, headers as natsHeaders } from "@nats-io/nats-core";
 import { connect } from "@nats-io/transport-node";
 import { Result } from "@qlever-llc/trellis";
 import { TransportError } from "@qlever-llc/trellis/errors";
@@ -422,6 +422,7 @@ Deno.test("generated Rust resources use live NATS", async () => {
           new URL("../../rust/target", import.meta.url),
         ),
       },
+      stdin: "piped",
       stdout: "piped",
       stderr: "inherit",
     }).spawn();
@@ -433,10 +434,18 @@ Deno.test("generated Rust resources use live NATS", async () => {
       assert(!chunk.done, output);
       output += chunk.value;
     }
+    await runtime.waitFor(() =>
+      runtime.hasParticipantConnection(
+        participants.Provider.participant.identity,
+      )
+    );
 
     await runtime.contracts.apply({
       contract: removedParticipants.Provider.participant,
     });
+    const stdin = child.stdin.getWriter();
+    await stdin.write(new TextEncoder().encode("replacement committed\n"));
+    await stdin.close();
 
     while (!output.includes("rust resources invalidated")) {
       const chunk = await reader.read();
@@ -539,6 +548,7 @@ Deno.test("generated runtime workflows", async (t) => {
         await op.started().orThrow();
         if (input.value === "reconnect-live") {
           const accepted = await op.nextSignal("Continue").orThrow();
+          await op.emitUpdate({ value: "transient" }).orThrow();
           await op.acknowledgeSignal(accepted.sequence).orThrow();
           return op.defer();
         }
@@ -670,13 +680,83 @@ Deno.test("generated runtime workflows", async (t) => {
             try {
               const resumed = reconnected.work.resume(operation);
               assertEquals((await resumed.get().orThrow()).state, "running");
-              const watch = (await resumed.watch().orThrow())
-                [Symbol.asyncIterator]();
-              assertEquals(
-                (await watch.next()).value?.snapshot.state,
-                "running",
+              const sibling = await runtime.services.createInstance({
+                name: "provider-sibling",
+                contract: participants.Provider.participant,
+              });
+              assertEquals(sibling.deploymentId, identity.deploymentId);
+              const siblingService = await TrellisService.connect({
+                trellisUrl: runtime.trellisUrl,
+                participant: participants.Provider.participant,
+                name: "provider-sibling",
+                seed: sibling.seed,
+              }).orThrow();
+              const siblingExit = siblingService.wait().catch((error) => error);
+              siblingService.handleWork(({ op }) =>
+                Promise.resolve(op.defer())
               );
-              await resumed.signal("Continue", { value: "continue" }).orThrow();
+              try {
+                const watches = await Promise.all([
+                  resumed.watch({ updates: true }).orThrow(),
+                  resumed.watch({ updates: true }).orThrow(),
+                ]).then((streams) =>
+                  streams.map((stream) => stream[Symbol.asyncIterator]())
+                );
+                for (const watch of watches) {
+                  assertEquals(
+                    (await watch.next()).value?.snapshot.state,
+                    "running",
+                  );
+                }
+                const nats = await connect({
+                  servers: runtime.natsUrl,
+                  authenticator: credsAuthenticator(
+                    await Deno.readFile(
+                      join(runtime.workdir, "nats/creds/trellis-auth.creds"),
+                    ),
+                  ),
+                });
+                try {
+                  const encode = (value: string) =>
+                    new TextEncoder().encode(value).toBase64({
+                      alphabet: "base64url",
+                      omitPadding: true,
+                    });
+                  const subject = `operation.v1.${
+                    encode("runtime-trellis.runtime@v1")
+                  }.${
+                    encode(identity.deploymentId)
+                  }.Work.updates.${operation.id}`;
+                  const forged = natsHeaders();
+                  forged.set("trellis-owner-executor", identity.instanceId);
+                  forged.set("trellis-owner-epoch", "1");
+                  forged.set("trellis-update-sequence", "1");
+                  forged.set("trellis-update-time", new Date().toISOString());
+                  nats.publish(subject, JSON.stringify({ value: "forged" }), {
+                    headers: forged,
+                    reply: `${subject}.owner.${identity.instanceId}`,
+                  });
+                  await nats.flush();
+                } finally {
+                  await nats.close();
+                }
+                await resumed.signal("Continue", { value: "continue" })
+                  .orThrow();
+                for (const watch of watches) {
+                  let update = (await watch.next()).value;
+                  while (update && update.type !== "update") {
+                    update = (await watch.next()).value;
+                  }
+                  assert(update);
+                  assertEquals(update.update, { value: "transient" });
+                }
+              } finally {
+                await siblingService.stop();
+                assertEquals(await siblingExit, undefined);
+              }
+              const late = (await resumed.watch({ updates: true }).orThrow())
+                [Symbol.asyncIterator]();
+              assert((await late.next()).value?.type !== "update");
               const cancel = await resumed.cancel();
               if (cancel.isErr()) {
                 throw new Error(
@@ -742,6 +822,7 @@ Deno.test("generated runtime workflows", async (t) => {
               ),
             ),
           });
+          const natsExit = nats.closed();
           try {
             const manager = await jetstreamManager(nats);
             const streams = await manager.streams.list().next();
@@ -958,16 +1039,31 @@ Deno.test("generated runtime workflows", async (t) => {
             );
           } finally {
             await nats.close();
+            const error = await natsExit;
+            if (error) {
+              throw new Error(
+                "revocation coverage NATS connection closed unexpectedly",
+                { cause: error },
+              );
+            }
           }
         },
       );
       await t.step("job retries then completes", async () => {
+        const startedAt = Date.now();
         const job = await service.jobs.work.create({ value: "retried" })
           .orThrow();
+        const initial = await job.get().orThrow();
+        assert(initial.deadline);
+        assertEquals(
+          Date.parse(initial.deadline) - Date.parse(initial.createdAt),
+          5_000,
+        );
         const terminal = await job.wait().orThrow();
         assertEquals(terminal.state, "completed");
         assertEquals(terminal.result, { value: "retried" });
         assertEquals(attempts, 2);
+        assert(Date.now() - startedAt >= 200);
       });
       await t.step("keyed wait does not consume deliveries", async () => {
         const first = await service.jobs.keyedWork.create({
@@ -1261,7 +1357,7 @@ Deno.test("generated runtime workflows", async (t) => {
             reason: "acceptance",
           }).orThrow();
           await runtime.waitFor(
-            () => client.connection.status.phase === "closed",
+            () => ["closed", "error"].includes(client.connection.status.phase),
           );
           const revoked = await client.echo({ value: "revoked" }, {
             timeout: 1000,

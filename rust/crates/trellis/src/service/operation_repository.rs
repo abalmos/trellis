@@ -246,13 +246,30 @@ pub trait OperationRepository: Send + Sync {
         record: DurableOperationRecord,
     ) -> impl Future<Output = Result<RevisionedOperationRecord, ServerError>> + Send;
 
-    /// Acquire or renew ownership, reclaiming only an expired non-terminal lease.
+    /// Acquire ownership, reclaiming only an expired non-terminal lease.
     fn claim(
         &self,
         invocation_id: &str,
         owner_executor_id: &str,
         now_ms: i64,
         lease_expires_at_ms: i64,
+    ) -> impl Future<Output = Result<RevisionedOperationRecord, ServerError>> + Send;
+
+    /// Renew an unexpired lease held by one exact owner fence.
+    fn renew(
+        &self,
+        invocation_id: &str,
+        owner_executor_id: &str,
+        owner_epoch: u64,
+        now_ms: i64,
+        lease_expires_at_ms: i64,
+    ) -> impl Future<Output = Result<RevisionedOperationRecord, ServerError>> + Send;
+
+    /// Replace caller-owned fields by record revision without claiming execution.
+    fn compare_record_exchange(
+        &self,
+        expected_revision: u64,
+        record: DurableOperationRecord,
     ) -> impl Future<Output = Result<RevisionedOperationRecord, ServerError>> + Send;
 
     /// Replace one record only when both KV revision and owner fencing token match.
@@ -369,26 +386,21 @@ impl OperationRepository for KvOperationRepository {
                     "terminal operation cannot be claimed".to_owned(),
                 ));
             }
-            if current.record.owner_executor_id.as_deref() != Some(owner_executor_id)
-                && current
-                    .record
-                    .lease_expires_at_ms
-                    .is_some_and(|expiry| expiry > now_ms)
+            if current
+                .record
+                .lease_expires_at_ms
+                .is_some_and(|expiry| expiry > now_ms)
             {
                 return Err(ServerError::Nats(
-                    "operation lease is owned by another instance".to_owned(),
+                    "operation already has an active lease".to_owned(),
                 ));
             }
             let mut record = current.record;
-            let expired = record
-                .lease_expires_at_ms
-                .is_none_or(|expiry| expiry <= now_ms);
-            if record.owner_executor_id.as_deref() != Some(owner_executor_id) || expired {
-                record.owner_executor_id = Some(owner_executor_id.to_owned());
-                record.owner_epoch = record.owner_epoch.checked_add(1).ok_or_else(|| {
-                    ServerError::Nats("operation owner epoch overflow".to_owned())
-                })?;
-            }
+            record.owner_executor_id = Some(owner_executor_id.to_owned());
+            record.owner_epoch = record
+                .owner_epoch
+                .checked_add(1)
+                .ok_or_else(|| ServerError::Nats("operation owner epoch overflow".to_owned()))?;
             record.lease_expires_at_ms = Some(lease_expires_at_ms);
             record.revision = record
                 .revision
@@ -408,6 +420,101 @@ impl OperationRepository for KvOperationRepository {
         Err(ServerError::Nats(
             "operation claim exceeded CAS retry limit".to_owned(),
         ))
+    }
+
+    async fn renew(
+        &self,
+        invocation_id: &str,
+        owner_executor_id: &str,
+        owner_epoch: u64,
+        now_ms: i64,
+        lease_expires_at_ms: i64,
+    ) -> Result<RevisionedOperationRecord, ServerError> {
+        if lease_expires_at_ms <= now_ms {
+            return Err(ServerError::Nats(
+                "operation lease must expire in the future".to_owned(),
+            ));
+        }
+        for _ in 0..8 {
+            let current = self.load(invocation_id).await?.ok_or_else(|| {
+                ServerError::Nats("operation invocation was not found".to_owned())
+            })?;
+            if current.record.owner_executor_id.as_deref() != Some(owner_executor_id)
+                || current.record.owner_epoch != owner_epoch
+                || current
+                    .record
+                    .lease_expires_at_ms
+                    .is_none_or(|expiry| expiry <= now_ms)
+                || current.record.snapshot.state.is_terminal()
+            {
+                return Err(ServerError::Nats(
+                    "operation owner fence is stale".to_owned(),
+                ));
+            }
+            let mut record = current.record;
+            record.lease_expires_at_ms = Some(lease_expires_at_ms);
+            record.revision += 1;
+            record.snapshot.revision = record.revision;
+            record.validate()?;
+            if let Ok(revision) = self
+                .store
+                .update(
+                    invocation_id,
+                    serde_json::to_vec(&record)?.into(),
+                    current.revision,
+                )
+                .await
+            {
+                return Ok(RevisionedOperationRecord { record, revision });
+            }
+        }
+        Err(ServerError::Nats(
+            "operation renewal exceeded CAS retry limit".to_owned(),
+        ))
+    }
+
+    async fn compare_record_exchange(
+        &self,
+        expected_revision: u64,
+        mut record: DurableOperationRecord,
+    ) -> Result<RevisionedOperationRecord, ServerError> {
+        let current = self
+            .load(&record.invocation_id)
+            .await?
+            .ok_or_else(|| ServerError::Nats("operation invocation was not found".to_owned()))?;
+        if current.revision != expected_revision
+            || record.owner_executor_id != current.record.owner_executor_id
+            || record.owner_epoch != current.record.owner_epoch
+            || record.lease_expires_at_ms != current.record.lease_expires_at_ms
+            || record.api_id != current.record.api_id
+            || record.operation != current.record.operation
+            || record.deployment_id != current.record.deployment_id
+            || record.creator_principal_id != current.record.creator_principal_id
+            || record.creator_participant_id != current.record.creator_participant_id
+            || record.caller != current.record.caller
+            || record.input != current.record.input
+        {
+            return Err(ServerError::Nats(
+                "operation record CAS is stale".to_owned(),
+            ));
+        }
+        if record.revision != current.record.revision.saturating_add(1) {
+            return Err(ServerError::Nats(
+                "operation durable revision must increment exactly once".to_owned(),
+            ));
+        }
+        record.snapshot.revision = record.revision;
+        record.validate()?;
+        let revision = self
+            .store
+            .update(
+                record.invocation_id.clone(),
+                serde_json::to_vec(&record)?.into(),
+                expected_revision,
+            )
+            .await
+            .map_err(|error| ServerError::Nats(format!("operation CAS failed: {error}")))?;
+        Ok(RevisionedOperationRecord { record, revision })
     }
 
     async fn compare_exchange(
@@ -437,6 +544,18 @@ impl OperationRepository for KvOperationRepository {
         {
             return Err(ServerError::Nats(
                 "operation owner fence is stale".to_owned(),
+            ));
+        }
+        if record.api_id != current.record.api_id
+            || record.operation != current.record.operation
+            || record.deployment_id != current.record.deployment_id
+            || record.creator_principal_id != current.record.creator_principal_id
+            || record.creator_participant_id != current.record.creator_participant_id
+            || record.caller != current.record.caller
+            || record.input != current.record.input
+        {
+            return Err(ServerError::Nats(
+                "operation immutable identity cannot change".to_owned(),
             ));
         }
         if record.revision != current.record.revision.saturating_add(1) {

@@ -17,6 +17,7 @@ export class AuthorizationContextCache {
   #routing?: AuthorizationRoutingMaterial;
   #clockOffsetMs = 0;
   #operation = 0;
+  #generation = 0;
   #refreshRequest?: () => void;
   #refreshRequestPending = false;
 
@@ -77,7 +78,13 @@ export class AuthorizationContextCache {
     this.#verified = verified;
     this.#runtime = installedRuntime;
     this.#routing = nextRouting;
+    this.#generation += 1;
     return verified;
+  }
+
+  /** Returns the number of successfully installed authorization contexts. */
+  generation(): number {
+    return this.#generation;
   }
 
   current(

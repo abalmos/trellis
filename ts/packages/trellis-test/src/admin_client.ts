@@ -34,6 +34,7 @@ export { adminMethods, type TrellisTestAdminRpcMethod };
 
 /** Internal public-surface admin automation used by `TrellisTestRuntime`. */
 export class TrellisTestAdminAutomation {
+  #configuredConsentPolicies = new Set<string>();
   readonly #trellisUrl: string;
   readonly #adminPassword: string;
   readonly #getBootstrapUrl: () => Promise<string>;
@@ -225,6 +226,13 @@ export class TrellisTestAdminAutomation {
       trellisUrl: this.#trellisUrl,
       flowId,
       binding,
+      prepareApproval: async (state) => {
+        const participantId = state.approval.contractId;
+        await this.ensurePortalConsentPolicy(
+          participantId,
+          Object.keys(state.approval.capabilities),
+        );
+      },
     });
     recordTrellisDuration(
       "trellis.admin.workflow.duration",
@@ -232,6 +240,36 @@ export class TrellisTestAdminAutomation {
       { operation: "register_client", phase: "total" },
     );
     return { status: "bound", flowId };
+  }
+
+  /** Configures the built-in portal's test consent ceiling for a participant. */
+  async ensurePortalConsentPolicy(
+    participantId: string,
+    selectionIds: readonly string[],
+  ): Promise<void> {
+    if (this.#configuredConsentPolicies.has(participantId)) return;
+    await this.#completeBootstrap();
+    await this.#rpc("authPortalsGrantOverridesPut", {
+      portalId: "builtin",
+      participantId,
+      directCapabilities: selectionIds
+        .filter((key) => key.startsWith("capability:"))
+        .map((key) => key.slice("capability:".length)),
+      capabilityGroupKeys: [],
+      roleMappings: [],
+      expectedVersion: null,
+      idempotencyKey: crypto.randomUUID(),
+    });
+    this.#configuredConsentPolicies.add(participantId);
+  }
+
+  /** Returns whether the runtime has projected a live participant connection. */
+  async hasParticipantConnection(participantId: string): Promise<boolean> {
+    await this.#completeBootstrap();
+    const connections = await this.#rpc("authConnectionsList", {});
+    return connections.items.some((item) =>
+      item.participantId === participantId
+    );
   }
 
   /** Installs a participant and atomically replaces its deployment GrantBinding. */

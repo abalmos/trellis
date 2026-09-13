@@ -64,3 +64,28 @@ independent review cycling stops here so the primary designer can perform the
 whole-release review.
 
 **READY FOR WHOLE-RELEASE REVIEW - NOT ACCEPTED**
+
+## Whole-release correction candidate
+
+The follow-up to candidate `4997f94a5ffa9f80d271421ddc7eb2b90c8ff5d5` implements
+the bounded C1-C7 correction round requested by the primary whole-release
+review. It does not replace or reinterpret the verification record above.
+
+- C1-C6 and the C7 CI protocol-WASM dependency correction have focused
+  production-bound evidence.
+- The generated Runtime workflow passed all eight steps, including exact
+  Operation identity and epoch fencing, same-deployment replica updates,
+  authored Job policy, and the bounded native-admin revocation scenario.
+- Historical Check run #310 remains failed in Install tooling and Live
+  integration; it is not evidence for this follow-up tree.
+- Complete live acceptance is not green: the focused
+  `generated Rust resources use live NATS` case reproducibly leaves stale NATS
+  ACLs and resource handles usable after the server has durably revoked the
+  service context and completed its post-commit actions.
+- A speculative client reconnect-generation gate was removed after it delayed
+  unrelated authority and deployment workflows. The unresolved C7b boundary
+  requires root-cause review rather than another mitigation.
+- `workorders/` remains protected review input and is excluded from the
+  follow-up commit.
+
+**REVIEW-BLOCKED CORRECTION CANDIDATE - NOT ACCEPTED**

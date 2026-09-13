@@ -1,3 +1,5 @@
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use sha2::{Digest as _, Sha256};
 use trellis_rs::generated::ParticipantDescriptor;
 
 use super::{AuthorizationStateError, ParticipantBindingRecord};
@@ -213,6 +215,11 @@ fn builtin_participant_binding<D: ParticipantDescriptor>(
         participant_digest: native.participant_digest.to_owned(),
         needs_digest: native.needs_digest.to_owned(),
         package_digest: native.package_digest.to_owned(),
+        evidence_digest: URL_SAFE_NO_PAD.encode(Sha256::digest(
+            trusted_package_evidence_json(native.package_digest)?
+                .ok_or(AuthorizationStateError::ParticipantMissing)?
+                .as_bytes(),
+        )),
         participant_path: D::PATH.to_owned(),
         projection: native.projection,
         resolved_at,

@@ -92,6 +92,12 @@ authoring has events, concurrency, replay, and retry—never ordering, ack-wait,
 max-delivery, or DLQ switches. Job progress, logs, and dead lifecycle are always
 available rather than feature flags.
 
+Job resources may declare a positive creation-relative `deadline` and a `retry`
+block with positive total `attempts` and exactly `attempts - 1` positive,
+ordered `backoff` durations. `attempts 1` requires `backoff []`. Omitting retry
+uses five deliveries with `[5s, 30s, 2m, 10m]`; omitting deadline declares no
+deadline.
+
 ## Types and wire codecs
 
 Top-level declarations are models, enums, named scalar aliases, and API-scoped

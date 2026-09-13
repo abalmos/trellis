@@ -150,7 +150,17 @@ async fn companion_consent(
             claim.participant_id,
         )
         .await?;
-    let ceiling = super::auth::policy::participant_delegation_ceiling(&child)?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| super::auth::AuthorizationStateError::InvalidRecord(error.to_string()))?
+        .as_millis()
+        .try_into()
+        .map_err(|_| {
+            super::auth::AuthorizationStateError::InvalidRecord(
+                "current time exceeds protocol range".to_owned(),
+            )
+        })?;
+    let ceiling = super::auth::policy::explicit_binding_ceiling(current.as_ref(), now);
     super::auth::policy::consent_request(
         &child,
         installed_revision,

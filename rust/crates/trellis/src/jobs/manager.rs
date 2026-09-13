@@ -1371,3 +1371,20 @@ fn compute_deadline(now: &str, default_deadline_ms: Option<u64>) -> Result<Optio
         .map(Some)
         .map_err(|error| error.to_string())
 }
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::compute_deadline;
+
+    #[test]
+    fn deadline_is_relative_to_job_creation() {
+        assert_eq!(
+            compute_deadline("2026-09-13T12:00:00Z", Some(250)).unwrap(),
+            Some("2026-09-13T12:00:00.25Z".to_owned())
+        );
+        assert_eq!(
+            compute_deadline("2026-09-13T12:00:00Z", None).unwrap(),
+            None
+        );
+    }
+}

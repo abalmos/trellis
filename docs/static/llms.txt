@@ -60,8 +60,9 @@ outputs; colliding participant output paths are errors.
 Trellis Operations are durable, restartable, at-least-once caller-visible
 workflows; controls remain bound to the creator principal and participant across
 reconnects, and terminal states are immutable. Jobs are service-private; keyed
-capacity waits do not consume attempts, and Jobs Summary is independent of Query
-pages. Capability approval is not an exact grant. Resource commitments are
+capacity waits do not consume attempts. Job deadlines are creation-relative;
+retry defaults to five deliveries delayed by 5s, 30s, 2m, and 10m. Jobs Summary
+is independent of Query pages. Capability approval is not an exact grant. Resource commitments are
 approvals; desired capacities are hints, while observed bindings are the usable
 limits. Trellis neither adopts nor destroys foreign-owned physical resources.
 Removal detaches access without deleting new-version data, allowing compatible

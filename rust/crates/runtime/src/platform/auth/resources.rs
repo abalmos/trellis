@@ -408,7 +408,20 @@ async fn reconcile_provider(
             reconcile_store(&jetstream, &request.catalog, commitment.ttl_ms.unwrap_or(0)).await
         }
         AuthorizationResourceKind::Job => {
-            reconcile_job(client, &request.catalog).await?;
+            let declaration = request
+                .participant
+                .resources
+                .get(&request.catalog.local_name)
+                .ok_or_else(|| {
+                    ProvisionError::Incompatible("job declaration is missing".to_owned())
+                })?;
+            reconcile_job(
+                client,
+                &request.catalog,
+                declaration.retry_attempts,
+                &declaration.retry_backoff_ms,
+            )
+            .await?;
             Ok(ResourceActual::Job)
         }
         AuthorizationResourceKind::Consumer => {
@@ -586,6 +599,8 @@ async fn reconcile_store(
 async fn reconcile_job(
     client: &async_nats::Client,
     catalog: &ResourceCatalogRecord,
+    retry_attempts: Option<u32>,
+    retry_backoff_ms: &[u64],
 ) -> Result<(), ProvisionError> {
     let jetstream = jetstream::new(client.clone());
     let namespace = job_namespace(catalog);
@@ -620,10 +635,15 @@ async fn reconcile_job(
         ));
     }
     let stream = get_required_stream(&jetstream, "JOBS_WORK").await?;
-    let backoff = [5_000, 30_000, 120_000, 600_000]
-        .into_iter()
-        .map(Duration::from_millis)
-        .collect::<Vec<_>>();
+    let max_deliver = i64::from(retry_attempts.unwrap_or(5));
+    let backoff = if retry_attempts.is_none() {
+        vec![5_000, 30_000, 120_000, 600_000]
+    } else {
+        retry_backoff_ms.to_vec()
+    }
+    .into_iter()
+    .map(Duration::from_millis)
+    .collect::<Vec<_>>();
     ensure_pull_consumer(
         &stream,
         &catalog.physical_id,
@@ -631,11 +651,8 @@ async fn reconcile_job(
             durable_name: Some(catalog.physical_id.clone()),
             filter_subject: format!("trellis.work.{}.{}", namespace, catalog.local_name),
             ack_policy: consumer::AckPolicy::Explicit,
-            ack_wait: backoff
-                .first()
-                .copied()
-                .unwrap_or(Duration::from_millis(300_000)),
-            max_deliver: 5,
+            ack_wait: backoff.first().copied().unwrap_or(Duration::from_secs(30)),
+            max_deliver,
             backoff: backoff.clone(),
             metadata: HashMap::from([(
                 "trellis.resource_id".to_owned(),
@@ -1199,14 +1216,20 @@ mod tests {
             .run(move |connection| {
                 connection
                     .execute(
-                        "INSERT INTO auth_package_evidence (package_digest, evidence_json, platform_trusted, accepted_at) VALUES (?1, '{}', 0, 1)",
+                        "INSERT INTO auth_package_evidence (package_digest, platform_trusted, accepted_at) VALUES (?1, 0, 1)",
                         ["B".repeat(43)],
                     )
                     .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
                 connection
                     .execute(
-                        "INSERT INTO auth_installed_participants (participant_id, revision, participant_kind, participant_digest, needs_digest, package_digest, participant_path, companion_required, projection_json, installed_at) VALUES ('participant-1', 1, 'service', ?1, ?2, ?3, 'Service', 0, '{}', 1)",
-                        rusqlite::params!["C".repeat(43), "D".repeat(43), "B".repeat(43)],
+                        "INSERT INTO auth_package_evidence_documents (evidence_digest, package_digest, evidence_json, created_at) VALUES (?1, ?2, '{}', 1)",
+                        rusqlite::params!["E".repeat(43), "B".repeat(43)],
+                    )
+                    .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
+                connection
+                    .execute(
+                        "INSERT INTO auth_installed_participants (participant_id, revision, participant_kind, participant_digest, needs_digest, package_digest, evidence_digest, participant_path, companion_required, projection_json, installed_at) VALUES ('participant-1', 1, 'service', ?1, ?2, ?3, ?4, 'Service', 0, '{}', 1)",
+                        rusqlite::params!["C".repeat(43), "D".repeat(43), "B".repeat(43), "E".repeat(43)],
                     )
                     .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
                 connection
@@ -1617,7 +1640,7 @@ mod tests {
             created_at: 1,
             updated_at: 2,
         };
-        reconcile_job(&client, &job).await.unwrap();
+        reconcile_job(&client, &job, None, &[]).await.unwrap();
         let namespace = job_namespace(&job);
         let job_keys = jetstream
             .get_key_value(format!("JOBS_KEYS_{namespace}"))

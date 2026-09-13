@@ -149,6 +149,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("rust resources ready");
     std::io::stdout().flush()?;
+    tokio::task::spawn_blocking(|| {
+        let mut replacement = String::new();
+        std::io::stdin().read_line(&mut replacement)
+    })
+    .await??;
     for _ in 0..60 {
         if matches!(
             kv.get("record").await,

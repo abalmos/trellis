@@ -98,7 +98,7 @@ where
 {
     let consumer_graph = trellis_idl::compile_evidence(
         repository
-            .get_installed_package_evidence(&participant.package_digest)
+            .get_installed_package_evidence(&participant.evidence_digest)
             .await?
             .ok_or(AuthorizationStateError::ParticipantMissing)?,
     )
@@ -215,7 +215,7 @@ where
                 };
                 let provider_graph = trellis_idl::compile_evidence(
                     repository
-                        .get_installed_package_evidence(&provider.package_digest)
+                        .get_installed_package_evidence(&provider.evidence_digest)
                         .await?
                         .ok_or(AuthorizationStateError::ParticipantMissing)?,
                 )

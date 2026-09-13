@@ -771,6 +771,8 @@ fn render_resource(
             payload,
             result,
             update,
+            deadline_ms,
+            retry,
             key_concurrency,
             ..
         } => {
@@ -781,6 +783,10 @@ fn render_resource(
             if let Some(value) = update {
                 writeln!(output, "    update {};", imports.ty(value)).unwrap();
             }
+            if let Some(value) = deadline_ms {
+                writeln!(output, "    deadline {value}ms;").unwrap();
+            }
+            render_retry(output, retry);
             if let Some(value) = key_concurrency {
                 writeln!(
                     output,

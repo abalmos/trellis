@@ -64,11 +64,11 @@ use super::{
     AccountRepository, AuthService, AuthorityEvidenceRepository, AuthorizationStateError,
     CompleteIdentityLinkInput, CompletePasswordResetInput, ContextRepository,
     CreateActivationReviewInput, CreateFederatedUserInput, CreateLocalUserInput,
-    CreateSessionInput, DeploymentRepository, FirstAdminBinding, FirstAdminFederatedRegistration,
-    FirstAdminRegistration, GrantBindingReplacement, GrantBindingState, GrantOwnerKind,
-    GrantRepository, IdempotencyResultRecord, IdempotentOutcome, LocalAuthentication,
-    LoginPortalRecord, LoginSettingsRecord, OutboxRepository, ParticipantBindingRecord,
-    ParticipantBindingState, PortalGrantProvenance, PortalRepository, PostCommitActionKind,
+    CreateSessionInput, DelegationCeiling, DeploymentRepository, FirstAdminBinding,
+    FirstAdminFederatedRegistration, FirstAdminRegistration, GrantBindingReplacement,
+    GrantBindingState, GrantOwnerKind, GrantRepository, IdempotencyResultRecord, IdempotentOutcome,
+    LocalAuthentication, LoginPortalRecord, LoginSettingsRecord, OutboxRepository,
+    ParticipantBindingRecord, ParticipantBindingState, PortalRepository, PostCommitActionKind,
     PostCommitActionRecord, ProviderLoginAttributes, ProvisioningRepository,
     ResourceBindingEvidence, ResourceBindingState, ResourceProviderIdentity, SessionRepository,
 };
@@ -368,7 +368,11 @@ fn browser_consent(
     binding: &ParticipantBindingRecord,
     installed_revision: u64,
 ) -> Result<ConsentRequest, HttpError> {
-    let ceiling = super::policy::participant_delegation_ceiling(binding)?;
+    let ceiling = DelegationCeiling {
+        capabilities: Vec::new(),
+        exact_restrictions: None,
+        platform_privileges: Vec::new(),
+    };
     super::policy::consent_request(binding, installed_revision, None, &ceiling, &[], None)
         .map_err(Into::into)
 }
@@ -608,7 +612,16 @@ fn project_service_resource_bindings(
                     .resources
                     .get(&binding.local_name)
                     .ok_or_else(|| HttpError::internal("job_queue_binding_invalid"))?;
-                let backoff_ms = vec![5_000, 30_000, 120_000, 600_000];
+                let max_deliver = config.retry_attempts.unwrap_or(5);
+                let backoff_ms = if config.retry_attempts.is_none() {
+                    vec![5_000, 30_000, 120_000, 600_000]
+                } else {
+                    config.retry_backoff_ms.clone()
+                }
+                .into_iter()
+                .map(i64::try_from)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| HttpError::internal("job_queue_binding_invalid"))?;
                 if jobs_namespace
                     .as_ref()
                     .is_some_and(|current| current != namespace)
@@ -642,9 +655,9 @@ fn project_service_resource_bindings(
                             .result_schema
                             .clone()
                             .map(|schema| JobsSchemaRef { schema }),
-                        max_deliver: 5,
+                        max_deliver: i64::from(max_deliver),
                         backoff_ms: backoff_ms.clone(),
-                        ack_wait_ms: backoff_ms[0],
+                        ack_wait_ms: backoff_ms.first().copied().unwrap_or(30_000),
                         default_deadline_ms: config
                             .deadline_ms
                             .map(i64::try_from)

@@ -440,6 +440,19 @@ export class TrellisTestRuntime implements AsyncDisposable {
     return await this.#admin.completeClientAuth(ctx);
   }
 
+  /** Configures the built-in test portal's consent ceiling for a participant. */
+  async ensurePortalConsentPolicy(
+    participantId: string,
+    selectionIds: readonly string[],
+  ): Promise<void> {
+    await this.#admin.ensurePortalConsentPolicy(participantId, selectionIds);
+  }
+
+  /** Returns whether production presence has observed a participant connection. */
+  async hasParticipantConnection(participantId: string): Promise<boolean> {
+    return await this.#admin.hasParticipantConnection(participantId);
+  }
+
   /** Connects an app/client participant through the public generated client surface. */
   async connectClient<
     TContract extends TrellisTestClientParticipant,

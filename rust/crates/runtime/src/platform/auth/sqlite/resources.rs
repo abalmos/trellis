@@ -1260,19 +1260,27 @@ mod tests {
                     connection
                         .execute(
                             "INSERT INTO auth_package_evidence (
-                                package_digest, evidence_json, platform_trusted, accepted_at
-                             ) VALUES (?1, '{}', 0, 1)",
+                                package_digest, platform_trusted, accepted_at
+                             ) VALUES (?1, 0, 1)",
                             ["B".repeat(43)],
+                        )
+                        .map_err(sql_error)?;
+                    connection
+                        .execute(
+                            "INSERT INTO auth_package_evidence_documents (
+                                evidence_digest, package_digest, evidence_json, created_at
+                             ) VALUES (?1, ?2, '{}', 1)",
+                            params!["E".repeat(43), "B".repeat(43)],
                         )
                         .map_err(sql_error)?;
                     connection
                         .execute(
                             "INSERT INTO auth_installed_participants (
                                 participant_id, revision, participant_kind, participant_digest,
-                                needs_digest, package_digest, participant_path, companion_required,
+                                needs_digest, package_digest, evidence_digest, participant_path, companion_required,
                                 projection_json, installed_at
-                             ) VALUES ('participant-1', 1, 'service', ?1, ?2, ?3, 'Service', 0, '{}', 1)",
-                            params!["C".repeat(43), "D".repeat(43), "B".repeat(43)],
+                             ) VALUES ('participant-1', 1, 'service', ?1, ?2, ?3, ?4, 'Service', 0, '{}', 1)",
+                            params!["C".repeat(43), "D".repeat(43), "B".repeat(43), "E".repeat(43)],
                         )
                         .map_err(sql_error)?;
                     connection

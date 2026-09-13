@@ -183,6 +183,9 @@ Completed, failed, and cancelled records are immutable.
 Keyed Jobs waiting for an active capacity slot maintain the current delivery and
 do not consume a retry attempt before handler entry. `Jobs.Summary` computes all
 matching totals, groups, and statistics independently of any `Jobs.Query` page.
+Job deadlines are creation-relative. Omitted retry means five deliveries with
+delays of 5s, 30s, 2m, and 10m; explicit retry declares total attempts and
+exactly attempts-minus-one positive ordered backoffs.
 Feed cancellation targets the runtime-issued `feedId` and is accepted only from
 the original caller identity; another feed or principal cannot cancel it.
 

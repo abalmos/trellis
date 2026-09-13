@@ -2,8 +2,73 @@ use super::super::*;
 use super::local::{portal_flow_response, PortalFlowResponse};
 use crate::platform::auth::policy::portal_allows_authenticated_provider;
 use crate::platform::auth::{
-    ApprovalMode, ApprovedCapability, ApprovedResource, DelegationCeiling,
+    ApprovalMode, ApprovedCapability, ApprovedResource, DelegationCeiling, GrantBinding,
+    PortalGrantProvenance, PortalPolicySnapshot,
 };
+
+struct ConsentCeiling {
+    ceiling: DelegationCeiling,
+    policy: Option<(PortalPolicySnapshot, PortalGrantProvenance)>,
+}
+
+async fn consent_ceiling<R, E>(
+    state: &AuthHttpState<R, E>,
+    flow: &AuthBrowserFlow,
+    participant: &ParticipantBindingRecord,
+    current: Option<&GrantBinding>,
+    attributes: &ProviderLoginAttributes,
+    now: i64,
+) -> Result<ConsentCeiling, HttpError>
+where
+    R: PortalRepository + Clone,
+{
+    if let Some(policy) = state
+        .service
+        .repository()
+        .get_portal_grant_override(&flow.portal_id, &participant.participant_id)
+        .await?
+    {
+        let (portal, settings) = state
+            .service
+            .repository()
+            .get_login_portal(&flow.portal_id)
+            .await?
+            .ok_or_else(|| HttpError::gone("portal_unavailable"))?;
+        let groups = state
+            .service
+            .repository()
+            .list_capability_groups()
+            .await?
+            .into_iter()
+            .map(|group| (group.group_key.clone(), group))
+            .collect();
+        let snapshot = portal_policy_snapshot(
+            &portal,
+            &settings,
+            &participant.participant_id,
+            Some(&policy),
+            &groups,
+        )?;
+        let selection =
+            resolve_portal_authority_selection(&policy, &groups, participant, attributes)?;
+        return Ok(ConsentCeiling {
+            ceiling: selection.ceiling,
+            policy: Some((
+                snapshot,
+                PortalGrantProvenance {
+                    portal_id: flow.portal_id.clone(),
+                    provider_id: attributes.provider_id.clone(),
+                    roles: attributes.roles.clone(),
+                    effective_policy_digest: selection.effective_policy_digest,
+                },
+            )),
+        });
+    }
+    Ok(ConsentCeiling {
+        ceiling: super::super::super::policy::explicit_binding_ceiling(current, now),
+        policy: None,
+    })
+}
 
 pub(crate) async fn decide_approval<R, E>(
     State(state): State<AuthHttpState<R, E>>,
@@ -89,8 +154,16 @@ where
             flow.participant_id.clone(),
         )
         .await?;
-    let mut ceiling = super::super::super::policy::participant_delegation_ceiling(&binding)?;
-    ceiling.platform_privileges = current
+    let attributes = ProviderLoginAttributes {
+        provider_id: flow
+            .authenticated_provider_id
+            .clone()
+            .ok_or_else(|| HttpError::conflict("flow_has_no_provider"))?,
+        roles: flow.authenticated_roles.clone(),
+    };
+    let mut authority =
+        consent_ceiling(&state, &flow, &binding, current.as_ref(), &attributes, now).await?;
+    authority.ceiling.platform_privileges = current
         .as_ref()
         .map_or_else(Vec::new, |binding| binding.platform_privileges.clone());
     let actuals = state
@@ -134,7 +207,16 @@ where
                 participant_id,
             )
             .await?;
-        Some((child, child_current, child_actuals))
+        let child_authority = consent_ceiling(
+            &state,
+            &flow,
+            &child,
+            child_current.as_ref(),
+            &attributes,
+            now,
+        )
+        .await?;
+        Some((child, child_current, child_actuals, child_authority))
     } else {
         None
     };
@@ -142,11 +224,18 @@ where
         &binding,
         flow.installed_revision,
         current.as_ref(),
-        &ceiling,
+        &authority.ceiling,
         &actuals,
         companion
             .as_ref()
-            .map(|(child, current, actuals)| (child, current.as_ref(), actuals.as_slice())),
+            .map(|(child, current, actuals, authority)| {
+                (
+                    child,
+                    current.as_ref(),
+                    actuals.as_slice(),
+                    &authority.ceiling,
+                )
+            }),
     )?;
     if current_consent != flow.consent {
         return Err(HttpError::conflict("consent_view_changed"));
@@ -173,7 +262,7 @@ where
         .approval
         .as_ref()
         .ok_or_else(|| HttpError::bad_request("invalid_consent_decision"))?;
-    validate_consent_decision(&flow.consent, approval, &ceiling)?;
+    validate_consent_decision(&flow.consent, approval, &authority.ceiling)?;
     let platform_privileges = current
         .as_ref()
         .filter(|binding| {
@@ -187,55 +276,65 @@ where
         &approval.approved_capabilities,
         &approval.approved_resources,
         &platform_privileges,
-        &ceiling,
+        &authority.ceiling,
         (&[], approval.companion_approved),
     )?;
     let signer_id = super::super::super::domain::validate_ed25519_public_key(
         "sessionPublicKey",
         &flow.session_public_key,
     )?;
-    let durable = state
-        .service
-        .repository()
-        .set_grant_binding(
-            GrantBindingReplacement {
-                owner_kind: GrantOwnerKind::User,
-                owner_id: principal_id.clone(),
-                participant_id: flow.participant_id.clone(),
-                installed_revision: flow.installed_revision,
-                grants: resolved.exact_grants,
-                approval_mode: ApprovalMode::Capabilities,
-                approved_capabilities: approval.approved_capabilities.clone(),
-                approved_resources: approval.approved_resources.clone(),
-                delegation_ceiling: ceiling,
-                approval_decision_digest: approval.decision_digest.clone(),
-                companion_approved: approval.companion_approved,
-                platform_privileges,
-                expected_revision: flow.target_grant_revision,
-                expected_current_installed_revision: Some(flow.installed_revision),
-                state: GrantBindingState::Active,
-                expires_at: None,
-                provenance: None,
-            },
-            idempotency(
-                &flow_id,
-                "browser.grant.accept",
-                &signer_id,
-                &flow_id,
-                &request_digest,
-                now,
-            )?,
-        )
-        .await
-        .map_err(|error| match error {
-            AuthorizationStateError::StorageConflict => HttpError::conflict("authority_changed"),
-            AuthorizationStateError::InvalidRecord(message)
-                if message == "grant binding does not match resolved authority" =>
-            {
-                HttpError::conflict("authority_changed")
-            }
-            error => error.into(),
-        })?;
+    let replacement = GrantBindingReplacement {
+        owner_kind: GrantOwnerKind::User,
+        owner_id: principal_id.clone(),
+        participant_id: flow.participant_id.clone(),
+        installed_revision: flow.installed_revision,
+        grants: resolved.exact_grants,
+        approval_mode: ApprovalMode::Capabilities,
+        approved_capabilities: approval.approved_capabilities.clone(),
+        approved_resources: approval.approved_resources.clone(),
+        delegation_ceiling: authority.ceiling,
+        approval_decision_digest: approval.decision_digest.clone(),
+        companion_approved: approval.companion_approved,
+        platform_privileges,
+        expected_revision: flow.target_grant_revision,
+        expected_current_installed_revision: Some(flow.installed_revision),
+        state: GrantBindingState::Active,
+        expires_at: None,
+        provenance: authority
+            .policy
+            .as_ref()
+            .map(|(_, provenance)| provenance.clone()),
+    };
+    let idempotency = idempotency(
+        &flow_id,
+        "browser.grant.accept",
+        &signer_id,
+        &flow_id,
+        &request_digest,
+        now,
+    )?;
+    let durable = if let Some((snapshot, _)) = authority.policy {
+        state
+            .service
+            .repository()
+            .set_portal_grant_binding(replacement, snapshot, idempotency)
+            .await
+    } else {
+        state
+            .service
+            .repository()
+            .set_grant_binding(replacement, idempotency)
+            .await
+    }
+    .map_err(|error| match error {
+        AuthorizationStateError::StorageConflict => HttpError::conflict("authority_changed"),
+        AuthorizationStateError::InvalidRecord(message)
+            if message == "grant binding does not match resolved authority" =>
+        {
+            HttpError::conflict("authority_changed")
+        }
+        error => error.into(),
+    })?;
     let durable_result_digest = trellis_protocol::digest_json(&durable)
         .map_err(|_| HttpError::internal("authority_digest"))?;
     let expected = flow.version;
@@ -585,9 +684,16 @@ where
             )
             .await?
             .ok_or_else(|| HttpError::internal("participant_binding_missing"))?;
-        let mut ceiling =
-            super::super::super::policy::participant_delegation_ceiling(&participant)?;
-        ceiling.platform_privileges = current
+        let mut authority = consent_ceiling(
+            state,
+            &flow,
+            &participant,
+            current.as_ref(),
+            &attributes,
+            now,
+        )
+        .await?;
+        authority.ceiling.platform_privileges = current
             .as_ref()
             .map_or_else(Vec::new, |binding| binding.platform_privileges.clone());
         let actuals = state
@@ -625,7 +731,16 @@ where
                     participant_id,
                 )
                 .await?;
-            Some((child, child_current, child_actuals))
+            let child_authority = consent_ceiling(
+                state,
+                &flow,
+                &child,
+                child_current.as_ref(),
+                &attributes,
+                now,
+            )
+            .await?;
+            Some((child, child_current, child_actuals, child_authority))
         } else {
             None
         };
@@ -633,11 +748,18 @@ where
             &participant,
             flow.installed_revision,
             current.as_ref(),
-            &ceiling,
+            &authority.ceiling,
             &actuals,
             companion
                 .as_ref()
-                .map(|(child, current, actuals)| (child, current.as_ref(), actuals.as_slice())),
+                .map(|(child, current, actuals, authority)| {
+                    (
+                        child,
+                        current.as_ref(),
+                        actuals.as_slice(),
+                        &authority.ceiling,
+                    )
+                }),
         )?;
         let expected = flow.version;
         flow.state = AuthBrowserFlowState::Authenticated;

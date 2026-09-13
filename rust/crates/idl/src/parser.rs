@@ -493,6 +493,7 @@ impl<'a> Parser<'a> {
                     ResourceValue::Integer(self.integer_statement()?)
                 }
                 "ttl" => ResourceValue::Duration(self.duration_statement(true)?),
+                "deadline" => ResourceValue::Duration(self.duration_statement(false)?),
                 "desired_max_value" | "desired_max_object" | "desired_max_total" => {
                     ResourceValue::Capacity(self.capacity_statement()?)
                 }

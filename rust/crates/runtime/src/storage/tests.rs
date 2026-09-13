@@ -179,6 +179,7 @@ fn sqlite_platform_store_creates_complete_fresh_schema() -> Result<(), Box<dyn s
     assert_table(&path, "auth_authorization_contexts")?;
     assert_table(&path, "auth_bootstrap_administrator")?;
     assert_table(&path, "auth_package_evidence")?;
+    assert_table(&path, "auth_package_evidence_documents")?;
     assert_table(&path, "auth_api_bindings")?;
     assert_table(&path, "auth_resources")?;
     assert_table(&path, "auth_resource_history")?;
@@ -193,7 +194,12 @@ fn sqlite_platform_store_creates_complete_fresh_schema() -> Result<(), Box<dyn s
             .filter(|column| column.ends_with("_digest"))
             .map(String::as_str)
             .collect::<Vec<_>>(),
-        ["participant_digest", "needs_digest", "package_digest"]
+        [
+            "participant_digest",
+            "needs_digest",
+            "package_digest",
+            "evidence_digest"
+        ]
     );
     let columns = connection
         .prepare("PRAGMA table_info(auth_device_delegations)")?

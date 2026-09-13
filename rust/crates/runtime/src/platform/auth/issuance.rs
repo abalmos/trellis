@@ -466,6 +466,7 @@ mod tests {
                 participant_digest: "d".repeat(43),
                 needs_digest: "n".repeat(43),
                 package_digest: "p".repeat(43),
+                evidence_digest: "e".repeat(43),
                 participant_path: "device".to_owned(),
                 projection: ParticipantRuntimeProjection {
                     participant_id,

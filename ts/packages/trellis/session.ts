@@ -152,6 +152,7 @@ export type VerifiedCaller = {
   principalId: string;
   principalKind: "user" | "service" | "device";
   participantId: string;
+  contextDigest: string;
   connectionId: string;
   loginSessionId: string | null;
   identityKeyId: string | null;
@@ -185,6 +186,7 @@ type LocalAuthorizationArgs =
     proofPayload?: Uint8Array;
     permission: DescriptorPermissionAtom | undefined;
     requiredCapabilities: readonly string[];
+    identityOnly?: boolean;
   }
   | {
     kind: "event";
@@ -198,6 +200,7 @@ type LocalAuthorizationArgs =
 type VerifyAuthorizationRequestResultLike =
   | {
     ok: true;
+    contextDigest: string;
     context: VerifiedAuthorizationContextTokenProjection["context"];
   }
   | { ok: false; error: { code: AuthorizationVerificationErrorCode } };
@@ -215,7 +218,7 @@ class EventVerificationAuthError extends AuthError {
 export async function verifyLocalAuthorization(
   args: LocalAuthorizationArgs,
 ): Promise<Result<VerifiedCaller, AuthError>> {
-  if (!args.permission) {
+  if (!args.permission && !(args.kind === "request" && args.identityOnly)) {
     return err(new AuthError({ reason: "insufficient_permissions" }));
   }
   if (!args.cache) {
@@ -251,7 +254,9 @@ export async function verifyLocalAuthorization(
         iat,
         requestId,
         proof,
-        requiredPermissions: [toVerifierPermission(args.permission)],
+        requiredPermissions: args.permission
+          ? [toVerifierPermission(args.permission)]
+          : [],
         requiredCapabilities: [...args.requiredCapabilities],
       };
       result = await args.cache.verifyRequest(request);
@@ -297,7 +302,7 @@ export async function verifyLocalAuthorization(
       }),
     );
   }
-  return ok(toVerifiedCaller(result.context));
+  return ok(toVerifiedCaller(result.contextDigest, result.context));
 }
 
 function toVerifierPermission(
@@ -332,6 +337,7 @@ function toVerifierPermission(
 }
 
 function toVerifiedCaller(
+  contextDigest: string,
   projection: VerifiedAuthorizationContextTokenProjection["context"],
 ): VerifiedCaller {
   return {
@@ -340,6 +346,7 @@ function toVerifiedCaller(
     principalId: projection.principalId,
     principalKind: projection.principalKind,
     participantId: projection.participantId,
+    contextDigest,
     connectionId: projection.connectionId,
     loginSessionId: projection.loginSessionId,
     identityKeyId: projection.identityKeyId,
@@ -3173,7 +3180,11 @@ export class Trellis<
       }
 
       const inbox = createInbox(this.#inboxPrefix);
-      const authHeaders = await this.#createProof(subject, payload, inbox);
+      const authHeaders = await this.createRequestProof(
+        subject,
+        payload,
+        inbox,
+      );
       if (opts?.signal?.aborted) {
         const error = createTransportError({
           code: "trellis.feed.subscribe_aborted",
@@ -3215,7 +3226,7 @@ export class Trellis<
             _trellisFeedCancel: inbox,
             feedId,
           });
-          const auth = await this.#createProof(
+          const auth = await this.createRequestProof(
             controlSubject,
             cancelPayload,
             inbox,
@@ -5287,7 +5298,8 @@ export class Trellis<
     return digest;
   }
 
-  async #createProof(
+  /** Creates a context-bound request proof for an exact subject, payload, and reply. */
+  protected async createRequestProof(
     subject: string,
     payload: string,
     reply: string,
@@ -5370,7 +5382,7 @@ export class Trellis<
       // Create the exact reply inbox before signing so the proof binds the
       // reply subject the response arrives on.
       const reply = createInbox(this.#inboxPrefix);
-      const authHeaders = await this.#createProof(
+      const authHeaders = await this.createRequestProof(
         args.subject,
         args.payload,
         reply,
@@ -5579,7 +5591,11 @@ export class Trellis<
     return AsyncResult.from((async () => {
       const payload = JSON.stringify(body);
       const inbox = createInbox(this.#inboxPrefix);
-      const authHeaders = await this.#createProof(subject, payload, inbox);
+      const authHeaders = await this.createRequestProof(
+        subject,
+        payload,
+        inbox,
+      );
 
       const headers = natsHeaders();
       headers.set("proof", authHeaders.proof);

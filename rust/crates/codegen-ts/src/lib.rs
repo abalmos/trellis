@@ -1438,12 +1438,14 @@ fn render_resource(resource: &ResourceDefinition, modules: &BTreeMap<String, Str
             "{{ kind: \"store\", availability: {}, ttlMs: {ttl_ms}, desiredMaxObject: {}, desiredMaxTotal: {} }}",
             availability(*optional), option_number(*desired_max_object), option_number(*desired_max_total)
         ),
-        ResourceDefinition::Job { optional, payload, result, update, .. } => format!(
-            "{{ kind: \"job\", availability: {}, payload: {}, result: {}, update: {} }}",
+        ResourceDefinition::Job { optional, payload, result, update, deadline_ms, retry, .. } => format!(
+            "{{ kind: \"job\", availability: {}, payload: {}, result: {}, update: {}, deadlineMs: {}, retry: {} }}",
             availability(*optional),
             type_codec(payload, "", modules),
             result.as_ref().map(|value| type_codec(value, "", modules)).unwrap_or_else(|| "undefined".into()),
-            update.as_ref().map(|value| type_codec(value, "", modules)).unwrap_or_else(|| "undefined".into())
+            update.as_ref().map(|value| type_codec(value, "", modules)).unwrap_or_else(|| "undefined".into()),
+            option_number(*deadline_ms),
+            retry.as_ref().map(|value| serde_json::json!({"attempts":value.attempts,"backoffMs":value.backoff_ms}).to_string()).unwrap_or_else(|| "undefined".into())
         ),
         ResourceDefinition::Consumer { optional, events, concurrency, replay, retry, .. } => format!(
             "{{ kind: \"consumer\", availability: {}, events: {}, concurrency: {concurrency}, replay: {}, retry: {} }}",
@@ -2054,7 +2056,7 @@ mod tests {
               rpc List { input Empty; output Node; }
               capabilities { public { allows { rpc List; } } }
             }
-            service Worker { implements orders; implements catalog; kv optional cache { title "Cache"; description "Cache"; schema PrivateState; version 2; accepts { 1: PrivateV1; } } }
+            service Worker { implements orders; implements catalog; kv optional cache { title "Cache"; description "Cache"; schema PrivateState; version 2; accepts { 1: PrivateV1; } } job work { title "Work"; description "Work queue."; payload Empty; deadline 45s; retry { attempts 3; backoff [5s, 30s]; } } }
             device Sensor { app optional Console { kv values { title "Values"; description "Values"; schema Node; } } }
             "#,
         );
@@ -2113,6 +2115,9 @@ mod tests {
         assert!(participant.contains("implements: [Api0.API, Api1.API]"));
         assert!(participant.contains("availability: \"optional\""));
         assert!(participant.contains("migrations"));
+        assert!(participant.contains("deadlineMs: 45e3"));
+        assert!(participant.contains("\"attempts\": 3"));
+        assert!(participant.contains("\"backoffMs\": [5e3, 3e4]"));
         assert!(participant.contains("packageEvidence"));
         let participant_declaration =
             fs::read_to_string(root.join("participants/Worker/mod.d.ts")).unwrap();

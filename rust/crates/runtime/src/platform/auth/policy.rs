@@ -106,6 +106,7 @@ pub(crate) fn consent_request(
         &ParticipantBindingRecord,
         Option<&GrantBinding>,
         &[ConsentResourceActualEntry],
+        &DelegationCeiling,
     )>,
 ) -> Result<ConsentRequest, AuthorizationStateError> {
     let resolved = binding.resolve()?;
@@ -197,22 +198,22 @@ pub(crate) fn consent_request(
     }
     resources.sort_by(|left, right| (left.kind, &left.name).cmp(&(right.kind, &right.name)));
     let companion = if let Some(participant_id) = &resolved.companion_participant_id {
-        let (child, current, child_actuals) = companion_binding.ok_or_else(|| {
-            AuthorizationStateError::InvalidRecord(
-                "companion participant definition is missing".to_owned(),
-            )
-        })?;
+        let (child, current, child_actuals, child_ceiling) =
+            companion_binding.ok_or_else(|| {
+                AuthorizationStateError::InvalidRecord(
+                    "companion participant definition is missing".to_owned(),
+                )
+            })?;
         if child.participant_id != *participant_id {
             return Err(AuthorizationStateError::InvalidRecord(
                 "companion participant definition does not match".to_owned(),
             ));
         }
-        let child_ceiling = participant_delegation_ceiling(child)?;
         let child_consent = consent_request(
             child,
             installed_revision,
             current,
-            &child_ceiling,
+            child_ceiling,
             child_actuals,
             None,
         )?;
@@ -315,6 +316,27 @@ pub(crate) fn participant_delegation_ceiling(
         exact_restrictions: None,
         platform_privileges: Vec::new(),
     })
+}
+
+pub(crate) fn explicit_binding_ceiling(
+    current: Option<&GrantBinding>,
+    now: i64,
+) -> DelegationCeiling {
+    current
+        .filter(|binding| {
+            binding.approval_mode == ApprovalMode::Exact
+                && binding.provenance.is_none()
+                && binding.state == super::GrantBindingState::Active
+                && binding.expires_at.is_none_or(|expires_at| expires_at > now)
+        })
+        .map_or(
+            DelegationCeiling {
+                capabilities: Vec::new(),
+                exact_restrictions: None,
+                platform_privileges: Vec::new(),
+            },
+            |binding| binding.delegation_ceiling.clone(),
+        )
 }
 
 pub(crate) fn participant_resource_commitments(
@@ -775,6 +797,7 @@ mod tests {
             participant_digest: "A".repeat(43),
             needs_digest: "B".repeat(43),
             package_digest: "A".repeat(43),
+            evidence_digest: "E".repeat(43),
             participant_path: "app".to_owned(),
             projection: ParticipantRuntimeProjection {
                 participant_id: "example.app".to_owned(),
@@ -844,6 +867,55 @@ mod tests {
             &participant,
             ApprovalMode::Capabilities,
             &[approved],
+            &[],
+            &[],
+            &ceiling,
+            (&[], true),
+        )
+        .unwrap();
+        assert_eq!(resolved.exact_grants, GrantSet::new(vec![atom("Read")]));
+        assert!(!resolved.readiness);
+        assert_eq!(resolved.missing_required, ["capability:app::overlap"]);
+    }
+
+    #[test]
+    fn request_inventory_is_not_a_consent_ceiling() {
+        let mut participant = participant();
+        participant
+            .projection
+            .referenced_apis
+            .get_mut("app@v1")
+            .unwrap()
+            .capabilities
+            .get_mut("app::first")
+            .unwrap()
+            .public = true;
+        let ceiling = DelegationCeiling {
+            capabilities: Vec::new(),
+            exact_restrictions: None,
+            platform_privileges: Vec::new(),
+        };
+        let consent = consent_request(&participant, 1, None, &ceiling, &[], None).unwrap();
+        assert!(
+            consent
+                .capabilities
+                .iter()
+                .find(|capability| capability.id == "app::first")
+                .unwrap()
+                .eligible
+        );
+        assert!(
+            !consent
+                .capabilities
+                .iter()
+                .find(|capability| capability.id == "app::overlap")
+                .unwrap()
+                .eligible
+        );
+        let resolved = resolve_authority(
+            &participant,
+            ApprovalMode::Capabilities,
+            &[],
             &[],
             &[],
             &ceiling,

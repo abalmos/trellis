@@ -1526,6 +1526,21 @@ mod tests {
     }
 
     #[test]
+    fn retry_uses_the_declared_delivery_interval() {
+        assert_eq!(
+            ack_action_for_outcome(
+                Some(&JobProcessOutcome::<Value>::Retry {
+                    tries: 1,
+                    error: "retry requested".to_string(),
+                }),
+                3,
+                &[17, 29],
+            ),
+            WorkerAckAction::Nak(Duration::from_millis(17))
+        );
+    }
+
+    #[test]
     fn lifecycle_work_decision_allows_when_latest_event_is_created() {
         let work = sample_job(JobState::Pending, 0);
         let latest = created(

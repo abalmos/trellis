@@ -91,6 +91,10 @@ Deno.test("device companion requires separate selected consent across restart", 
       })).status,
       "activation_required",
     );
+    await runtime.ensurePortalConsentPolicy(
+      participants.Device.Companion.participant.identity,
+      consent.capabilities.map((item: ConsentCapability) => item.id),
+    );
 
     const approval = {
       mode: "capabilities" as const,
