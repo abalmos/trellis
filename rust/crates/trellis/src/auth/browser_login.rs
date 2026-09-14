@@ -266,7 +266,7 @@ impl AgentLoginChallenge {
         super::session_store::save_admin_session(&state)?;
         let client = connect_admin_client_async(&state).await?;
         let response = client
-            .request_value("rpc.v1.auth.Sessions.Me", json!({}))
+            .request_api_value("trellis.auth@v1", "Sessions.Me", json!({}))
             .await
             .map_err(|error| TrellisAuthError::OperationFailed(error.to_string()))?;
         let response: SessionsMeResponse = serde_json::from_value(response)?;

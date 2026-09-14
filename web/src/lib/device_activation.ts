@@ -4,7 +4,7 @@ import {
   type DeviceActivationAuth,
   type DeviceActivationOperationRef,
 } from "@qlever-llc/trellis-svelte";
-import { participants } from "trellis-web-generated";
+import { participant as portalParticipant } from "../../../ts/packages/trellis/internal_sdk/generated/participants/portal/mod.js";
 import { trellisUrl } from "./portal_config.ts";
 
 type PortalAuthState = DeviceActivationAuth;
@@ -15,8 +15,10 @@ function createPortalAuthState(
   return {
     async init() {},
     async handleCallback(callbackUrl) {
-      const flowId = new URL(callbackUrl).searchParams.get("flowId");
-      if (!flowId) return null;
+      const url = new URL(callbackUrl);
+      const flowId = url.searchParams.get("flowId");
+      const deviceFlowId = url.searchParams.get("deviceFlowId");
+      if (!flowId || flowId === deviceFlowId) return null;
 
       onCallback(flowId);
       return null;
@@ -26,10 +28,13 @@ function createPortalAuthState(
         options?.redirectTo ?? "/login",
         window.location.href,
       ).toString();
+      const currentUrl = new URL(window.location.href);
+      currentUrl.searchParams.delete("flowId");
+      currentUrl.searchParams.delete("deviceFlowId");
       await TrellisClient.connect({
         trellisUrl,
-        participant: participants.Portal.participant,
-        auth: { redirectTo, context: options?.context },
+        participant: portalParticipant,
+        auth: { currentUrl, redirectTo, context: options?.context },
         onAuthRequired: ({ loginUrl }) => {
           window.location.href = loginUrl;
           throw new Error("Browser authentication redirect started");
@@ -59,7 +64,7 @@ export function createPortalDeviceActivationController() {
           flowId: callbackFlowId,
         },
         onAuthRequired: () => ({ status: "handled" }),
-        participant: participants.Portal.participant,
+        participant: portalParticipant,
       }).orThrow();
       callbackFlowId = undefined;
 

@@ -71,6 +71,9 @@ export type TrellisControlPlaneConfig = {
   };
 };
 
+/** Platform TTL settings (milliseconds) for an isolated test control plane. */
+export type TrellisControlPlaneTtlMs = TrellisControlPlaneConfig["ttlMs"];
+
 /** Serializable OAuth/OIDC provider config for test control planes. */
 export type TrellisControlPlaneOAuthProvider =
   | {
@@ -244,9 +247,10 @@ export function buildControlPlaneConfig(args: {
   webSource?: TrellisControlPlaneWebSource;
   portalSource?: TrellisControlPlaneWebSource;
   consoleSource?: TrellisControlPlaneWebSource;
+  ttlMs?: Partial<TrellisControlPlaneTtlMs>;
 }): TrellisControlPlaneConfig {
   const natsDir = join(args.natsWorkdir ?? args.workdir, "nats");
-  const publicOrigin = `http://127.0.0.1:${args.port}`;
+  const publicOrigin = `http://localhost:${args.port}`;
   return {
     logLevel: "info",
     port: args.port,
@@ -279,6 +283,7 @@ export function buildControlPlaneConfig(args: {
       pendingAuth: 5 * 60_000,
       connections: 2 * 60 * 60_000,
       natsJwt: 60 * 60_000,
+      ...args.ttlMs,
     },
     nats: {
       servers: args.natsUrl,

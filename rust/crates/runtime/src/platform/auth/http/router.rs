@@ -443,6 +443,7 @@ where
         portal_source,
         console_source,
         console_source_is_override,
+        browser_flow_ttl_ms: options.browser_flow_ttl_ms,
     };
     let mut api_routes: Router<AuthHttpState<R, E>> = Router::new();
     let mut static_routes: Router<AuthHttpState<R, E>> = Router::new();

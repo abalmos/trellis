@@ -2,7 +2,8 @@ use super::super::*;
 use super::local::{portal_flow_response, PortalFlowResponse};
 use crate::platform::auth::policy::portal_allows_authenticated_provider;
 use crate::platform::auth::{
-    ApprovalMode, ApprovedCapability, ApprovedResource, GrantBinding, PortalGrantProvenance,
+    ApprovalMode, ApprovedCapability, ApprovedResource, DelegationCeiling, GrantBinding,
+    PortalGrantOverrideRecord, PortalGrantProvenance,
 };
 
 async fn consent_ceiling<R, E>(
@@ -21,12 +22,14 @@ where
             && binding.state == GrantBindingState::Active
             && binding.expires_at.is_none_or(|expiry| expiry > now)
     }) {
-        return Ok(super::super::super::policy::consent_authority(
+        let mut authority = super::super::super::policy::consent_authority(
             super::super::super::policy::ConsentAuthoritySource::Explicit {
                 target: current.expect("checked above"),
             },
             now,
-        )?);
+        )?;
+        authority.ceiling = capability_ceiling(participant, current, now)?;
+        return Ok(authority);
     }
     if let Some(policy) = state
         .service
@@ -76,10 +79,73 @@ where
             now,
         )?);
     }
-    Ok(super::super::super::policy::consent_authority(
+    let mut authority = super::super::super::policy::consent_authority(
         super::super::super::policy::ConsentAuthoritySource::Public,
         now,
-    )?)
+    )?;
+    authority.ceiling = capability_ceiling(participant, current, now)?;
+    authority.provenance =
+        Some(default_portal_provenance(state, flow, participant, attributes, now).await?);
+    Ok(authority)
+}
+
+async fn default_portal_provenance<R, E>(
+    state: &AuthHttpState<R, E>,
+    flow: &AuthBrowserFlow,
+    participant: &ParticipantBindingRecord,
+    attributes: &ProviderLoginAttributes,
+    now: i64,
+) -> Result<PortalGrantProvenance, HttpError>
+where
+    R: PortalRepository + Clone,
+{
+    state
+        .service
+        .repository()
+        .get_login_portal(&flow.portal_id)
+        .await?
+        .ok_or_else(|| HttpError::gone("portal_unavailable"))?;
+    let groups = state
+        .service
+        .repository()
+        .list_capability_groups()
+        .await?
+        .into_iter()
+        .map(|group| (group.group_key.clone(), group))
+        .collect();
+    let default_policy = PortalGrantOverrideRecord {
+        portal_id: flow.portal_id.clone(),
+        participant_id: participant.participant_id.clone(),
+        direct_capabilities: Vec::new(),
+        capability_group_keys: Vec::new(),
+        role_mappings: Vec::new(),
+        created_at: now,
+        updated_at: now,
+        version: 1,
+    };
+    let selection =
+        resolve_portal_authority_selection(&default_policy, &groups, participant, attributes)?;
+    Ok(PortalGrantProvenance {
+        portal_id: flow.portal_id.clone(),
+        provider_id: attributes.provider_id.clone(),
+        roles: attributes.roles.clone(),
+        effective_policy_digest: selection.effective_policy_digest,
+    })
+}
+
+fn capability_ceiling(
+    participant: &ParticipantBindingRecord,
+    current: Option<&GrantBinding>,
+    now: i64,
+) -> Result<DelegationCeiling, AuthorizationStateError> {
+    let mut ceiling = super::super::super::policy::participant_delegation_ceiling(participant)?;
+    if let Some(binding) = current.filter(|binding| {
+        binding.state == GrantBindingState::Active
+            && binding.expires_at.is_none_or(|expires_at| expires_at > now)
+    }) {
+        ceiling.platform_privileges = binding.platform_privileges.clone();
+    }
+    Ok(ceiling)
 }
 
 pub(crate) async fn decide_approval<R, E>(

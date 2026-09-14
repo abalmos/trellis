@@ -4,6 +4,7 @@ import { ulid } from "ulid";
 
 import { generateSessionSeed } from "../control_plane_config.ts";
 import type {
+  TrellisTestParticipantApplyResult,
   TrellisTestParticipantApproval,
   TrellisTestParticipantLike,
   TrellisTestServiceKey,
@@ -40,6 +41,7 @@ export type AdminDeploymentContext = {
   createdDeployments: Map<string, Promise<void>>;
   deploymentBindingRevisions: Map<string, bigint>;
   deploymentIds: Map<string, string>;
+  pendingApprovals: Map<string, PendingDeploymentApply>;
   installedParticipants: Map<
     string,
     { digest: string; participantId: string; revision: bigint }
@@ -131,69 +133,71 @@ export async function createDeployment(
   await promise;
 }
 
-/** @internal Installs a participant and atomically replaces its deployment GrantBinding. */
+/** Applies a deployment, explicitly approving server-computed consent when required. */
 export async function applyParticipant(
   context: AdminDeploymentContext,
   args: { deployment?: string; contract: TrellisTestParticipantLike },
 ): Promise<TrellisTestParticipantApproval> {
-  const startedAt = performance.now();
-  const deployment = args.deployment ?? context.defaultDeployment;
-  if (!context.deploymentIds.has(deployment)) {
-    await createDeployment(context, { deployment });
-  }
-  const deploymentId = context.deploymentIds.get(deployment);
-  if (!deploymentId) {
-    throw new Error(`Trellis deployment '${deployment}' was not created`);
-  }
+  const result = await requestParticipantApply(context, args);
+  return result.status === "approved"
+    ? result.approval
+    : await approveParticipantApply(context, result.pendingId);
+}
 
-  const evidence = participantPresentation(args.contract);
-  let request: AdminRpcInput<"authDeploymentsApply"> = {
-    deploymentId,
-    ...evidence,
-    expectedRevision: context.deploymentBindingRevisions.get(deploymentId) ??
-      0n,
-    idempotencyKey: ulid(),
-    approval: undefined,
+/** Pending deployment consent retained until an explicit approval is supplied. */
+export type PendingDeploymentApply = {
+  deployment: string;
+  evidence: ReturnType<typeof participantPresentation>;
+  request: AdminRpcInput<"authDeploymentsApply">;
+  consent: NonNullable<ReturnType<typeof deploymentConsentRequest>>;
+  startedAt: number;
+};
+
+function consentApproval(
+  consent: NonNullable<ReturnType<typeof deploymentConsentRequest>>,
+): AdminRpcInput<"authDeploymentsApply">["approval"] {
+  return {
+    approvedCapabilities: consent.capabilities.filter((item) => item.eligible)
+      .map((item) => ({ id: item.id, consentDigest: item.consentDigest })),
+    approvedResources: consent.resources.filter((item) => item.eligible)
+      .map((item) => ({
+        kind: item.kind,
+        name: item.name,
+        commitment: item.requestedCommitment,
+      })),
+    companionApproved: consent.companion !== undefined &&
+      consent.companion !== null,
+    decisionDigest: consent.decisionDigest,
+    expectedGrantRevision: consent.expectedGrantRevision,
+    installedRevision: consent.installedRevision,
+    mode: "capabilities",
   };
-  const applied = await (async () => {
-    for (;;) {
-      try {
-        return await applyWithServerConsent(
-          (input) => context.rpc("authDeploymentsApply", input),
-          request,
-        );
-      } catch (error) {
-        if (
-          !(error instanceof RemoteError) ||
-          !("code" in error.remoteError) ||
-          error.remoteError.code !== "revision_conflict" ||
-          request.expectedRevision >= 64n
-        ) {
-          throw error;
-        }
-        request = {
-          ...request,
-          expectedRevision: request.expectedRevision + 1n,
-          idempotencyKey: ulid(),
-        };
-      }
-    }
-  })();
+}
+
+function finalizeParticipantApply(
+  context: AdminDeploymentContext,
+  pending: Pick<
+    PendingDeploymentApply,
+    "deployment" | "evidence" | "startedAt"
+  >,
+  deploymentId: string,
+  applied: AdminRpc["authDeploymentsApply"]["output"],
+): TrellisTestParticipantApproval {
   context.deploymentBindingRevisions.set(
     deploymentId,
     applied.binding.revision,
   );
-  context.installedParticipants.set(evidence.participantPath, {
-    digest: evidence.packageDigest,
+  context.installedParticipants.set(pending.evidence.participantPath, {
+    digest: pending.evidence.packageDigest,
     participantId: applied.binding.participantId,
     revision: applied.binding.installedRevision,
   });
   recordTrellisDuration(
     "trellis.admin.workflow.duration",
-    performance.now() - startedAt,
+    performance.now() - pending.startedAt,
     {
-      deployment,
-      participantId: evidence.participantPath,
+      deployment: pending.deployment,
+      participantId: pending.evidence.participantPath,
       operation: "approve_contract",
       phase: "apply",
     },
@@ -204,6 +208,94 @@ export async function applyParticipant(
     deploymentId,
     binding: applied.binding,
   };
+}
+
+/** Applies a deployment without providing consent; returns the pending approval when required. */
+export async function requestParticipantApply(
+  context: AdminDeploymentContext,
+  args: { deployment?: string; contract: TrellisTestParticipantLike },
+): Promise<TrellisTestParticipantApplyResult> {
+  const startedAt = performance.now();
+  const deployment = args.deployment ?? context.defaultDeployment;
+  if (!context.deploymentIds.has(deployment)) {
+    await createDeployment(context, { deployment });
+  }
+  const deploymentId = context.deploymentIds.get(deployment);
+  if (!deploymentId) {
+    throw new Error(`Trellis deployment '${deployment}' was not created`);
+  }
+  const evidence = participantPresentation(args.contract);
+  let request: AdminRpcInput<"authDeploymentsApply"> = {
+    deploymentId,
+    ...evidence,
+    expectedRevision: context.deploymentBindingRevisions.get(deploymentId) ??
+      0n,
+    idempotencyKey: ulid(),
+    approval: undefined,
+  };
+  for (;;) {
+    try {
+      const applied = await context.rpc("authDeploymentsApply", request);
+      return {
+        status: "approved",
+        approval: finalizeParticipantApply(
+          context,
+          { deployment, evidence, startedAt },
+          deploymentId,
+          applied,
+        ),
+      };
+    } catch (error) {
+      if (
+        error instanceof RemoteError &&
+        "code" in error.remoteError &&
+        error.remoteError.code === "revision_conflict" &&
+        request.expectedRevision < 64n
+      ) {
+        request = {
+          ...request,
+          expectedRevision: request.expectedRevision + 1n,
+          idempotencyKey: ulid(),
+        };
+        continue;
+      }
+      const consent = deploymentConsentRequest(error);
+      if (!consent) throw error;
+      const pendingId = ulid();
+      context.pendingApprovals.set(pendingId, {
+        deployment,
+        evidence,
+        request,
+        consent,
+        startedAt,
+      });
+      return { status: "approval_required", pendingId };
+    }
+  }
+}
+
+/** Completes a deployment apply with server-computed consent for a pending approval. */
+export async function approveParticipantApply(
+  context: AdminDeploymentContext,
+  pendingId: string,
+): Promise<TrellisTestParticipantApproval> {
+  const pending = context.pendingApprovals.get(pendingId);
+  if (!pending) {
+    throw new Error("Trellis pending deployment approval was not found");
+  }
+  const deploymentId = context.deploymentIds.get(pending.deployment);
+  if (!deploymentId) {
+    throw new Error(
+      `Trellis deployment '${pending.deployment}' was not created`,
+    );
+  }
+  const applied = await context.rpc("authDeploymentsApply", {
+    ...pending.request,
+    idempotencyKey: ulid(),
+    approval: consentApproval(pending.consent),
+  });
+  context.pendingApprovals.delete(pendingId);
+  return finalizeParticipantApply(context, pending, deploymentId, applied);
 }
 
 /** @internal Installs a participant definition without creating a deployment or grants. */

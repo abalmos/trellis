@@ -73,7 +73,6 @@ use super::{
     ResourceBindingEvidence, ResourceBindingState, ResourceProviderIdentity, SessionRepository,
 };
 
-const FLOW_TTL_MS: i64 = 15 * 60_000;
 const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60_000;
 
 #[derive(Clone)]
@@ -214,6 +213,7 @@ pub(super) struct AuthHttpState<R, E> {
     portal_source: WebSource,
     console_source: WebSource,
     console_source_is_override: bool,
+    browser_flow_ttl_ms: i64,
 }
 
 #[derive(Clone)]
@@ -236,6 +236,7 @@ pub(crate) struct AuthHttpOptions<R, E> {
     pub oidc_providers: BTreeMap<String, OidcProvider>,
     pub rate_limit_max: u32,
     pub rate_limit_window_ms: u64,
+    pub browser_flow_ttl_ms: i64,
     pub web_source: Option<crate::config::WebSourceConfig>,
     pub portal_source: Option<crate::config::WebSourceConfig>,
     pub console_source: Option<crate::config::WebSourceConfig>,

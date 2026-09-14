@@ -303,6 +303,25 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     )
     .await?;
     let http = context.config.http.as_ref();
+    let browser_flow_ttl_ms = match context
+        .config
+        .platform
+        .as_ref()
+        .and_then(|platform| platform.ttl_ms.as_ref())
+        .and_then(|ttl| ttl.pending_auth)
+    {
+        Some(ttl) => match i64::try_from(ttl) {
+            Ok(ttl) if ttl > 0 => ttl,
+            _ => {
+                stop.stop();
+                validator_join.abort();
+                return Err(RuntimeError::Platform(
+                    "platform.ttl_ms.pending_auth must be a positive millisecond value".to_owned(),
+                ));
+            }
+        },
+        None => 15 * 60_000,
+    };
     let oidc_providers =
         match auth::discover_oidc_providers(context.config.oauth.as_ref(), &public_origin).await {
             Ok(providers) => providers,
@@ -329,6 +348,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         rate_limit_window_ms: http
             .and_then(|http| http.rate_limit_window_ms)
             .unwrap_or(60_000),
+        browser_flow_ttl_ms,
         web_source: http.and_then(|http| http.web_source.clone()),
         portal_source: http.and_then(|http| http.portal_source.clone()),
         console_source: http.and_then(|http| http.console_source.clone()),

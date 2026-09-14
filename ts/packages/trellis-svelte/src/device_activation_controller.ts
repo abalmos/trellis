@@ -96,9 +96,34 @@ type SnapshotCapableDeviceActivationOperationRef =
     >;
   };
 
+type CompanionConsent = NonNullable<
+  DeviceUserAuthoritiesResolveProgress["companionConsent"]
+>;
+
+export type DeviceCompanionApproval = {
+  mode: "capabilities";
+  installedRevision: CompanionConsent["installedRevision"];
+  expectedGrantRevision: CompanionConsent["expectedGrantRevision"];
+  decisionDigest: CompanionConsent["decisionDigest"];
+  approvedCapabilities: Array<{
+    id: CompanionConsent["capabilities"][number]["id"];
+    consentDigest: CompanionConsent["capabilities"][number]["consentDigest"];
+  }>;
+  approvedResources: Array<{
+    kind: CompanionConsent["resources"][number]["kind"];
+    name: CompanionConsent["resources"][number]["name"];
+    commitment: CompanionConsent["resources"][number]["requestedCommitment"];
+  }>;
+  companionApproved: boolean;
+};
+
 export type DeviceActivationClient = {
   activateDevice(
-    input: { flowId: string; confirmationCode: string },
+    input: {
+      flowId: string;
+      confirmationCode: string;
+      companionApproval?: DeviceCompanionApproval;
+    },
   ): Promise<DeviceActivationOperationRef>;
 };
 
@@ -113,6 +138,30 @@ export type DeviceActivationState = {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function buildCompanionApproval(
+  consent: NonNullable<
+    DeviceUserAuthoritiesResolveProgress["companionConsent"]
+  >,
+): DeviceCompanionApproval {
+  return {
+    mode: "capabilities",
+    installedRevision: consent.installedRevision,
+    expectedGrantRevision: consent.expectedGrantRevision,
+    decisionDigest: consent.decisionDigest,
+    approvedCapabilities: consent.capabilities
+      .filter((item) => item.required && item.eligible)
+      .map((item) => ({ id: item.id, consentDigest: item.consentDigest })),
+    approvedResources: consent.resources
+      .filter((item) => item.required && item.eligible)
+      .map((item) => ({
+        kind: item.kind,
+        name: item.name,
+        commitment: item.requestedCommitment,
+      })),
+    companionApproved: false,
+  };
 }
 
 function redirectErrorMessage(error: unknown): string | null {
@@ -282,6 +331,9 @@ export class DeviceActivationControllerCore {
           this.state.authError = errorMessage(error);
         }
         this.state.view = createDeviceActivationSignInRequiredView(flowId);
+        if (!isAuthCallback) {
+          await this.signIn();
+        }
       }
     } catch (error) {
       this.state.authError = errorMessage(error);
@@ -331,20 +383,47 @@ export class DeviceActivationControllerCore {
     this.state.authError = null;
 
     try {
-      const operation = await this.#client.activateDevice({
+      let operation = await this.#client.activateDevice({
         flowId,
         confirmationCode,
       });
       if (hasOperationSnapshot(operation)) {
-        const snapshot = await operation.get().match({
+        let snapshot = await operation.get().match({
           ok: (value) => value,
           err: () => null,
         });
+        for (
+          let attempt = 0;
+          attempt < 40 &&
+          !snapshot?.progress?.companionConsent &&
+          snapshot?.state === "running" &&
+          this.#isRunActive(runId);
+          attempt++
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          snapshot = await operation.get().match({
+            ok: (value) => value,
+            err: () => null,
+          });
+        }
         if (snapshot?.progress && this.#isRunActive(runId)) {
           this.state.view = mapDeviceActivationProgress(
             flowId,
             snapshot.progress,
           );
+        }
+        const companionConsent = snapshot?.progress?.companionConsent;
+        if (companionConsent && this.#isRunActive(runId)) {
+          try {
+            operation = await this.#client.activateDevice({
+              flowId,
+              confirmationCode,
+              companionApproval: buildCompanionApproval(companionConsent),
+            });
+          } catch {
+            // The signed-in user cannot decide this activation; a reviewer
+            // with the activation capability completes it later.
+          }
         }
       }
       const watch = await operation.watch().match({

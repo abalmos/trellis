@@ -884,12 +884,14 @@ impl Client {
         &self.client
     }
 
-    pub(crate) async fn request_value(
+    pub(crate) async fn request_api_value(
         &self,
-        subject: &str,
+        api_id: &str,
+        action: &str,
         input: serde_json::Value,
     ) -> Result<serde_json::Value, crate::client::TrellisClientError> {
-        self.client.request_json_value(subject, &input).await
+        let subject = self.client.bound_api_subject("rpc", api_id, action)?;
+        self.client.request_json_value(&subject, &input).await
     }
 }
 

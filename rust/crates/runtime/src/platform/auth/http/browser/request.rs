@@ -135,7 +135,7 @@ where
         durable_result_digest: None,
         completed_at: None,
         created_at: now,
-        expires_at: checked_add(now, FLOW_TTL_MS)?,
+        expires_at: checked_add(now, state.browser_flow_ttl_ms)?,
         version: 1,
     };
     match state.ephemeral.create_browser_flow(flow.clone()).await {

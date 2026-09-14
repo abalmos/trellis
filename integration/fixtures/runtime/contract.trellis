@@ -113,3 +113,13 @@ device Device {
     }
   }
 }
+device AgentDevice {
+  agent Companion {
+    use auth { rpc Sessions.Logout; }
+    use device_child {
+      rpc Required;
+      rpc Optional;
+      optional capability optional;
+    }
+  }
+}

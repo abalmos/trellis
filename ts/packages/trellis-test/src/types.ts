@@ -8,6 +8,7 @@ import type {
 
 import type {
   TrellisControlPlaneOAuthProvider,
+  TrellisControlPlaneTtlMs,
   TrellisControlPlaneWebSource,
 } from "./control_plane_config.ts";
 
@@ -56,6 +57,8 @@ export type TrellisTestRuntimeStartOptions = {
   consoleSource?: TrellisControlPlaneWebSource;
   /** Route the advertised browser WebSocket endpoint through a replaceable TCP proxy. */
   rotatableWebsocketProxy?: boolean;
+  /** Platform TTL overrides (milliseconds) for the isolated test control plane. */
+  ttlMs?: Partial<TrellisControlPlaneTtlMs>;
   timeouts?: {
     startupMs?: number;
     waitForMs?: number;
@@ -92,6 +95,11 @@ export type TrellisTestParticipantApproval = {
   deploymentId?: string;
   binding?: Record<string, unknown> | null;
 };
+
+/** Result of a deployment apply that may require an explicit consent decision. */
+export type TrellisTestParticipantApplyResult =
+  | { status: "approved"; approval: TrellisTestParticipantApproval }
+  | { status: "approval_required"; pendingId: string };
 
 /** Contract value accepted by the Trellis test runtime. */
 export type TrellisTestParticipant = TrellisTestParticipantLike;

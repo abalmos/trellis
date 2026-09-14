@@ -8,6 +8,7 @@ import { recordTrellisDuration } from "@qlever-llc/trellis/telemetry";
 import { dirname, join } from "@std/path";
 
 import { TrellisTestAdminAutomation } from "./admin_client.ts";
+import { ADMIN_USERNAME } from "./admin/methods.ts";
 import type { AdminRpc, AdminRpcInput } from "./admin/methods.ts";
 import {
   removeStaleMarkedDirectories,
@@ -31,6 +32,7 @@ import type {
   TrellisTestClientKey,
   TrellisTestClientParticipant,
   TrellisTestConnectedClient,
+  TrellisTestParticipantApplyResult,
   TrellisTestParticipantApproval,
   TrellisTestParticipantLike,
   TrellisTestRuntimeStartOptions,
@@ -127,6 +129,10 @@ export class TrellisTestRuntime implements AsyncDisposable {
   readonly trellisUrl: string;
   readonly natsUrl: string;
   readonly workdir: string;
+  /** Local test-admin username used by the harness bootstrap. */
+  readonly adminUsername = ADMIN_USERNAME;
+  /** Local test-admin password configured for this runtime. */
+  readonly adminPassword: string;
   readonly deployments: {
     create(
       args: {
@@ -146,6 +152,10 @@ export class TrellisTestRuntime implements AsyncDisposable {
     install(
       args: { contract: TrellisTestParticipantLike },
     ): Promise<TrellisTestParticipantApproval>;
+    requestApply(
+      args: { deployment?: string; contract: TrellisTestParticipantLike },
+    ): Promise<TrellisTestParticipantApplyResult>;
+    approveApply(pendingId: string): Promise<TrellisTestParticipantApproval>;
   };
   readonly services: {
     createInstance(args: {
@@ -202,9 +212,20 @@ export class TrellisTestRuntime implements AsyncDisposable {
   #keepWorkdir: boolean;
   #ownsWorkdir: boolean;
   #deployment: string;
+  #getBootstrapUrl: () => Promise<string>;
   #timeouts: RuntimeTimeouts;
   #clients = new Set<ConnectedClient>();
   #stopped = false;
+
+  /** Returns the one-time first-administrator bootstrap URL for this runtime. */
+  async bootstrapUrl(): Promise<string> {
+    return await this.#getBootstrapUrl();
+  }
+
+  /** Completes the first-administrator bootstrap through the harness automation. */
+  async ensureAdmin(): Promise<void> {
+    await this.#admin.completeBootstrap();
+  }
 
   private constructor(args: {
     trellisUrl: string;
@@ -212,6 +233,8 @@ export class TrellisTestRuntime implements AsyncDisposable {
     deployment: string;
     keepWorkdir: boolean;
     timeouts: RuntimeTimeouts;
+    adminPassword: string;
+    getBootstrapUrl: () => Promise<string>;
     configPath?: string;
     config?: ReturnType<typeof buildControlPlaneConfig>;
     websocketProxy?: TcpProxy;
@@ -227,6 +250,8 @@ export class TrellisTestRuntime implements AsyncDisposable {
     this.#deployment = args.deployment;
     this.#keepWorkdir = args.keepWorkdir;
     this.#ownsWorkdir = args.ownsWorkdir ?? true;
+    this.#getBootstrapUrl = args.getBootstrapUrl;
+    this.adminPassword = args.adminPassword;
     this.#timeouts = args.timeouts;
     this.#nats = args.nats;
     this.#controlPlane = args.controlPlane;
@@ -250,6 +275,13 @@ export class TrellisTestRuntime implements AsyncDisposable {
           contract,
         }),
       install: ({ contract }) => this.#admin.installParticipant({ contract }),
+      requestApply: ({ deployment, contract }) =>
+        this.#admin.requestParticipantApply({
+          deployment: deployment ?? this.#deployment,
+          contract,
+        }),
+      approveApply: (pendingId) =>
+        this.#admin.approveParticipantApply(pendingId),
     };
     this.services = {
       createInstance: ({ deployment, contract }) =>
@@ -316,7 +348,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
       for (let attempt = 1;; attempt++) {
         portLease = reserveLocalPort();
         const port = portLease.port;
-        const trellisUrl = `http://127.0.0.1:${port}`;
+        const trellisUrl = `http://localhost:${port}`;
         config = buildControlPlaneConfig({
           workdir,
           natsUrl: nats.natsUrl,
@@ -328,6 +360,7 @@ export class TrellisTestRuntime implements AsyncDisposable {
           webSource: options.webSource,
           portalSource: options.portalSource,
           consoleSource: options.consoleSource,
+          ttlMs: options.ttlMs,
         });
         configPath = await writeTrellisConfig({ workdir, config });
         try {
@@ -355,12 +388,13 @@ export class TrellisTestRuntime implements AsyncDisposable {
       const adminPassword = options.adminPassword ??
         `trellis-test-${generateSessionSeed()}`;
       controlPlane = startedControlPlane;
+      const getBootstrapUrl = (): Promise<string> =>
+        startedControlPlane.waitForBootstrapUrl(timeouts.startupMs);
       const admin = new TrellisTestAdminAutomation({
         trellisUrl: startedControlPlane.trellisUrl,
         adminPassword,
         defaultDeployment: deployment,
-        getBootstrapUrl: () =>
-          startedControlPlane.waitForBootstrapUrl(timeouts.startupMs),
+        getBootstrapUrl,
       });
       return new TrellisTestRuntime({
         trellisUrl: startedControlPlane.trellisUrl,
@@ -368,6 +402,8 @@ export class TrellisTestRuntime implements AsyncDisposable {
         deployment,
         keepWorkdir: options.keepWorkdir ?? false,
         timeouts,
+        adminPassword,
+        getBootstrapUrl,
         configPath,
         config,
         websocketProxy,

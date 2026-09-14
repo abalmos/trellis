@@ -25,6 +25,7 @@ import { recordTrellisDuration } from "./admin/metrics.ts";
 import { isRecord, postJson } from "./admin/transport.ts";
 import { generateSessionSeed } from "./control_plane_config.ts";
 import type {
+  TrellisTestParticipantApplyResult,
   TrellisTestParticipantApproval,
   TrellisTestParticipantLike,
   TrellisTestServiceKey,
@@ -59,6 +60,7 @@ export class TrellisTestAdminAutomation {
       createdDeployments: new Map(),
       deploymentBindingRevisions: new Map(),
       deploymentIds: new Map(),
+      pendingApprovals: new Map(),
       installedParticipants: new Map(),
       rpc: <M extends TrellisTestAdminRpcMethod>(
         method: M,
@@ -70,7 +72,8 @@ export class TrellisTestAdminAutomation {
     }
   }
 
-  async #completeBootstrap(): Promise<void> {
+  /** Completes the one-time first-administrator bootstrap through the real account-flow endpoint. */
+  async completeBootstrap(): Promise<void> {
     this.#bootstrapComplete ??= (async () => {
       const startedAt = performance.now();
       try {
@@ -102,7 +105,7 @@ export class TrellisTestAdminAutomation {
     this.#adminClient ??= (async () => {
       const startedAt = performance.now();
       try {
-        await this.#completeBootstrap();
+        await this.completeBootstrap();
         const sessionKeySeed = generateSessionSeed();
         const client = await TrellisClient.connect({
           trellisUrl: this.#trellisUrl,
@@ -215,7 +218,7 @@ export class TrellisTestAdminAutomation {
     ctx: ClientAuthRequiredContext,
   ): Promise<ClientAuthContinuation> {
     const startedAt = performance.now();
-    await this.#completeBootstrap();
+    await this.completeBootstrap();
     const flowId = flowIdFromUrl(ctx.loginUrl);
     const binding = await performLocalLogin({
       trellisUrl: this.#trellisUrl,
@@ -248,7 +251,7 @@ export class TrellisTestAdminAutomation {
     selectionIds: readonly string[],
   ): Promise<void> {
     if (this.#configuredConsentPolicies.has(participantId)) return;
-    await this.#completeBootstrap();
+    await this.completeBootstrap();
     await this.#rpc("authPortalsGrantOverridesPut", {
       portalId: "builtin",
       participantId,
@@ -269,6 +272,27 @@ export class TrellisTestAdminAutomation {
     contract: TrellisTestParticipantLike;
   }): Promise<TrellisTestParticipantApproval> {
     return await adminDeployment.applyParticipant(this.#deployment, args);
+  }
+
+  /** Applies a deployment without consent; returns the pending approval when required. */
+  async requestParticipantApply(args: {
+    deployment?: string;
+    contract: TrellisTestParticipantLike;
+  }): Promise<TrellisTestParticipantApplyResult> {
+    return await adminDeployment.requestParticipantApply(
+      this.#deployment,
+      args,
+    );
+  }
+
+  /** Completes a deployment apply with server-computed consent for a pending approval. */
+  async approveParticipantApply(
+    pendingId: string,
+  ): Promise<TrellisTestParticipantApproval> {
+    return await adminDeployment.approveParticipantApply(
+      this.#deployment,
+      pendingId,
+    );
   }
 
   async installParticipant(args: {
@@ -315,7 +339,7 @@ export class TrellisTestAdminAutomation {
 
   /** Ensures bootstrap is complete and clears the admin connection before a Trellis restart. */
   async prepareForControlPlaneRestart(): Promise<void> {
-    await this.#completeBootstrap();
+    await this.completeBootstrap();
     await this.close();
   }
 
