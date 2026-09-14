@@ -54,6 +54,7 @@ impl AuthorizationContextCache {
     pub(crate) fn install(
         &self,
         installation: AuthorizationInstallation,
+        promote: bool,
     ) -> Result<(), TrellisClientError> {
         let AuthorizationInstallation {
             context: bundle,
@@ -165,7 +166,53 @@ impl AuthorizationContextCache {
             server_clock_offset_ms,
             authorization,
         };
-        self.availability.send_replace(availability);
+        self.availability.send_replace(if promote {
+            availability
+        } else {
+            crate::generated::AvailabilitySnapshot::suspended(&availability)
+        });
+        tracing::info!(
+            context_digest = verified.context_digest(),
+            promoted = promote,
+            "installed verified authorization context"
+        );
+        Ok(())
+    }
+
+    pub(crate) fn promote(&self) -> Result<(), TrellisClientError> {
+        let state = self.state_snapshot()?;
+        let current = self.availability.borrow().clone();
+        let resources = state
+            .authorization
+            .as_ref()
+            .and_then(|value| value.get("resourceRuntime"))
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()?
+            .unwrap_or_default();
+        let current_context = state
+            .current
+            .ok_or_else(|| {
+                TrellisClientError::AuthorizationUnavailable(
+                    "authorization context is unavailable".into(),
+                )
+            })?
+            .bundle;
+        let permissions = persisted_signed_context(&current_context)?
+            .unsigned
+            .grants
+            .permissions()
+            .to_vec();
+        self.availability
+            .send_replace(crate::generated::AvailabilitySnapshot::replacing(
+                permissions,
+                resources,
+                &current,
+            ));
+        tracing::info!(
+            context_digest = self.context_digest().ok(),
+            "promoted authorization installation"
+        );
         Ok(())
     }
 
@@ -178,7 +225,20 @@ impl AuthorizationContextCache {
         state.current = None;
         state.routing = None;
         state.api_bindings.clear();
+        let suspended =
+            crate::generated::AvailabilitySnapshot::suspended(&self.availability.borrow().clone());
+        self.availability.send_replace(suspended);
         Ok(())
+    }
+
+    pub(crate) fn suspend(&self) {
+        let suspended =
+            crate::generated::AvailabilitySnapshot::suspended(&self.availability.borrow().clone());
+        self.availability.send_replace(suspended);
+        tracing::info!(
+            context_digest = self.context_digest().ok(),
+            "suspended authorization installation"
+        );
     }
 
     /// Return the digest of the currently valid context used for request proofs.
@@ -211,7 +271,7 @@ impl AuthorizationContextCache {
 
     /// Renew through the credential's proof-bound native bootstrap or user refresh route.
     pub async fn refresh(&self, auth: &SessionAuth) -> Result<bool, TrellisClientError> {
-        super::refresh::refresh(self, auth).await
+        super::refresh::refresh(self, auth, true).await
     }
 
     pub(crate) async fn lock_refresh(&self) -> tokio::sync::MutexGuard<'_, ()> {

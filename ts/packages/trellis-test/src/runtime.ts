@@ -448,11 +448,6 @@ export class TrellisTestRuntime implements AsyncDisposable {
     await this.#admin.ensurePortalConsentPolicy(participantId, selectionIds);
   }
 
-  /** Returns whether production presence has observed a participant connection. */
-  async hasParticipantConnection(participantId: string): Promise<boolean> {
-    return await this.#admin.hasParticipantConnection(participantId);
-  }
-
   /** Connects an app/client participant through the public generated client surface. */
   async connectClient<
     TContract extends TrellisTestClientParticipant,

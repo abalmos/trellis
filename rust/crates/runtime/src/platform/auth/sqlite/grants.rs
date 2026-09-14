@@ -1403,10 +1403,12 @@ impl SqliteAuthorizationStore {
     pub(crate) async fn apply_companion_activation_claim(
         &self,
         replacement: Option<GrantBindingReplacement>,
+        policy: Option<super::super::PortalPolicySnapshot>,
         command: ActivationReviewClaim,
     ) -> Result<Value, AuthorizationStateError> {
         self.apply_companion_activation(
             replacement,
+            policy,
             CompanionActivationReviewMutation::Claim(command),
         )
         .await
@@ -1415,10 +1417,12 @@ impl SqliteAuthorizationStore {
     pub(crate) async fn apply_companion_activation_decision(
         &self,
         replacement: Option<GrantBindingReplacement>,
+        policy: Option<super::super::PortalPolicySnapshot>,
         command: ActivationReviewDecision,
     ) -> Result<Value, AuthorizationStateError> {
         self.apply_companion_activation(
             replacement,
+            policy,
             CompanionActivationReviewMutation::Decision(command),
         )
         .await
@@ -1427,6 +1431,7 @@ impl SqliteAuthorizationStore {
     async fn apply_companion_activation(
         &self,
         replacement: Option<GrantBindingReplacement>,
+        policy: Option<super::super::PortalPolicySnapshot>,
         mutation: CompanionActivationReviewMutation,
     ) -> Result<Value, AuthorizationStateError> {
         match &mutation {
@@ -1450,6 +1455,9 @@ impl SqliteAuthorizationStore {
         }
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
+            if let Some(policy) = &policy {
+                verify_portal_policy_snapshot(&transaction, policy)?;
+            }
             let idempotency = match &mutation {
                 CompanionActivationReviewMutation::Claim(command) => &command.idempotency,
                 CompanionActivationReviewMutation::Decision(command) => &command.idempotency,
@@ -2309,6 +2317,7 @@ mod package_evidence_tests {
             store
                 .apply_companion_activation_decision(
                     Some(replacement(1, "E".repeat(43))),
+                    None,
                     ActivationReviewDecision {
                         review_id: "review-stale".to_owned(),
                         expected_version: 1,
@@ -3013,7 +3022,7 @@ app Companion {
             .await
             .unwrap();
         let applied = store
-            .apply_companion_activation_decision(Some(aggregate_replacement), command.clone())
+            .apply_companion_activation_decision(Some(aggregate_replacement), None, command.clone())
             .await
             .unwrap();
         let established = store
@@ -3027,7 +3036,7 @@ app Companion {
             .unwrap();
         assert_eq!(
             store
-                .apply_companion_activation_decision(None, command.clone())
+                .apply_companion_activation_decision(None, None, command.clone())
                 .await
                 .unwrap(),
             applied
@@ -3051,7 +3060,7 @@ app Companion {
             trellis_protocol::digest_json(&json!(["changed-companion-approval"])).unwrap();
         assert_eq!(
             store
-                .apply_companion_activation_decision(None, collision)
+                .apply_companion_activation_decision(None, None, collision)
                 .await,
             Err(AuthorizationStateError::StorageConflict)
         );

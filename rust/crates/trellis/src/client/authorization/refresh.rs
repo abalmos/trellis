@@ -38,6 +38,7 @@ fn is_terminal_refresh_error(code: &str) -> bool {
 pub(crate) async fn refresh(
     cache: &AuthorizationContextCache,
     auth: &SessionAuth,
+    promote: bool,
 ) -> Result<bool, TrellisClientError> {
     if auth.session_key != cache.session_key {
         return Err(TrellisClientError::Bootstrap(
@@ -167,16 +168,19 @@ pub(crate) async fn refresh(
     ) {
         object.insert("companion".to_owned(), companion.clone());
     }
-    cache.install(AuthorizationInstallation {
-        context: serde_json::from_value(response["authorizationContext"].clone())?,
-        routing: serde_json::from_value(response["routing"].clone())?,
-        runtime: serde_json::from_value(runtime)?,
-        api_bindings: serde_json::from_value(response["apiBindings"].clone())?,
-        server_clock_offset_ms: server_now
-            .checked_sub(midpoint)
-            .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap time overflow".into()))?,
-        authorization,
-    })?;
+    cache.install(
+        AuthorizationInstallation {
+            context: serde_json::from_value(response["authorizationContext"].clone())?,
+            routing: serde_json::from_value(response["routing"].clone())?,
+            runtime: serde_json::from_value(runtime)?,
+            api_bindings: serde_json::from_value(response["apiBindings"].clone())?,
+            server_clock_offset_ms: server_now
+                .checked_sub(midpoint)
+                .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap time overflow".into()))?,
+            authorization,
+        },
+        promote,
+    )?;
     Ok(previous.runtime.as_ref() != Some(&cache.runtime_binding()?))
 }
 
@@ -188,6 +192,7 @@ pub(crate) fn spawn_authorization_context_refresh_task(
     applied_native_authorization: Arc<
         tokio::sync::Mutex<super::super::connection::AppliedNativeAuthorization>,
     >,
+    provider: super::AuthorizationProviderCache,
     timeout_ms: u64,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -207,8 +212,14 @@ pub(crate) fn spawn_authorization_context_refresh_task(
                 continue;
             }
             let mut applied = applied_native_authorization.lock().await;
-            match refresh(&contexts, &auth).await {
+            contexts.suspend();
+            match refresh(&contexts, &auth, false).await {
                 Ok(_) => {
+                    if let Err(error) = provider.retain_own_context().await {
+                        tracing::warn!(%error, "refreshed own-context coverage is unavailable");
+                        contexts.request_refresh();
+                        continue;
+                    }
                     let refreshed =
                         match super::super::connection::AppliedNativeAuthorization::from_cache(
                             &contexts,
@@ -229,6 +240,9 @@ pub(crate) fn spawn_authorization_context_refresh_task(
                         .await
                     {
                         tracing::warn!(%error, "native connection refresh will retry");
+                        contexts.request_refresh();
+                    } else if let Err(error) = contexts.promote() {
+                        tracing::warn!(%error, "refreshed authorization promotion failed");
                         contexts.request_refresh();
                     }
                 }

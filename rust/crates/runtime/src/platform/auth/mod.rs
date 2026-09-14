@@ -247,6 +247,15 @@ where
             }
         }
         compatible.sort_unstable();
+        tracing::info!(
+            event = "trellis.auth.api_binding.resolve",
+            participant_id = %participant.participant_id,
+            binding_scope = %consumer_binding_scope,
+            api_id,
+            current = ?current,
+            compatible = ?compatible,
+            "resolving authorization API provider binding"
+        );
         let provider_deployment_id = if let Some(current) = current
             .as_ref()
             .filter(|current| compatible.contains(current))

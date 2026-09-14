@@ -276,6 +276,9 @@ export async function captureProcessOutput(
     while (newlineIndex >= 0) {
       const line = pending.slice(0, newlineIndex).replace(/\r$/, "");
       onLine(line);
+      if (Deno.env.get("TRELLIS_TEST_TRACE_OUTPUT") === "1") {
+        console.error(line);
+      }
       pending = pending.slice(newlineIndex + 1);
       newlineIndex = pending.indexOf("\n");
     }

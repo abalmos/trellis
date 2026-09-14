@@ -589,7 +589,7 @@ pub(crate) fn activation_review_event_action_id(
     .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))
 }
 
-pub(crate) fn activation_review_event(
+pub(crate) fn activation_review_event<D: EventDescriptor>(
     review: &DeviceActivationReviewRecord,
     suffix: &str,
     event_type: &str,
@@ -616,9 +616,7 @@ pub(crate) fn activation_review_event(
                 })?
                 .clone(),
         );
-    payload["eventSubject"] = serde_json::json!(auth_event_subject::<
-        trellis_runtime_apis::apis::trellis_auth_v1::events::DeviceUserAuthoritiesResolved,
-    >(&payload)?);
+    payload["eventSubject"] = serde_json::json!(auth_event_subject::<D>(&payload)?);
     Ok(PostCommitActionRecord {
         predecessor_action_id: None,
         action_id: activation_review_event_action_id(&review.review_id, suffix)?,

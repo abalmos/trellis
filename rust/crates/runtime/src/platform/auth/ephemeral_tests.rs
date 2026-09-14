@@ -279,6 +279,7 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
         .unwrap()
         .as_millis() as i64;
     let connection = AuthConnectionPresence {
+        storage_revision: 0,
         format: "trellis.auth-connection-presence.v1".to_owned(),
         connection_id: DIGEST.to_owned(),
         runtime_connection_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV".to_owned(),
@@ -318,7 +319,10 @@ async fn repository_conformance(repository: impl AuthEphemeralRepository + Clone
             .len(),
         2
     );
-    repository.delete_connection_presence(DIGEST).await.unwrap();
+    repository
+        .delete_connection_presence(DIGEST, 1)
+        .await
+        .unwrap();
     let remaining = repository
         .list_connection_presence(Some("01ARZ3NDEKTSV4RRFFQ69G5FAW"))
         .await

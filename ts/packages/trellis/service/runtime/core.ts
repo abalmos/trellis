@@ -88,6 +88,7 @@ type TrellisServiceRuntimeOpts<TA extends RuntimeApi> =
     transferSupport?: RuntimeOperationTransferSupport;
     version?: string;
     operationDeploymentId?: string;
+    operationConnectionId?: string;
     feedOwnerId?: string;
   };
 
@@ -282,11 +283,13 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
   #version?: string;
   #log: LoggerLike;
   #operations = new Map<string, RuntimeOperationRecord>();
+  #activeOperationFences = new Map<string, RuntimeOperationFence>();
   #operationUpdateSequences = new Map<string, number>();
   #mountedOperationControls = new Set<string>();
   #stopPromise?: Promise<void>;
   #transferSupport?: RuntimeOperationTransferSupport;
   #operationOwnerId: string;
+  #operationConnectionId: string;
   #operationDeploymentId?: string;
   readonly operations: RuntimeOperationController;
 
@@ -310,7 +313,8 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       lib: "trellis-service-runtime",
     });
     this.#transferSupport = opts?.transferSupport;
-    this.#operationOwnerId = opts?.feedOwnerId ?? ulid();
+    this.#operationOwnerId = ulid();
+    this.#operationConnectionId = opts?.operationConnectionId ?? "";
     this.#operationDeploymentId = opts?.operationDeploymentId;
     this.operations = {
       get: (operationId) =>
@@ -461,6 +465,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       input: durable.input,
       revision: durable.revision,
       ownerInstanceId: durable.ownerInstanceId,
+      ownerConnectionId: durable.ownerConnectionId,
       ownerEpoch: durable.ownerEpoch,
       leaseExpiresAt: durable.leaseExpiresAt,
       ...(durable.cancelRequestedAt
@@ -501,6 +506,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     const runtime = await this.#resolveOperation(durable.invocationId);
     if (!runtime || runtime.revision !== durable.revision) return null;
     runtime.ownerInstanceId = this.#operationOwnerId;
+    runtime.ownerConnectionId = this.#operationConnectionId;
     runtime.ownerEpoch = durable.ownerEpoch + 1;
     runtime.leaseExpiresAt = new Date(Date.now() + 30_000).toISOString();
     try {
@@ -510,6 +516,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       return null;
     }
     runtime.reclaimed = true;
+    this.#activeOperationFences.set(runtime.id, this.#operationFence(runtime));
     return runtime;
   }
 
@@ -578,6 +585,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
         }
 
         if (runtime.terminal) {
+          this.#activeOperationFences.delete(runtime.id);
           this.#rejectSignalWaiters(runtime);
         }
 
@@ -597,9 +605,11 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     return AsyncResult.from((async () => {
       const runtime = await this.#resolveOperation(operationId);
       if (!runtime) return err(this.#operationNotFoundError(operationId));
+      const fence = this.#activeOperationFences.get(operationId);
+      if (!fence) return err(this.#operationNotFoundError(operationId));
       return await this.#applyOperationUpdate(
         runtime,
-        this.#operationFence(runtime),
+        fence,
         state,
         opts,
       );
@@ -658,13 +668,20 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       const sequence = (this.#operationUpdateSequences.get(key) ?? 0) + 1;
       this.#operationUpdateSequences.set(key, sequence);
       const metadata = headers();
-      metadata.set("trellis-owner-executor", fence.ownerInstanceId);
-      metadata.set("trellis-owner-epoch", String(fence.ownerEpoch));
-      metadata.set("trellis-update-sequence", String(sequence));
-      const updateTime = new Date().toISOString();
-      metadata.set("trellis-update-time", updateTime);
+      const occurredAt = new Date().toISOString();
       const subject = `${ctx.subject}.updates.${runtime.id}`;
-      const payload = JSON.stringify(parsed);
+      const payload = JSON.stringify({
+        operationId: runtime.id,
+        apiId: runtime.apiId,
+        operation: runtime.operation,
+        deploymentId: this.#operationDeploymentId,
+        ownerExecutorId: fence.ownerInstanceId,
+        ownerConnectionId: runtime.ownerConnectionId,
+        ownerEpoch: String(fence.ownerEpoch),
+        sequence: String(sequence),
+        occurredAt,
+        update: parsed,
+      });
       const contextDigest = typeof this.auth.contextDigest === "function"
         ? this.auth.contextDigest()
         : this.auth.contextDigest;
@@ -676,14 +693,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       const reply = createInbox(ownContext.context.inboxPrefix);
       const authorization = await this.createRequestProof(
         subject,
-        JSON.stringify({
-          operationId: runtime.id,
-          ownerInstanceId: fence.ownerInstanceId,
-          ownerEpoch: fence.ownerEpoch,
-          sequence,
-          updateTime,
-          update: parsed,
-        }),
+        payload,
         reply,
       );
       metadata.set("proof", authorization.proof);
@@ -691,12 +701,27 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       metadata.set("request-id", authorization.requestId);
       metadata.set("authorization-context", authorization.contextDigest);
       metadata.set("session-key", this.auth.sessionKey);
+      this.#log.info({
+        operationId: runtime.id,
+        operation: runtime.operation,
+        ownerExecutorId: fence.ownerInstanceId,
+        ownerConnectionId: runtime.ownerConnectionId,
+        ownerEpoch: fence.ownerEpoch,
+        sequence,
+        subject,
+        reply,
+      }, "Publishing transient operation update");
       await this.#nats.publish(
         subject,
         payload,
         { headers: metadata, reply },
       );
       await this.#nats.flush();
+      this.#log.info({
+        operationId: runtime.id,
+        ownerEpoch: fence.ownerEpoch,
+        sequence,
+      }, "Published transient operation update");
       return ok(undefined);
     });
   }
@@ -797,15 +822,17 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       if (!this.#matchesOperationRoute(runtime, operation, ctx)) {
         return err(this.#operationNotFoundError(operationId));
       }
-      return ok(this.#makeControlledOperation(runtime, ctx));
+      const fence = this.#activeOperationFences.get(operationId);
+      if (!fence) return err(this.#operationNotFoundError(operationId));
+      return ok(this.#makeControlledOperation(runtime, fence, ctx));
     })());
   }
 
   #makeControlledOperation(
     runtime: RuntimeOperationRecord,
+    fence: RuntimeOperationFence,
     ctx: RegisteredRuntimeOperationDesc,
   ): OperationRuntimeHandle<unknown, unknown, BaseError> {
-    const fence = this.#operationFence(runtime);
     return {
       id: runtime.id,
       started: () =>
@@ -1325,44 +1352,33 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                       await durableWatch.return?.();
                       break;
                     }
-                    const update = safeJson(updateMsg).take();
-                    if (isErr(update)) continue;
+                    const decoded = safeJson(updateMsg).take();
+                    if (
+                      isErr(decoded) || !decoded ||
+                      typeof decoded !== "object" || Array.isArray(decoded)
+                    ) continue;
+                    const envelope = decoded as Record<string, unknown>;
                     const current = await this.loadOperationRecord(
                       control.operationId,
                     );
-                    const executor = updateMsg.headers?.get(
-                      "trellis-owner-executor",
-                    );
-                    const epoch = Number(
-                      updateMsg.headers?.get("trellis-owner-epoch"),
-                    );
-                    const sequence = Number(
-                      updateMsg.headers?.get("trellis-update-sequence"),
-                    );
-                    const updateTime = updateMsg.headers?.get(
-                      "trellis-update-time",
-                    );
+                    const executor = envelope.ownerExecutorId;
+                    const connectionId = envelope.ownerConnectionId;
+                    const epoch = typeof envelope.ownerEpoch === "string"
+                      ? Number(envelope.ownerEpoch)
+                      : NaN;
+                    const sequence = typeof envelope.sequence === "string"
+                      ? Number(envelope.sequence)
+                      : NaN;
                     const parsedUpdate = this.#validateOperationValue(
                       ctx,
                       "update",
-                      update,
+                      envelope.update,
                     ).take();
                     const providerAuthorization =
                       await verifyLocalAuthorization({
                         kind: "request",
                         cache: this.auth.authorizationProviderCache,
                         message: updateMsg,
-                        proofPayload: !isErr(parsedUpdate) && executor &&
-                            updateTime
-                          ? new TextEncoder().encode(JSON.stringify({
-                            operationId: control.operationId,
-                            ownerInstanceId: executor,
-                            ownerEpoch: epoch,
-                            sequence,
-                            updateTime,
-                            update: parsedUpdate,
-                          }))
-                          : undefined,
                         permission: undefined,
                         requiredCapabilities: [],
                         identityOnly: true,
@@ -1371,6 +1387,13 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                     if (isErr(provider)) continue;
                     if (
                       isErr(parsedUpdate) ||
+                      typeof executor !== "string" ||
+                      typeof connectionId !== "string" ||
+                      typeof envelope.occurredAt !== "string" ||
+                      envelope.operationId !== control.operationId ||
+                      envelope.apiId !== current?.apiId ||
+                      envelope.operation !== current?.operation ||
+                      envelope.deploymentId !== this.#operationDeploymentId ||
                       !current ||
                       !this.#matchesOperationRoute(
                         current,
@@ -1379,9 +1402,10 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                         value.caller,
                       ) || current.ownerEpoch !== epoch ||
                       current.ownerInstanceId !== executor ||
+                      current.ownerConnectionId !== connectionId ||
                       provider.participantId !== this.contractId ||
                       provider.deploymentId !== this.#operationDeploymentId ||
-                      provider.instanceId !== current.ownerInstanceId ||
+                      provider.connectionId !== current.ownerConnectionId ||
                       epoch < ownerEpoch ||
                       !Number.isSafeInteger(sequence) || sequence <= 0 ||
                       (epoch === ownerEpoch && sequence <= updateSequence)
@@ -1716,7 +1740,8 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
           operationContext: { requestId?: string; traceId?: string } = {},
           resuming = false,
         ) => {
-          const fence = this.#operationFence(runtime);
+          const fence = this.#activeOperationFences.get(runtime.id);
+          if (!fence) return;
           const op = makeOperation(runtime, fence, operationContext);
           try {
             const handlerResult: unknown = await handler(
@@ -2198,6 +2223,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               input: value.input,
               revision: 1,
               ownerInstanceId: this.#operationOwnerId,
+              ownerConnectionId: this.#operationConnectionId,
               ownerEpoch: 1,
               leaseExpiresAt: new Date(Date.now() + 30_000).toISOString(),
               ...(transferSession
@@ -2222,6 +2248,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               cancellation: new AbortController(),
             };
             transferFence = this.#operationFence(runtime);
+            this.#activeOperationFences.set(runtime.id, transferFence);
             if (!reclaimed) {
               this.#operations.set(operationId, runtime);
               try {

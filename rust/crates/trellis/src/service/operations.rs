@@ -437,6 +437,7 @@ pub(crate) struct RuntimeOperationProvider<D: OperationDescriptor, F, V> {
     provider_participant_id: String,
     deployment_id: String,
     executor_id: String,
+    connection_id: String,
     repository: KvOperationRepository,
     mutation_gate: Arc<Mutex<()>>,
     next_update_sequence: Arc<AtomicU64>,
@@ -454,6 +455,7 @@ pub struct OperationHandlerRuntime<V> {
     pub service: String,
     pub deployment_id: String,
     pub executor_id: String,
+    pub connection_id: String,
     pub repository: KvOperationRepository,
     pub nats: async_nats::Client,
     pub service_session_key: String,
@@ -465,6 +467,7 @@ impl<D, F, V> RuntimeOperationProvider<D, F, V>
 where
     D: OperationDescriptor + 'static,
 {
+    #[cfg(any(feature = "runtime-internals", test))]
     pub(crate) fn new(runtime: OperationHandlerRuntime<V>, handler: F) -> Self {
         Self::new_authenticated(runtime, handler, String::new(), None)
     }
@@ -480,6 +483,7 @@ where
             provider_participant_id,
             deployment_id: runtime.deployment_id,
             executor_id: runtime.executor_id,
+            connection_id: runtime.connection_id,
             repository: runtime.repository,
             mutation_gate: Arc::new(Mutex::new(())),
             next_update_sequence: Arc::new(AtomicU64::new(1)),
@@ -540,7 +544,7 @@ where
     )]
     async fn resume<Fut>(
         service: String,
-        _executor_id: String,
+        fence: OwnerFence,
         repository: KvOperationRepository,
         mutation_gate: Arc<Mutex<()>>,
         handler: Arc<F>,
@@ -560,7 +564,7 @@ where
         if claimed.record.cancellation_requested {
             finalize_cancellation::<D>(
                 &repository,
-                &OwnerFence::from(&claimed.record)?,
+                &fence,
                 &mutation_gate,
                 &claimed.record.invocation_id,
             )
@@ -578,7 +582,7 @@ where
             operation_ref,
             durable: DurableOperationControl {
                 repository: repository.clone(),
-                fence: OwnerFence::from(&claimed.record)?,
+                fence: fence.clone(),
                 mutation_gate: Arc::clone(&mutation_gate),
             },
             nats,
@@ -587,7 +591,6 @@ where
             next_update_sequence,
             _descriptor: PhantomData,
         };
-        let fence = OwnerFence::from(&claimed.record)?;
         let context = RequestContext {
             resuming: claimed.record.owner_epoch > 1,
             operation_progress: claimed.record.snapshot.progress.clone(),
@@ -685,6 +688,7 @@ where
         let service = self.service.clone();
         let deployment_id = self.deployment_id.clone();
         let executor_id = self.executor_id.clone();
+        let connection_id = self.connection_id.clone();
         let repository = self.repository.clone();
         let mutation_gate = Arc::clone(&self.mutation_gate);
         let handler = Arc::clone(&self.handler);
@@ -735,6 +739,7 @@ where
                         let operation_id = record.record.invocation_id;
                         let repository = repository.clone();
                         let executor_id = executor_id.clone();
+                        let connection_id = connection_id.clone();
                         let service = service.clone();
                         let mutation_gate = Arc::clone(&mutation_gate);
                         let handler = Arc::clone(&handler);
@@ -747,7 +752,13 @@ where
                         tokio::spawn(async move {
                             let now = now_ms();
                             if let Ok(claimed) = repository
-                                .claim(&operation_id, &executor_id, now, now + 30_000)
+                                .claim_for_connection(
+                                    &operation_id,
+                                    &executor_id,
+                                    &connection_id,
+                                    now,
+                                    now + 30_000,
+                                )
                                 .await
                             {
                                 let reconciled = async {
@@ -829,9 +840,16 @@ where
                                         return;
                                     }
                                 };
+                                let fence = match OwnerFence::from(&claimed.record) {
+                                    Ok(fence) => fence,
+                                    Err(error) => {
+                                        tracing::error!(%error, %operation_id, "operation upload recovery fence is invalid");
+                                        return;
+                                    }
+                                };
                                 if let Err(error) = Self::resume(
                                     service,
-                                    executor_id,
+                                    fence,
                                     repository,
                                     mutation_gate,
                                     handler,
@@ -875,6 +893,7 @@ where
         let service = self.service.clone();
         let deployment_id = self.deployment_id.clone();
         let executor_id = self.executor_id.clone();
+        let connection_id = self.connection_id.clone();
         let repository = self.repository.clone();
         let mutation_gate = Arc::clone(&self.mutation_gate);
         let handler = Arc::clone(&self.handler);
@@ -945,6 +964,7 @@ where
                     },
                     revision: 1,
                     owner_executor_id: None,
+                    owner_connection_id: None,
                     owner_epoch: 0,
                     lease_expires_at_ms: None,
                     cancellation_requested: false,
@@ -991,8 +1011,15 @@ where
                 });
             }
             let claimed = repository
-                .claim(&invocation_id, &executor_id, now, now + 30_000)
+                .claim_for_connection(
+                    &invocation_id,
+                    &executor_id,
+                    &connection_id,
+                    now,
+                    now + 30_000,
+                )
                 .await?;
+            let fence = OwnerFence::from(&claimed.record)?;
             if D::UPLOAD {
                 let mut upload: DurableOperationUpload =
                     serde_json::from_value(claimed.record.transfer.clone().ok_or_else(|| {
@@ -1001,7 +1028,7 @@ where
                 if upload.state == "committed" {
                     durable_snapshot_update::<D>(
                         &repository,
-                        &OwnerFence::from(&claimed.record)?,
+                        &fence,
                         &mutation_gate,
                         &invocation_id,
                         SnapshotUpdate {
@@ -1030,7 +1057,7 @@ where
                     };
                     Self::resume(
                         service,
-                        executor_id,
+                        fence,
                         repository,
                         mutation_gate,
                         handler,
@@ -1231,7 +1258,7 @@ where
                                         {
                                             let _ = Self::resume(
                                                 service_for_resume,
-                                                fence_for_completion.executor_id.clone(),
+                                                fence_for_completion,
                                                 repository_for_completion,
                                                 gate_for_completion,
                                                 handler,
@@ -1296,7 +1323,7 @@ where
             }
             durable_snapshot_update::<D>(
                 &repository,
-                &OwnerFence::from(&claimed.record)?,
+                &fence,
                 &mutation_gate,
                 &invocation_id,
                 SnapshotUpdate {
@@ -1325,7 +1352,7 @@ where
             };
             Self::resume(
                 service,
-                executor_id,
+                fence,
                 repository,
                 mutation_gate,
                 handler,
@@ -1540,42 +1567,27 @@ where
                                     else {
                                         continue;
                                     };
-                                    if caller.principal_kind
-                                        != trellis_protocol::AuthorizationPrincipalKind::Service
-                                        || caller.participant_id != provider_participant_id
+                                    if !matches!(
+                                        caller.principal_kind,
+                                        trellis_protocol::AuthorizationPrincipalKind::Service
+                                            | trellis_protocol::AuthorizationPrincipalKind::Device
+                                    ) || caller.participant_id != provider_participant_id
                                         || caller.deployment_id.as_deref()
                                             != Some(&update_deployment_id)
                                     {
                                         continue;
                                     }
-                                    let Some(headers) = message.headers.as_ref() else {
-                                        continue;
-                                    };
-                                    let Some(epoch) = headers
-                                        .get("trellis-owner-epoch")
-                                        .and_then(|value| value.as_str().parse::<u64>().ok())
+                                    let Ok(envelope) =
+                                        serde_json::from_slice::<OperationUpdateEnvelope>(
+                                            &message.payload,
+                                        )
                                     else {
                                         continue;
                                     };
-                                    let Some(executor) = headers
-                                        .get("trellis-owner-executor")
-                                        .map(|value| value.as_str())
-                                    else {
+                                    let Ok(epoch) = envelope.owner_epoch.parse::<u64>() else {
                                         continue;
                                     };
-                                    if caller.instance_id.as_deref() != Some(executor) {
-                                        continue;
-                                    }
-                                    let Some(sequence) = headers
-                                        .get("trellis-update-sequence")
-                                        .and_then(|value| value.as_str().parse::<u64>().ok())
-                                    else {
-                                        continue;
-                                    };
-                                    let Some(timestamp) = headers
-                                        .get("trellis-update-time")
-                                        .map(|value| value.as_str().to_owned())
-                                    else {
+                                    let Ok(sequence) = envelope.sequence.parse::<u64>() else {
                                         continue;
                                     };
                                     let Ok(Some(current)) =
@@ -1583,9 +1595,16 @@ where
                                     else {
                                         continue;
                                     };
-                                    if current.record.owner_epoch != epoch
+                                    if envelope.operation_id != update_operation_id
+                                        || envelope.api_id != D::API_ID
+                                        || envelope.operation != D::KEY
+                                        || envelope.deployment_id != update_deployment_id
+                                        || current.record.owner_epoch != epoch
                                         || current.record.owner_executor_id.as_deref()
-                                            != Some(executor)
+                                            != Some(&envelope.owner_executor_id)
+                                        || current.record.owner_connection_id.as_deref()
+                                            != Some(&envelope.owner_connection_id)
+                                        || caller.connection_id != envelope.owner_connection_id
                                         || current
                                             .record
                                             .lease_expires_at_ms
@@ -1596,13 +1615,19 @@ where
                                     {
                                         continue;
                                     }
-                                    let result = serde_json::from_slice(&message.payload)
+                                    if D::UPDATE_SCHEMA_JSON.is_none_or(|schema| {
+                                        super::validate_input_schema(schema, &envelope.update)
+                                            .is_err()
+                                    }) {
+                                        continue;
+                                    }
+                                    let result = serde_json::from_value(envelope.update)
                                         .map(|update| {
                                             OperationLiveEvent::Update(
                                                 crate::client::OperationUpdateEvent {
                                                     operation_id: update_operation_id.clone(),
                                                     sequence,
-                                                    timestamp,
+                                                    timestamp: envelope.occurred_at,
                                                     update,
                                                 },
                                             )
@@ -1774,6 +1799,21 @@ fn operation_update_subject<D: OperationDescriptor>(
     let start = trellis_protocol::derive_bound_operation_subject(D::API_ID, deployment_id, action)
         .expect("generated operation metadata must form a valid bound subject");
     format!("{start}.updates.{operation_id}")
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OperationUpdateEnvelope {
+    operation_id: String,
+    api_id: String,
+    operation: String,
+    deployment_id: String,
+    owner_executor_id: String,
+    owner_connection_id: String,
+    owner_epoch: String,
+    sequence: String,
+    occurred_at: String,
+    update: Value,
 }
 
 /// Typed service-owned operation lifecycle control handle.
@@ -2011,16 +2051,25 @@ where
             ServerError::Nats("operation update publisher authentication is unavailable".to_owned())
         })?;
         let reply = self.nats.new_inbox();
-        let payload = serde_json::to_vec(&update_value)?;
-        let mut headers = publisher
+        let owner_connection_id =
+            current.record.owner_connection_id.clone().ok_or_else(|| {
+                ServerError::Nats("operation owner connection is missing".to_owned())
+            })?;
+        let payload = serde_json::to_vec(&OperationUpdateEnvelope {
+            operation_id: self.operation_ref.id.clone(),
+            api_id: D::API_ID.to_owned(),
+            operation: D::KEY.to_owned(),
+            deployment_id: current.record.deployment_id.clone(),
+            owner_executor_id: durable.fence.executor_id.clone(),
+            owner_connection_id,
+            owner_epoch: durable.fence.owner_epoch.to_string(),
+            sequence: sequence.to_string(),
+            occurred_at: timestamp.clone(),
+            update: update_value,
+        })?;
+        let headers = publisher
             .signed_headers(&self.update_subject, &reply, &payload)
             .map_err(|error| ServerError::Nats(error.to_string()))?;
-        let epoch = durable.fence.owner_epoch.to_string();
-        let sequence_header = sequence.to_string();
-        headers.insert("trellis-owner-executor", durable.fence.executor_id.as_str());
-        headers.insert("trellis-owner-epoch", epoch.as_str());
-        headers.insert("trellis-update-sequence", sequence_header.as_str());
-        headers.insert("trellis-update-time", timestamp.as_str());
         self.nats
             .publish_with_reply_and_headers(
                 self.update_subject.clone(),
@@ -2588,6 +2637,7 @@ mod tests {
             },
             revision: 1,
             owner_executor_id: None,
+            owner_connection_id: None,
             owner_epoch: 0,
             lease_expires_at_ms: None,
             cancellation_requested: false,

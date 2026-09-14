@@ -39,6 +39,7 @@ fn record(id: String) -> DurableOperationRecord {
         },
         revision: 1,
         owner_executor_id: None,
+        owner_connection_id: None,
         owner_epoch: 0,
         lease_expires_at_ms: None,
         cancellation_requested: false,

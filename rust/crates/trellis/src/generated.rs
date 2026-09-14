@@ -18,6 +18,7 @@ pub const fn assert_abi(version: u32) {
 /// Immutable projection of optional surfaces installed with an authorization context.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AvailabilitySnapshot {
+    usable: bool,
     permissions: Arc<[trellis_protocol::PermissionAtom]>,
     resources: Arc<crate::service::ServiceResourceBindings>,
     resource_generations: Arc<std::collections::BTreeMap<(ResourceKind, String), u64>>,
@@ -40,6 +41,7 @@ impl AvailabilitySnapshot {
         let mut generations = (*previous.resource_generations).clone();
         let next = generations.values().copied().max().unwrap_or(0) + 1;
         let candidate = Self {
+            usable: true,
             permissions: permissions.into(),
             resources: Arc::new(resources),
             resource_generations: Arc::default(),
@@ -61,6 +63,15 @@ impl AvailabilitySnapshot {
             }
         }
         candidate.with_resource_generations(generations)
+    }
+
+    pub(crate) fn suspended(previous: &Self) -> Self {
+        Self {
+            usable: false,
+            permissions: previous.permissions.clone(),
+            resources: previous.resources.clone(),
+            resource_generations: previous.resource_generations.clone(),
+        }
     }
 
     fn with_resource_generations(
@@ -153,11 +164,12 @@ impl AvailabilitySnapshot {
     /// Test exact installed authority for an API action.
     #[doc(hidden)]
     pub fn allows_action(&self, action: OptionalAction) -> bool {
-        self.permissions.iter().any(|permission| {
-            permission.action() == action.action
-                && permission.target().as_api_surface()
-                    == Some((action.api_id, action.surface, action.name))
-        })
+        self.usable
+            && self.permissions.iter().any(|permission| {
+                permission.action() == action.action
+                    && permission.target().as_api_surface()
+                        == Some((action.api_id, action.surface, action.name))
+            })
     }
 
     /// Reject an optional action absent from this installed snapshot.
@@ -178,6 +190,9 @@ impl AvailabilitySnapshot {
     /// Test whether bootstrap installed a participant resource binding.
     #[doc(hidden)]
     pub fn has_resource(&self, kind: ResourceKind, name: &str) -> bool {
+        if !self.usable {
+            return false;
+        }
         match kind {
             ResourceKind::State => self.permissions.iter().any(|permission| {
                 matches!(
@@ -203,10 +218,12 @@ impl AvailabilitySnapshot {
     /// Test whether a cached KV handle still names the exact current binding.
     #[doc(hidden)]
     pub fn has_kv_binding(&self, name: &str, binding: &crate::service::KvResourceBinding) -> bool {
-        self.resources
-            .kv
-            .get(name)
-            .is_some_and(|current| current.bucket == binding.bucket)
+        self.usable
+            && self
+                .resources
+                .kv
+                .get(name)
+                .is_some_and(|current| current.bucket == binding.bucket)
     }
 
     /// Test whether a cached Store handle still names the exact physical binding.
@@ -216,10 +233,12 @@ impl AvailabilitySnapshot {
         name: &str,
         binding: &crate::service::StoreResourceBinding,
     ) -> bool {
-        self.resources
-            .store
-            .get(name)
-            .is_some_and(|current| current.name == binding.name)
+        self.usable
+            && self
+                .resources
+                .store
+                .get(name)
+                .is_some_and(|current| current.name == binding.name)
     }
 }
 

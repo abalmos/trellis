@@ -280,7 +280,9 @@ impl ProvisioningRepository for SqliteAuthorizationStore {
                 .map(|(review_id, previous_state, claimant)| {
                     let review = load_activation_review(&transaction, &review_id)?
                         .ok_or(AuthorizationStateError::StorageConflict)?;
-                    let mut action = activation_review_event(
+                    let mut action = activation_review_event::<
+                        trellis_runtime_apis::apis::trellis_auth_v1::events::DeviceUserAuthoritiesResolved,
+                    >(
                         &review,
                         "resolved",
                         "Auth.DeviceUserAuthorities.Resolved",

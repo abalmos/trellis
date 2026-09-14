@@ -1164,6 +1164,7 @@ export async function createConnectedService<
   nc: NatsConnection;
   inboxPrefix: string;
   contextDigest: string | (() => string);
+  operationConnectionId: string;
   contractId?: string;
   contractDigest?: string;
   participantDigest?: string;
@@ -1185,6 +1186,8 @@ export async function createConnectedService<
     kind: "service",
     nc: args.nc,
     availability: args.availability,
+    onTransportEvent: (event) =>
+      args.authorizationProviderCache?.observeTransportEvent(event),
     log: false,
     lifecycleLog: {
       log: resolvedLog,
@@ -1245,6 +1248,7 @@ export async function createConnectedService<
           getTransfer().createOperationUpload(transferArgs),
       },
       operationDeploymentId: args.healthIdentity?.deploymentId,
+      operationConnectionId: args.operationConnectionId,
       feedOwnerId: args.healthIdentity?.instanceId ?? ulid(),
     },
   );
@@ -2700,6 +2704,8 @@ export function connectTrellisServiceWithRuntimeDeps<
           sessionId: bootstrap.connectInfo.connectionId,
           contextDigest: () => authorizationContexts.current().contextDigest,
           jwt: () => authorizationContexts.routingJwt(),
+          authorizationUsable: () =>
+            authorizationProviderCache?.ownUsable() ?? true,
         });
 
       let nc: NatsConnection | undefined;
@@ -2726,6 +2732,7 @@ export function connectTrellisServiceWithRuntimeDeps<
         );
         authorizationProviderCache.start();
         await authorizationProviderCache.waitReady();
+        await authorizationProviderCache.retainOwnContext();
         void connectedNats.closed().then(
           () => {
             stopContextRefresh?.();
@@ -2786,6 +2793,7 @@ export function connectTrellisServiceWithRuntimeDeps<
             bootstrap.binding.apiBindings,
           ) as TTrellisApi,
           operationDeploymentId: verifiedContext.context.deploymentId,
+          operationConnectionId: verifiedContext.context.connectionId,
         };
 
         const service = await createConnectedService<
@@ -2799,6 +2807,7 @@ export function connectTrellisServiceWithRuntimeDeps<
           nc,
           inboxPrefix,
           contextDigest: () => authorizationContexts.current().contextDigest,
+          operationConnectionId: verifiedContext.context.connectionId,
           contractId: args.participant.identity,
           contractDigest: bootstrap.connectInfo.participantDigest,
           participantDigest: bootstrap.connectInfo.participantDigest,
@@ -2823,6 +2832,12 @@ export function connectTrellisServiceWithRuntimeDeps<
           },
           authorizationProviderCache,
         });
+        authorizationProviderCache.onOwnInvalidated(() =>
+          installConnectionAvailability(
+            service.connection,
+            participantAvailability(args.participant, {}, {}, []),
+          )
+        );
         stopContextRefresh = startAuthorizationContextRefresh({
           trellisUrl: args.trellisUrl,
           sessionId: bootstrap.connectInfo.connectionId,
@@ -2876,6 +2891,7 @@ export function connectTrellisServiceWithRuntimeDeps<
                   );
                 },
               );
+              await authorizationProviderCache.retainOwnContext();
               return context;
             } catch (error) {
               if (error instanceof TrellisHttpError) {

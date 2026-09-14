@@ -846,11 +846,13 @@ async function createRuntimeUserAuthenticator(args: {
   sessionId: string;
   contextDigest: string | (() => string);
   jwt: string | (() => string);
+  authorizationUsable?: () => boolean;
 }): Promise<{ authenticators: Authenticator[]; stop: () => void }> {
   const options = await args.identity.auth.natsConnectOptions({
     sessionId: args.sessionId,
     contextDigest: args.contextDigest,
     jwt: args.jwt,
+    authorizationUsable: args.authorizationUsable,
   });
   return {
     authenticators: Array.isArray(options.authenticator)
@@ -1256,6 +1258,7 @@ export async function connectClientWithDeps<
     sessionId: runtimeState.sessionId,
     contextDigest: runtimeState.contextDigest,
     jwt: runtimeState.jwt,
+    authorizationUsable: () => authorizationProviderCache?.ownUsable() ?? true,
   });
   let nc: NatsConnection | undefined;
   let authorizationProviderCache: AuthorizationProviderCache | undefined;
@@ -1280,6 +1283,7 @@ export async function connectClientWithDeps<
     );
     authorizationProviderCache.start();
     await authorizationProviderCache.waitReady();
+    await authorizationProviderCache.retainOwnContext();
     void connectedNats.closed().then(
       () => authorizationProviderCache?.stop(),
       () => authorizationProviderCache?.stop(),
@@ -1330,6 +1334,8 @@ export async function connectClientWithDeps<
       bootstrap.resourceBindings,
       authorizationContexts.current().context.grants.permissions,
     ),
+    onTransportEvent: (event) =>
+      authorizationProviderCache?.observeTransportEvent(event),
     ...(args.log
       ? {
         lifecycleLog: {
@@ -1356,6 +1362,13 @@ export async function connectClientWithDeps<
     }),
   };
   const resourceFacades = clientResourceFacades(resourceState);
+  authorizationProviderCache.onOwnInvalidated(() => {
+    resourceState.current.active.value = false;
+    installConnectionAvailability(
+      connection,
+      participantAvailability(args.participant, {}, {}, []),
+    );
+  });
   const stopContextRefresh = startAuthorizationContextRefresh({
     trellisUrl: args.trellisUrl,
     sessionId: runtimeState.sessionId,
@@ -1397,6 +1410,7 @@ export async function connectClientWithDeps<
           };
         },
       });
+      await authorizationProviderCache.retainOwnContext();
       return result.context;
     },
     onRefresh: () => {

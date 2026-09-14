@@ -59,7 +59,7 @@ export async function applyWithServerConsent<T>(
   } catch (error) {
     const consent = deploymentConsentRequest(error);
     if (!consent) throw error;
-    return await rpc({
+    const applied = await rpc({
       ...request,
       idempotencyKey: ulid(),
       approval: {
@@ -81,6 +81,7 @@ export async function applyWithServerConsent<T>(
         mode: "capabilities",
       },
     });
+    return applied;
   }
 }
 

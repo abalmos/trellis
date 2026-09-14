@@ -7,6 +7,9 @@ use trellis_rs::service::{KvResourceReadError, ServiceConnectOptions, StoreListO
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
     if std::env::var_os("TRELLIS_STATE_ACCEPTANCE").is_some() {
         return state_acceptance().await;
     }
@@ -155,10 +158,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })
     .await??;
     for _ in 0..60 {
-        if matches!(
-            kv.get("record").await,
-            Err(KvResourceReadError::Unavailable)
-        ) {
+        let result = kv.get("record").await;
+        if matches!(result, Err(KvResourceReadError::Unavailable)) {
             assert!(consumer.messages().await.is_err());
             println!("rust resources invalidated");
             return Ok(());

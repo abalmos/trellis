@@ -54,6 +54,8 @@ pub struct DurableOperationRecord {
     pub revision: u64,
     /// Process executor currently allowed to mutate the record.
     pub owner_executor_id: Option<String>,
+    /// Signed logical connection that acquired the current owner fence.
+    pub owner_connection_id: Option<String>,
     /// Monotonic fencing token for the current owner.
     pub owner_epoch: u64,
     /// Server-time lease expiry in milliseconds since the Unix epoch.
@@ -253,6 +255,24 @@ pub trait OperationRepository: Send + Sync {
         owner_executor_id: &str,
         now_ms: i64,
         lease_expires_at_ms: i64,
+    ) -> impl Future<Output = Result<RevisionedOperationRecord, ServerError>> + Send {
+        self.claim_for_connection(
+            invocation_id,
+            owner_executor_id,
+            owner_executor_id,
+            now_ms,
+            lease_expires_at_ms,
+        )
+    }
+
+    /// Acquire ownership for one exact process and signed connection.
+    fn claim_for_connection(
+        &self,
+        invocation_id: &str,
+        owner_executor_id: &str,
+        owner_connection_id: &str,
+        now_ms: i64,
+        lease_expires_at_ms: i64,
     ) -> impl Future<Output = Result<RevisionedOperationRecord, ServerError>> + Send;
 
     /// Renew an unexpired lease held by one exact owner fence.
@@ -362,10 +382,11 @@ impl OperationRepository for KvOperationRepository {
         }
     }
 
-    async fn claim(
+    async fn claim_for_connection(
         &self,
         invocation_id: &str,
         owner_executor_id: &str,
+        owner_connection_id: &str,
         now_ms: i64,
         lease_expires_at_ms: i64,
     ) -> Result<RevisionedOperationRecord, ServerError> {
@@ -397,6 +418,7 @@ impl OperationRepository for KvOperationRepository {
             }
             let mut record = current.record;
             record.owner_executor_id = Some(owner_executor_id.to_owned());
+            record.owner_connection_id = Some(owner_connection_id.to_owned());
             record.owner_epoch = record
                 .owner_epoch
                 .checked_add(1)

@@ -684,6 +684,7 @@ fn spawn_authorization_context_refresh_task(
     auth: Arc<SessionAuth>,
     nats: async_nats::Client,
     applied_native_authorization: Arc<tokio::sync::Mutex<AppliedNativeAuthorization>>,
+    provider: AuthorizationProviderCache,
     timeout_ms: u64,
 ) -> JoinHandle<()> {
     crate::client::authorization::spawn_authorization_context_refresh_task(
@@ -691,6 +692,7 @@ fn spawn_authorization_context_refresh_task(
         auth,
         nats,
         applied_native_authorization,
+        provider,
         timeout_ms,
     )
 }
@@ -779,6 +781,7 @@ async fn connect_authorized_nats(
     let session_nkey = key_pair.public_key();
     let contexts = authorization_contexts.clone();
     let reauth = Arc::new(AtomicBool::new(false));
+    let event_contexts = contexts.clone();
     let options = ConnectOptions::with_auth_callback(move |nonce| {
         let auth = auth.clone();
         let contexts = contexts.clone();
@@ -789,10 +792,28 @@ async fn connect_authorized_nats(
             let reconnecting = reauth.swap(true, Ordering::AcqRel);
             if reconnecting || contexts.routing_jwt().is_err() || contexts.context_digest().is_err()
             {
-                contexts
-                    .refresh(&auth)
-                    .await
-                    .map_err(async_nats::AuthError::new)?;
+                let context_digest = contexts.context_digest().ok();
+                tracing::info!(
+                    reconnecting,
+                    context_digest,
+                    "refreshing authorization before NATS reconnect"
+                );
+                let refresh = contexts.refresh(&auth).await;
+                if let Err(error) = &refresh {
+                    tracing::warn!(
+                        reconnecting,
+                        context_digest,
+                        error = %error,
+                        "authorization refresh before NATS reconnect failed"
+                    );
+                } else {
+                    tracing::info!(
+                        reconnecting,
+                        context_digest,
+                        "authorization refresh before NATS reconnect succeeded"
+                    );
+                }
+                refresh.map_err(async_nats::AuthError::new)?;
             }
             let mut credentials = async_nats::Auth::new();
             credentials.nkey = Some(session_nkey);
@@ -812,8 +833,28 @@ async fn connect_authorized_nats(
         }
     })
     .connection_timeout(Duration::from_millis(timeout_ms))
-    .event_callback(|event| async move {
-        tracing::debug!(event = ?event, "NATS client event");
+    .event_callback(move |event| {
+        let contexts = event_contexts.clone();
+        async move {
+            if matches!(event, async_nats::Event::Disconnected) {
+                contexts.suspend();
+                tracing::info!(
+                    context_digest = contexts.context_digest().ok(),
+                    "suspended authorization installation after NATS disconnect"
+                );
+            }
+            if matches!(
+                event,
+                async_nats::Event::ServerError(async_nats::ServerError::AuthorizationViolation)
+            ) {
+                contexts.suspend();
+                contexts.request_refresh();
+                tracing::info!(
+                    "requested authorization refresh after broker authentication rejection"
+                );
+            }
+            tracing::debug!(event = ?event, "observed NATS client event");
+        }
     })
     .custom_inbox_prefix(runtime.inbox_prefix);
     let native = runtime.transports.native.ok_or_else(|| {
@@ -1244,6 +1285,7 @@ impl TrellisClient {
             auth.clone(),
             nats.clone(),
             applied_native_authorization.clone(),
+            provider.provider.clone(),
             timeout_ms,
         ));
         Ok(Self {
@@ -1365,6 +1407,15 @@ impl TrellisClient {
                 "authorization context omitted deployment assignment".into(),
             )
         })
+    }
+
+    pub(crate) fn own_connection_id(&self) -> Result<String, TrellisClientError> {
+        let contexts = self.authorization_contexts.as_ref().ok_or_else(|| {
+            TrellisClientError::Bootstrap("authorization context unavailable".into())
+        })?;
+        let context = trellis_protocol::parse_authorization_context(&contexts.bundle()?.context)
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        Ok(context.unsigned.connection_id)
     }
 
     pub(crate) fn own_instance_id(&self) -> Result<String, TrellisClientError> {

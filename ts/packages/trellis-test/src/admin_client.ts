@@ -263,15 +263,6 @@ export class TrellisTestAdminAutomation {
     this.#configuredConsentPolicies.add(participantId);
   }
 
-  /** Returns whether the runtime has projected a live participant connection. */
-  async hasParticipantConnection(participantId: string): Promise<boolean> {
-    await this.#completeBootstrap();
-    const connections = await this.#rpc("authConnectionsList", {});
-    return connections.items.some((item) =>
-      item.participantId === participantId
-    );
-  }
-
   /** Installs a participant and atomically replaces its deployment GrantBinding. */
   async applyParticipant(args: {
     deployment?: string;

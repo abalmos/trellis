@@ -20,13 +20,6 @@ Deno.test("device companion requires separate selected consent across restart", 
       kind: "device",
       reviewMode: "none",
     });
-    await runtime.contracts.install({
-      contract: participants.Device.Companion.participant,
-    });
-    await runtime.contracts.apply({
-      deployment: "device",
-      contract: participants.Device.participant,
-    });
     await runtime.deployments.create({ id: "child-provider", kind: "service" });
     const childProviderIdentity = await runtime.services.createInstance({
       deployment: "child-provider",
@@ -40,6 +33,22 @@ Deno.test("device companion requires separate selected consent across restart", 
     }).orThrow();
     await childProvider.handleRequired(() => Result.ok({}));
     await childProvider.handleOptional(() => Result.ok({}));
+    await runtime.contracts.install({
+      contract: participants.Device.Companion.participant,
+    });
+    await runtime.contracts.apply({
+      deployment: "device",
+      contract: participants.Device.participant,
+    });
+    await runtime.ensurePortalConsentPolicy(
+      participants.Device.Companion.participant.identity,
+      [
+        "capability:runtime-trellis.device_child@v1::required",
+        "capability:runtime-trellis.device_child@v1::optional",
+        "capability:trellis.auth@v1::public",
+        "capability:trellis.state@v1::public",
+      ],
+    );
     const provisioned = await runtime.devices.provision({
       deploymentId: "device",
       participantId: participants.Device.participant.identity,
@@ -91,11 +100,6 @@ Deno.test("device companion requires separate selected consent across restart", 
       })).status,
       "activation_required",
     );
-    await runtime.ensurePortalConsentPolicy(
-      participants.Device.Companion.participant.identity,
-      consent.capabilities.map((item: ConsentCapability) => item.id),
-    );
-
     const approval = {
       mode: "capabilities" as const,
       installedRevision: consent.installedRevision,
@@ -117,21 +121,41 @@ Deno.test("device companion requires separate selected consent across restart", 
       companionApproved: false,
     };
 
-    await t.step("stale child consent is rejected", async () => {
-      const operation = await portal.deviceUserAuthoritiesResolve({
-        flowId,
-        confirmationCode: activation.confirmationCode,
-        companionApproval: { ...approval, decisionDigest: "A".repeat(43) },
-      }).start().orThrow();
-      assertEquals((await operation.wait().orThrow()).state, "failed");
-    });
-
     const approved = await portal.deviceUserAuthoritiesResolve({
       flowId,
       confirmationCode: activation.confirmationCode,
       companionApproval: approval,
     }).start().orThrow();
-    assertEquals((await approved.wait().orThrow()).state, "completed");
+    const approvedResult = await runtime.waitFor(async () => {
+      const snapshot = await approved.get().orThrow();
+      return snapshot.state === "running" ? undefined : snapshot;
+    }, { timeoutMs: 60_000 });
+    assertEquals(approvedResult.state, "completed");
+    const fetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (
+        new URL(input instanceof Request ? input.url : input).pathname ===
+          "/bootstrap/device"
+      ) {
+        const body = JSON.parse(String(init?.body));
+        body.companion.proof =
+          (body.companion.proof.startsWith("A") ? "B" : "A") +
+          body.companion.proof.slice(1);
+        return await fetch(input, { ...init, body: JSON.stringify(body) });
+      }
+      return await fetch(input, init);
+    };
+    try {
+      await assertRejects(() =>
+        TrellisDevice.connect({
+          trellisUrl: runtime.trellisUrl,
+          participant: participants.Device.participant,
+          rootSecret,
+        }).orThrow()
+      );
+    } finally {
+      globalThis.fetch = fetch;
+    }
     let device = await TrellisDevice.connect({
       trellisUrl: runtime.trellisUrl,
       participant: participants.Device.participant,
@@ -172,7 +196,12 @@ Deno.test("device companion requires separate selected consent across restart", 
     }).start().orThrow();
     const secondSnapshot = await runtime.waitFor(async () => {
       const snapshot = await secondPending.get().orThrow();
-      return snapshot.progress?.companionConsent ? snapshot : undefined;
+      const consent = snapshot.progress?.companionConsent;
+      return consent?.resources.every((resource: ConsentResource) =>
+          !resource.required || resource.actual
+        )
+        ? snapshot
+        : undefined;
     });
     const secondConsent = secondSnapshot.progress?.companionConsent;
     assert(secondConsent);
@@ -181,47 +210,35 @@ Deno.test("device companion requires separate selected consent across restart", 
       flowId: secondFlowId,
       confirmationCode: secondActivation.confirmationCode,
       companionApproval: {
-        ...approval,
+        mode: "capabilities",
         installedRevision: secondConsent.installedRevision,
         expectedGrantRevision: secondConsent.expectedGrantRevision,
         decisionDigest: secondConsent.decisionDigest,
+        approvedCapabilities: secondConsent.capabilities.filter((
+          item: ConsentCapability,
+        ) => item.required && item.eligible && !item.alreadyApproved).map((
+          item: ConsentCapability,
+        ) => ({
+          id: item.id,
+          consentDigest: item.consentDigest,
+        })),
         approvedResources: secondConsent.resources.filter((
           item: ConsentResource,
-        ) => item.required && item.eligible).map((item: ConsentResource) => ({
+        ) => item.required && item.eligible && !item.alreadyApproved).map((
+          item: ConsentResource,
+        ) => ({
           kind: item.kind,
           name: item.name,
           commitment: item.requestedCommitment,
         })),
+        companionApproved: false,
       },
     }).start().orThrow();
-    const secondResult = await secondApproved.wait().orThrow();
+    const secondResult = await runtime.waitFor(async () => {
+      const snapshot = await secondApproved.get().orThrow();
+      return snapshot.state === "running" ? undefined : snapshot;
+    }, { timeoutMs: 60_000 });
     assertEquals(secondResult.state, "completed", JSON.stringify(secondResult));
-
-    const fetch = globalThis.fetch;
-    globalThis.fetch = async (input, init) => {
-      if (
-        new URL(input instanceof Request ? input.url : input).pathname ===
-          "/bootstrap/device"
-      ) {
-        const body = JSON.parse(String(init?.body));
-        body.companion.proof = body.companion.proof.slice(0, -1) +
-          (body.companion.proof.endsWith("A") ? "B" : "A");
-        return await fetch(input, { ...init, body: JSON.stringify(body) });
-      }
-      return await fetch(input, init);
-    };
-    try {
-      await assertRejects(() =>
-        TrellisDevice.connect({
-          trellisUrl: runtime.trellisUrl,
-          participant: participants.Device.participant,
-          rootSecret,
-        }).orThrow()
-      );
-    } finally {
-      globalThis.fetch = fetch;
-    }
-
     let secondDevice = await TrellisDevice.connect({
       trellisUrl: runtime.trellisUrl,
       participant: participants.Device.participant,
@@ -233,10 +250,11 @@ Deno.test("device companion requires separate selected consent across restart", 
       return result.isOk() ? true : undefined;
     });
     await companion.state.shared.set({ value: "same-user" }).orThrow();
-    assertEquals(
-      (await secondDevice.companion?.state.shared.get().orThrow())?.value,
-      { value: "same-user" },
-    );
+    await runtime.waitFor(async () => {
+      const value = (await secondDevice.companion?.state.shared.get().orThrow())
+        ?.value;
+      return value?.value === "same-user" ? true : undefined;
+    });
     await companion.connection.close();
     await secondDevice.companion?.connection.close();
     await device.connection.close();

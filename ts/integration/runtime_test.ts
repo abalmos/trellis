@@ -434,23 +434,32 @@ Deno.test("generated Rust resources use live NATS", async () => {
       assert(!chunk.done, output);
       output += chunk.value;
     }
-    await runtime.waitFor(() =>
-      runtime.hasParticipantConnection(
-        participants.Provider.participant.identity,
-      )
-    );
-
-    await runtime.contracts.apply({
-      contract: removedParticipants.Provider.participant,
-    });
     const stdin = child.stdin.getWriter();
-    await stdin.write(new TextEncoder().encode("replacement committed\n"));
-    await stdin.close();
+    try {
+      await runtime.contracts.apply({
+        contract: removedParticipants.Provider.participant,
+      });
+    } finally {
+      await stdin.write(new TextEncoder().encode("replacement complete\n"));
+      await stdin.close();
+    }
 
     while (!output.includes("rust resources invalidated")) {
-      const chunk = await reader.read();
+      const chunk = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(new Error(`resource invalidation timed out: ${output}`)),
+            60_000,
+          )
+        ),
+      ]);
       assert(!chunk.done, output);
       output += chunk.value;
+    }
+    if (Deno.env.get("TRELLIS_TRACE_AUTH") === "1") {
+      console.error(runtime.controlPlaneOutput());
     }
     const status = await child.status;
     assert(status.success);
@@ -696,6 +705,9 @@ Deno.test("generated runtime workflows", async (t) => {
                 Promise.resolve(op.defer())
               );
               try {
+                if (Deno.env.get("TRELLIS_TRACE_AUTH") === "1") {
+                  console.error("TRELLIS_TRACE replica_watches_begin");
+                }
                 const watches = await Promise.all([
                   resumed.watch({ updates: true }).orThrow(),
                   resumed.watch({ updates: true }).orThrow(),
@@ -706,6 +718,11 @@ Deno.test("generated runtime workflows", async (t) => {
                   assertEquals(
                     (await watch.next()).value?.snapshot.state,
                     "running",
+                  );
+                }
+                if (Deno.env.get("TRELLIS_TRACE_AUTH") === "1") {
+                  console.error(
+                    "TRELLIS_TRACE replica_initial_snapshots_received",
                   );
                 }
                 const nats = await connect({
@@ -737,15 +754,36 @@ Deno.test("generated runtime workflows", async (t) => {
                     reply: `${subject}.owner.${identity.instanceId}`,
                   });
                   await nats.flush();
+                  if (Deno.env.get("TRELLIS_TRACE_AUTH") === "1") {
+                    console.error("TRELLIS_TRACE forged_update_flushed");
+                  }
                 } finally {
                   await nats.close();
                 }
+                if (Deno.env.get("TRELLIS_TRACE_AUTH") === "1") {
+                  console.error("TRELLIS_TRACE continue_signal_begin");
+                }
                 await resumed.signal("Continue", { value: "continue" })
                   .orThrow();
-                for (const watch of watches) {
+                if (Deno.env.get("TRELLIS_TRACE_AUTH") === "1") {
+                  console.error("TRELLIS_TRACE continue_signal_complete");
+                }
+                for (const [index, watch] of watches.entries()) {
                   let update = (await watch.next()).value;
                   while (update && update.type !== "update") {
+                    if (Deno.env.get("TRELLIS_TRACE_AUTH") === "1") {
+                      console.error(
+                        `TRELLIS_TRACE replica_watch_frame index=${index} type=${update.type}`,
+                      );
+                    }
                     update = (await watch.next()).value;
+                  }
+                  if (Deno.env.get("TRELLIS_TRACE_AUTH") === "1") {
+                    console.error(
+                      `TRELLIS_TRACE replica_watch_update index=${index} present=${
+                        Boolean(update)
+                      }`,
+                    );
                   }
                   assert(update);
                   assertEquals(update.update, { value: "transient" });

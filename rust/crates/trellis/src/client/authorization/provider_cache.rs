@@ -147,6 +147,7 @@ pub struct AuthorizationProviderCache {
     registry: AuthorizationRegistryReader,
     http: BootstrapHttp,
     own: Option<Arc<AuthorizationContextCache>>,
+    own_lease: Arc<Mutex<Option<AuthorizationContextLease>>>,
     verification_policy: AuthorizationVerificationPolicy,
     state: Arc<RwLock<ProviderState>>,
     in_flight: Arc<Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>>,
@@ -191,9 +192,7 @@ impl AuthorizationProviderCache {
             Some(own.clone()),
         )
         .await?;
-        cache
-            .resolve_context(&own.context_digest()?, own.corrected_now_seconds()?)
-            .await?;
+        cache.retain_own_context().await?;
         Ok(cache)
     }
 
@@ -234,6 +233,7 @@ impl AuthorizationProviderCache {
             registry,
             http,
             own,
+            own_lease: Arc::new(Mutex::new(None)),
             verification_policy,
             state: Arc::new(RwLock::new(ProviderState {
                 issuers: issuer
@@ -248,6 +248,19 @@ impl AuthorizationProviderCache {
             context_resolves: Arc::new(AtomicU64::new(0)),
             access_clock: Arc::new(AtomicU64::new(0)),
         })
+    }
+
+    pub(crate) async fn retain_own_context(&self) -> Result<(), TrellisClientError> {
+        let Some(own) = &self.own else {
+            return Ok(());
+        };
+        let lease = self
+            .resolve_context(&own.context_digest()?, own.corrected_now_seconds()?)
+            .await?;
+        *self.own_lease.lock().map_err(|_| {
+            TrellisClientError::AuthorizationUnavailable("own context lease lock poisoned".into())
+        })? = Some(lease);
+        Ok(())
     }
 
     pub(crate) async fn run(
@@ -380,7 +393,7 @@ impl AuthorizationProviderCache {
         drop(state);
         if let Some(own) = &self.own {
             if own.context_digest().is_ok_and(|current| current == digest) {
-                own.clear()?;
+                own.suspend();
                 own.request_refresh();
             }
         }
@@ -840,6 +853,7 @@ async fn observe_context_revocation(
                 .context_digest()
                 .is_ok_and(|digest| digest == watch_digest)
             {
+                own.suspend();
                 own.request_refresh();
             }
         }

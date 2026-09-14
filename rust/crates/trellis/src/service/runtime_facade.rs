@@ -807,6 +807,7 @@ pub struct ConnectedServiceRuntime<C> {
     provider_deployment_id: String,
     provider_instance_id: String,
     operation_executor_id: String,
+    operation_connection_id: String,
     operation_repository: Option<super::KvOperationRepository>,
     operation_staging: Option<super::resources::backend::BoundStoreResourceClient>,
     service_name: String,
@@ -847,6 +848,9 @@ impl<C> ConnectedServiceRuntime<C> {
         let provider_instance_id = client
             .own_instance_id()
             .expect("connected services always have an instance assignment");
+        let operation_connection_id = client
+            .own_connection_id()
+            .expect("connected services always have a logical connection identity");
         router.set_provider_instance_id(provider_instance_id.clone());
         Self {
             client,
@@ -861,7 +865,8 @@ impl<C> ConnectedServiceRuntime<C> {
             router,
             provider_deployment_id,
             provider_instance_id: provider_instance_id.clone(),
-            operation_executor_id: provider_instance_id,
+            operation_executor_id: ulid::Ulid::new().to_string(),
+            operation_connection_id,
             operation_repository: None,
             operation_staging: None,
             service_name: service_name.into(),
@@ -1213,6 +1218,7 @@ impl<C> ConnectedServiceRuntime<C> {
                     service: self.service_name.clone(),
                     deployment_id: self.provider_deployment_id.clone(),
                     executor_id: self.operation_executor_id.clone(),
+                    connection_id: self.operation_connection_id.clone(),
                     repository: self
                         .operation_repository
                         .clone()

@@ -61,6 +61,7 @@ export type ObserveTrellisConnectionOptions = {
   log?: LoggerLike | false;
   lifecycleLog?: TrellisConnectionLifecycleLogOptions;
   availability?: TrellisAvailability;
+  onTransportEvent?: (event: unknown) => void;
 };
 
 /** Options for observing a NATS-backed Trellis connection lifecycle. */
@@ -70,6 +71,7 @@ export type ObserveNatsTrellisConnectionOptions = {
   log?: LoggerLike | false;
   lifecycleLog?: TrellisConnectionLifecycleLogOptions;
   availability?: TrellisAvailability;
+  onTransportEvent?: (event: unknown) => void;
 };
 
 /** Options for logging transport lifecycle events with Trellis runtime context. */
@@ -299,6 +301,7 @@ export function observeTrellisConnection(
           const next = await statusIterator.next();
           if (next.done) return;
           const event = next.value;
+          options.onTransportEvent?.(event);
           if (stopped) {
             return;
           }
@@ -365,6 +368,7 @@ export function observeNatsTrellisConnection(
     log: options.log,
     lifecycleLog: options.lifecycleLog,
     availability: options.availability,
+    onTransportEvent: options.onTransportEvent,
   });
 }
 

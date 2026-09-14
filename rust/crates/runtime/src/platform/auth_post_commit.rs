@@ -141,6 +141,13 @@ impl AuthPostCommitRuntime {
                     .await
             }
             Err(error) => {
+                tracing::warn!(
+                    action_id = %claim.action.action_id,
+                    action_kind = ?claim.action.kind,
+                    attempts = claim.action.attempts,
+                    error = %error,
+                    "Auth post-commit action failed; scheduling retry"
+                );
                 let delay = retry_delay_ms(claim.action.attempts);
                 self.repository
                     .fail_post_commit_action(
@@ -218,11 +225,16 @@ impl AuthPostCommitRuntime {
             .dispatch_registry_action(digest, revocation, now_millis()? / 1_000)
             .await?;
         if revocation {
-            for connection in self
+            let connections = self
                 .ephemeral
                 .list_connection_presence_by_context(digest)
-                .await?
-            {
+                .await?;
+            tracing::info!(
+                context_digest = digest,
+                physical_connection_count = connections.len(),
+                "enumerated authoritative physical connections for revoked context"
+            );
+            for connection in connections {
                 self.kick_connection(&connection).await?;
             }
         }
@@ -523,9 +535,18 @@ impl AuthPostCommitRuntime {
             )
             .await
             .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
-        validate_connection_kick_response(&response.payload)?;
+        let outcome = validate_connection_kick_response(&response.payload)?;
+        tracing::info!(
+            context_digest = %connection.context_digest,
+            runtime_connection_id = %connection.runtime_connection_id,
+            server_id = %connection.server_id,
+            client_id = %connection.client_id,
+            presence_revision = connection.storage_revision,
+            ?outcome,
+            "processed authorization connection kick"
+        );
         self.ephemeral
-            .delete_connection_presence(&connection.connection_id)
+            .delete_connection_presence(&connection.connection_id, connection.storage_revision)
             .await
     }
 }

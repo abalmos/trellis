@@ -89,3 +89,60 @@ review. It does not replace or reinterpret the verification record above.
   follow-up commit.
 
 **REVIEW-BLOCKED CORRECTION CANDIDATE - NOT ACCEPTED**
+
+## Whole-release correction follow-up
+
+This follow-up to correction candidate
+`ce88e73259ae471547444e421fa9d64da6ad0cd9` addresses the independent review's
+remaining R1-R4 findings and the C7b live failure. It does not replace the
+historical evidence above.
+
+- Historical Check #310 remains failed in Install tooling and Live integration.
+- Exact-candidate Check #311 (`34759048838`) remains failed because
+  `trellis-test-generated` did not match its semantic lock. Dependent lanes were
+  skipped and are not treated as green evidence.
+- The affected semantic lock was refreshed through normal `trellis update` and
+  generated artifacts were rebuilt. Two consecutive `cargo xtask install` passes
+  produced the identical tracked binary-diff SHA-256
+  `4d3f66faa9a98226fa079c05e6ca641d71b899136ece246c0857874ac3cf4172` before this
+  evidence section was appended.
+- R1 now derives presentation and companion approval from one current,
+  server-owned portal-policy ceiling and carries its expiry and provenance into
+  the atomic decision. Repeated approval submits only the current delta and
+  retains only server-confirmed eligible authority.
+- R2 now fences admission after acknowledged physical presence and makes SDK
+  authorization installation candidate-then-promote. Revocation suspends
+  resource usability before refresh. A correlated live trace is retained at
+  `target/device-companion-auth-flow-trace.log` for follow-up flow analysis.
+- R3 requires the immutable fence acquired by a successful local Operation claim
+  through executor-held controls; durable rereads cannot mint ownership.
+- R4 uses one signed cross-language transient-update envelope with operation,
+  API, action, deployment, process executor, signed connection, owner epoch,
+  sequence, timestamp, and generated update identity.
+
+The following local verification passed on 2026-09-14:
+
+| Boundary                    | Result                                                                                                                                                                                                    |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rust static/workspace       | Formatting passed; warning-denied workspace/all-target Clippy passed; the complete Rust workspace passed.                                                                                                 |
+| TypeScript static/packages  | Repository formatting, public package checks, integration checks, and all package/UI-tool tests passed.                                                                                                   |
+| TypeScript live integration | Complete matrix passed 20 tests with 14 nested steps in 15m23s. Device.Companion separately passed its two-device policy, State, restart, logout, and sibling-survival case with retained trace evidence. |
+| Rust live integration       | Passed 2/2 with prebuilt repository server and CLI binaries.                                                                                                                                              |
+| Runtime and Events          | Complete Runtime passed 7/7 with 12 nested steps; complete Events passed 6/6.                                                                                                                             |
+| Protocol and browser        | Protocol WASM and embedded applications built; embedded, configured-directory, and reverse-proxy hosting passed 3/3.                                                                                      |
+| Package consumers           | Staged Node, Deno, and Svelte consumers passed; Rust service and device demos compiled against the unpublished local `trellis-rs`; packaged Orders passed its real service/caller test.                   |
+| Console and docs            | Both Svelte checks reported zero errors and warnings; embedded Console and documentation production builds passed, including generated TypeScript API docs.                                               |
+| Repository integrity        | Consecutive generation digests matched; `git diff --check` passed; no merge-conflict markers or temporary print diagnostics remain.                                                                       |
+
+One initial local Rust-live attempt overlapped an embedded-asset replacement and
+compiled a stale generated `include_bytes!` list; one browser-hosting attempt
+also omitted its required prebuilt-server environment and waited behind that
+Cargo lock. Neither is counted as product evidence. After the asset build
+completed, the server and CLI were rebuilt once and both exact lanes passed as
+recorded above.
+
+`workorders/` remains protected review input and is excluded from the follow-up
+commit. This evidence records local execution only; it does not claim an
+exact-candidate CI result or release acceptance.
+
+**READY FOR INDEPENDENT WHOLE-RELEASE REVIEW - NOT ACCEPTED**

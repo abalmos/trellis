@@ -833,6 +833,7 @@ export async function connectDeviceWithDeps<
     sessionId: connectInfo.connectionId,
     contextDigest: () => authorizationContexts.current().contextDigest,
     jwt: () => authorizationContexts.routingJwt(),
+    authorizationUsable: () => authorizationProviderCache?.ownUsable() ?? true,
   });
   let nc: NatsConnection | undefined;
   let authorizationProviderCache: AuthorizationProviderCache | undefined;
@@ -854,6 +855,7 @@ export async function connectDeviceWithDeps<
     );
     authorizationProviderCache.start();
     await authorizationProviderCache.waitReady();
+    await authorizationProviderCache.retainOwnContext();
     void connectedNats.closed().finally(() => {
       authorizationProviderCache?.stop();
     });
@@ -882,12 +884,20 @@ export async function connectDeviceWithDeps<
       connectInfo.apiBindings,
       connectInfo.resourceBindings,
     ),
+    onTransportEvent: (event) =>
+      authorizationProviderCache.observeTransportEvent(event),
     log: false,
     lifecycleLog: {
       log,
       context: { participantId: args.participant.identity },
     },
   });
+  authorizationProviderCache.onOwnInvalidated(() =>
+    installConnectionAvailability(
+      connection,
+      participantAvailability(args.participant, {}, {}, []),
+    )
+  );
   connection.subscribe((status) =>
     authorizationProviderCache.observeConnectionPhase(status.phase)
   );
@@ -924,6 +934,7 @@ export async function connectDeviceWithDeps<
           undefined,
           shouldInstall,
         );
+        await authorizationProviderCache.retainOwnContext();
         installConnectionAvailability(
           connection,
           participantAvailability(

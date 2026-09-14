@@ -116,6 +116,9 @@ export class AuthorizationProviderCache {
   #connected = true;
   #started = false;
   #generation = 0;
+  #ownEntry?: ProviderContextEntry;
+  #onOwnInvalidated?: () => void;
+  #ownUsable = true;
 
   private constructor(
     registry: AuthorizationRegistryReader,
@@ -168,6 +171,51 @@ export class AuthorizationProviderCache {
     for (const entry of this.#contexts.values()) this.#invalidate(entry);
     this.#contexts.clear();
     this.#inFlight.clear();
+    if (this.#ownEntry) this.#release(this.#ownEntry);
+    this.#ownEntry = undefined;
+  }
+
+  /** Retain exact revocation coverage for the currently installed own context. */
+  async retainOwnContext(): Promise<void> {
+    const digest = this.#cache.current().contextDigest;
+    const entry = await this.#lease(digest, false);
+    if (entry.revokedAt !== undefined) {
+      this.#release(entry);
+      throw new Error("authorization context is revoked");
+    }
+    if (this.#ownEntry) this.#release(this.#ownEntry);
+    this.#ownEntry = entry;
+    this.#ownUsable = true;
+  }
+
+  /** Returns whether the current own authorization may authenticate transport. */
+  ownUsable(): boolean {
+    return this.#ownUsable;
+  }
+
+  /** Suspend stale transport authentication and request one current context. */
+  refreshOwnAuthorization(): void {
+    if (!this.#ownUsable) return;
+    this.#ownUsable = false;
+    this.#onOwnInvalidated?.();
+    this.#cache.requestRefresh();
+  }
+
+  /** React to an authoritative NATS authentication rejection during reconnect. */
+  observeTransportEvent(event: unknown): void {
+    if (!event || typeof event !== "object") return;
+    const status = event as { type?: unknown; data?: unknown };
+    if (
+      status.type === "error" &&
+      String(status.data).toLowerCase().includes("authorization")
+    ) {
+      this.refreshOwnAuthorization();
+    }
+  }
+
+  /** Register the connection-owned usability withdrawal for own revocation. */
+  onOwnInvalidated(callback: () => void): void {
+    this.#onOwnInvalidated = callback;
   }
 
   /** Wait until the connected registry is available. */
@@ -531,6 +579,15 @@ export class AuthorizationProviderCache {
       entry.revokedAt ?? 0,
       parseRevocation(event.value),
     );
+    let ownDigest: string | undefined;
+    try {
+      ownDigest = this.#cache.current().contextDigest;
+    } catch {
+      // No own installation remains to invalidate.
+    }
+    if (ownDigest === entry.contextDigest) {
+      this.refreshOwnAuthorization();
+    }
   }
 
   async #issuer(keyId: string): Promise<AuthorizationIssuerKey> {

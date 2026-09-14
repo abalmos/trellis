@@ -387,7 +387,7 @@ impl CalloutProcessor {
             return Ok(());
         };
         self.ephemeral
-            .delete_connection_presence(&connection_id)
+            .delete_connection_presence(&connection_id, connection.storage_revision)
             .await?;
         let now = now_millis()?;
         self.repository
@@ -514,86 +514,10 @@ impl CalloutProcessor {
             .map_err(|error| denied(error.to_string()))?;
         verify_connect_nkey_matches_context(session_nkey, &verified_context)?;
 
-        let permissions = self
-            .contexts
-            .transport_permissions(&verified_context, now_seconds)
-            .await
-            .map_err(|error| denied(error.to_string()))?;
-        let device_implements_apis =
-            if verified_context.principal_kind() == AuthorizationPrincipalKind::Device {
-                let retained = self
-                    .repository
-                    .get_context_by_digest(verified_context.context_digest())
-                    .await?
-                    .ok_or_else(|| denied("authorization context is missing from durable state"))?;
-                self.repository
-                    .get_installed_participant_record(
-                        verified_context.participant_id().to_owned(),
-                        Some(retained.installed_revision),
-                    )
-                    .await?
-                    .is_some_and(|(_, participant)| {
-                        participant.participant_kind == ParticipantKind::Device
-                            && participant.state == ParticipantBindingState::Resolved
-                            && !participant.projection.implemented_apis.is_empty()
-                    })
-            } else {
-                false
-            };
-        tracing::debug!(
-            publish_count = permissions.publish.len(),
-            subscribe_count = permissions.subscribe.len(),
-            jobs_list_services = permissions
-                .publish
-                .iter()
-                .any(|subject| subject == "rpc.v1.Jobs.ListServices"),
-            jobs_metrics = permissions
-                .publish
-                .iter()
-                .any(|subject| subject == "rpc.v1.Jobs.Metrics"),
-            events_query = permissions
-                .publish
-                .iter()
-                .any(|subject| subject == "rpc.v1.events.Query"),
-            health_watch = permissions
-                .publish
-                .iter()
-                .any(|subject| subject == "feed.v1.Health.Watch"),
-            "compiled NATS authorization permissions"
-        );
-        let expires_at_ms = [
-            Some(
-                verified_context
-                    .expires_at()
-                    .checked_mul(1_000)
-                    .ok_or_else(|| denied("authorization context expiry overflowed"))?,
-            ),
-            Some(
-                now.checked_add(self.user_jwt_ttl_ms)
-                    .ok_or_else(|| denied("NATS user JWT expiry overflowed"))?,
-            ),
-        ]
-        .into_iter()
-        .flatten()
-        .min()
-        .ok_or_else(|| denied("NATS user JWT has no expiry bound"))?;
-        if expires_at_ms <= now {
-            return Err(denied("NATS user JWT expiry has elapsed"));
-        }
-        let expires_at_seconds = expires_at_ms / 1_000;
-        if expires_at_seconds <= now_seconds {
-            return Err(denied("NATS user JWT expiry is below one second"));
-        }
-        let jwt = self.keys.authorized_user_jwt(
-            &request.user_nkey,
-            verified_context.principal_kind(),
-            device_implements_apis,
-            permissions,
-            expires_at_seconds,
-        )?;
         let client_id = request.client_info.id.to_string();
         let connection_id = connection_id(&request.server.id, &client_id, &request.user_nkey)?;
-        let presence = AuthConnectionPresence {
+        let mut presence = AuthConnectionPresence {
+            storage_revision: 0,
             format: "trellis.auth-connection-presence.v1".to_owned(),
             connection_id: connection_id.clone(),
             runtime_connection_id: verified_context.connection_id().to_owned(),
@@ -620,39 +544,152 @@ impl CalloutProcessor {
             last_seen_at: now,
             version: 1,
         };
-        self.ephemeral
+        presence.storage_revision = self
+            .ephemeral
             .put_connection_presence(presence.clone())
             .await?;
-        if self
-            .contexts
-            .validator_cache()
-            .runtime_revocation_time(&token.context_digest)
-            .map_err(|error| denied(error.to_string()))?
-            .is_some()
-        {
-            self.ephemeral
-                .delete_connection_presence(&connection_id)
-                .await?;
-            return Err(denied("authorization context is not admissible"));
-        }
-        self.repository
-            .enqueue_post_commit_actions(vec![super::auth::connection_event_action::<
-                trellis_runtime_apis::apis::trellis_auth_v1::events::ConnectionsOpened,
-            >(
-                &presence,
-                "Auth.Connections.Opened",
-                "opened",
-                None,
-                now,
-            )?])
-            .await?;
-        tracing::debug!(
-            connection_id = %verified_context.connection_id(),
-            login_session_id = ?verified_context.login_session_id(),
-            context_digest = %token.context_digest,
-            "NATS authorization callout admitted"
+        tracing::info!(
+            context_digest = %presence.context_digest,
+            runtime_connection_id = %presence.runtime_connection_id,
+            physical_connection_id = %presence.connection_id,
+            server_id = %presence.server_id,
+            client_id = %presence.client_id,
+            presence_revision = presence.storage_revision,
+            participant_id = %presence.participant_id,
+            "recorded physical connection presence before final admission validation"
         );
-        Ok(jwt)
+
+        let result = async {
+            let permissions = self
+                .contexts
+                .transport_permissions(&verified_context, now_seconds)
+                .await
+                .map_err(|error| denied(error.to_string()))?;
+            let device_implements_apis = if verified_context.principal_kind()
+                == AuthorizationPrincipalKind::Device
+            {
+                let retained = self
+                    .repository
+                    .get_context_by_digest(verified_context.context_digest())
+                    .await?
+                    .ok_or_else(|| denied("authorization context is missing from durable state"))?;
+                self.repository
+                    .get_installed_participant_record(
+                        verified_context.participant_id().to_owned(),
+                        Some(retained.installed_revision),
+                    )
+                    .await?
+                    .is_some_and(|(_, participant)| {
+                        participant.participant_kind == ParticipantKind::Device
+                            && participant.state == ParticipantBindingState::Resolved
+                            && !participant.projection.implemented_apis.is_empty()
+                    })
+            } else {
+                false
+            };
+            tracing::debug!(
+                publish_count = permissions.publish.len(),
+                subscribe_count = permissions.subscribe.len(),
+                jobs_list_services = permissions
+                    .publish
+                    .iter()
+                    .any(|subject| subject == "rpc.v1.Jobs.ListServices"),
+                jobs_metrics = permissions
+                    .publish
+                    .iter()
+                    .any(|subject| subject == "rpc.v1.Jobs.Metrics"),
+                events_query = permissions
+                    .publish
+                    .iter()
+                    .any(|subject| subject == "rpc.v1.events.Query"),
+                health_watch = permissions
+                    .publish
+                    .iter()
+                    .any(|subject| subject == "feed.v1.Health.Watch"),
+                "compiled NATS authorization permissions"
+            );
+            let expires_at_ms = [
+                Some(
+                    verified_context
+                        .expires_at()
+                        .checked_mul(1_000)
+                        .ok_or_else(|| denied("authorization context expiry overflowed"))?,
+                ),
+                Some(
+                    now.checked_add(self.user_jwt_ttl_ms)
+                        .ok_or_else(|| denied("NATS user JWT expiry overflowed"))?,
+                ),
+            ]
+            .into_iter()
+            .flatten()
+            .min()
+            .ok_or_else(|| denied("NATS user JWT has no expiry bound"))?;
+            if expires_at_ms <= now {
+                return Err(denied("NATS user JWT expiry has elapsed"));
+            }
+            let expires_at_seconds = expires_at_ms / 1_000;
+            if expires_at_seconds <= now_seconds {
+                return Err(denied("NATS user JWT expiry is below one second"));
+            }
+            let jwt = self.keys.authorized_user_jwt(
+                &request.user_nkey,
+                verified_context.principal_kind(),
+                device_implements_apis,
+                permissions,
+                expires_at_seconds,
+            )?;
+            if self
+                .contexts
+                .validator_cache()
+                .runtime_revocation_time(&token.context_digest)
+                .map_err(|error| denied(error.to_string()))?
+                .is_some()
+            {
+                self.ephemeral
+                    .delete_connection_presence(&connection_id, presence.storage_revision)
+                    .await?;
+                return Err(denied("authorization context is not admissible"));
+            }
+            self.repository
+                .enqueue_post_commit_actions(vec![super::auth::connection_event_action::<
+                    trellis_runtime_apis::apis::trellis_auth_v1::events::ConnectionsOpened,
+                >(
+                    &presence,
+                    "Auth.Connections.Opened",
+                    "opened",
+                    None,
+                    now,
+                )?])
+                .await?;
+            tracing::debug!(
+                connection_id = %verified_context.connection_id(),
+                login_session_id = ?verified_context.login_session_id(),
+                context_digest = %token.context_digest,
+                "NATS authorization callout admitted"
+            );
+            Ok(jwt)
+        }
+        .await;
+        if result.is_err() {
+            tracing::warn!(
+                context_digest = %presence.context_digest,
+                physical_connection_id = %presence.connection_id,
+                presence_revision = presence.storage_revision,
+                error = %result.as_ref().expect_err("checked error"),
+                "final admission validation failed; deleting exact presence revision"
+            );
+            self.ephemeral
+                .delete_connection_presence(&connection_id, presence.storage_revision)
+                .await?;
+        } else {
+            tracing::info!(
+                context_digest = %presence.context_digest,
+                physical_connection_id = %presence.connection_id,
+                presence_revision = presence.storage_revision,
+                "final admission validation succeeded"
+            );
+        }
+        result
     }
 }
 

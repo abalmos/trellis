@@ -53,6 +53,7 @@ export type TrellisAuth = {
       sessionId: string;
       contextDigest: string | (() => string);
       jwt: string | (() => string);
+      authorizationUsable?: () => boolean;
     },
   ) => Promise<NatsConnectOptions>;
 };
@@ -115,6 +116,9 @@ export async function createAuth(
         authenticator: [
           jwtAuthenticator(options.jwt, encodedSeed),
           (nonce) => {
+            if (options.authorizationUsable?.() === false) {
+              throw new Error("authorization context is suspended");
+            }
             if (!nonce) throw new Error("NATS server nonce is required");
             const contextDigest = typeof options.contextDigest === "function"
               ? options.contextDigest()

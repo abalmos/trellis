@@ -1216,6 +1216,7 @@ export type RuntimeOperationRecord = {
   input: unknown;
   revision: number;
   ownerInstanceId: string;
+  ownerConnectionId: string;
   ownerEpoch: number;
   leaseExpiresAt: string;
   cancelRequestedAt?: string;
@@ -1244,6 +1245,7 @@ export type DurableOperationRecord = {
   input: unknown;
   revision: number;
   ownerInstanceId: string;
+  ownerConnectionId: string;
   ownerEpoch: number;
   leaseExpiresAt: string;
   cancelRequestedAt?: string;
@@ -1302,6 +1304,7 @@ export const DurableOperationRecordSchema = Type.Object({
   operation: Type.String(),
   input: Type.Any(),
   ownerInstanceId: Type.String(),
+  ownerConnectionId: Type.String(),
   ownerEpoch: Type.Number(),
   leaseExpiresAt: Type.String(),
   cancelRequestedAt: Type.Optional(Type.String()),
@@ -2770,6 +2773,7 @@ export class Trellis<
       input: runtime.input,
       revision,
       ownerInstanceId: runtime.ownerInstanceId,
+      ownerConnectionId: runtime.ownerConnectionId,
       ownerEpoch: runtime.ownerEpoch,
       leaseExpiresAt: runtime.leaseExpiresAt,
       ...(runtime.cancelRequestedAt
