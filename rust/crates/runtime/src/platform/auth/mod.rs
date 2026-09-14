@@ -41,7 +41,9 @@ pub(crate) use ephemeral::{
     validate_connection_kick_response, AuthConnectionPresence, AuthEphemeralRepository,
     ConsentApproval, ConsentRequest, NatsAuthEphemeralRepository,
 };
-pub(crate) use grant_repository::GrantRepository;
+pub(crate) use grant_repository::{
+    ConsentAuthorityPreconditions, ConsentBindingPrecondition, GrantRepository,
+};
 pub(super) use http::{
     discover_oidc_providers, router as auth_http_router, AuthHttpOptions, NatsBootstrapIssuer,
 };

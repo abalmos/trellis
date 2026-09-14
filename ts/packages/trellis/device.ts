@@ -831,9 +831,10 @@ export async function connectDeviceWithDeps<
   }
   const sessionOptions = await bootstrap.sessionAuth.natsConnectOptions({
     sessionId: connectInfo.connectionId,
-    contextDigest: () => authorizationContexts.current().contextDigest,
-    jwt: () => authorizationContexts.routingJwt(),
-    authorizationUsable: () => authorizationProviderCache?.ownUsable() ?? true,
+    contextDigest: () => authorizationContexts.transportCurrent().contextDigest,
+    jwt: () => authorizationContexts.transportRoutingJwt(),
+    authorizationUsable: () =>
+      authorizationProviderCache?.transportUsable() ?? true,
   });
   let nc: NatsConnection | undefined;
   let authorizationProviderCache: AuthorizationProviderCache | undefined;
@@ -925,7 +926,7 @@ export async function connectDeviceWithDeps<
         authorizationContexts.setServerClockOffsetMs(
           offsetState.serverClockOffsetMs,
         );
-        const context = await authorizationContexts.install(
+        const context = await authorizationContexts.prepare(
           next.connectInfo.authorizationContext,
           {
             bootstrapJwt: next.connectInfo.transport.jwt,
@@ -933,17 +934,19 @@ export async function connectDeviceWithDeps<
           },
           undefined,
           shouldInstall,
+          undefined,
+          () => () => {
+            installConnectionAvailability(
+              connection,
+              participantAvailability(
+                args.participant,
+                next.connectInfo.apiBindings,
+                next.connectInfo.resourceBindings,
+              ),
+            );
+            refreshApiRoutes(runtimeApi, next.connectInfo.apiBindings);
+          },
         );
-        await authorizationProviderCache.retainOwnContext();
-        installConnectionAvailability(
-          connection,
-          participantAvailability(
-            args.participant,
-            next.connectInfo.apiBindings,
-            next.connectInfo.resourceBindings,
-          ),
-        );
-        refreshApiRoutes(runtimeApi, next.connectInfo.apiBindings);
         return context;
       } catch (error) {
         if (error instanceof TrellisHttpError) {
@@ -952,8 +955,19 @@ export async function connectDeviceWithDeps<
         throw error;
       }
     },
-    onRefresh: () =>
-      connection.status.phase === "connected" ? nc.reconnect() : undefined,
+    onRefresh: async (context) => {
+      if (connection.status.phase === "connected") await nc.reconnect();
+      await authorizationProviderCache.waitReady({ timeoutMs: 30_000 });
+      const generation = authorizationProviderCache.connectionGeneration();
+      await authorizationProviderCache.retainOwnCandidate(
+        context.contextDigest,
+        generation,
+      );
+      authorizationProviderCache.promoteOwnCandidate(
+        context.contextDigest,
+        generation,
+      );
+    },
     onTerminalFailure: async () => {
       if (!nc.isClosed()) await nc.close();
     },

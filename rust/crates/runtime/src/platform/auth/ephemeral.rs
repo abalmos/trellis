@@ -458,9 +458,24 @@ pub(crate) enum ConnectionKickOutcome {
 
 pub(crate) fn validate_connection_kick_response(
     payload: &[u8],
+    expected_server_id: &str,
 ) -> Result<ConnectionKickOutcome, AuthorizationStateError> {
     let response: Value = serde_json::from_slice(payload)
         .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
+    let server_id = response
+        .get("server")
+        .and_then(|server| server.get("id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            AuthorizationStateError::Storage(
+                "NATS connection kick response is missing server identity".to_owned(),
+            )
+        })?;
+    if server_id != expected_server_id {
+        return Err(AuthorizationStateError::Storage(format!(
+            "NATS connection kick response came from server {server_id}, expected {expected_server_id}"
+        )));
+    }
     let Some(error) = response.get("error") else {
         return Ok(ConnectionKickOutcome::Disconnected);
     };
@@ -1139,47 +1154,6 @@ mod nats {
             connection_id: &str,
             expected_revision: u64,
         ) -> Result<(), AuthorizationStateError> {
-            let subject = format!("{}{}", self.connections.prefix, connection_id);
-            let entry = match self
-                .connections
-                .stream
-                .direct_get_last_for_subject(&subject)
-                .await
-            {
-                Ok(entry) => entry,
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        async_nats::jetstream::stream::DirectGetErrorKind::NotFound
-                    ) =>
-                {
-                    return Ok(());
-                }
-                Err(error) => {
-                    return Err(storage(format!(
-                        "failed to read authoritative connection presence key {connection_id}: {error}"
-                    )));
-                }
-            };
-            if entry
-                .headers
-                .get("KV-Operation")
-                .is_some_and(|value| value.as_str() != "PUT")
-            {
-                return Ok(());
-            }
-            let revision = entry
-                .headers
-                .get("Nats-Sequence")
-                .ok_or_else(|| storage("connection presence has no stream revision"))?
-                .as_str()
-                .parse::<u64>()
-                .map_err(|error| {
-                    storage(format!("invalid connection presence revision: {error}"))
-                })?;
-            if revision != expected_revision {
-                return Ok(());
-            }
             match self
                 .connections
                 .delete_expect_revision(connection_id, Some(expected_revision))
@@ -1210,14 +1184,14 @@ mod nats {
                 let entry = match self
                     .connections
                     .stream
-                    .direct_get_last_for_subject(&subject)
+                    .get_last_raw_message_by_subject(&subject)
                     .await
                 {
                     Ok(entry) => entry,
                     Err(error)
                         if matches!(
                             error.kind(),
-                            async_nats::jetstream::stream::DirectGetErrorKind::NotFound
+                            async_nats::jetstream::stream::LastRawMessageErrorKind::NoMessageFound
                         ) =>
                     {
                         continue;
@@ -1228,30 +1202,31 @@ mod nats {
                         )));
                     }
                 };
-                if entry
-                    .headers
-                    .get("KV-Operation")
-                    .is_some_and(|value| value.as_str() != "PUT")
-                {
-                    continue;
+                if entry.subject.as_ref() != subject {
+                    return Err(storage(format!(
+                        "connection presence key {key} returned subject {}",
+                        entry.subject
+                    )));
                 }
-                let revision = entry
-                    .headers
-                    .get("Nats-Sequence")
-                    .ok_or_else(|| {
-                        storage(format!(
-                            "connection presence key {key} has no stream revision"
-                        ))
-                    })?
-                    .as_str()
-                    .parse::<u64>()
-                    .map_err(|error| {
-                        storage(format!(
-                            "connection presence key {key} has invalid stream revision: {error}"
-                        ))
-                    })?;
+                if let Some(operation) = entry.headers.get("KV-Operation") {
+                    match operation.as_str() {
+                        "DEL" | "PURGE" => continue,
+                        "PUT" => {}
+                        other => {
+                            return Err(storage(format!(
+                                "connection presence key {key} has invalid KV operation {other}"
+                            )));
+                        }
+                    }
+                }
                 let mut record = decode::<AuthConnectionPresence>(&entry.payload)?;
-                record.storage_revision = revision;
+                if record.connection_id != key {
+                    return Err(storage(format!(
+                        "connection presence key {key} contains connection {}",
+                        record.connection_id
+                    )));
+                }
+                record.storage_revision = entry.sequence;
                 if login_session_id.is_none_or(|id| record.login_session_id.as_deref() == Some(id))
                 {
                     records.push(record);

@@ -1218,8 +1218,8 @@ export async function connectClientWithDeps<
   const runtimeState = {
     participantDigest: bootstrap.connectInfo.participantDigest,
     sessionId: bootstrap.connectInfo.sessionId,
-    jwt: () => authorizationContexts.routingJwt(),
-    contextDigest: () => authorizationContexts.current().contextDigest,
+    jwt: () => authorizationContexts.transportRoutingJwt(),
+    contextDigest: () => authorizationContexts.transportCurrent().contextDigest,
   };
   let endingSession = false;
   const handleSessionNotFound = identity.mode === "browser"
@@ -1258,7 +1258,8 @@ export async function connectClientWithDeps<
     sessionId: runtimeState.sessionId,
     contextDigest: runtimeState.contextDigest,
     jwt: runtimeState.jwt,
-    authorizationUsable: () => authorizationProviderCache?.ownUsable() ?? true,
+    authorizationUsable: () =>
+      authorizationProviderCache?.transportUsable() ?? true,
   });
   let nc: NatsConnection | undefined;
   let authorizationProviderCache: AuthorizationProviderCache | undefined;
@@ -1383,6 +1384,7 @@ export async function connectClientWithDeps<
         sessionKey: identity.sessionKey,
         cache: authorizationContexts,
         shouldInstall,
+        prepareOnly: true,
         prepareInstall: async (response) => {
           const nextResources = await resolveClientResources({
             nc,
@@ -1410,18 +1412,25 @@ export async function connectClientWithDeps<
           };
         },
       });
-      await authorizationProviderCache.retainOwnContext();
       return result.context;
     },
-    onRefresh: () => {
+    onRefresh: async (context) => {
       nc.setServers(
         selectClientRuntimeTransportServers(
-          authorizationContexts.runtimeBinding().transports,
+          authorizationContexts.transportRuntimeBinding().transports,
         ),
       );
-      return connection.status.phase === "connected"
-        ? nc.reconnect()
-        : undefined;
+      if (connection.status.phase === "connected") await nc.reconnect();
+      await authorizationProviderCache.waitReady({ timeoutMs: 30_000 });
+      const generation = authorizationProviderCache.connectionGeneration();
+      await authorizationProviderCache.retainOwnCandidate(
+        context.contextDigest,
+        generation,
+      );
+      authorizationProviderCache.promoteOwnCandidate(
+        context.contextDigest,
+        generation,
+      );
     },
     onTerminalFailure: async () => {
       if (!nc.isClosed()) {

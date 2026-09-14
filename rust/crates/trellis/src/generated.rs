@@ -25,6 +25,10 @@ pub struct AvailabilitySnapshot {
 }
 
 impl AvailabilitySnapshot {
+    pub(crate) fn is_usable(&self) -> bool {
+        self.usable
+    }
+
     #[cfg(test)]
     pub(crate) fn new(
         permissions: Vec<trellis_protocol::PermissionAtom>,

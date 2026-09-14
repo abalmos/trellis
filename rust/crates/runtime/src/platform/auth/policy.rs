@@ -11,9 +11,11 @@ use super::{
         ConsentResourceActualEntry, ConsentResourceChange,
     },
     ApprovalMode, ApprovedCapability, ApprovedResource, AuthorizationResourceKind,
-    AuthorizationStateError, CapabilityGroupRecord, DelegationCeiling, GrantBinding,
-    LoginPortalRecord, LoginSettingsRecord, ParticipantBindingRecord, PortalGrantOverrideRecord,
-    PortalPolicySnapshot, ResourceBindingEvidence, ResourceBindingState, ResourceCommitment,
+    AuthorizationStateError, CapabilityGroupRecord, ConsentAuthorityPreconditions,
+    ConsentBindingPrecondition, DelegationCeiling, GrantBinding, LoginPortalRecord,
+    LoginSettingsRecord, ParticipantBindingRecord, PortalGrantOverrideRecord,
+    PortalGrantProvenance, PortalPolicySnapshot, ResourceBindingEvidence, ResourceBindingState,
+    ResourceCommitment,
 };
 
 pub(crate) fn portal_allows_authenticated_provider(
@@ -316,27 +318,6 @@ pub(crate) fn participant_delegation_ceiling(
         exact_restrictions: None,
         platform_privileges: Vec::new(),
     })
-}
-
-pub(crate) fn explicit_binding_ceiling(
-    current: Option<&GrantBinding>,
-    now: i64,
-) -> DelegationCeiling {
-    current
-        .filter(|binding| {
-            binding.approval_mode == ApprovalMode::Exact
-                && binding.provenance.is_none()
-                && binding.state == super::GrantBindingState::Active
-                && binding.expires_at.is_none_or(|expires_at| expires_at > now)
-        })
-        .map_or(
-            DelegationCeiling {
-                capabilities: Vec::new(),
-                exact_restrictions: None,
-                platform_privileges: Vec::new(),
-            },
-            |binding| binding.delegation_ceiling.clone(),
-        )
 }
 
 pub(crate) fn participant_resource_commitments(
@@ -663,6 +644,117 @@ pub(crate) struct ProviderLoginAttributes {
 pub(crate) struct PortalAuthoritySelection {
     pub ceiling: DelegationCeiling,
     pub effective_policy_digest: String,
+}
+
+pub(crate) struct ConsentAuthority {
+    pub(crate) ceiling: DelegationCeiling,
+    pub(crate) expires_at: Option<i64>,
+    pub(crate) provenance: Option<PortalGrantProvenance>,
+    pub(crate) preconditions: ConsentAuthorityPreconditions,
+}
+
+pub(crate) struct PortalConsentAuthority<'a> {
+    pub(crate) selection: PortalAuthoritySelection,
+    pub(crate) snapshot: PortalPolicySnapshot,
+    pub(crate) provenance: PortalGrantProvenance,
+    pub(crate) source: Option<&'a GrantBinding>,
+    pub(crate) retained_target: Option<&'a GrantBinding>,
+}
+
+pub(crate) enum ConsentAuthoritySource<'a> {
+    Public,
+    Explicit { target: &'a GrantBinding },
+    Portal(Box<PortalConsentAuthority<'a>>),
+}
+
+pub(crate) fn consent_authority(
+    source: ConsentAuthoritySource<'_>,
+    now: i64,
+) -> Result<ConsentAuthority, AuthorizationStateError> {
+    match source {
+        ConsentAuthoritySource::Public => Ok(ConsentAuthority {
+            ceiling: DelegationCeiling {
+                capabilities: Vec::new(),
+                exact_restrictions: None,
+                platform_privileges: Vec::new(),
+            },
+            expires_at: None,
+            provenance: None,
+            preconditions: ConsentAuthorityPreconditions::default(),
+        }),
+        ConsentAuthoritySource::Explicit { target }
+            if target.approval_mode == ApprovalMode::Exact
+                && target.provenance.is_none()
+                && target.state == super::GrantBindingState::Active
+                && target.expires_at.is_none_or(|expiry| expiry > now) =>
+        {
+            Ok(ConsentAuthority {
+                ceiling: target.delegation_ceiling.clone(),
+                expires_at: target.expires_at,
+                provenance: None,
+                preconditions: ConsentAuthorityPreconditions {
+                    policy: None,
+                    bindings: vec![ConsentBindingPrecondition::from(target)],
+                },
+            })
+        }
+        ConsentAuthoritySource::Explicit { .. } => Err(AuthorizationStateError::NotAuthorized),
+        ConsentAuthoritySource::Portal(portal) => {
+            let PortalConsentAuthority {
+                mut selection,
+                snapshot,
+                provenance,
+                source,
+                retained_target,
+            } = *portal;
+            for binding in source.into_iter().chain(retained_target) {
+                if binding.state != super::GrantBindingState::Active
+                    || binding.expires_at.is_some_and(|expiry| expiry <= now)
+                {
+                    return Err(AuthorizationStateError::NotAuthorized);
+                }
+            }
+            if let Some(target) = retained_target {
+                selection
+                    .ceiling
+                    .capabilities
+                    .retain(|candidate| target.delegation_ceiling.capabilities.contains(candidate));
+                selection.ceiling.platform_privileges.retain(|candidate| {
+                    target
+                        .delegation_ceiling
+                        .platform_privileges
+                        .contains(candidate)
+                });
+                selection.ceiling.exact_restrictions =
+                    target.delegation_ceiling.exact_restrictions.clone();
+            }
+            let expires_at = source
+                .and_then(|binding| binding.expires_at)
+                .into_iter()
+                .chain(retained_target.and_then(|binding| binding.expires_at))
+                .min();
+            let mut bindings = source
+                .into_iter()
+                .chain(retained_target)
+                .map(ConsentBindingPrecondition::from)
+                .collect::<Vec<_>>();
+            bindings.dedup_by(|left, right| {
+                left.owner_kind == right.owner_kind
+                    && left.owner_id == right.owner_id
+                    && left.participant_id == right.participant_id
+                    && left.revision == right.revision
+            });
+            Ok(ConsentAuthority {
+                ceiling: selection.ceiling,
+                expires_at,
+                provenance: Some(provenance),
+                preconditions: ConsentAuthorityPreconditions {
+                    policy: Some(snapshot),
+                    bindings,
+                },
+            })
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -995,5 +1087,157 @@ mod tests {
             ),
             ConsentResourceChange::Unchanged
         );
+    }
+
+    fn consent_binding(
+        approval_mode: ApprovalMode,
+        ceiling: DelegationCeiling,
+        expires_at: Option<i64>,
+        provenance: Option<PortalGrantProvenance>,
+    ) -> GrantBinding {
+        let participant = participant();
+        GrantBinding {
+            owner_kind: super::super::GrantOwnerKind::User,
+            owner_id: "user-1".to_owned(),
+            participant_id: participant.participant_id.clone(),
+            installed_revision: 1,
+            grants: participant.projection.required_grants.clone(),
+            approval_mode,
+            approved_capabilities: Vec::new(),
+            approved_resources: Vec::new(),
+            delegation_ceiling: ceiling,
+            approval_decision_digest: "A".repeat(43),
+            approval_expected_grant_revision: 0,
+            companion_approved: false,
+            platform_privileges: Vec::new(),
+            revision: 3,
+            state: super::super::GrantBindingState::Active,
+            expires_at,
+            provenance,
+            created_at: 1,
+            updated_at: 1,
+        }
+    }
+
+    fn portal_snapshot() -> PortalPolicySnapshot {
+        PortalPolicySnapshot {
+            portal_id: "portal".to_owned(),
+            portal_version: 1,
+            portal_fingerprint: "B".repeat(43),
+            login_settings_version: 1,
+            login_settings_fingerprint: "B".repeat(43),
+            participant_id: "example.app".to_owned(),
+            policy_version: Some(1),
+            policy_fingerprint: Some("B".repeat(43)),
+            capability_group_versions: Vec::new(),
+            capability_group_fingerprints: Vec::new(),
+        }
+    }
+
+    fn provenance(digest: &str) -> PortalGrantProvenance {
+        PortalGrantProvenance {
+            portal_id: "portal".to_owned(),
+            provider_id: "local".to_owned(),
+            roles: Vec::new(),
+            effective_policy_digest: digest.to_owned(),
+        }
+    }
+
+    #[test]
+    fn explicit_target_entitlement_keeps_its_ceiling_and_finite_expiry() {
+        let ceiling = DelegationCeiling {
+            capabilities: vec![ApprovedCapability {
+                id: "app::first".to_owned(),
+                consent_digest: "A".repeat(43),
+            }],
+            exact_restrictions: Some(GrantSet::new(vec![atom("Read")])),
+            platform_privileges: Vec::new(),
+        };
+        let target = consent_binding(ApprovalMode::Exact, ceiling.clone(), Some(1_000), None);
+        let authority =
+            consent_authority(ConsentAuthoritySource::Explicit { target: &target }, 1).unwrap();
+        assert_eq!(authority.ceiling, ceiling);
+        assert_eq!(authority.expires_at, Some(1_000));
+        assert!(authority.provenance.is_none());
+        assert_eq!(authority.preconditions.bindings.len(), 1);
+        assert_eq!(authority.preconditions.bindings[0].revision, 3);
+        assert!(authority.preconditions.policy.is_none());
+
+        let expired = consent_binding(ApprovalMode::Exact, ceiling.clone(), Some(1), None);
+        assert!(matches!(
+            consent_authority(ConsentAuthoritySource::Explicit { target: &expired }, 1),
+            Err(AuthorizationStateError::NotAuthorized)
+        ));
+        let policy_managed = consent_binding(
+            ApprovalMode::Exact,
+            ceiling.clone(),
+            Some(1_000),
+            Some(provenance(&"C".repeat(43))),
+        );
+        assert!(matches!(
+            consent_authority(
+                ConsentAuthoritySource::Explicit {
+                    target: &policy_managed
+                },
+                1
+            ),
+            Err(AuthorizationStateError::NotAuthorized)
+        ));
+    }
+
+    #[test]
+    fn portal_authority_never_widens_a_narrower_retained_child() {
+        let retained = consent_binding(
+            ApprovalMode::Capabilities,
+            DelegationCeiling {
+                capabilities: vec![ApprovedCapability {
+                    id: "app::first".to_owned(),
+                    consent_digest: "A".repeat(43),
+                }],
+                exact_restrictions: None,
+                platform_privileges: Vec::new(),
+            },
+            Some(1_000),
+            Some(provenance(&"C".repeat(43))),
+        );
+        let selection = PortalAuthoritySelection {
+            ceiling: DelegationCeiling {
+                capabilities: vec![
+                    ApprovedCapability {
+                        id: "app::first".to_owned(),
+                        consent_digest: "A".repeat(43),
+                    },
+                    ApprovedCapability {
+                        id: "app::overlap".to_owned(),
+                        consent_digest: "A".repeat(43),
+                    },
+                ],
+                exact_restrictions: None,
+                platform_privileges: Vec::new(),
+            },
+            effective_policy_digest: "D".repeat(43),
+        };
+        let authority = consent_authority(
+            ConsentAuthoritySource::Portal(Box::new(PortalConsentAuthority {
+                selection,
+                snapshot: portal_snapshot(),
+                provenance: provenance(&"D".repeat(43)),
+                source: None,
+                retained_target: Some(&retained),
+            })),
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            authority.ceiling.capabilities,
+            vec![ApprovedCapability {
+                id: "app::first".to_owned(),
+                consent_digest: "A".repeat(43),
+            }]
+        );
+        assert_eq!(authority.expires_at, Some(1_000));
+        assert!(authority.provenance.is_some());
+        assert!(authority.preconditions.policy.is_some());
+        assert_eq!(authority.preconditions.bindings.len(), 1);
     }
 }

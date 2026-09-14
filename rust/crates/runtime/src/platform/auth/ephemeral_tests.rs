@@ -6,15 +6,19 @@ const DIGEST: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 #[test]
 fn connection_kick_response_rejects_system_errors() {
-    validate_connection_kick_response(br#"{"server":{}}"#).expect("successful response");
+    validate_connection_kick_response(br#"{"server":{"id":"N1"}}"#, "N1")
+        .expect("successful response");
     validate_connection_kick_response(
-        br#"{"error":{"code":500,"description":"no such client or leafnode id"}}"#,
+        br#"{"server":{"id":"N1"},"error":{"code":500,"description":"no such client or leafnode id"}}"#,
+        "N1",
     )
     .expect("already disconnected response");
     assert!(validate_connection_kick_response(
-        br#"{"error":{"code":403,"description":"permission denied"}}"#
+        br#"{"server":{"id":"N1"},"error":{"code":403,"description":"permission denied"}}"#,
+        "N1",
     )
     .is_err());
+    assert!(validate_connection_kick_response(br#"{"server":{"id":"N2"}}"#, "N1").is_err());
 }
 
 pub(crate) fn browser_flow() -> AuthBrowserFlow {

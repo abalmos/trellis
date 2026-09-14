@@ -2702,10 +2702,11 @@ export function connectTrellisServiceWithRuntimeDeps<
       const { authenticator, inboxPrefix } = await sessionAuth
         .natsConnectOptions({
           sessionId: bootstrap.connectInfo.connectionId,
-          contextDigest: () => authorizationContexts.current().contextDigest,
-          jwt: () => authorizationContexts.routingJwt(),
+          contextDigest: () =>
+            authorizationContexts.transportCurrent().contextDigest,
+          jwt: () => authorizationContexts.transportRoutingJwt(),
           authorizationUsable: () =>
-            authorizationProviderCache?.ownUsable() ?? true,
+            authorizationProviderCache?.transportUsable() ?? true,
         });
 
       let nc: NatsConnection | undefined;
@@ -2860,7 +2861,7 @@ export function connectTrellisServiceWithRuntimeDeps<
               authorizationContexts.setServerClockOffsetMs(
                 next.serverClockOffsetMs,
               );
-              const context = await authorizationContexts.install(
+              const context = await authorizationContexts.prepare(
                 next.connectInfo.authorizationContext,
                 {
                   bootstrapJwt: next.connectInfo.jwt,
@@ -2891,7 +2892,6 @@ export function connectTrellisServiceWithRuntimeDeps<
                   );
                 },
               );
-              await authorizationProviderCache.retainOwnContext();
               return context;
             } catch (error) {
               if (error instanceof TrellisHttpError) {
@@ -2903,13 +2903,26 @@ export function connectTrellisServiceWithRuntimeDeps<
               throw error;
             }
           },
-          onRefresh: async () => {
+          onRefresh: async (context) => {
             nc.setServers(
               selectRuntimeTransportServers(
-                authorizationContexts.runtimeBinding().transports,
+                authorizationContexts.transportRuntimeBinding().transports,
               ),
             );
-            await nc.reconnect();
+            if (service.connection.status.phase === "connected") {
+              await nc.reconnect();
+            }
+            await authorizationProviderCache.waitReady({ timeoutMs: 30_000 });
+            const generation = authorizationProviderCache
+              .connectionGeneration();
+            await authorizationProviderCache.retainOwnCandidate(
+              context.contextDigest,
+              generation,
+            );
+            authorizationProviderCache.promoteOwnCandidate(
+              context.contextDigest,
+              generation,
+            );
           },
           onTerminalFailure: async () => {
             if (!nc.isClosed()) await nc.close();

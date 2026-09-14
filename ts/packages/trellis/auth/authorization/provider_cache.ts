@@ -119,6 +119,7 @@ export class AuthorizationProviderCache {
   #ownEntry?: ProviderContextEntry;
   #onOwnInvalidated?: () => void;
   #ownUsable = true;
+  readonly #connectedWaiters = new Set<() => void>();
 
   private constructor(
     registry: AuthorizationRegistryReader,
@@ -178,14 +179,51 @@ export class AuthorizationProviderCache {
   /** Retain exact revocation coverage for the currently installed own context. */
   async retainOwnContext(): Promise<void> {
     const digest = this.#cache.current().contextDigest;
+    await this.#retainOwnContext(digest, this.#generation);
+    this.#ownUsable = true;
+  }
+
+  /** Retain candidate coverage on the exact admitted connection generation. */
+  async retainOwnCandidate(
+    digest: string,
+    generation: number,
+  ): Promise<void> {
+    await this.#retainOwnContext(digest, generation);
+  }
+
+  /** Promote the candidate only while its admitted coverage remains current. */
+  promoteOwnCandidate(digest: string, generation: number): void {
+    if (
+      !this.#connected || generation !== this.#generation ||
+      this.#ownEntry?.contextDigest !== digest || !this.#ownEntry.covered ||
+      this.#ownEntry.generation !== generation
+    ) {
+      throw new Error(
+        "authorization candidate coverage changed before promotion",
+      );
+    }
+    this.#cache.promote(digest);
+    this.#ownUsable = true;
+  }
+
+  connectionGeneration(): number {
+    return this.#generation;
+  }
+
+  async #retainOwnContext(digest: string, generation: number): Promise<void> {
     const entry = await this.#lease(digest, false);
-    if (entry.revokedAt !== undefined) {
+    if (
+      entry.revokedAt !== undefined || !entry.covered ||
+      entry.generation !== generation || generation !== this.#generation ||
+      !this.#connected
+    ) {
       this.#release(entry);
-      throw new Error("authorization context is revoked");
+      throw new Error(
+        "authorization context coverage changed during installation",
+      );
     }
     if (this.#ownEntry) this.#release(this.#ownEntry);
     this.#ownEntry = entry;
-    this.#ownUsable = true;
   }
 
   /** Returns whether the current own authorization may authenticate transport. */
@@ -193,11 +231,17 @@ export class AuthorizationProviderCache {
     return this.#ownUsable;
   }
 
+  /** A verified private candidate may authenticate transport while application use is suspended. */
+  transportUsable(): boolean {
+    return this.#ownUsable || this.#cache.hasCandidate();
+  }
+
   /** Suspend stale transport authentication and request one current context. */
   refreshOwnAuthorization(): void {
-    if (!this.#ownUsable) return;
-    this.#ownUsable = false;
-    this.#onOwnInvalidated?.();
+    if (this.#ownUsable) {
+      this.#ownUsable = false;
+      this.#onOwnInvalidated?.();
+    }
     this.#cache.requestRefresh();
   }
 
@@ -222,7 +266,7 @@ export class AuthorizationProviderCache {
   waitReady(
     options: { signal?: AbortSignal; timeoutMs?: number } = {},
   ): Promise<void> {
-    if (!this.#started || this.#stopped || !this.#connected) {
+    if (!this.#started || this.#stopped) {
       return Promise.reject(
         new AuthorizationProviderUnavailableError(
           "authorization provider is unavailable",
@@ -230,7 +274,30 @@ export class AuthorizationProviderCache {
       );
     }
     if (options.signal?.aborted) return Promise.reject(options.signal.reason);
-    return Promise.resolve();
+    if (this.#connected) return Promise.resolve();
+    return new Promise<void>((resolve, reject) => {
+      const ready = () => {
+        clearTimeout(timer);
+        options.signal?.removeEventListener("abort", aborted);
+        resolve();
+      };
+      const aborted = () => {
+        this.#connectedWaiters.delete(ready);
+        clearTimeout(timer);
+        reject(options.signal?.reason);
+      };
+      const timer = setTimeout(() => {
+        this.#connectedWaiters.delete(ready);
+        options.signal?.removeEventListener("abort", aborted);
+        reject(
+          new AuthorizationProviderUnavailableError(
+            "authorization provider readiness timed out",
+          ),
+        );
+      }, options.timeoutMs ?? 30_000);
+      this.#connectedWaiters.add(ready);
+      options.signal?.addEventListener("abort", aborted, { once: true });
+    });
   }
 
   /** Return current provider health. */
@@ -258,14 +325,36 @@ export class AuthorizationProviderCache {
     if (phase === "error") return;
     const wasConnected = this.#connected;
     this.#connected = phase === "connected";
-    if (wasConnected && !this.#connected && phase !== "closed") {
-      this.#cache.requestRefresh();
-    }
     if (wasConnected && !this.#connected) {
+      this.#ownUsable = false;
+      this.#onOwnInvalidated?.();
+      if (this.#ownEntry) this.#release(this.#ownEntry);
+      this.#ownEntry = undefined;
       this.#generation += 1;
       for (const entry of this.#contexts.values()) this.#invalidate(entry);
       this.#contexts.clear();
       this.#inFlight.clear();
+    }
+    if (!wasConnected && this.#connected) {
+      for (const ready of this.#connectedWaiters) ready();
+      this.#connectedWaiters.clear();
+      if (!this.#cache.hasCandidate()) {
+        const generation = this.#generation;
+        void this.#restoreOwnContext(generation);
+      }
+    }
+  }
+
+  async #restoreOwnContext(generation: number): Promise<void> {
+    while (
+      !this.#stopped && this.#connected && this.#generation === generation
+    ) {
+      try {
+        await this.retainOwnContext();
+        return;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
     }
   }
 
@@ -740,6 +829,13 @@ export class AuthorizationProviderCache {
   }
 
   #invalidate(entry: ProviderContextEntry): void {
+    const wasOwn = this.#ownEntry === entry;
+    if (wasOwn) {
+      this.#ownEntry = undefined;
+      this.#ownUsable = false;
+      this.#onOwnInvalidated?.();
+      this.#release(entry);
+    }
     entry.covered = false;
     entry.disposed = true;
     void entry.closeWatch?.();
@@ -748,6 +844,12 @@ export class AuthorizationProviderCache {
       this.#contexts.delete(entry.contextDigest);
     }
     if (entry.leases === 0) this.#disposeResources(entry);
+    if (
+      wasOwn && entry.revokedAt === undefined && this.#connected &&
+      !this.#cache.hasCandidate()
+    ) {
+      void this.#restoreOwnContext(this.#generation);
+    }
   }
 
   #release(entry: ProviderContextEntry): void {

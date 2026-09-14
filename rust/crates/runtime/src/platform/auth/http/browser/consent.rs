@@ -2,14 +2,8 @@ use super::super::*;
 use super::local::{portal_flow_response, PortalFlowResponse};
 use crate::platform::auth::policy::portal_allows_authenticated_provider;
 use crate::platform::auth::{
-    ApprovalMode, ApprovedCapability, ApprovedResource, DelegationCeiling, GrantBinding,
-    PortalGrantProvenance, PortalPolicySnapshot,
+    ApprovalMode, ApprovedCapability, ApprovedResource, GrantBinding, PortalGrantProvenance,
 };
-
-struct ConsentCeiling {
-    ceiling: DelegationCeiling,
-    policy: Option<(PortalPolicySnapshot, PortalGrantProvenance)>,
-}
 
 async fn consent_ceiling<R, E>(
     state: &AuthHttpState<R, E>,
@@ -18,10 +12,23 @@ async fn consent_ceiling<R, E>(
     current: Option<&GrantBinding>,
     attributes: &ProviderLoginAttributes,
     now: i64,
-) -> Result<ConsentCeiling, HttpError>
+) -> Result<super::super::super::policy::ConsentAuthority, HttpError>
 where
     R: PortalRepository + Clone,
 {
+    if current.is_some_and(|binding| {
+        binding.approval_mode == ApprovalMode::Exact
+            && binding.provenance.is_none()
+            && binding.state == GrantBindingState::Active
+            && binding.expires_at.is_none_or(|expiry| expiry > now)
+    }) {
+        return Ok(super::super::super::policy::consent_authority(
+            super::super::super::policy::ConsentAuthoritySource::Explicit {
+                target: current.expect("checked above"),
+            },
+            now,
+        )?);
+    }
     if let Some(policy) = state
         .service
         .repository()
@@ -51,23 +58,29 @@ where
         )?;
         let selection =
             resolve_portal_authority_selection(&policy, &groups, participant, attributes)?;
-        return Ok(ConsentCeiling {
-            ceiling: selection.ceiling,
-            policy: Some((
-                snapshot,
-                PortalGrantProvenance {
-                    portal_id: flow.portal_id.clone(),
-                    provider_id: attributes.provider_id.clone(),
-                    roles: attributes.roles.clone(),
-                    effective_policy_digest: selection.effective_policy_digest,
+        let effective_policy_digest = selection.effective_policy_digest.clone();
+        return Ok(super::super::super::policy::consent_authority(
+            super::super::super::policy::ConsentAuthoritySource::Portal(Box::new(
+                super::super::super::policy::PortalConsentAuthority {
+                    selection,
+                    snapshot,
+                    provenance: PortalGrantProvenance {
+                        portal_id: flow.portal_id.clone(),
+                        provider_id: attributes.provider_id.clone(),
+                        roles: attributes.roles.clone(),
+                        effective_policy_digest,
+                    },
+                    source: None,
+                    retained_target: None,
                 },
             )),
-        });
+            now,
+        )?);
     }
-    Ok(ConsentCeiling {
-        ceiling: super::super::super::policy::explicit_binding_ceiling(current, now),
-        policy: None,
-    })
+    Ok(super::super::super::policy::consent_authority(
+        super::super::super::policy::ConsentAuthoritySource::Public,
+        now,
+    )?)
 }
 
 pub(crate) async fn decide_approval<R, E>(
@@ -292,18 +305,15 @@ where
         approval_mode: ApprovalMode::Capabilities,
         approved_capabilities: approval.approved_capabilities.clone(),
         approved_resources: approval.approved_resources.clone(),
-        delegation_ceiling: authority.ceiling,
+        delegation_ceiling: authority.ceiling.clone(),
         approval_decision_digest: approval.decision_digest.clone(),
         companion_approved: approval.companion_approved,
         platform_privileges,
         expected_revision: flow.target_grant_revision,
         expected_current_installed_revision: Some(flow.installed_revision),
         state: GrantBindingState::Active,
-        expires_at: None,
-        provenance: authority
-            .policy
-            .as_ref()
-            .map(|(_, provenance)| provenance.clone()),
+        expires_at: authority.expires_at,
+        provenance: authority.provenance.clone(),
     };
     let idempotency = idempotency(
         &flow_id,
@@ -313,28 +323,20 @@ where
         &request_digest,
         now,
     )?;
-    let durable = if let Some((snapshot, _)) = authority.policy {
-        state
-            .service
-            .repository()
-            .set_portal_grant_binding(replacement, snapshot, idempotency)
-            .await
-    } else {
-        state
-            .service
-            .repository()
-            .set_grant_binding(replacement, idempotency)
-            .await
-    }
-    .map_err(|error| match error {
-        AuthorizationStateError::StorageConflict => HttpError::conflict("authority_changed"),
-        AuthorizationStateError::InvalidRecord(message)
-            if message == "grant binding does not match resolved authority" =>
-        {
-            HttpError::conflict("authority_changed")
-        }
-        error => error.into(),
-    })?;
+    let durable = state
+        .service
+        .repository()
+        .set_consent_grant_binding(replacement, authority.preconditions, idempotency)
+        .await
+        .map_err(|error| match error {
+            AuthorizationStateError::StorageConflict => HttpError::conflict("authority_changed"),
+            AuthorizationStateError::InvalidRecord(message)
+                if message == "grant binding does not match resolved authority" =>
+            {
+                HttpError::conflict("authority_changed")
+            }
+            error => error.into(),
+        })?;
     let durable_result_digest = trellis_protocol::digest_json(&durable)
         .map_err(|_| HttpError::internal("authority_digest"))?;
     let expected = flow.version;

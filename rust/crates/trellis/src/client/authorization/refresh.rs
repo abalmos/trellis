@@ -28,6 +28,9 @@ fn is_terminal_refresh_error(code: &str) -> bool {
             | "instance_inactive"
             | "device_inactive"
             | "activation_required"
+            | "authority_revoked"
+            | "authority_expired"
+            | "authority_not_found"
             | "delegation_expired"
             | "context_refresh_mismatch"
             | "invalid_proof"
@@ -39,16 +42,16 @@ pub(crate) async fn refresh(
     cache: &AuthorizationContextCache,
     auth: &SessionAuth,
     promote: bool,
-) -> Result<bool, TrellisClientError> {
+) -> Result<(String, bool), TrellisClientError> {
     if auth.session_key != cache.session_key {
         return Err(TrellisClientError::Bootstrap(
             "refresh signing key does not belong to this connection".into(),
         ));
     }
-    let observed_digest = cache.context_digest().ok();
+    let observed_digest = cache.retained_context_digest().ok();
     let _refresh = cache.lock_refresh().await;
-    if observed_digest != cache.context_digest().ok() {
-        return Ok(false);
+    if observed_digest != cache.retained_context_digest().ok() {
+        return Ok((cache.retained_context_digest()?, false));
     }
     let previous = cache.state_snapshot()?;
     let request_started_at = system_now_millis()?;
@@ -168,20 +171,26 @@ pub(crate) async fn refresh(
     ) {
         object.insert("companion".to_owned(), companion.clone());
     }
-    cache.install(
-        AuthorizationInstallation {
-            context: serde_json::from_value(response["authorizationContext"].clone())?,
-            routing: serde_json::from_value(response["routing"].clone())?,
-            runtime: serde_json::from_value(runtime)?,
-            api_bindings: serde_json::from_value(response["apiBindings"].clone())?,
-            server_clock_offset_ms: server_now
-                .checked_sub(midpoint)
-                .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap time overflow".into()))?,
-            authorization,
-        },
-        promote,
-    )?;
-    Ok(previous.runtime.as_ref() != Some(&cache.runtime_binding()?))
+    let installation = AuthorizationInstallation {
+        context: serde_json::from_value(response["authorizationContext"].clone())?,
+        routing: serde_json::from_value(response["routing"].clone())?,
+        runtime: serde_json::from_value(runtime)?,
+        api_bindings: serde_json::from_value(response["apiBindings"].clone())?,
+        server_clock_offset_ms: server_now
+            .checked_sub(midpoint)
+            .ok_or_else(|| TrellisClientError::Bootstrap("bootstrap time overflow".into()))?,
+        authorization,
+    };
+    let context_digest = if promote {
+        cache.install_initial(installation)?;
+        cache.retained_context_digest()?
+    } else {
+        cache.prepare(installation)?
+    };
+    Ok((
+        context_digest,
+        previous.runtime.as_ref() != Some(&cache.runtime_binding()?),
+    ))
 }
 
 /// Background own-context refresh on the retained NATS connection.
@@ -204,22 +213,47 @@ pub(crate) fn spawn_authorization_context_refresh_task(
                     return;
                 }
             };
-            let requested_digest = tokio::select! {
-                () = tokio::time::sleep(delay) => None,
-                digest = contexts.wait_refresh_request() => Some(digest),
+            let request = tokio::select! {
+                () = tokio::time::sleep(delay) => super::own_context::AuthorizationRefreshRequest {
+                    context_digest: contexts.retained_context_digest().ok(),
+                    refresh_credential: true,
+                },
+                request = contexts.wait_refresh_request() => request,
             };
-            if requested_digest.is_some_and(|digest| contexts.context_digest().ok() != digest) {
+            if request.context_digest.is_some()
+                && request.context_digest != contexts.retained_context_digest().ok()
+            {
                 continue;
             }
             let mut applied = applied_native_authorization.lock().await;
-            contexts.suspend();
-            match refresh(&contexts, &auth, false).await {
-                Ok(_) => {
-                    if let Err(error) = provider.retain_own_context().await {
-                        tracing::warn!(%error, "refreshed own-context coverage is unavailable");
-                        contexts.request_refresh();
-                        continue;
+            if !request.refresh_credential && request.context_digest.is_some() {
+                if let Some(digest) = request.context_digest {
+                    let epoch = provider.epoch();
+                    match provider.retain_own_context(&digest, epoch).await {
+                        Ok(()) => {
+                            if contexts.candidate_digest().is_err() {
+                                // Coverage is restored for the already-active installation.
+                                continue;
+                            }
+                            match contexts.promote(&digest) {
+                                Ok(()) => continue,
+                                Err(error) => {
+                                    tracing::warn!(%error, "authorization coverage promotion failed")
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, "authorization coverage reconciliation will retry")
+                        }
                     }
+                }
+                drop(applied);
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                contexts.request_coverage_reconciliation();
+                continue;
+            }
+            match contexts.prepare_refresh(&auth).await {
+                Ok((candidate_digest, _)) => {
                     let refreshed =
                         match super::super::connection::AppliedNativeAuthorization::from_cache(
                             &contexts,
@@ -241,7 +275,13 @@ pub(crate) fn spawn_authorization_context_refresh_task(
                     {
                         tracing::warn!(%error, "native connection refresh will retry");
                         contexts.request_refresh();
-                    } else if let Err(error) = contexts.promote() {
+                    } else if let Err(error) = provider
+                        .retain_own_context(&candidate_digest, provider.epoch())
+                        .await
+                    {
+                        tracing::warn!(%error, "refreshed own-context coverage is unavailable");
+                        contexts.request_refresh();
+                    } else if let Err(error) = contexts.promote(&candidate_digest) {
                         tracing::warn!(%error, "refreshed authorization promotion failed");
                         contexts.request_refresh();
                     }
@@ -260,6 +300,7 @@ pub(crate) fn spawn_authorization_context_refresh_task(
                     tracing::warn!(%error, "authorization context refresh will retry");
                     drop(applied);
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    contexts.request_refresh();
                 }
             }
         }

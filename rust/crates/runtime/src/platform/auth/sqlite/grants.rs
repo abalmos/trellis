@@ -1517,12 +1517,12 @@ impl SqliteAuthorizationStore {
     pub(crate) async fn apply_companion_activation_claim(
         &self,
         replacement: Option<GrantBindingReplacement>,
-        policy: Option<super::super::PortalPolicySnapshot>,
+        authority: Option<super::super::ConsentAuthorityPreconditions>,
         command: ActivationReviewClaim,
     ) -> Result<Value, AuthorizationStateError> {
         self.apply_companion_activation(
             replacement,
-            policy,
+            authority,
             CompanionActivationReviewMutation::Claim(command),
         )
         .await
@@ -1531,12 +1531,12 @@ impl SqliteAuthorizationStore {
     pub(crate) async fn apply_companion_activation_decision(
         &self,
         replacement: Option<GrantBindingReplacement>,
-        policy: Option<super::super::PortalPolicySnapshot>,
+        authority: Option<super::super::ConsentAuthorityPreconditions>,
         command: ActivationReviewDecision,
     ) -> Result<Value, AuthorizationStateError> {
         self.apply_companion_activation(
             replacement,
-            policy,
+            authority,
             CompanionActivationReviewMutation::Decision(command),
         )
         .await
@@ -1545,7 +1545,7 @@ impl SqliteAuthorizationStore {
     async fn apply_companion_activation(
         &self,
         replacement: Option<GrantBindingReplacement>,
-        policy: Option<super::super::PortalPolicySnapshot>,
+        authority: Option<super::super::ConsentAuthorityPreconditions>,
         mutation: CompanionActivationReviewMutation,
     ) -> Result<Value, AuthorizationStateError> {
         match &mutation {
@@ -1569,8 +1569,8 @@ impl SqliteAuthorizationStore {
         }
         self.run(move |connection| {
             let transaction = connection.transaction().map_err(sql_error)?;
-            if let Some(policy) = &policy {
-                verify_portal_policy_snapshot(&transaction, policy)?;
+            if let Some(authority) = &authority {
+                verify_consent_authority_preconditions(&transaction, authority)?;
             }
             let idempotency = match &mutation {
                 CompanionActivationReviewMutation::Claim(command) => &command.idempotency,
@@ -2042,6 +2042,29 @@ impl super::super::GrantRepository for SqliteAuthorizationStore {
         .await
     }
 
+    async fn set_consent_grant_binding(
+        &self,
+        replacement: GrantBindingReplacement,
+        authority: super::super::ConsentAuthorityPreconditions,
+        idempotency: IdempotencyResultRecord,
+    ) -> Result<Value, AuthorizationStateError> {
+        self.run(move |connection| {
+            let transaction = connection.transaction().map_err(sql_error)?;
+            verify_consent_authority_preconditions(&transaction, &authority)?;
+            if let Some(result) = sqlite_idempotency_replay(&transaction, &idempotency)? {
+                return Ok(result);
+            }
+            let (binding, actions) =
+                replace_grant_binding(&transaction, replacement, idempotency.created_at)?;
+            let mut idempotency = idempotency;
+            idempotency.result = json!({"binding": binding});
+            insert_sql_idempotency_and_actions(&transaction, &idempotency, &actions)?;
+            transaction.commit().map_err(sql_error)?;
+            Ok(idempotency.result)
+        })
+        .await
+    }
+
     async fn revoke_portal_grant_binding(
         &self,
         owner_id: String,
@@ -2180,6 +2203,36 @@ fn verify_portal_policy_snapshot(
     Ok(())
 }
 
+fn verify_consent_authority_preconditions(
+    transaction: &Connection,
+    authority: &super::super::ConsentAuthorityPreconditions,
+) -> Result<(), AuthorizationStateError> {
+    if let Some(policy) = &authority.policy {
+        verify_portal_policy_snapshot(transaction, policy)?;
+    }
+    let now = i64::try_from(time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000)
+        .map_err(|_| AuthorizationStateError::InvalidRecord("current time overflow".to_owned()))?;
+    for expected in &authority.bindings {
+        let current = load_grant_binding(
+            transaction,
+            expected.owner_kind,
+            &expected.owner_id,
+            &expected.participant_id,
+        )?
+        .ok_or(AuthorizationStateError::StorageConflict)?;
+        if current.revision != expected.revision
+            || current.state != super::super::GrantBindingState::Active
+            || current.expires_at != expected.expires_at
+            || current.expires_at.is_some_and(|expiry| expiry <= now)
+            || current.delegation_ceiling != expected.delegation_ceiling
+            || current.provenance != expected.provenance
+        {
+            return Err(AuthorizationStateError::StorageConflict);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod package_evidence_tests {
     use super::*;
@@ -2189,12 +2242,12 @@ mod package_evidence_tests {
     use crate::platform::auth::sqlite::deployments::insert_deployment_profile;
     use crate::platform::auth::{
         portal_policy_snapshot, resolve_api_bindings, resolve_portal_authority_selection,
-        ApprovalMode, DelegationCeiling, DeploymentProfileRecord, DeploymentProfileState,
-        GrantRepository, LoginPortalMutation, LoginPortalRecord, LoginSettingsRecord,
-        OutboxRepository, ParticipantBindingState, PortalGrantOverrideRecord,
-        PortalGrantProvenance, PortalRepository, PrincipalKind, ProviderLoginAttributes,
-        ProvisionedIdentityKind, ProvisionedIdentityRecord, ProvisionedIdentityState,
-        SessionRepository,
+        ApprovalMode, ConsentAuthorityPreconditions, ConsentBindingPrecondition, DelegationCeiling,
+        DeploymentProfileRecord, DeploymentProfileState, GrantRepository, LoginPortalMutation,
+        LoginPortalRecord, LoginSettingsRecord, OutboxRepository, ParticipantBindingState,
+        PortalGrantOverrideRecord, PortalGrantProvenance, PortalRepository, PrincipalKind,
+        ProviderLoginAttributes, ProvisionedIdentityKind, ProvisionedIdentityRecord,
+        ProvisionedIdentityState, SessionRepository,
     };
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
     use ed25519_dalek::SigningKey;
@@ -3721,25 +3774,135 @@ service Missing { implements orders; }
     }
 
     #[tokio::test]
-    async fn semantic_digest_accepts_distinct_evidence_documents() {
-        let store = SqliteAuthorizationStore::open_in_memory().expect("store");
-        store
-            .run(|connection| {
-                let digest = "x".repeat(43);
-                accept_package_evidence(connection, &digest, "example", "{}", false, None, 1)?;
-                let second = accept_package_evidence(
-                    connection,
-                    &digest,
-                    "example",
-                    r#"{"rootPackage":"different"}"#,
-                    false,
-                    None,
-                    2,
-                )?;
-                assert_ne!(second, URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(b"{}")));
-                Ok(())
-            })
+    async fn consent_authority_preconditions_fence_expiry_and_revision() {
+        const NOW: i64 = 1_700_000_000_000;
+        const FUTURE: i64 = 9_000_000_000_000;
+        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
+        let actor =
+            crate::platform::auth::tests::conformance::fixtures::install_login_mutation_actor(
+                &store, NOW,
+            )
             .await
-            .expect("evidence check");
+            .unwrap();
+        let participant =
+            crate::platform::auth::builtins::console_participant_binding(NOW).unwrap();
+        let participant_id = participant.participant_id.clone();
+        store
+            .put_participant_binding(participant.clone())
+            .await
+            .unwrap();
+        let grants = participant.projection.required_grants.clone();
+        let replacement = |expected_revision, expires_at| GrantBindingReplacement {
+            owner_kind: GrantOwnerKind::User,
+            owner_id: actor.principal_id.clone(),
+            participant_id: participant_id.clone(),
+            installed_revision: 1,
+            grants: grants.clone(),
+            approval_mode: ApprovalMode::Exact,
+            approved_capabilities: Vec::new(),
+            approved_resources: Vec::new(),
+            delegation_ceiling: DelegationCeiling {
+                capabilities: Vec::new(),
+                exact_restrictions: Some(grants.clone()),
+                platform_privileges: Vec::new(),
+            },
+            approval_decision_digest: "A".repeat(43),
+            companion_approved: false,
+            platform_privileges: Vec::new(),
+            expected_revision,
+            expected_current_installed_revision: Some(1),
+            state: GrantBindingState::Active,
+            expires_at,
+            provenance: None,
+        };
+        let idempotency = |purpose: &str, digest: &str| IdempotencyResultRecord {
+            scope_key: trellis_protocol::digest_json(&json!([purpose])).unwrap(),
+            purpose: purpose.to_owned(),
+            signer_id: actor.principal_id.clone(),
+            request_id: purpose.to_owned(),
+            request_digest: digest.to_owned(),
+            result: Value::Null,
+            created_at: NOW,
+            expires_at: NOW + 60_000,
+        };
+        let load = || {
+            let (owner, participant) = (actor.principal_id.clone(), participant_id.clone());
+            let store = store.clone();
+            async move {
+                store
+                    .get_grant_binding(GrantOwnerKind::User, owner, participant)
+                    .await
+                    .unwrap()
+                    .unwrap()
+            }
+        };
+
+        store
+            .set_grant_binding(
+                replacement(0, Some(FUTURE)),
+                idempotency("consent.finite", &"B".repeat(43)),
+            )
+            .await
+            .unwrap();
+        let binding = load().await;
+        assert_eq!(binding.expires_at, Some(FUTURE));
+
+        // Matching source revision and finite expiry commit and preserve the expiry.
+        store
+            .set_consent_grant_binding(
+                replacement(binding.revision, Some(FUTURE)),
+                ConsentAuthorityPreconditions {
+                    policy: None,
+                    bindings: vec![ConsentBindingPrecondition::from(&binding)],
+                },
+                idempotency("consent.keep", &"C".repeat(43)),
+            )
+            .await
+            .unwrap();
+        let preserved = load().await;
+        assert_eq!(preserved.expires_at, Some(FUTURE));
+
+        // A stale source revision is rejected inside the commit transaction.
+        assert!(matches!(
+            store
+                .set_consent_grant_binding(
+                    replacement(preserved.revision, Some(FUTURE)),
+                    ConsentAuthorityPreconditions {
+                        policy: None,
+                        bindings: vec![ConsentBindingPrecondition {
+                            revision: preserved.revision + 1,
+                            ..ConsentBindingPrecondition::from(&preserved)
+                        }],
+                    },
+                    idempotency("consent.stale", &"D".repeat(43)),
+                )
+                .await,
+            Err(AuthorizationStateError::StorageConflict)
+        ));
+        assert_eq!(load().await.revision, preserved.revision);
+
+        // An expired source cannot be extended into a fresh binding.
+        store
+            .set_grant_binding(
+                replacement(preserved.revision, Some(1)),
+                idempotency("consent.expired", &"E".repeat(43)),
+            )
+            .await
+            .unwrap();
+        let expired = load().await;
+        assert!(matches!(
+            store
+                .set_consent_grant_binding(
+                    replacement(expired.revision, Some(FUTURE)),
+                    ConsentAuthorityPreconditions {
+                        policy: None,
+                        bindings: vec![ConsentBindingPrecondition::from(&expired)],
+                    },
+                    idempotency("consent.expired-reject", &"F".repeat(43)),
+                )
+                .await,
+            Err(AuthorizationStateError::StorageConflict)
+        ));
+        assert_eq!(load().await.revision, expired.revision);
     }
 }

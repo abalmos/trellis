@@ -18,27 +18,41 @@ type AuthDeviceUserAuthoritiesResolveOperation =
 use super::auth::{
     ActivationReviewClaim, ActivationReviewDecision, ApprovalMode, ApprovedCapability,
     ApprovedResource, AuthService, AuthorityEvidenceRepository, ClaimActivationReviewInput,
-    DecideActivationReviewInput, DelegationCeiling, DeploymentRepository,
-    DeviceActivationReviewRecord, DeviceActivationReviewState, DeviceDelegationRecord,
-    DeviceDelegationState, DeviceReviewMode, GrantBindingReplacement, GrantBindingState,
-    GrantOwnerKind, IdempotencyResultRecord, PortalGrantProvenance, PortalPolicySnapshot,
-    PortalRepository, PostCommitActionRecord, ProvisioningRepository, SessionRecord, SessionState,
-    SqliteAuthorizationStore,
+    DecideActivationReviewInput, DeploymentRepository, DeviceActivationReviewRecord,
+    DeviceActivationReviewState, DeviceDelegationRecord, DeviceDelegationState, DeviceReviewMode,
+    GrantBindingReplacement, GrantBindingState, GrantOwnerKind, IdempotencyResultRecord,
+    PortalGrantProvenance, PortalRepository, PostCommitActionRecord, ProvisioningRepository,
+    SessionRecord, SessionState, SqliteAuthorizationStore,
 };
-
-struct CompanionConsentAuthority {
-    ceiling: DelegationCeiling,
-    expires_at: Option<i64>,
-    policy: PortalPolicySnapshot,
-    provenance: PortalGrantProvenance,
-}
 
 async fn companion_consent_authority(
     service: &AuthService<SqliteAuthorizationStore>,
     user_principal_id: &str,
     caller_participant_id: &str,
     child: &super::auth::ParticipantBindingRecord,
-) -> Result<CompanionConsentAuthority, super::auth::AuthorizationStateError> {
+) -> Result<super::auth::policy::ConsentAuthority, super::auth::AuthorizationStateError> {
+    let target_binding = service
+        .repository()
+        .get_grant_binding(
+            GrantOwnerKind::User,
+            user_principal_id.to_owned(),
+            child.participant_id.clone(),
+        )
+        .await?;
+    if target_binding.as_ref().is_some_and(|binding| {
+        binding.approval_mode == ApprovalMode::Exact
+            && binding.provenance.is_none()
+            && binding.state == GrantBindingState::Active
+    }) {
+        return super::auth::policy::consent_authority(
+            super::auth::policy::ConsentAuthoritySource::Explicit {
+                target: target_binding.as_ref().expect("checked above"),
+            },
+            now_ms().map_err(|error| {
+                super::auth::AuthorizationStateError::InvalidRecord(error.to_string())
+            })?,
+        );
+    }
     let caller_binding = service
         .repository()
         .get_grant_binding(
@@ -57,7 +71,7 @@ async fn companion_consent_authority(
             );
             super::auth::AuthorizationStateError::NotAuthorized
         })?;
-    let source = caller_binding.provenance.ok_or_else(|| {
+    let source = caller_binding.provenance.clone().ok_or_else(|| {
         tracing::warn!(
             user_principal_id,
             caller_participant_id,
@@ -118,31 +132,41 @@ async fn companion_consent_authority(
         child,
         &super::auth::policy::ProviderLoginAttributes {
             provider_id: source.provider_id.clone(),
-            roles: source.roles.clone(),
+            roles: Vec::new(),
         },
     )
     .map_err(|error| {
         tracing::warn!(
             portal_id = %source.portal_id,
             provider_id = %source.provider_id,
-            roles = ?source.roles,
             child_participant_id = %child.participant_id,
             ?error,
             "companion portal authority selection failed"
         );
         error
     })?;
-    Ok(CompanionConsentAuthority {
-        ceiling: selection.ceiling,
-        expires_at: caller_binding.expires_at,
-        policy: snapshot,
-        provenance: PortalGrantProvenance {
-            portal_id: source.portal_id,
-            provider_id: source.provider_id,
-            roles: source.roles,
-            effective_policy_digest: selection.effective_policy_digest,
-        },
-    })
+    let effective_policy_digest = selection.effective_policy_digest.clone();
+    super::auth::policy::consent_authority(
+        super::auth::policy::ConsentAuthoritySource::Portal(Box::new(
+            super::auth::policy::PortalConsentAuthority {
+                selection,
+                snapshot,
+                provenance: PortalGrantProvenance {
+                    portal_id: source.portal_id,
+                    provider_id: source.provider_id,
+                    roles: Vec::new(),
+                    effective_policy_digest,
+                },
+                source: Some(&caller_binding),
+                retained_target: target_binding
+                    .as_ref()
+                    .filter(|binding| binding.provenance.is_some()),
+            },
+        )),
+        now_ms().map_err(|error| {
+            super::auth::AuthorizationStateError::InvalidRecord(error.to_string())
+        })?,
+    )
 }
 
 #[derive(Deserialize)]
@@ -296,7 +320,7 @@ async fn apply_companion_approval(
     (
         Option<GrantBindingReplacement>,
         String,
-        PortalPolicySnapshot,
+        super::auth::ConsentAuthorityPreconditions,
     ),
     super::auth::AuthorizationStateError,
 > {
@@ -426,11 +450,11 @@ async fn apply_companion_approval(
             consent.participant_id.clone(),
         )
         .await?;
-    let CompanionConsentAuthority {
+    let super::auth::policy::ConsentAuthority {
         ceiling,
         expires_at,
-        policy,
         provenance,
+        preconditions,
     } = companion_consent_authority(service, user_principal_id, caller_participant_id, &child)
         .await?;
     if approval
@@ -499,7 +523,7 @@ async fn apply_companion_approval(
         expected_current_installed_revision: Some(consent.installed_revision),
         state: GrantBindingState::Active,
         expires_at,
-        provenance: Some(provenance),
+        provenance,
     };
     let unchanged = current.as_ref().is_some_and(|binding| {
         binding.installed_revision == replacement.installed_revision
@@ -514,7 +538,11 @@ async fn apply_companion_approval(
             && binding.expires_at == replacement.expires_at
             && binding.provenance == replacement.provenance
     });
-    Ok(((!unchanged).then_some(replacement), request_digest, policy))
+    Ok((
+        (!unchanged).then_some(replacement),
+        request_digest,
+        preconditions,
+    ))
 }
 
 pub(crate) async fn companion_activation(
@@ -601,6 +629,7 @@ async fn companion_activation_with_replacement(
         approved_resources,
         platform_privileges,
         grants,
+        delegation_ceiling,
         expires_at,
         child_grant_revision,
     ) = if let Some(replacement) = replacement {
@@ -618,6 +647,7 @@ async fn companion_activation_with_replacement(
             &replacement.approved_resources,
             &replacement.platform_privileges,
             &replacement.grants,
+            &replacement.delegation_ceiling,
             replacement.expires_at,
             replacement
                 .expected_revision
@@ -636,6 +666,7 @@ async fn companion_activation_with_replacement(
             &child_grant.approved_resources,
             &child_grant.platform_privileges,
             &child_grant.grants,
+            &child_grant.delegation_ceiling,
             child_grant.expires_at,
             child_grant.revision,
         )
@@ -657,7 +688,6 @@ async fn companion_activation_with_replacement(
     {
         return Err(super::auth::AuthorizationStateError::NotAuthorized);
     }
-    let ceiling = super::auth::policy::participant_delegation_ceiling(&child)?;
     let resources = service
         .repository()
         .resource_bindings(
@@ -673,7 +703,7 @@ async fn companion_activation_with_replacement(
         approved_capabilities,
         approved_resources,
         platform_privileges,
-        &ceiling,
+        delegation_ceiling,
         (&resources, true),
     )?;
     if authority.exact_grants != *grants
@@ -881,13 +911,13 @@ async fn claim_activation(
             .as_ref()
             .ok_or_else(|| ServerError::Nats("companion approval is required".to_owned()))?;
         let (_, request_digest) = decode_companion_approval(approval).map_err(server_error)?;
-        let (replacement, policy, delegation, companion_session) = if review
+        let (replacement, authority, delegation, companion_session) = if review
             .activated_by_user_principal_id
             .is_some()
         {
             (None, None, None, None)
         } else {
-            let (replacement, _, policy) =
+            let (replacement, _, authority) =
                 apply_companion_approval(service, &review, caller, caller_participant_id, approval)
                     .await
                     .map_err(server_error)?;
@@ -900,7 +930,7 @@ async fn claim_activation(
             )
             .await
             .map_err(server_error)?;
-            (replacement, Some(policy), delegation, session)
+            (replacement, Some(authority), delegation, session)
         };
         let mut requested = requested_event(&review, caller, now)?;
         requested.predecessor_action_id = Some(
@@ -915,7 +945,7 @@ async fn claim_activation(
             .repository()
             .apply_companion_activation_claim(
                 replacement,
-                policy,
+                authority,
                 ActivationReviewClaim {
                     review_id: review.review_id.clone(),
                     expected_version: review.version,

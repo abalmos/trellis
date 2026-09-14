@@ -86,6 +86,16 @@ impl Deref for AuthorizationContextLease {
     }
 }
 
+impl AuthorizationContextLease {
+    pub(crate) fn epoch(&self) -> u64 {
+        self.entry.epoch
+    }
+
+    pub(crate) fn context_digest(&self) -> &str {
+        self.context.context_digest()
+    }
+}
+
 impl Drop for AuthorizationContextLease {
     fn drop(&mut self) {
         self.entry.leases.fetch_sub(1, Ordering::Release);
@@ -192,7 +202,8 @@ impl AuthorizationProviderCache {
             Some(own.clone()),
         )
         .await?;
-        cache.retain_own_context().await?;
+        let digest = own.retained_context_digest()?;
+        cache.retain_own_context(&digest, cache.epoch()).await?;
         Ok(cache)
     }
 
@@ -250,16 +261,44 @@ impl AuthorizationProviderCache {
         })
     }
 
-    pub(crate) async fn retain_own_context(&self) -> Result<(), TrellisClientError> {
+    pub(crate) async fn retain_own_context(
+        &self,
+        digest: &str,
+        expected_epoch: u64,
+    ) -> Result<(), TrellisClientError> {
         let Some(own) = &self.own else {
             return Ok(());
         };
+        let old = self
+            .own_lease
+            .lock()
+            .map_err(|_| {
+                TrellisClientError::AuthorizationUnavailable(
+                    "own context lease lock poisoned".into(),
+                )
+            })?
+            .take();
+        drop(old);
         let lease = self
-            .resolve_context(&own.context_digest()?, own.corrected_now_seconds()?)
+            .resolve_context(digest, own.corrected_now_seconds()?)
             .await?;
+        if lease.context_digest() != digest
+            || lease.epoch() != expected_epoch
+            || self.epoch() != expected_epoch
+            || !self.health()?.healthy
+        {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "own context coverage changed before installation".into(),
+            ));
+        }
         *self.own_lease.lock().map_err(|_| {
             TrellisClientError::AuthorizationUnavailable("own context lease lock poisoned".into())
         })? = Some(lease);
+        tracing::info!(
+            context_digest = digest,
+            transport_epoch = expected_epoch,
+            "retained own authorization coverage"
+        );
         Ok(())
     }
 
@@ -342,7 +381,7 @@ impl AuthorizationProviderCache {
         }
     }
 
-    fn epoch(&self) -> u64 {
+    pub(crate) fn epoch(&self) -> u64 {
         self.nats.statistics().connects.load(Ordering::Acquire)
     }
 
@@ -392,7 +431,15 @@ impl AuthorizationProviderCache {
         }
         drop(state);
         if let Some(own) = &self.own {
-            if own.context_digest().is_ok_and(|current| current == digest) {
+            if own
+                .retained_context_digest()
+                .is_ok_and(|current| current == digest)
+            {
+                // Retire the stale own lease so the suspended installation
+                // cannot keep resources or revocation coverage alive.
+                if let Ok(mut lease) = self.own_lease.lock() {
+                    lease.take();
+                }
                 own.suspend();
                 own.request_refresh();
             }
@@ -504,7 +551,7 @@ impl AuthorizationProviderCache {
                 "provider is not connected".into(),
             ));
         }
-        if self.revocation_time(digest)?.is_some() {
+        if self.read_state()?.revocations.contains_key(digest) {
             return Err(TrellisClientError::Bootstrap(
                 "authorization context is revoked".into(),
             ));
@@ -533,7 +580,7 @@ impl AuthorizationProviderCache {
             }
         };
         let _guard = pending.lock().await;
-        if self.revocation_time(digest)?.is_some() {
+        if self.read_state()?.revocations.contains_key(digest) {
             return Err(TrellisClientError::Bootstrap(
                 "authorization context is revoked".into(),
             ));
@@ -847,14 +894,16 @@ async fn observe_context_revocation(
             }
         }
     }
-    if revoked_at.is_some() {
-        if let Some(own) = own.and_then(|own| own.upgrade()) {
-            if own
-                .context_digest()
-                .is_ok_and(|digest| digest == watch_digest)
-            {
-                own.suspend();
+    if let Some(own) = own.and_then(|own| own.upgrade()) {
+        if own
+            .retained_context_digest()
+            .is_ok_and(|digest| digest == watch_digest)
+        {
+            own.suspend();
+            if revoked_at.is_some() {
                 own.request_refresh();
+            } else {
+                own.request_coverage_reconciliation();
             }
         }
     }

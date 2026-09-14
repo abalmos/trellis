@@ -6,6 +6,37 @@ use super::{
 };
 use serde_json::Value;
 
+#[derive(Clone, Debug)]
+pub(crate) struct ConsentBindingPrecondition {
+    pub(crate) owner_kind: GrantOwnerKind,
+    pub(crate) owner_id: String,
+    pub(crate) participant_id: String,
+    pub(crate) revision: u64,
+    pub(crate) expires_at: Option<i64>,
+    pub(crate) delegation_ceiling: super::DelegationCeiling,
+    pub(crate) provenance: Option<super::PortalGrantProvenance>,
+}
+
+impl From<&GrantBinding> for ConsentBindingPrecondition {
+    fn from(binding: &GrantBinding) -> Self {
+        Self {
+            owner_kind: binding.owner_kind,
+            owner_id: binding.owner_id.clone(),
+            participant_id: binding.participant_id.clone(),
+            revision: binding.revision,
+            expires_at: binding.expires_at,
+            delegation_ceiling: binding.delegation_ceiling.clone(),
+            provenance: binding.provenance.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ConsentAuthorityPreconditions {
+    pub(crate) policy: Option<super::PortalPolicySnapshot>,
+    pub(crate) bindings: Vec<ConsentBindingPrecondition>,
+}
+
 #[async_trait]
 pub(crate) trait GrantRepository: Send + Sync {
     async fn get_installed_participant_record(
@@ -101,6 +132,20 @@ pub(crate) trait GrantRepository: Send + Sync {
         policy: super::PortalPolicySnapshot,
         idempotency: IdempotencyResultRecord,
     ) -> Result<Value, AuthorizationStateError>;
+
+    async fn set_consent_grant_binding(
+        &self,
+        replacement: GrantBindingReplacement,
+        authority: ConsentAuthorityPreconditions,
+        idempotency: IdempotencyResultRecord,
+    ) -> Result<Value, AuthorizationStateError> {
+        if let Some(policy) = authority.policy {
+            self.set_portal_grant_binding(replacement, policy, idempotency)
+                .await
+        } else {
+            self.set_grant_binding(replacement, idempotency).await
+        }
+    }
 
     async fn revoke_portal_grant_binding(
         &self,

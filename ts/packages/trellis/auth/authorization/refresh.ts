@@ -58,6 +58,7 @@ export async function refreshAuthorizationContextWithMetadata(args: {
   prepareInstall?: (
     response: AuthorizationContextRefreshResponse,
   ) => Promise<(verified: VerifiedAuthorizationContext) => void>;
+  prepareOnly?: boolean;
 }): Promise<AuthorizationContextRefreshResult> {
   const fetch = args.fetch ?? globalThis.fetch;
   let current: VerifiedAuthorizationContext | undefined;
@@ -123,7 +124,7 @@ export async function refreshAuthorizationContextWithMetadata(args: {
     throw new Error("authorization context refresh stopped");
   }
   const nextRuntime = runtimeBindingFromResponse(next);
-  const context = await args.cache.install(
+  const context = await args.cache[args.prepareOnly ? "prepare" : "install"](
     next.authorizationContext,
     {
       bootstrapJwt: next.routing.bootstrapJwt,
@@ -196,12 +197,11 @@ export function startAuthorizationContextRefresh(args: {
         : (await refreshAuthorizationContextWithMetadata({
           ...args,
           shouldInstall: () => !stopped,
+          prepareOnly: true,
         })).context;
       if (stopped) return;
       failures = 0;
-      if (before !== context.contextDigest) {
-        await args.onRefresh?.(context);
-      }
+      await args.onRefresh?.(context);
       schedule(
         refreshDelay(
           args.cache,

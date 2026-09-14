@@ -535,7 +535,7 @@ impl AuthPostCommitRuntime {
             )
             .await
             .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
-        let outcome = validate_connection_kick_response(&response.payload)?;
+        let outcome = validate_connection_kick_response(&response.payload, &connection.server_id)?;
         tracing::info!(
             context_digest = %connection.context_digest,
             runtime_connection_id = %connection.runtime_connection_id,

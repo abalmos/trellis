@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use time::format_description::well_known::Rfc3339;
@@ -48,23 +48,11 @@ impl AppliedNativeAuthorization {
     pub(crate) fn from_cache(
         contexts: &AuthorizationContextCache,
     ) -> Result<Self, TrellisClientError> {
-        let state = contexts.state_snapshot()?;
+        let (runtime, context_digest, routing_jwt) = contexts.applied_transport()?;
         Ok(Self {
-            runtime: state.runtime.ok_or_else(|| {
-                TrellisClientError::Bootstrap("authorization runtime unavailable".into())
-            })?,
-            context_digest: state
-                .current
-                .ok_or_else(|| {
-                    TrellisClientError::Bootstrap("authorization context unavailable".into())
-                })?
-                .context_digest,
-            routing_jwt: state
-                .routing
-                .ok_or_else(|| {
-                    TrellisClientError::Bootstrap("authorization routing JWT unavailable".into())
-                })?
-                .bootstrap_jwt,
+            runtime,
+            context_digest,
+            routing_jwt,
         })
     }
 
@@ -780,52 +768,24 @@ async fn connect_authorized_nats(
     let key_pair = Arc::new(auth.nkey_pair()?);
     let session_nkey = key_pair.public_key();
     let contexts = authorization_contexts.clone();
-    let reauth = Arc::new(AtomicBool::new(false));
     let event_contexts = contexts.clone();
     let options = ConnectOptions::with_auth_callback(move |nonce| {
-        let auth = auth.clone();
         let contexts = contexts.clone();
         let key_pair = key_pair.clone();
         let session_nkey = session_nkey.clone();
-        let reauth = reauth.clone();
         async move {
-            let reconnecting = reauth.swap(true, Ordering::AcqRel);
-            if reconnecting || contexts.routing_jwt().is_err() || contexts.context_digest().is_err()
-            {
-                let context_digest = contexts.context_digest().ok();
-                tracing::info!(
-                    reconnecting,
-                    context_digest,
-                    "refreshing authorization before NATS reconnect"
-                );
-                let refresh = contexts.refresh(&auth).await;
-                if let Err(error) = &refresh {
-                    tracing::warn!(
-                        reconnecting,
-                        context_digest,
-                        error = %error,
-                        "authorization refresh before NATS reconnect failed"
-                    );
-                } else {
-                    tracing::info!(
-                        reconnecting,
-                        context_digest,
-                        "authorization refresh before NATS reconnect succeeded"
-                    );
-                }
-                refresh.map_err(async_nats::AuthError::new)?;
-            }
+            let (routing_jwt, context_digest) = contexts
+                .transport_credentials()
+                .map_err(async_nats::AuthError::new)?;
             let mut credentials = async_nats::Auth::new();
             credentials.nkey = Some(session_nkey);
-            credentials.jwt = Some(contexts.routing_jwt().map_err(async_nats::AuthError::new)?);
+            credentials.jwt = Some(routing_jwt);
             credentials.signature =
                 Some(key_pair.sign(&nonce).map_err(async_nats::AuthError::new)?);
             credentials.token = Some(
                 serde_json::to_string(&NatsConnectToken {
                     format: "trellis.nats-connect-token.v1",
-                    context_digest: contexts
-                        .context_digest()
-                        .map_err(async_nats::AuthError::new)?,
+                    context_digest,
                 })
                 .map_err(async_nats::AuthError::new)?,
             );
@@ -838,10 +798,14 @@ async fn connect_authorized_nats(
         async move {
             if matches!(event, async_nats::Event::Disconnected) {
                 contexts.suspend();
+                contexts.request_coverage_reconciliation();
                 tracing::info!(
-                    context_digest = contexts.context_digest().ok(),
+                    context_digest = contexts.retained_context_digest().ok(),
                     "suspended authorization installation after NATS disconnect"
                 );
+            }
+            if matches!(event, async_nats::Event::Connected) {
+                contexts.request_coverage_reconciliation();
             }
             if matches!(
                 event,
@@ -1330,7 +1294,7 @@ impl TrellisClient {
             TrellisClientError::Bootstrap("authorization context unavailable".into())
         })?;
         let mut applied = self.applied_native_authorization.lock().await;
-        contexts.refresh(&self.auth).await?;
+        let (candidate_digest, _) = contexts.prepare_refresh(&self.auth).await?;
         apply_native_authorization_refresh(
             &self.nats,
             &mut applied,
@@ -1338,6 +1302,10 @@ impl TrellisClient {
             self.timeout_ms,
         )
         .await?;
+        self.authorization_provider
+            .retain_own_context(&candidate_digest, self.authorization_provider.epoch())
+            .await?;
+        contexts.promote(&candidate_digest)?;
         contexts.bundle()
     }
 

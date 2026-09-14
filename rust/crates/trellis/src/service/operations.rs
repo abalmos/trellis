@@ -544,6 +544,7 @@ where
     )]
     async fn resume<Fut>(
         service: String,
+        deployment_id: String,
         fence: OwnerFence,
         repository: KvOperationRepository,
         mutation_gate: Arc<Mutex<()>>,
@@ -561,6 +562,30 @@ where
         F: Fn(RequestContext, D::Input, OperationControl<D>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
     {
+        let claimed = {
+            let _guard = mutation_gate.lock().await;
+            repository
+                .get(&claimed.record.invocation_id)
+                .await?
+                .filter(|current| {
+                    fence.matches(&current.record)
+                        && current.record.api_id == D::API_ID
+                        && current.record.operation == D::KEY
+                        && current.record.deployment_id == deployment_id
+                        && !current.record.snapshot.state.is_terminal()
+                        && current
+                            .record
+                            .lease_expires_at_ms
+                            .is_some_and(|expiry| expiry > now_ms())
+                        && !current.record.creator_principal_id.is_empty()
+                        && !current.record.creator_participant_id.is_empty()
+                        && current.record.caller.as_ref().is_some_and(|caller| {
+                            caller.principal_id == current.record.creator_principal_id
+                                && caller.participant_id == current.record.creator_participant_id
+                        })
+                })
+                .ok_or_else(|| ServerError::Nats("operation owner fence is stale".to_owned()))?
+        };
         if claimed.record.cancellation_requested {
             finalize_cancellation::<D>(
                 &repository,
@@ -738,6 +763,7 @@ where
                         }
                         let operation_id = record.record.invocation_id;
                         let repository = repository.clone();
+                        let deployment_id_for_resume = deployment_id.clone();
                         let executor_id = executor_id.clone();
                         let connection_id = connection_id.clone();
                         let service = service.clone();
@@ -849,6 +875,7 @@ where
                                 };
                                 if let Err(error) = Self::resume(
                                     service,
+                                    deployment_id_for_resume,
                                     fence,
                                     repository,
                                     mutation_gate,
@@ -946,7 +973,7 @@ where
                     invocation_digest: digest,
                     api_id: D::API_ID.to_owned(),
                     operation: D::KEY.to_owned(),
-                    deployment_id,
+                    deployment_id: deployment_id.clone(),
                     creator_principal_id: caller.principal_id.clone(),
                     creator_participant_id: caller.participant_id.clone(),
                     caller_session_key: caller.session_key.clone(),
@@ -1057,6 +1084,7 @@ where
                     };
                     Self::resume(
                         service,
+                        deployment_id,
                         fence,
                         repository,
                         mutation_gate,
@@ -1126,6 +1154,16 @@ where
                                 let Ok(Some(current)) = repository.get(&operation_id).await else {
                                     return;
                                 };
+                                if !fence.matches(&current.record)
+                                    || current.record.snapshot.state.is_terminal()
+                                    || current.record.cancellation_requested
+                                    || current
+                                        .record
+                                        .lease_expires_at_ms
+                                        .is_none_or(|expiry| expiry <= now_ms())
+                                {
+                                    return;
+                                }
                                 let mut record = current.record;
                                 let Ok(mut upload) =
                                     record.transfer.clone().ok_or(()).and_then(|value| {
@@ -1154,6 +1192,7 @@ where
                     .await?;
                 let operation_id = invocation_id.clone();
                 let service_for_resume = service.clone();
+                let deployment_id_for_resume = deployment_id.clone();
                 let repository_for_completion = repository.clone();
                 let fence_for_completion = fence.clone();
                 let gate_for_completion = Arc::clone(&mutation_gate);
@@ -1209,6 +1248,18 @@ where
                                     .ok_or_else(|| ServerError::OperationNotFound {
                                     operation_id: operation_id.clone(),
                                 })?;
+                                if !fence_for_completion.matches(&current.record)
+                                    || current.record.snapshot.state.is_terminal()
+                                    || current.record.cancellation_requested
+                                    || current
+                                        .record
+                                        .lease_expires_at_ms
+                                        .is_none_or(|expiry| expiry <= now_ms())
+                                {
+                                    return Err(ServerError::Nats(
+                                        "operation owner fence is stale".to_owned(),
+                                    ));
+                                }
                                 let mut record = current.record;
                                 let mut upload: DurableOperationUpload = serde_json::from_value(
                                     record.transfer.clone().ok_or_else(|| {
@@ -1258,6 +1309,7 @@ where
                                         {
                                             let _ = Self::resume(
                                                 service_for_resume,
+                                                deployment_id_for_resume,
                                                 fence_for_completion,
                                                 repository_for_completion,
                                                 gate_for_completion,
@@ -1352,6 +1404,7 @@ where
             };
             Self::resume(
                 service,
+                deployment_id,
                 fence,
                 repository,
                 mutation_gate,
@@ -1590,6 +1643,13 @@ where
                                     let Ok(sequence) = envelope.sequence.parse::<u64>() else {
                                         continue;
                                     };
+                                    if epoch == 0
+                                        || sequence == 0
+                                        || epoch.to_string() != envelope.owner_epoch
+                                        || sequence.to_string() != envelope.sequence
+                                    {
+                                        continue;
+                                    }
                                     let Ok(Some(current)) =
                                         repository.get(&update_operation_id).await
                                     else {
@@ -1609,6 +1669,8 @@ where
                                             .record
                                             .lease_expires_at_ms
                                             .is_none_or(|expiry| expiry <= now_ms())
+                                        || current.record.snapshot.state.is_terminal()
+                                        || current.record.cancellation_requested
                                         || current.record.api_id != D::API_ID
                                         || current.record.operation != D::KEY
                                         || current.record.deployment_id != update_deployment_id
@@ -1850,6 +1912,7 @@ struct DurableOperationControl {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OwnerFence {
     executor_id: String,
+    connection_id: String,
     owner_epoch: u64,
 }
 
@@ -1860,12 +1923,16 @@ impl OwnerFence {
                 .owner_executor_id
                 .clone()
                 .ok_or_else(|| ServerError::Nats("operation has no active owner".to_owned()))?,
+            connection_id: record.owner_connection_id.clone().ok_or_else(|| {
+                ServerError::Nats("operation has no owning connection".to_owned())
+            })?,
             owner_epoch: record.owner_epoch,
         })
     }
 
     fn matches(&self, record: &DurableOperationRecord) -> bool {
         record.owner_executor_id.as_deref() == Some(&self.executor_id)
+            && record.owner_connection_id.as_deref() == Some(&self.connection_id)
             && record.owner_epoch == self.owner_epoch
             && record
                 .lease_expires_at_ms
@@ -2664,6 +2731,11 @@ mod tests {
                 repository,
                 fence: OwnerFence {
                     executor_id: executor_id.to_owned(),
+                    connection_id: record
+                        .record
+                        .owner_connection_id
+                        .clone()
+                        .unwrap_or_else(|| executor_id.to_owned()),
                     owner_epoch: record.record.owner_epoch,
                 },
                 mutation_gate: Arc::new(Mutex::new(())),
@@ -2799,6 +2871,7 @@ mod tests {
                 service: "service".to_owned(),
                 deployment_id: "deployment".to_owned(),
                 executor_id: "upload-executor".to_owned(),
+                connection_id: "upload-executor".to_owned(),
                 repository: repository.clone(),
                 nats: client.clone(),
                 service_session_key: "session".to_owned(),
@@ -2877,6 +2950,7 @@ mod tests {
                 service: "service".to_owned(),
                 deployment_id: "deployment".to_owned(),
                 executor_id: "executor-a".to_owned(),
+                connection_id: "executor-a".to_owned(),
                 repository: repository.clone(),
                 nats: client.clone(),
                 service_session_key: "session".to_owned(),
@@ -3107,6 +3181,7 @@ mod tests {
                 service: "service".to_owned(),
                 deployment_id: "deployment".to_owned(),
                 executor_id: "cancellation-executor".to_owned(),
+                connection_id: "cancellation-executor".to_owned(),
                 repository: repository.clone(),
                 nats: client.clone(),
                 service_session_key: "session".to_owned(),
@@ -3173,6 +3248,7 @@ mod tests {
                 service: "service".to_owned(),
                 deployment_id: "deployment".to_owned(),
                 executor_id: "ownership-a".to_owned(),
+                connection_id: "ownership-a".to_owned(),
                 repository: repository.clone(),
                 nats: client.clone(),
                 service_session_key: "session".to_owned(),

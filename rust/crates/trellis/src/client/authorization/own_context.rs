@@ -9,6 +9,23 @@ use super::types::{
     AuthorizationRuntimeBinding, CachedAuthorizationState, CurrentContext,
 };
 
+#[derive(Clone, Debug)]
+pub(crate) struct AuthorizationRefreshRequest {
+    pub(crate) context_digest: Option<String>,
+    pub(crate) refresh_credential: bool,
+}
+
+#[derive(Clone, Debug)]
+struct PreparedInstallation {
+    current: CurrentContext,
+    runtime: AuthorizationRuntimeBinding,
+    routing: super::types::AuthorizationRoutingMaterial,
+    api_bindings: std::collections::BTreeMap<String, super::types::AuthorizationApiBinding>,
+    server_clock_offset_ms: i64,
+    authorization: Option<serde_json::Value>,
+    availability: crate::generated::AvailabilitySnapshot,
+}
+
 /// Process-local context, route credential, and refresh scheduling for one connection.
 /// Native credentials never require a writable authorization-state directory.
 #[derive(Clone)]
@@ -23,7 +40,8 @@ pub struct AuthorizationContextCache {
     availability: tokio::sync::watch::Sender<crate::generated::AvailabilitySnapshot>,
     refresh: Arc<tokio::sync::Mutex<()>>,
     refresh_requested: Arc<tokio::sync::Notify>,
-    refresh_requested_digest: Arc<Mutex<Option<Option<String>>>>,
+    refresh_request: Arc<Mutex<Option<AuthorizationRefreshRequest>>>,
+    candidate: Arc<RwLock<Option<PreparedInstallation>>>,
 }
 
 impl AuthorizationContextCache {
@@ -47,11 +65,12 @@ impl AuthorizationContextCache {
             availability,
             refresh: Arc::new(tokio::sync::Mutex::new(())),
             refresh_requested: Arc::new(tokio::sync::Notify::new()),
-            refresh_requested_digest: Arc::new(Mutex::new(None)),
+            refresh_request: Arc::new(Mutex::new(None)),
+            candidate: Arc::new(RwLock::new(None)),
         })
     }
 
-    pub(crate) fn install(
+    fn replace_installation(
         &self,
         installation: AuthorizationInstallation,
         promote: bool,
@@ -154,6 +173,27 @@ impl AuthorizationContextCache {
             refresh_at,
             bundle,
         };
+        if !promote {
+            // A planned refresh keeps the active installation usable until the
+            // candidate is promoted after transport reauthorization.
+            let mut candidate = self.candidate.write().map_err(|_| {
+                TrellisClientError::Bootstrap("context candidate lock poisoned".into())
+            })?;
+            *candidate = Some(PreparedInstallation {
+                current,
+                runtime,
+                routing,
+                api_bindings,
+                server_clock_offset_ms,
+                authorization,
+                availability,
+            });
+            tracing::info!(
+                context_digest = verified.context_digest(),
+                "prepared verified authorization candidate"
+            );
+            return Ok(());
+        }
         let mut state = self
             .state
             .write()
@@ -166,51 +206,116 @@ impl AuthorizationContextCache {
             server_clock_offset_ms,
             authorization,
         };
-        self.availability.send_replace(if promote {
-            availability
-        } else {
-            crate::generated::AvailabilitySnapshot::suspended(&availability)
-        });
+        drop(state);
+        *self.candidate.write().map_err(|_| {
+            TrellisClientError::Bootstrap("context candidate lock poisoned".into())
+        })? = None;
+        self.availability.send_replace(availability);
         tracing::info!(
             context_digest = verified.context_digest(),
-            promoted = promote,
+            promoted = true,
             "installed verified authorization context"
         );
         Ok(())
     }
 
-    pub(crate) fn promote(&self) -> Result<(), TrellisClientError> {
-        let state = self.state_snapshot()?;
-        let current = self.availability.borrow().clone();
-        let resources = state
-            .authorization
+    pub(crate) fn install_initial(
+        &self,
+        installation: AuthorizationInstallation,
+    ) -> Result<(), TrellisClientError> {
+        self.replace_installation(installation, true)
+    }
+
+    pub(crate) fn prepare(
+        &self,
+        installation: AuthorizationInstallation,
+    ) -> Result<String, TrellisClientError> {
+        self.replace_installation(installation, false)?;
+        self.candidate_digest()
+    }
+
+    pub(crate) fn candidate_digest(&self) -> Result<String, TrellisClientError> {
+        self.candidate
+            .read()
+            .map_err(|_| TrellisClientError::Bootstrap("context candidate lock poisoned".into()))?
             .as_ref()
-            .and_then(|value| value.get("resourceRuntime"))
-            .cloned()
-            .map(serde_json::from_value)
-            .transpose()?
-            .unwrap_or_default();
-        let current_context = state
-            .current
+            .map(|candidate| candidate.current.context_digest.clone())
             .ok_or_else(|| {
                 TrellisClientError::AuthorizationUnavailable(
-                    "authorization context is unavailable".into(),
+                    "authorization candidate is unavailable".into(),
                 )
-            })?
-            .bundle;
-        let permissions = persisted_signed_context(&current_context)?
-            .unsigned
-            .grants
-            .permissions()
-            .to_vec();
-        self.availability
-            .send_replace(crate::generated::AvailabilitySnapshot::replacing(
-                permissions,
-                resources,
-                &current,
+            })
+    }
+
+    /// Return the runtime, digest, and route JWT that the next transport
+    /// reauthorization must present: the candidate when one is prepared.
+    pub(crate) fn applied_transport(
+        &self,
+    ) -> Result<(AuthorizationRuntimeBinding, String, String), TrellisClientError> {
+        if let Some(candidate) = self
+            .candidate
+            .read()
+            .map_err(|_| TrellisClientError::Bootstrap("context candidate lock poisoned".into()))?
+            .as_ref()
+        {
+            return Ok((
+                candidate.runtime.clone(),
+                candidate.current.context_digest.clone(),
+                candidate.routing.bootstrap_jwt.clone(),
             ));
+        }
+        let state = self.state_snapshot()?;
+        Ok((
+            state.runtime.ok_or_else(|| {
+                TrellisClientError::Bootstrap("authorization runtime unavailable".into())
+            })?,
+            state
+                .current
+                .ok_or_else(|| {
+                    TrellisClientError::Bootstrap("authorization context unavailable".into())
+                })?
+                .context_digest,
+            state
+                .routing
+                .ok_or_else(|| {
+                    TrellisClientError::Bootstrap("authorization routing JWT unavailable".into())
+                })?
+                .bootstrap_jwt,
+        ))
+    }
+
+    pub(crate) fn promote(&self, expected_digest: &str) -> Result<(), TrellisClientError> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))?;
+        let mut candidate = self
+            .candidate
+            .write()
+            .map_err(|_| TrellisClientError::Bootstrap("context candidate lock poisoned".into()))?;
+        let prepared = candidate.take().ok_or_else(|| {
+            TrellisClientError::AuthorizationUnavailable(
+                "authorization candidate is unavailable".into(),
+            )
+        })?;
+        if prepared.current.context_digest != expected_digest || state.current.is_none() {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization candidate changed before promotion".into(),
+            ));
+        }
+        *state = CachedAuthorizationState {
+            current: Some(prepared.current),
+            runtime: Some(prepared.runtime),
+            routing: Some(prepared.routing),
+            api_bindings: prepared.api_bindings,
+            server_clock_offset_ms: prepared.server_clock_offset_ms,
+            authorization: prepared.authorization,
+        };
+        drop(candidate);
+        drop(state);
+        self.availability.send_replace(prepared.availability);
         tracing::info!(
-            context_digest = self.context_digest().ok(),
+            context_digest = self.retained_context_digest().ok(),
             "promoted authorization installation"
         );
         Ok(())
@@ -225,6 +330,10 @@ impl AuthorizationContextCache {
         state.current = None;
         state.routing = None;
         state.api_bindings.clear();
+        drop(state);
+        *self.candidate.write().map_err(|_| {
+            TrellisClientError::Bootstrap("context candidate lock poisoned".into())
+        })? = None;
         let suspended =
             crate::generated::AvailabilitySnapshot::suspended(&self.availability.borrow().clone());
         self.availability.send_replace(suspended);
@@ -243,6 +352,15 @@ impl AuthorizationContextCache {
 
     /// Return the digest of the currently valid context used for request proofs.
     pub fn context_digest(&self) -> Result<String, TrellisClientError> {
+        if !self.availability.borrow().is_usable() {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization installation is suspended".into(),
+            ));
+        }
+        self.retained_context_digest()
+    }
+
+    pub(crate) fn retained_context_digest(&self) -> Result<String, TrellisClientError> {
         let state = self
             .state
             .read()
@@ -271,7 +389,16 @@ impl AuthorizationContextCache {
 
     /// Renew through the credential's proof-bound native bootstrap or user refresh route.
     pub async fn refresh(&self, auth: &SessionAuth) -> Result<bool, TrellisClientError> {
-        super::refresh::refresh(self, auth, true).await
+        super::refresh::refresh(self, auth, true)
+            .await
+            .map(|(_, changed)| changed)
+    }
+
+    pub(crate) async fn prepare_refresh(
+        &self,
+        auth: &SessionAuth,
+    ) -> Result<(String, bool), TrellisClientError> {
+        super::refresh::refresh(self, auth, false).await
     }
 
     pub(crate) async fn lock_refresh(&self) -> tokio::sync::MutexGuard<'_, ()> {
@@ -279,19 +406,39 @@ impl AuthorizationContextCache {
     }
 
     pub(crate) fn request_refresh(&self) {
-        if let Ok(mut requested) = self.refresh_requested_digest.lock() {
-            *requested = Some(self.context_digest().ok());
+        self.request_reconciliation(true);
+    }
+
+    pub(crate) fn request_coverage_reconciliation(&self) {
+        self.request_reconciliation(false);
+    }
+
+    fn request_reconciliation(&self, refresh_credential: bool) {
+        if let Ok(mut requested) = self.refresh_request.lock() {
+            let digest = self.retained_context_digest().ok();
+            match requested.as_mut() {
+                Some(request) => request.refresh_credential |= refresh_credential,
+                None => {
+                    *requested = Some(AuthorizationRefreshRequest {
+                        context_digest: digest,
+                        refresh_credential,
+                    });
+                }
+            }
             self.refresh_requested.notify_one();
         }
     }
 
-    pub(crate) async fn wait_refresh_request(&self) -> Option<String> {
+    pub(crate) async fn wait_refresh_request(&self) -> AuthorizationRefreshRequest {
         self.refresh_requested.notified().await;
-        self.refresh_requested_digest
+        self.refresh_request
             .lock()
             .ok()
             .and_then(|mut requested| requested.take())
-            .flatten()
+            .unwrap_or(AuthorizationRefreshRequest {
+                context_digest: self.retained_context_digest().ok(),
+                refresh_credential: false,
+            })
     }
 
     pub(crate) fn refresh_delay(&self) -> Result<std::time::Duration, TrellisClientError> {
@@ -326,6 +473,26 @@ impl AuthorizationContextCache {
             .ok_or_else(|| {
                 TrellisClientError::Bootstrap("authorization routing JWT expired".into())
             })
+    }
+
+    pub(crate) fn transport_credentials(&self) -> Result<(String, String), TrellisClientError> {
+        if let Some(candidate) = self
+            .candidate
+            .read()
+            .map_err(|_| TrellisClientError::Bootstrap("context candidate lock poisoned".into()))?
+            .as_ref()
+        {
+            if candidate.routing.bootstrap_jwt_expires_at <= self.corrected_now_seconds()? {
+                return Err(TrellisClientError::Bootstrap(
+                    "authorization routing JWT expired".into(),
+                ));
+            }
+            return Ok((
+                candidate.routing.bootstrap_jwt.clone(),
+                candidate.current.context_digest.clone(),
+            ));
+        }
+        Ok((self.routing_jwt()?, self.retained_context_digest()?))
     }
 
     pub(crate) fn runtime_binding(
