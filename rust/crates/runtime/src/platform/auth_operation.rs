@@ -40,9 +40,7 @@ async fn companion_consent_authority(
         )
         .await?;
     if target_binding.as_ref().is_some_and(|binding| {
-        binding.approval_mode == ApprovalMode::Exact
-            && binding.provenance.is_none()
-            && binding.state == GrantBindingState::Active
+        binding.provenance.is_none() && binding.state == GrantBindingState::Active
     }) {
         return super::auth::policy::consent_authority(
             super::auth::policy::ConsentAuthoritySource::Explicit {

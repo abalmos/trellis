@@ -16,8 +16,9 @@ use trellis_protocol::{ApiSurfaceKind, PermissionAction};
 
 use super::{
     operation_invocation_digest, DurableOperationRecord, DurableOperationSignal, FileTransferInfo,
-    KvOperationRepository, OperationRepository, RequestContext, RequestValidator, ServerError,
-    UploadTransferGrant, UploadTransferGrantPlan, UploadTransferSession,
+    KvOperationRepository, OperationRepository, RequestContext, RequestValidator,
+    RevisionedOperationRecord, ServerError, UploadTransferGrant, UploadTransferGrantPlan,
+    UploadTransferSession,
 };
 
 use super::resources::backend::BoundStoreResourceClient;
@@ -562,30 +563,15 @@ where
         F: Fn(RequestContext, D::Input, OperationControl<D>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<(), ServerError>> + Send + 'static,
     {
-        let claimed = {
-            let _guard = mutation_gate.lock().await;
-            repository
-                .get(&claimed.record.invocation_id)
-                .await?
-                .filter(|current| {
-                    fence.matches(&current.record)
-                        && current.record.api_id == D::API_ID
-                        && current.record.operation == D::KEY
-                        && current.record.deployment_id == deployment_id
-                        && !current.record.snapshot.state.is_terminal()
-                        && current
-                            .record
-                            .lease_expires_at_ms
-                            .is_some_and(|expiry| expiry > now_ms())
-                        && !current.record.creator_principal_id.is_empty()
-                        && !current.record.creator_participant_id.is_empty()
-                        && current.record.caller.as_ref().is_some_and(|caller| {
-                            caller.principal_id == current.record.creator_principal_id
-                                && caller.participant_id == current.record.creator_participant_id
-                        })
-                })
-                .ok_or_else(|| ServerError::Nats("operation owner fence is stale".to_owned()))?
-        };
+        let claimed = admit_operation_execution::<D>(
+            &repository,
+            &mutation_gate,
+            &fence,
+            &deployment_id,
+            &claimed.record.invocation_id,
+        )
+        .await?
+        .ok_or_else(|| ServerError::Nats("operation owner fence is stale".to_owned()))?;
         if claimed.record.cancellation_requested {
             finalize_cancellation::<D>(
                 &repository,
@@ -598,32 +584,57 @@ where
         }
         let mut cancellation = repository.watch(&claimed.record.invocation_id).await?;
         let input = serde_json::from_value(claimed.record.input.clone())?;
-        let operation_ref = OperationRefData {
-            id: claimed.record.invocation_id.clone(),
-            service,
-            operation: D::KEY.to_owned(),
-        };
-        let control = OperationControl {
-            operation_ref,
-            durable: DurableOperationControl {
-                repository: repository.clone(),
-                fence: fence.clone(),
-                mutation_gate: Arc::clone(&mutation_gate),
-            },
-            nats,
-            publisher,
-            update_subject,
-            next_update_sequence,
-            _descriptor: PhantomData,
-        };
-        let context = RequestContext {
-            resuming: claimed.record.owner_epoch > 1,
-            operation_progress: claimed.record.snapshot.progress.clone(),
-            session_key: Some(claimed.record.caller_session_key),
-            caller: claimed.record.caller,
-            ..RequestContext::default()
-        };
         tokio::spawn(async move {
+            // Final entry admission after asynchronous setup: the captured fence,
+            // identity, lease, and nonterminal state must still hold immediately
+            // before user code runs. The mutation gate only fences this check.
+            let admitted = admit_operation_execution::<D>(
+                &repository,
+                &mutation_gate,
+                &fence,
+                &deployment_id,
+                &claimed.record.invocation_id,
+            )
+            .await
+            .ok()
+            .flatten();
+            let Some(admitted) = admitted else {
+                return;
+            };
+            if admitted.record.cancellation_requested {
+                let _ = finalize_cancellation::<D>(
+                    &repository,
+                    &fence,
+                    &mutation_gate,
+                    &claimed.record.invocation_id,
+                )
+                .await;
+                return;
+            }
+            let context = RequestContext {
+                resuming: admitted.record.owner_epoch > 1,
+                operation_progress: admitted.record.snapshot.progress.clone(),
+                session_key: Some(admitted.record.caller_session_key),
+                caller: admitted.record.caller,
+                ..RequestContext::default()
+            };
+            let control = OperationControl {
+                operation_ref: OperationRefData {
+                    id: claimed.record.invocation_id.clone(),
+                    service,
+                    operation: D::KEY.to_owned(),
+                },
+                durable: DurableOperationControl {
+                    repository: repository.clone(),
+                    fence: fence.clone(),
+                    mutation_gate: Arc::clone(&mutation_gate),
+                },
+                nats,
+                publisher,
+                update_subject,
+                next_update_sequence,
+                _descriptor: PhantomData,
+            };
             let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
             heartbeat.tick().await;
             let mut execution = Box::pin(handler(context, input, control));
@@ -1900,6 +1911,41 @@ impl<D: OperationDescriptor> std::fmt::Debug for OperationControl<D> {
             .field("durable", &self.durable)
             .finish_non_exhaustive()
     }
+}
+
+/// The exact execution-entry admission for one acquired Operation fence.
+///
+/// Runs under the provider mutation gate and is called both before setup and
+/// again immediately before user code so a delayed execution cannot enter after
+/// a successor acquired the operation.
+async fn admit_operation_execution<D>(
+    repository: &KvOperationRepository,
+    mutation_gate: &Arc<Mutex<()>>,
+    fence: &OwnerFence,
+    deployment_id: &str,
+    invocation_id: &str,
+) -> Result<Option<RevisionedOperationRecord>, ServerError>
+where
+    D: OperationDescriptor,
+{
+    let _guard = mutation_gate.lock().await;
+    Ok(repository.get(invocation_id).await?.filter(|current| {
+        fence.matches(&current.record)
+            && current.record.api_id == D::API_ID
+            && current.record.operation == D::KEY
+            && current.record.deployment_id == deployment_id
+            && !current.record.snapshot.state.is_terminal()
+            && current
+                .record
+                .lease_expires_at_ms
+                .is_some_and(|expiry| expiry > now_ms())
+            && !current.record.creator_principal_id.is_empty()
+            && !current.record.creator_participant_id.is_empty()
+            && current.record.caller.as_ref().is_some_and(|caller| {
+                caller.principal_id == current.record.creator_principal_id
+                    && caller.participant_id == current.record.creator_participant_id
+            })
+    }))
 }
 
 #[derive(Debug, Clone)]
@@ -3431,6 +3477,39 @@ mod tests {
         assert!(first_control.upload().await.is_err());
         second_control.acknowledge_signal(1).await.unwrap();
         assert!(repository.get(&id).await.unwrap().unwrap().record.signals[0].acknowledged);
+
+        // A delayed E1 execution cannot enter after E2 acquired the operation,
+        // and the current acquisition is still admitted by the same boundary.
+        let stale_fence = OwnerFence {
+            executor_id: "executor-a".to_owned(),
+            connection_id: "executor-a".to_owned(),
+            owner_epoch: signalled.record.owner_epoch,
+        };
+        assert!(admit_operation_execution::<TestOperation>(
+            &repository,
+            &provider.mutation_gate,
+            &stale_fence,
+            "deployment",
+            &id,
+        )
+        .await
+        .unwrap()
+        .is_none());
+        let current_fence = OwnerFence {
+            executor_id: "executor-b".to_owned(),
+            connection_id: "executor-b".to_owned(),
+            owner_epoch: recovered.record.owner_epoch,
+        };
+        assert!(admit_operation_execution::<TestOperation>(
+            &repository,
+            &provider.mutation_gate,
+            &current_fence,
+            "deployment",
+            &id,
+        )
+        .await
+        .unwrap()
+        .is_some());
 
         let mut live = provider.watch(
             context("watch-replica", PermissionAction::Observe, None),

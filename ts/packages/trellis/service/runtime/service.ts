@@ -2833,12 +2833,23 @@ export function connectTrellisServiceWithRuntimeDeps<
           },
           authorizationProviderCache,
         });
+        let installedAvailability = participantAvailability(
+          args.participant,
+          bootstrap.binding.apiBindings,
+          bootstrap.binding.resources,
+        );
         authorizationProviderCache.onOwnInvalidated(() =>
           installConnectionAvailability(
             service.connection,
             participantAvailability(args.participant, {}, {}, []),
           )
         );
+        authorizationProviderCache.onOwnResumed(() => {
+          installConnectionAvailability(
+            service.connection,
+            installedAvailability,
+          );
+        });
         stopContextRefresh = startAuthorizationContextRefresh({
           trellisUrl: args.trellisUrl,
           sessionId: bootstrap.connectInfo.connectionId,
@@ -2877,13 +2888,14 @@ export function connectTrellisServiceWithRuntimeDeps<
                   transports: next.connectInfo.transports,
                 },
                 () => () => {
+                  installedAvailability = participantAvailability(
+                    args.participant,
+                    next.binding.apiBindings,
+                    next.binding.resources,
+                  );
                   installConnectionAvailability(
                     service.connection,
-                    participantAvailability(
-                      args.participant,
-                      next.binding.apiBindings,
-                      next.binding.resources,
-                    ),
+                    installedAvailability,
                   );
                   refreshApiRoutes(runtime.api, next.binding.apiBindings);
                   refreshApiRoutes(

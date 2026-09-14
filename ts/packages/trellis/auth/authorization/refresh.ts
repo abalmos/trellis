@@ -15,6 +15,7 @@ import { AuthorizationContextRefreshResponseSchema as ResponseSchema } from "./t
 /** HTTP refresh failure with terminal-state classification. */
 export class AuthorizationContextRefreshError extends TrellisHttpError {
   readonly terminal: boolean;
+  readonly loginInvalid: boolean;
 
   constructor(status: number, code: string) {
     super(status, code);
@@ -27,6 +28,7 @@ export class AuthorizationContextRefreshError extends TrellisHttpError {
       "identity_inactive",
       "user_not_found",
       "user_inactive",
+      "login_not_found",
       "participant_not_found",
       "participant_changed",
       "contract_changed",
@@ -34,6 +36,7 @@ export class AuthorizationContextRefreshError extends TrellisHttpError {
       "authority_rejected",
       "authority_revoked",
       "authority_expired",
+      "context_owner_mismatch",
       "deployment_inactive",
       "instance_inactive",
       "device_inactive",
@@ -41,6 +44,16 @@ export class AuthorizationContextRefreshError extends TrellisHttpError {
       "delegation_expired",
       "context_refresh_mismatch",
       "invalid_proof",
+    ].includes(code);
+    this.loginInvalid = [
+      "session_not_found",
+      "session_expired",
+      "session_revoked",
+      "identity_not_found",
+      "identity_inactive",
+      "user_not_found",
+      "user_inactive",
+      "login_not_found",
     ].includes(code);
   }
 }
@@ -61,12 +74,7 @@ export async function refreshAuthorizationContextWithMetadata(args: {
   prepareOnly?: boolean;
 }): Promise<AuthorizationContextRefreshResult> {
   const fetch = args.fetch ?? globalThis.fetch;
-  let current: VerifiedAuthorizationContext | undefined;
-  try {
-    current = args.cache.current();
-  } catch {
-    current = undefined;
-  }
+  const currentDigest = args.cache.storedContextDigest();
   let runtime: AuthorizationRuntimeBinding | undefined;
   try {
     runtime = args.cache.runtimeBinding();
@@ -83,7 +91,7 @@ export async function refreshAuthorizationContextWithMetadata(args: {
     loginSessionId: args.sessionId,
     connectionId: runtime?.connectionId ?? ulid(),
     sessionKey: args.sessionKey ?? args.auth.sessionKey,
-    currentContextDigest: current?.contextDigest ?? null,
+    currentContextDigest: currentDigest ?? null,
   };
   const proof = await args.auth.signSessionProof({
     purpose: "authorizationContextRefresh",
@@ -188,7 +196,7 @@ export function startAuthorizationContextRefresh(args: {
     try {
       let before: string | undefined;
       try {
-        before = args.cache.current().contextDigest;
+        before = args.cache.storedContextDigest();
       } catch {
         before = undefined;
       }

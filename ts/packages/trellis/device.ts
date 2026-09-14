@@ -893,12 +893,20 @@ export async function connectDeviceWithDeps<
       context: { participantId: args.participant.identity },
     },
   });
+  let installedAvailability = participantAvailability(
+    args.participant,
+    connectInfo.apiBindings,
+    connectInfo.resourceBindings,
+  );
   authorizationProviderCache.onOwnInvalidated(() =>
     installConnectionAvailability(
       connection,
       participantAvailability(args.participant, {}, {}, []),
     )
   );
+  authorizationProviderCache.onOwnResumed(() => {
+    installConnectionAvailability(connection, installedAvailability);
+  });
   connection.subscribe((status) =>
     authorizationProviderCache.observeConnectionPhase(status.phase)
   );
@@ -936,14 +944,12 @@ export async function connectDeviceWithDeps<
           shouldInstall,
           undefined,
           () => () => {
-            installConnectionAvailability(
-              connection,
-              participantAvailability(
-                args.participant,
-                next.connectInfo.apiBindings,
-                next.connectInfo.resourceBindings,
-              ),
+            installedAvailability = participantAvailability(
+              args.participant,
+              next.connectInfo.apiBindings,
+              next.connectInfo.resourceBindings,
             );
+            installConnectionAvailability(connection, installedAvailability);
             refreshApiRoutes(runtimeApi, next.connectInfo.apiBindings);
           },
         );

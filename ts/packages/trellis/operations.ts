@@ -468,6 +468,21 @@ function operationRequestBody(input: unknown, invocationId: string): JsonValue {
   return { invocationId, input: input as JsonValue };
 }
 
+function encodeOperationInput(schema: unknown, value: unknown): JsonValue {
+  if (
+    value === undefined || value === null || schema === undefined ||
+    schema === null
+  ) {
+    return value as JsonValue;
+  }
+  if (typeof Reflect.get(schema, "encode") === "function") {
+    return (schema as { encode(value: unknown): unknown }).encode(
+      value,
+    ) as JsonValue;
+  }
+  return value as JsonValue;
+}
+
 export function controlSubject(subject: string): string {
   return `${subject}.control`;
 }
@@ -743,6 +758,77 @@ class RuntimeOperationRef<
     this.#acceptedTransfer = acceptedTransfer;
   }
 
+  #decodePayload(schema: unknown, value: unknown): unknown {
+    if (
+      value === undefined || value === null || schema === undefined ||
+      schema === null
+    ) {
+      return value;
+    }
+    if (typeof Reflect.get(schema, "decode") === "function") {
+      return (schema as { decode(value: unknown): unknown }).decode(value);
+    }
+    return value;
+  }
+
+  #decodeSnapshot(
+    snapshot: OperationSnapshot<TProgress, TOutput> | undefined,
+  ): OperationSnapshot<TProgress, TOutput> | undefined {
+    if (!snapshot || typeof snapshot !== "object") {
+      return snapshot;
+    }
+    const descriptor = this.#descriptor as {
+      progress?: unknown;
+      output?: unknown;
+    };
+    return {
+      ...snapshot,
+      ...(snapshot.progress === undefined ? {} : {
+        progress: this.#decodePayload(
+          descriptor.progress,
+          snapshot.progress,
+        ) as TProgress,
+      }),
+      ...(snapshot.output === undefined ? {} : {
+        output: this.#decodePayload(
+          descriptor.output,
+          snapshot.output,
+        ) as TOutput,
+      }),
+    };
+  }
+
+  #decodeEvent(
+    event: OperationEvent<TProgress, TOutput, TUpdate>,
+  ): OperationEvent<TProgress, TOutput, TUpdate> {
+    const descriptor = this.#descriptor as {
+      update?: unknown;
+      progress?: unknown;
+    };
+    const decoded = (event as { snapshot?: unknown }).snapshot === undefined
+      ? { ...event }
+      : { ...event, snapshot: this.#decodeSnapshot(event.snapshot) };
+    if (event.type === "progress") {
+      return {
+        ...decoded,
+        progress: this.#decodePayload(
+          descriptor.progress,
+          event.progress,
+        ) as TProgress,
+      } as OperationEvent<TProgress, TOutput, TUpdate>;
+    }
+    if (event.type === "update") {
+      return {
+        ...decoded,
+        update: this.#decodePayload(
+          descriptor.update,
+          event.update,
+        ) as TUpdate,
+      } as OperationEvent<TProgress, TOutput, TUpdate>;
+    }
+    return decoded as OperationEvent<TProgress, TOutput, TUpdate>;
+  }
+
   get(): AsyncResult<
     OperationSnapshot<TProgress, TOutput>,
     OperationControlError | UnexpectedError
@@ -853,7 +939,10 @@ class RuntimeOperationRef<
         signal,
       };
       if (input !== undefined) {
-        body.input = input as JsonValue;
+        const signals =
+          (this.#descriptor as { signals?: Record<string, unknown> })
+            .signals;
+        body.input = encodeOperationInput(signals?.[signal], input);
       }
 
       const responseValue = await this.#transport.requestJson(
@@ -864,7 +953,12 @@ class RuntimeOperationRef<
         return err(responseValue.error);
       }
 
-      return decodeSignalAckFrame<TProgress, TOutput>(responseValue);
+      const ack = decodeSignalAckFrame<TProgress, TOutput>(responseValue)
+        .take();
+      if (isErr(ack)) {
+        return ack;
+      }
+      return ok({ ...ack, snapshot: this.#decodeSnapshot(ack.snapshot)! });
     })());
   }
 
@@ -900,6 +994,7 @@ class RuntimeOperationRef<
       const iterable = rawIterable as AsyncIterable<
         Result<JsonValue, TransportError | UnexpectedError>
       >;
+      const decodeEvent = this.#decodeEvent.bind(this);
 
       async function* events() {
         for await (const frame of iterable) {
@@ -921,8 +1016,9 @@ class RuntimeOperationRef<
           if (isErr(normalized)) {
             throw normalized.error;
           }
-          yield normalized;
-          if (isTerminalEvent(normalized)) {
+          const event = decodeEvent(normalized);
+          yield event;
+          if (isTerminalEvent(event)) {
             break;
           }
         }
@@ -956,7 +1052,7 @@ class RuntimeOperationRef<
       if (isErr(frame)) {
         return frame;
       }
-      return ok(frame.snapshot);
+      return ok(this.#decodeSnapshot(frame.snapshot)!);
     })());
   }
 }
@@ -1049,7 +1145,10 @@ function invokeOperation<
   return AsyncResult.from((async () => {
     const responseValue = await transport.requestJson(
       descriptor.subject,
-      operationRequestBody(input, invocationId),
+      operationRequestBody(
+        encodeOperationInput(descriptor.input, input),
+        invocationId,
+      ),
     ).take();
     if (isErr(responseValue)) {
       return responseValue;

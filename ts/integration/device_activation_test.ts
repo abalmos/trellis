@@ -238,7 +238,11 @@ Deno.test("device companion requires separate selected consent across restart", 
       const snapshot = await secondApproved.get().orThrow();
       return snapshot.state === "running" ? undefined : snapshot;
     }, { timeoutMs: 60_000 });
-    assertEquals(secondResult.state, "completed", JSON.stringify(secondResult));
+    assertEquals(
+      secondResult.state,
+      "completed",
+      `second approval state ${secondResult.state}`,
+    );
     let secondDevice = await TrellisDevice.connect({
       trellisUrl: runtime.trellisUrl,
       participant: participants.Device.participant,

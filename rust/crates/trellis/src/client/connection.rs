@@ -1305,7 +1305,8 @@ impl TrellisClient {
         self.authorization_provider
             .retain_own_context(&candidate_digest, self.authorization_provider.epoch())
             .await?;
-        contexts.promote(&candidate_digest)?;
+        self.authorization_provider
+            .finalize_own_installation(&candidate_digest, true)?;
         contexts.bundle()
     }
 

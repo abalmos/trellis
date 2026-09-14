@@ -302,3 +302,153 @@ commit. This evidence records local execution only and does not claim an
 exact-candidate CI result.
 
 **READY FOR INDEPENDENT WHOLE-RELEASE REVIEW - NOT ACCEPTED**
+
+## R1-R4 correction candidate on `08b310db`
+
+This section records the bounded R1-R4 correction ordered by
+`TRELLIS-WHOLE-RELEASE-REVIEW-08b310d.md`, implemented on top of candidate
+`08b310db02e6b118df59be274ada5c5f6675a4cb` (parent `0e94770`). It preserves the
+integrated immutable-evidence optimization, ordinary correctness tests, the
+manual performance tool, OpenTelemetry instrumentation, and every accepted
+security correction, including W3 and C2/C3/C6/C7a. No compatibility shim,
+second authority record, weakened validation, or new trust service is included.
+
+- Check #315 remains evidence only for `08b310d`. No CI run is claimed for this
+  correction; the review requires an independent exact-candidate Check.
+- The implementation-only tracked diff (21 files, 702 insertions, 133 deletions,
+  excluding this appended evidence section) has SHA-256
+  `68bfe62933d8521f175a2d44eb61f0d68ddf79399728cbf9f75c01a20bdf72ed`. Two
+  consecutive `cargo xtask install` passes produced that identical hash; the
+  only generated outputs in the surface are the regenerated
+  `integration/fixtures/runtime/trellis.lock` and gitignored fixture trees.
+
+### R1 - own-authorization recovery and final publication
+
+- **Resource identity vs transient usability.** A disconnect or watch
+  interruption now suspends use without retiring unchanged resource identities;
+  generations are bumped only by `replace`/`remove` or terminal state. The
+  TypeScript promotion path restores the exact retained `active` object when the
+  binding signature is unchanged and retires the previous object when it
+  changed, covering both the availability snapshot and the retained-handle gate.
+- **Explicit same-current resumption.** Rust's coverage-only branch now calls
+  `AuthorizationProviderCache::finalize_own_installation(digest, false)`, which
+  republishes the retained installation's availability without an HTTP request
+  or generation change. TypeScript's `#restoreOwnContext` success drives a new
+  `onOwnResumed` connection callback that reinstalls the last installed
+  availability; service, client, and device connections register it.
+- **Guarded final publication.** `finalize_own_installation` runs on one short
+  local synchronization boundary with no network await: expected digest,
+  retained lease identity, current admitted transport epoch, initialized live
+  coverage, no stored revocation, not-before/expiry, and nonterminal state.
+  Promotion is digest-checked against the prepared candidate; resumption checks
+  the retained digest.
+- **Both digests invalidate correctly.** Observed revocation of the active
+  digest suspends it and requests a fresh credential; observed revocation of the
+  current private candidate discards that candidate and requests a new one
+  without touching the still-valid active predecessor. A late watch from a
+  retired lease/epoch is ignored unless its coverage identity is still the
+  current cache entry for that digest.
+- **Transport authentication is independent of application-use eligibility.**
+  TypeScript presents a verified private candidate or a retained, unexpired,
+  not-definitively-revoked installation even while application use is suspended;
+  terminal state still rejects. Rust's authenticator already selected the
+  candidate or retained credential without consulting availability and now also
+  refuses a digest with locally observed revocation evidence.
+- **Typed refusal table and durable login.** `login_not_found` and
+  `context_owner_mismatch` are definitive in both SDK classifiers; pending and
+  transient codes are not. The browser client clears its durable login only for
+  login/session-invalid codes, so a revoked or expired authority context closes
+  the connection and recovers without erasing the user login.
+- **Predecessor identity.** `stored_context_digest`/`storedContextDigest`
+  preserve an expired-but-retained predecessor for refresh ownership and
+  reconciliation; time/usability checks remain on use and authentication.
+
+Runtime evidence (server and SDK from this tree): complete Rust resources live
+case passed in 38s, proving a replacement revokes retained KV/Store/Consumer
+handles (typed `Unavailable`) and that a same-digest coverage reinitialization
+restores usability without new issuance; complete Device.Companion live case
+passed 1/1 (two device approvals, companion bootstrap, cross-device State,
+restart, logout isolation); Rust live SDK suite 122/122; complete TypeScript
+live matrix 20/20 with 14 nested steps in 8m07s.
+
+### R2 - re-encode at the final TypeScript watch boundary
+
+The TypeScript watch-serving provider now re-encodes the decoded update through
+the generated action codec immediately before `publishFrame`, preserving the
+envelope, sequence handling, raw-byte proof verification, and every exact
+owner/epoch/lease/route check. To make the receiver boundary complete, the
+caller path now decodes operation `progress`/`update`/`output` payloads through
+the generated descriptor codecs and encodes typed operation and signal inputs
+before serialization, so nested 64-bit and byte values round-trip instead of
+relying on the previous wire-shaped leak.
+
+Evidence: the live generated workflow contract now carries
+`Update { value, nested: UpdateDetail { count: int64, payload: bytes } }`; the
+Rust fixture persists and emits `count: 9007199254740993` and bytes, and the
+separate live "generated TypeScript caller reaches Rust provider" case passed in
+1m21s. The complete generated workflow passed with two live same-deployment
+replicas, both watches receiving the typed update, forged unsigned update
+rejection, cancellation, and `bigint`/`Uint8Array` identity assertions. Only
+`Update` was added to the fixture contract; payloads stay transient and no
+update journal or public envelope changed.
+
+### R3 - explicit target entitlement after consent
+
+The explicit target source no longer requires `ApprovalMode::Exact`; the current
+target binding's stored server-owned delegation ceiling is used whenever it has
+no portal provenance, is active, and is unexpired, so a first approval persisted
+as `Capabilities` keeps its ceiling, restrictions, and finite expiry on the next
+consent or second-device activation. Owner/participant identity, active state,
+expiry, and transactional revision preconditions are unchanged; public-only
+targets keep their empty named-capability ceiling; revoked or expired bindings
+remain unusable; policy-backed authority is still resolved through portal policy
+with retained-target narrowing.
+
+Evidence:
+`capabilities_mode_target_keeps_explicit_entitlement_after_first_consent` and
+the existing explicit-ceiling/expiry/precondition and SQLite precondition tests;
+complete Device.Companion live case.
+
+### R4 - final ownership checks and cleanup ownership
+
+- Rust `resume` now performs its execution-entry admission
+  (`admit_operation_execution`) inside the spawned execution after
+  `repository.watch(...)` and immediately before the user handler. The check is
+  the exact fence/API/action/deployment/creator/lease/nonterminal predicate,
+  built from the freshly read record; a stale or cancelled acquisition returns
+  without invoking user code or renewing the old lease. The mutation gate fences
+  only the check, not the handler.
+- TypeScript's lease heartbeat now stops when its captured execution is aborted
+  as well as terminal, and asynchronous cleanup deletes the execution cache
+  entry and active fence only when the map still holds that captured runtime.
+
+Evidence: `durable_operation_recovery_and_controls_use_real_kv` (real KV/NATS)
+now asserts that an E1 fence is refused by the final entry boundary after E2
+acquired the operation while the current fence is admitted, on top of the
+existing expired-owner controls, snapshot revisions, and real replica recovery.
+The complete TypeScript live matrix covers same-process and cross-replica
+execution, cancellation, and forged-proof rejection.
+
+### Local Check-equivalent campaign on the rebased tree
+
+| Lane                | Result                                                                                                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Install / generated | Two installs identical (`68bfe629…`); only the regenerated fixture lock is tracked; `git diff --check` clean.                                 |
+| Rust                | Formatting, warning-denied workspace/all-target Clippy, and the full workspace test suite passed.                                             |
+| Rust tooling        | Both tooling workspaces passed.                                                                                                               |
+| Rust live           | Live-integration library suite 122/122 and live integration target 2/2 with prebuilt server and CLI.                                          |
+| TypeScript          | Repository formatting, public and integration checks, and all package/UI-tool tests passed.                                                   |
+| TypeScript live     | Complete matrix 20/20 with 14 nested steps in 8m07s; Device.Companion 1/1.                                                                    |
+| Demos / consumers   | Staged Node/Deno/Svelte consumers passed; isolated Rust service and device demos compiled against local `trellis-rs`; packaged Orders passed. |
+| UI hosting          | Embedded, configured-directory, and reverse-proxy hosting passed 3/3.                                                                         |
+
+One implementation root cause was found and fixed during focused live work: the
+new Rust resumption path originally held a watch `borrow()` guard across
+`send_replace`, self-deadlocking the first coverage resumption; the guard is now
+released before publication, and the resources live case passed afterward.
+
+`workorders/` remains protected untracked review input and is excluded from the
+commit. This evidence records local execution only and does not claim an
+exact-candidate CI result.
+
+**READY FOR INDEPENDENT WHOLE-RELEASE REVIEW - NOT ACCEPTED**

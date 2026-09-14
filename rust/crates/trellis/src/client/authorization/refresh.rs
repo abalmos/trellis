@@ -28,6 +28,8 @@ fn is_terminal_refresh_error(code: &str) -> bool {
             | "instance_inactive"
             | "device_inactive"
             | "activation_required"
+            | "login_not_found"
+            | "context_owner_mismatch"
             | "authority_revoked"
             | "authority_expired"
             | "authority_not_found"
@@ -48,10 +50,10 @@ pub(crate) async fn refresh(
             "refresh signing key does not belong to this connection".into(),
         ));
     }
-    let observed_digest = cache.retained_context_digest().ok();
+    let observed_digest = cache.stored_context_digest().ok();
     let _refresh = cache.lock_refresh().await;
-    if observed_digest != cache.retained_context_digest().ok() {
-        return Ok((cache.retained_context_digest()?, false));
+    if observed_digest != cache.stored_context_digest().ok() {
+        return Ok((cache.stored_context_digest()?, false));
     }
     let previous = cache.state_snapshot()?;
     let request_started_at = system_now_millis()?;
@@ -215,13 +217,13 @@ pub(crate) fn spawn_authorization_context_refresh_task(
             };
             let request = tokio::select! {
                 () = tokio::time::sleep(delay) => super::own_context::AuthorizationRefreshRequest {
-                    context_digest: contexts.retained_context_digest().ok(),
+                    context_digest: contexts.stored_context_digest().ok(),
                     refresh_credential: true,
                 },
                 request = contexts.wait_refresh_request() => request,
             };
             if request.context_digest.is_some()
-                && request.context_digest != contexts.retained_context_digest().ok()
+                && request.context_digest != contexts.stored_context_digest().ok()
             {
                 continue;
             }
@@ -231,14 +233,11 @@ pub(crate) fn spawn_authorization_context_refresh_task(
                     let epoch = provider.epoch();
                     match provider.retain_own_context(&digest, epoch).await {
                         Ok(()) => {
-                            if contexts.candidate_digest().is_err() {
-                                // Coverage is restored for the already-active installation.
-                                continue;
-                            }
-                            match contexts.promote(&digest) {
+                            let promote = contexts.candidate_digest().is_ok();
+                            match provider.finalize_own_installation(&digest, promote) {
                                 Ok(()) => continue,
                                 Err(error) => {
-                                    tracing::warn!(%error, "authorization coverage promotion failed")
+                                    tracing::warn!(%error, "authorization coverage publication failed")
                                 }
                             }
                         }
@@ -281,7 +280,9 @@ pub(crate) fn spawn_authorization_context_refresh_task(
                     {
                         tracing::warn!(%error, "refreshed own-context coverage is unavailable");
                         contexts.request_refresh();
-                    } else if let Err(error) = contexts.promote(&candidate_digest) {
+                    } else if let Err(error) =
+                        provider.finalize_own_installation(&candidate_digest, true)
+                    {
                         tracing::warn!(%error, "refreshed authorization promotion failed");
                         contexts.request_refresh();
                     }
@@ -316,7 +317,12 @@ mod tests {
         assert!(is_terminal_refresh_error("session_revoked"));
         assert!(is_terminal_refresh_error("grant_binding_revoked"));
         assert!(is_terminal_refresh_error("context_refresh_mismatch"));
+        assert!(is_terminal_refresh_error("login_not_found"));
+        assert!(is_terminal_refresh_error("context_owner_mismatch"));
         assert!(!is_terminal_refresh_error("required_resources_unavailable"));
+        assert!(!is_terminal_refresh_error("dependency_pending"));
+        assert!(!is_terminal_refresh_error("resource_pending"));
+        assert!(!is_terminal_refresh_error("authorization_pending"));
         assert!(!is_terminal_refresh_error("session_revoked later"));
     }
 }

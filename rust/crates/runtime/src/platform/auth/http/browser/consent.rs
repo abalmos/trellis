@@ -17,8 +17,7 @@ where
     R: PortalRepository + Clone,
 {
     if current.is_some_and(|binding| {
-        binding.approval_mode == ApprovalMode::Exact
-            && binding.provenance.is_none()
+        binding.provenance.is_none()
             && binding.state == GrantBindingState::Active
             && binding.expires_at.is_none_or(|expiry| expiry > now)
     }) {

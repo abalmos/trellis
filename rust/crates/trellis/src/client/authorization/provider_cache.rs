@@ -432,9 +432,10 @@ impl AuthorizationProviderCache {
         drop(state);
         if let Some(own) = &self.own {
             if own
-                .retained_context_digest()
+                .stored_context_digest()
                 .is_ok_and(|current| current == digest)
             {
+                own.mark_revoked(digest);
                 // Retire the stale own lease so the suspended installation
                 // cannot keep resources or revocation coverage alive.
                 if let Ok(mut lease) = self.own_lease.lock() {
@@ -442,7 +443,79 @@ impl AuthorizationProviderCache {
                 }
                 own.suspend();
                 own.request_refresh();
+            } else if own
+                .candidate_digest()
+                .is_ok_and(|candidate| candidate == digest)
+            {
+                // A revoked private candidate must never be published, and the
+                // still-valid active predecessor stays untouched.
+                own.mark_revoked(digest);
+                own.invalidate_candidate(digest);
+                own.request_refresh();
             }
+        }
+        Ok(())
+    }
+
+    /// Publish the guarded final own-installation transition.
+    ///
+    /// Runs on one short local synchronization boundary with no network or HTTP
+    /// await: the expected digest must still own the retained lease on the
+    /// current admitted epoch with initialized live coverage and no stored
+    /// revocation. `promote` publishes a prepared candidate; otherwise the
+    /// retained installation is resumed after coverage reinitialization.
+    pub(crate) fn finalize_own_installation(
+        &self,
+        expected_digest: &str,
+        promote: bool,
+    ) -> Result<(), TrellisClientError> {
+        let Some(own) = &self.own else {
+            return Ok(());
+        };
+        let expected_epoch = self.epoch();
+        {
+            let state = self.read_state()?;
+            if state.revocations.contains_key(expected_digest) {
+                return Err(TrellisClientError::AuthorizationUnavailable(
+                    "authorization context is revoked".into(),
+                ));
+            }
+            let Some(entry) = state.contexts.get(expected_digest) else {
+                return Err(TrellisClientError::AuthorizationUnavailable(
+                    "authorization coverage is unavailable".into(),
+                ));
+            };
+            if !entry.covered.load(Ordering::Acquire) || entry.epoch != expected_epoch {
+                return Err(TrellisClientError::AuthorizationUnavailable(
+                    "authorization coverage changed before publication".into(),
+                ));
+            }
+        }
+        let lease = self.own_lease.lock().map_err(|_| {
+            TrellisClientError::AuthorizationUnavailable("own context lease lock poisoned".into())
+        })?;
+        let Some(lease) = lease.as_ref() else {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization coverage lease is unavailable".into(),
+            ));
+        };
+        if lease.context_digest() != expected_digest
+            || lease.epoch() != expected_epoch
+            || !self.health()?.healthy
+        {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization coverage changed before publication".into(),
+            ));
+        }
+        if promote {
+            if own.candidate_digest()? != expected_digest {
+                return Err(TrellisClientError::AuthorizationUnavailable(
+                    "authorization candidate changed before publication".into(),
+                ));
+            }
+            own.promote(expected_digest)?;
+        } else {
+            own.resume_availability(expected_digest)?;
         }
         Ok(())
     }
@@ -894,17 +967,42 @@ async fn observe_context_revocation(
             }
         }
     }
+    // A late watch from a retired lease or epoch must not invalidate a newer
+    // transition that reused the same digest.
+    let current_entry = weak_state.upgrade().is_some_and(|state| {
+        state.read().is_ok_and(|state| {
+            state
+                .contexts
+                .get(&watch_digest)
+                .is_some_and(|entry| Arc::ptr_eq(&entry.covered, &watch_covered))
+        })
+    });
+    if !current_entry {
+        return;
+    }
     if let Some(own) = own.and_then(|own| own.upgrade()) {
         if own
-            .retained_context_digest()
+            .stored_context_digest()
             .is_ok_and(|digest| digest == watch_digest)
         {
+            if revoked_at.is_some() {
+                own.mark_revoked(&watch_digest);
+            }
             own.suspend();
             if revoked_at.is_some() {
                 own.request_refresh();
             } else {
                 own.request_coverage_reconciliation();
             }
+        } else if own
+            .candidate_digest()
+            .is_ok_and(|digest| digest == watch_digest)
+        {
+            if revoked_at.is_some() {
+                own.mark_revoked(&watch_digest);
+            }
+            own.invalidate_candidate(&watch_digest);
+            own.request_refresh();
         }
     }
 }

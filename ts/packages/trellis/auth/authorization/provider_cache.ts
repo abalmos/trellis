@@ -118,6 +118,8 @@ export class AuthorizationProviderCache {
   #generation = 0;
   #ownEntry?: ProviderContextEntry;
   #onOwnInvalidated?: () => void;
+  #onOwnResumed?: () => void;
+  #ownRevokedDigest?: string;
   #ownUsable = true;
   readonly #connectedWaiters = new Set<() => void>();
 
@@ -180,6 +182,7 @@ export class AuthorizationProviderCache {
   async retainOwnContext(): Promise<void> {
     const digest = this.#cache.current().contextDigest;
     await this.#retainOwnContext(digest, this.#generation);
+    this.#ownRevokedDigest = undefined;
     this.#ownUsable = true;
   }
 
@@ -196,13 +199,17 @@ export class AuthorizationProviderCache {
     if (
       !this.#connected || generation !== this.#generation ||
       this.#ownEntry?.contextDigest !== digest || !this.#ownEntry.covered ||
-      this.#ownEntry.generation !== generation
+      this.#ownEntry.revokedAt !== undefined ||
+      this.#ownEntry.generation !== generation ||
+      !this.#cache.hasCandidate() ||
+      this.#cache.transportCurrent().contextDigest !== digest
     ) {
       throw new Error(
         "authorization candidate coverage changed before promotion",
       );
     }
     this.#cache.promote(digest);
+    this.#ownRevokedDigest = undefined;
     this.#ownUsable = true;
   }
 
@@ -231,13 +238,20 @@ export class AuthorizationProviderCache {
     return this.#ownUsable;
   }
 
-  /** A verified private candidate may authenticate transport while application use is suspended. */
+  /** A verified private candidate or a retained unrevoked installation may authenticate transport. */
   transportUsable(): boolean {
-    return this.#ownUsable || this.#cache.hasCandidate();
+    if (!this.#started || this.#stopped) return false;
+    if (this.#ownUsable) return true;
+    const digest = this.#cache.hasCandidate()
+      ? this.#cache.transportCurrent().contextDigest
+      : this.#cache.storedContextDigest();
+    return digest !== undefined && digest !== this.#ownRevokedDigest;
   }
 
   /** Suspend stale transport authentication and request one current context. */
   refreshOwnAuthorization(): void {
+    const revoked = this.#cache.storedContextDigest();
+    if (revoked !== undefined) this.#ownRevokedDigest = revoked;
     if (this.#ownUsable) {
       this.#ownUsable = false;
       this.#onOwnInvalidated?.();
@@ -260,6 +274,11 @@ export class AuthorizationProviderCache {
   /** Register the connection-owned usability withdrawal for own revocation. */
   onOwnInvalidated(callback: () => void): void {
     this.#onOwnInvalidated = callback;
+  }
+
+  /** Register the connection-owned resumption after same-context coverage initialization. */
+  onOwnResumed(callback: () => void): void {
+    this.#onOwnResumed = callback;
   }
 
   /** Wait until the connected registry is available. */
@@ -351,6 +370,7 @@ export class AuthorizationProviderCache {
     ) {
       try {
         await this.retainOwnContext();
+        this.#onOwnResumed?.();
         return;
       } catch {
         await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -669,13 +689,23 @@ export class AuthorizationProviderCache {
       parseRevocation(event.value),
     );
     let ownDigest: string | undefined;
+    let candidateDigest: string | undefined;
     try {
-      ownDigest = this.#cache.current().contextDigest;
+      ownDigest = this.#cache.storedContextDigest();
+      candidateDigest = this.#cache.hasCandidate()
+        ? this.#cache.transportCurrent().contextDigest
+        : undefined;
     } catch {
       // No own installation remains to invalidate.
     }
     if (ownDigest === entry.contextDigest) {
+      this.#ownRevokedDigest = entry.contextDigest;
       this.refreshOwnAuthorization();
+    } else if (candidateDigest === entry.contextDigest) {
+      // A revoked candidate is discarded without touching the active predecessor.
+      this.#ownRevokedDigest = entry.contextDigest;
+      this.#cache.invalidateCandidate(entry.contextDigest);
+      this.#cache.requestRefresh();
     }
   }
 

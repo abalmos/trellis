@@ -138,6 +138,20 @@ export class AuthorizationContextCache {
     return candidate.verified;
   }
 
+  /** Return the installed context identity without time or usability checks. */
+  storedContextDigest(): string | undefined {
+    return this.#verified?.contextDigest;
+  }
+
+  /** Drop a private candidate that became unusable before promotion. */
+  invalidateCandidate(digest: string): boolean {
+    if (this.#candidate?.verified.contextDigest === digest) {
+      this.#candidate = undefined;
+      return true;
+    }
+    return false;
+  }
+
   /** Return the verified candidate used only for transport reauthorization. */
   transportCurrent(): VerifiedAuthorizationContext {
     return this.#candidate?.verified ?? this.current();

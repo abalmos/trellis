@@ -42,6 +42,7 @@ pub struct AuthorizationContextCache {
     refresh_requested: Arc<tokio::sync::Notify>,
     refresh_request: Arc<Mutex<Option<AuthorizationRefreshRequest>>>,
     candidate: Arc<RwLock<Option<PreparedInstallation>>>,
+    revoked_digest: Arc<Mutex<Option<String>>>,
 }
 
 impl AuthorizationContextCache {
@@ -67,6 +68,7 @@ impl AuthorizationContextCache {
             refresh_requested: Arc::new(tokio::sync::Notify::new()),
             refresh_request: Arc::new(Mutex::new(None)),
             candidate: Arc::new(RwLock::new(None)),
+            revoked_digest: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -303,6 +305,13 @@ impl AuthorizationContextCache {
                 "authorization candidate changed before promotion".into(),
             ));
         }
+        let now = self.corrected_now_seconds()?;
+        if prepared.current.not_before > now || prepared.current.expires_at <= now {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization candidate is no longer current".into(),
+            ));
+        }
+        self.clear_revoked(expected_digest);
         *state = CachedAuthorizationState {
             current: Some(prepared.current),
             runtime: Some(prepared.runtime),
@@ -360,6 +369,24 @@ impl AuthorizationContextCache {
         self.retained_context_digest()
     }
 
+    /// Return the installed context identity without time or usability checks.
+    ///
+    /// Refresh ownership and coverage reconciliation must still recognize an
+    /// expired-but-retained predecessor; time checks belong on use paths.
+    pub(crate) fn stored_context_digest(&self) -> Result<String, TrellisClientError> {
+        let state = self
+            .state
+            .read()
+            .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))?;
+        state
+            .current
+            .as_ref()
+            .map(|current| current.context_digest.clone())
+            .ok_or_else(|| {
+                TrellisClientError::Bootstrap("authorization context is not installed".into())
+            })
+    }
+
     pub(crate) fn retained_context_digest(&self) -> Result<String, TrellisClientError> {
         let state = self
             .state
@@ -375,6 +402,94 @@ impl AuthorizationContextCache {
             .filter(|current| current.not_before <= now && current.expires_at > now)
             .map(|current| current.context_digest.clone())
             .ok_or_else(|| TrellisClientError::Bootstrap("authorization context expired".into()))
+    }
+
+    /// Publish usability again for the retained installation without changing
+    /// context or resource identity, after coverage was reinitialized.
+    pub(crate) fn resume_availability(
+        &self,
+        expected_digest: &str,
+    ) -> Result<(), TrellisClientError> {
+        let state = self.state_snapshot()?;
+        let current = state.current.as_ref().ok_or_else(|| {
+            TrellisClientError::AuthorizationUnavailable(
+                "authorization context is unavailable".into(),
+            )
+        })?;
+        if current.context_digest != expected_digest {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization installation changed before resumption".into(),
+            ));
+        }
+        let now = self.corrected_now_seconds()?;
+        if current.not_before > now || current.expires_at <= now {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization context is no longer current".into(),
+            ));
+        }
+        let permissions = persisted_signed_context(&current.bundle)?
+            .unsigned
+            .grants
+            .permissions()
+            .to_vec();
+        let resources = state
+            .authorization
+            .as_ref()
+            .and_then(|value| value.get("resourceRuntime"))
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()?
+            .unwrap_or_default();
+        let previous = self.availability.borrow().clone();
+        self.availability
+            .send_replace(crate::generated::AvailabilitySnapshot::replacing(
+                permissions,
+                resources,
+                &previous,
+            ));
+        self.clear_revoked(expected_digest);
+        tracing::info!(
+            context_digest = expected_digest,
+            "resumed authorization installation coverage"
+        );
+        Ok(())
+    }
+
+    /// Record locally observed revocation evidence for transport presentation.
+    pub(crate) fn mark_revoked(&self, digest: &str) {
+        if let Ok(mut revoked) = self.revoked_digest.lock() {
+            if revoked.as_deref() != Some(digest) {
+                *revoked = Some(digest.to_owned());
+            }
+        }
+    }
+
+    fn clear_revoked(&self, digest: &str) {
+        if let Ok(mut revoked) = self.revoked_digest.lock() {
+            if revoked.as_deref() == Some(digest) {
+                *revoked = None;
+            }
+        }
+    }
+
+    fn is_revoked(&self, digest: &str) -> bool {
+        self.revoked_digest
+            .lock()
+            .is_ok_and(|revoked| revoked.as_deref() == Some(digest))
+    }
+
+    /// Drop a private candidate that became unusable before publication.
+    pub(crate) fn invalidate_candidate(&self, digest: &str) -> bool {
+        if let Ok(mut candidate) = self.candidate.write() {
+            if candidate
+                .as_ref()
+                .is_some_and(|candidate| candidate.current.context_digest == digest)
+            {
+                *candidate = None;
+                return true;
+            }
+        }
+        false
     }
 
     /// Return the current verified context and its online issuer entry.
@@ -415,7 +530,7 @@ impl AuthorizationContextCache {
 
     fn request_reconciliation(&self, refresh_credential: bool) {
         if let Ok(mut requested) = self.refresh_request.lock() {
-            let digest = self.retained_context_digest().ok();
+            let digest = self.stored_context_digest().ok();
             match requested.as_mut() {
                 Some(request) => request.refresh_credential |= refresh_credential,
                 None => {
@@ -436,7 +551,7 @@ impl AuthorizationContextCache {
             .ok()
             .and_then(|mut requested| requested.take())
             .unwrap_or(AuthorizationRefreshRequest {
-                context_digest: self.retained_context_digest().ok(),
+                context_digest: self.stored_context_digest().ok(),
                 refresh_credential: false,
             })
     }
@@ -487,12 +602,23 @@ impl AuthorizationContextCache {
                     "authorization routing JWT expired".into(),
                 ));
             }
+            if self.is_revoked(&candidate.current.context_digest) {
+                return Err(TrellisClientError::AuthorizationUnavailable(
+                    "authorization candidate is revoked".into(),
+                ));
+            }
             return Ok((
                 candidate.routing.bootstrap_jwt.clone(),
                 candidate.current.context_digest.clone(),
             ));
         }
-        Ok((self.routing_jwt()?, self.retained_context_digest()?))
+        let digest = self.retained_context_digest()?;
+        if self.is_revoked(&digest) {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization context is revoked".into(),
+            ));
+        }
+        Ok((self.routing_jwt()?, digest))
     }
 
     pub(crate) fn runtime_binding(

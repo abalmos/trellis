@@ -683,8 +683,7 @@ pub(crate) fn consent_authority(
             preconditions: ConsentAuthorityPreconditions::default(),
         }),
         ConsentAuthoritySource::Explicit { target }
-            if target.approval_mode == ApprovalMode::Exact
-                && target.provenance.is_none()
+            if target.provenance.is_none()
                 && target.state == super::GrantBindingState::Active
                 && target.expires_at.is_none_or(|expiry| expiry > now) =>
         {
@@ -1181,6 +1180,44 @@ mod tests {
                 },
                 1
             ),
+            Err(AuthorizationStateError::NotAuthorized)
+        ));
+    }
+
+    #[test]
+    fn capabilities_mode_target_keeps_explicit_entitlement_after_first_consent() {
+        let ceiling = DelegationCeiling {
+            capabilities: vec![ApprovedCapability {
+                id: "app::first".to_owned(),
+                consent_digest: "A".repeat(43),
+            }],
+            exact_restrictions: Some(GrantSet::new(vec![atom("Read")])),
+            platform_privileges: Vec::new(),
+        };
+        let first = consent_binding(ApprovalMode::Exact, ceiling.clone(), Some(1_000), None);
+        let first_authority =
+            consent_authority(ConsentAuthoritySource::Explicit { target: &first }, 1).unwrap();
+        assert_eq!(first_authority.ceiling, ceiling);
+
+        // The first approval persists the user's selection as a capability-mode
+        // binding with the same server-owned ceiling and no portal provenance.
+        let second = consent_binding(
+            ApprovalMode::Capabilities,
+            ceiling.clone(),
+            Some(1_000),
+            None,
+        );
+        let second_authority =
+            consent_authority(ConsentAuthoritySource::Explicit { target: &second }, 1).unwrap();
+        assert_eq!(second_authority.ceiling, ceiling);
+        assert_eq!(second_authority.expires_at, Some(1_000));
+        assert!(second_authority.provenance.is_none());
+        assert_eq!(second_authority.preconditions.bindings.len(), 1);
+        assert_eq!(second_authority.preconditions.bindings[0].revision, 3);
+
+        let expired = consent_binding(ApprovalMode::Capabilities, ceiling, Some(1), None);
+        assert!(matches!(
+            consent_authority(ConsentAuthoritySource::Explicit { target: &expired }, 1),
             Err(AuthorizationStateError::NotAuthorized)
         ));
     }

@@ -1,6 +1,8 @@
 import { auth } from trellis;
 
 model Value { value: string; }
+model UpdateDetail { count: int64; payload: bytes; }
+model Update { value: string; nested: UpdateDetail; }
 model Empty {}
 model Saved { value: string; }
 model Sample { site: string; value: string; }
@@ -13,7 +15,7 @@ api runtime@v1 {
   title "Runtime acceptance";
   description "Small generated transport and durability fixture.";
   rpc Echo { input Value; output Value; }
-  operation Work { input Value; progress Value; output Value; signals { Continue Value; } }
+  operation Work { input Value; progress Update; output Value; signals { Continue Value; } }
   operation Upload { input Value; output Value; signals { Continue Value; } upload; }
   event Changed { payload Value; }
   feed Watch { input Empty; event Value; }

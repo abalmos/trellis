@@ -517,7 +517,9 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     try {
       await this.saveOperationRecord(runtime);
     } catch {
-      this.#operations.delete(runtime.id);
+      if (this.#operations.get(runtime.id) === runtime) {
+        this.#operations.delete(runtime.id);
+      }
       return null;
     }
     runtime.reclaimed = true;
@@ -1466,12 +1468,18 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                     ) continue;
                     ownerEpoch = epoch;
                     updateSequence = sequence;
+                    const wireUpdate = this.#encodeOperationValue(
+                      ctx,
+                      "update",
+                      parsedUpdate,
+                    ).take();
+                    if (isErr(wireUpdate)) continue;
                     await publishFrame(reply, {
                       kind: "event",
                       sequence: current.sequence,
                       event: {
                         type: "update",
-                        update: parsedUpdate,
+                        update: wireUpdate,
                         snapshot: current.snapshot,
                       },
                     });
@@ -1896,7 +1904,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
           fence: RuntimeOperationFence,
         ) => {
           const leaseHeartbeat = setInterval(() => {
-            if (runtime.terminal) {
+            if (runtime.terminal || runtime.cancellation.signal.aborted) {
               clearInterval(leaseHeartbeat);
               return;
             }
@@ -1926,7 +1934,10 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               }
             }).catch(() => {
               runtime.cancellation.abort("operation ownership lost");
-              this.#operations.delete(runtime.id);
+              if (this.#operations.get(runtime.id) === runtime) {
+                this.#operations.delete(runtime.id);
+              }
+              this.#releaseOperationFence(runtime.id, fence);
               clearInterval(leaseHeartbeat);
             });
           }, 10_000);

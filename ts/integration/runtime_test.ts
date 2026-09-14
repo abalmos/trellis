@@ -13,6 +13,21 @@ import { participants as removedParticipants } from "../../integration/fixtures/
 import { adminParticipant } from "../packages/trellis-test/src/admin/methods.ts";
 import { withTrellisRuntime } from "./_support/runtime.ts";
 
+const persistedProgress = {
+  value: "persisted",
+  nested: {
+    count: 9_007_199_254_740_993n,
+    payload: Uint8Array.from([1, 2, 3]),
+  },
+};
+const transientProgress = {
+  value: "transient",
+  nested: {
+    count: 9_007_199_254_740_993n,
+    payload: Uint8Array.from([4, 5, 6]),
+  },
+};
+
 Deno.test("runtime owns its production stream configs across restart", async () => {
   await withTrellisRuntime(async (runtime) => {
     const nats = await connect({
@@ -214,14 +229,15 @@ Deno.test("generated TypeScript caller reaches Rust provider", async () => {
         contract: participants.Caller.participant,
       });
       const resumedLive = reconnected.work.resume(live);
-      assertEquals((await resumedLive.get().orThrow()).progress, {
-        value: "persisted",
-      });
+      assertEquals(
+        (await resumedLive.get().orThrow()).progress,
+        persistedProgress,
+      );
       const watched = (await resumedLive.watch({ updates: true }).orThrow())
         [Symbol.asyncIterator]();
       const initial = (await watched.next()).value;
       assert(initial?.type !== "update");
-      assertEquals(initial?.snapshot.progress, { value: "persisted" });
+      assertEquals(initial?.snapshot.progress, persistedProgress);
 
       await runtime.deployments.create({
         id: "operation-intruder",
@@ -257,6 +273,7 @@ Deno.test("generated TypeScript caller reaches Rust provider", async () => {
         while (update?.type !== "update") update = (await watched.next()).value;
         assert(update);
         assertEquals(update.update.value, "transient");
+        assertEquals(update.update, transientProgress);
         const afterUpdate = await resumedLive.get().orThrow();
         assert(afterUpdate.revision >= signal.snapshot.revision);
         assertEquals(afterUpdate.progress, signal.snapshot.progress);
@@ -265,7 +282,7 @@ Deno.test("generated TypeScript caller reaches Rust provider", async () => {
           [Symbol.asyncIterator]();
         const lateInitial = (await late.next()).value;
         assert(lateInitial?.type !== "update");
-        assertEquals(lateInitial?.snapshot.progress, { value: "persisted" });
+        assertEquals(lateInitial?.snapshot.progress, persistedProgress);
         await resumedLive.cancel().orThrow();
         let lateTerminal = (await late.next()).value;
         while (lateTerminal?.snapshot.state !== "cancelled") {
@@ -557,7 +574,7 @@ Deno.test("generated runtime workflows", async (t) => {
         await op.started().orThrow();
         if (input.value === "reconnect-live") {
           const accepted = await op.nextSignal("Continue").orThrow();
-          await op.emitUpdate({ value: "transient" }).orThrow();
+          await op.emitUpdate(transientProgress).orThrow();
           await op.acknowledgeSignal(accepted.sequence).orThrow();
           return op.defer();
         }
@@ -786,7 +803,7 @@ Deno.test("generated runtime workflows", async (t) => {
                     );
                   }
                   assert(update);
-                  assertEquals(update.update, { value: "transient" });
+                  assertEquals(update.update, transientProgress);
                 }
               } finally {
                 await siblingService.stop();

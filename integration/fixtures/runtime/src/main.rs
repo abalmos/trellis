@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use runtime_trellis::participants::runtime_trellis_operation_provider::types::KeyedValue;
 use runtime_trellis::participants::runtime_trellis_operation_provider::{Participant, Provider};
-use runtime_trellis::types::Value;
+use runtime_trellis::types::{Update, UpdateDetail, Value};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -126,8 +126,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ));
             }
             if !context.resuming {
-                op.progress(Value {
+                op.progress(Update {
                     value: "persisted".to_owned(),
+                    nested: UpdateDetail {
+                        count: runtime_trellis::Int64(9_007_199_254_740_993),
+                        payload: vec![1, 2, 3].into(),
+                    },
                 })
                 .await?;
             } else if context
@@ -153,8 +157,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 trellis_rs::service::ServerError::Nats("signal stream ended".to_owned())
             })?;
             if input.value == "reconnect-live" {
-                op.emit_update(Value {
+                op.emit_update(Update {
                     value: "transient".to_owned(),
+                    nested: UpdateDetail {
+                        count: runtime_trellis::Int64(9_007_199_254_740_993),
+                        payload: vec![4, 5, 6].into(),
+                    },
                 })
                 .await?;
                 op.acknowledge_signal(signal.signal_sequence).await?;

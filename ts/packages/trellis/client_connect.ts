@@ -1363,12 +1363,22 @@ export async function connectClientWithDeps<
     }),
   };
   const resourceFacades = clientResourceFacades(resourceState);
+  let installedAvailability = participantAvailability(
+    args.participant,
+    bootstrap.apiBindings,
+    bootstrap.resourceBindings,
+    authorizationContexts.current().context.grants.permissions,
+  );
   authorizationProviderCache.onOwnInvalidated(() => {
     resourceState.current.active.value = false;
     installConnectionAvailability(
       connection,
       participantAvailability(args.participant, {}, {}, []),
     );
+  });
+  authorizationProviderCache.onOwnResumed(() => {
+    resourceState.current.active.value = true;
+    installConnectionAvailability(connection, installedAvailability);
   });
   const stopContextRefresh = startAuthorizationContextRefresh({
     trellisUrl: args.trellisUrl,
@@ -1398,16 +1408,16 @@ export async function connectClientWithDeps<
             if (nextResources !== resourceState.current) {
               resourceState.current.active.value = false;
               resourceState.current = nextResources;
+            } else {
+              resourceState.current.active.value = true;
             }
-            installConnectionAvailability(
-              connection,
-              participantAvailability(
-                args.participant,
-                response.apiBindings,
-                response.authorization.resourceRuntime,
-                verified.context.grants.permissions,
-              ),
+            installedAvailability = participantAvailability(
+              args.participant,
+              response.apiBindings,
+              response.authorization.resourceRuntime,
+              verified.context.grants.permissions,
             );
+            installConnectionAvailability(connection, installedAvailability);
             refreshApiRoutes(api, response.apiBindings);
           };
         },
@@ -1432,7 +1442,7 @@ export async function connectClientWithDeps<
         generation,
       );
     },
-    onTerminalFailure: async () => {
+    onTerminalFailure: async (error) => {
       if (!nc.isClosed()) {
         try {
           await nc.close();
@@ -1440,6 +1450,10 @@ export async function connectClientWithDeps<
           await nc.closed().catch(() => undefined);
         }
       }
+      // A revoked or expired authority context is not a durable login failure.
+      if (
+        error instanceof AuthorizationContextRefreshError && !error.loginInvalid
+      ) return;
       await handleSessionNotFound?.();
     },
   });
