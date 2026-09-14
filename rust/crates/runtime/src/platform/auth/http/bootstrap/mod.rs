@@ -347,6 +347,11 @@ fn verify_detached_companion_proof(
         .map_err(|_| HttpError::unauthorized("invalid_companion_proof"))
 }
 
+#[tracing::instrument(
+    name = "trellis.auth.issue_bootstrap",
+    skip_all,
+    fields(trellis.surface = "auth", trellis.operation = "issue_bootstrap")
+)]
 pub(super) async fn issue_bootstrap<R, E>(
     state: &AuthHttpState<R, E>,
     connection: IssuanceConnection,
@@ -366,90 +371,151 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    let session_key = connection.session_public_key.clone();
-    let (authorization_context, issuance) = state
-        .authorization_contexts
-        .issue_with_state(
-            AuthorizationContextIssueRequest {
-                connection,
-                request_id,
-                request_digest,
+    let total_started = std::time::Instant::now();
+    let result = async {
+        let session_key = connection.session_public_key.clone();
+        let context_issue_started = std::time::Instant::now();
+        let context_issue = state
+            .authorization_contexts
+            .issue_with_state(
+                AuthorizationContextIssueRequest {
+                    connection,
+                    request_id,
+                    request_digest,
+                },
+                now / 1_000,
+            )
+            .await;
+        crate::telemetry::record_duration(
+            crate::telemetry::DurationMetric::AuthFlow,
+            context_issue_started.elapsed(),
+            "auth",
+            "issue_bootstrap",
+            "context_issue",
+            if context_issue.is_ok() {
+                crate::telemetry::Outcome::Ok
+            } else {
+                crate::telemetry::Outcome::Error
             },
+        );
+        let (authorization_context, issuance) = context_issue.map_err(map_issuance_error)?;
+        let bootstrap_jwt_expires_at = authorization_context
+            .context
+            .get("expiresAt")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| HttpError::internal("issued_context_invalid"))?;
+        let route = state.issuer.deny_all_user_jwt(
+            &session_public_key_to_user_nkey(&session_key)?,
+            bootstrap_jwt_expires_at,
             now / 1_000,
-        )
-        .await
-        .map_err(map_issuance_error)?;
-    let bootstrap_jwt_expires_at = authorization_context
-        .context
-        .get("expiresAt")
-        .and_then(Value::as_i64)
-        .ok_or_else(|| HttpError::internal("issued_context_invalid"))?;
-    let route = state.issuer.deny_all_user_jwt(
-        &session_public_key_to_user_nkey(&session_key)?,
-        bootstrap_jwt_expires_at,
-        now / 1_000,
-    )?;
-    let transports = BootstrapTransports {
-        native: (!state.native_nats_servers.is_empty()).then(|| BootstrapTransport {
-            nats_servers: state.native_nats_servers.clone(),
-        }),
-        websocket: (!state.websocket_nats_servers.is_empty()).then(|| BootstrapTransport {
-            nats_servers: state.websocket_nats_servers.clone(),
-        }),
-    };
-    if transports.native.is_none() && transports.websocket.is_none() {
-        return Err(HttpError::internal("transport_unavailable"));
-    }
-    if issuance
-        .participant
-        .projection
-        .implemented_apis
-        .values()
-        .any(|api| {
-            api.actions.values().any(|action| {
-                action.kind == crate::platform::auth::evidence::RuntimeActionKind::Operation
+        )?;
+        let transports = BootstrapTransports {
+            native: (!state.native_nats_servers.is_empty()).then(|| BootstrapTransport {
+                nats_servers: state.native_nats_servers.clone(),
+            }),
+            websocket: (!state.websocket_nats_servers.is_empty()).then(|| BootstrapTransport {
+                nats_servers: state.websocket_nats_servers.clone(),
+            }),
+        };
+        if transports.native.is_none() && transports.websocket.is_none() {
+            return Err(HttpError::internal("transport_unavailable"));
+        }
+        if issuance
+            .participant
+            .projection
+            .implemented_apis
+            .values()
+            .any(|api| {
+                api.actions.values().any(|action| {
+                    action.kind == crate::platform::auth::evidence::RuntimeActionKind::Operation
+                })
             })
+        {
+            let deployment_id = issuance
+                .deployment_id
+                .as_deref()
+                .ok_or_else(|| HttpError::internal("provider_deployment_missing"))?;
+            let operation_store_started = std::time::Instant::now();
+            let operation_store = crate::platform::auth::resources::ensure_operation_store(
+                &state.nats,
+                deployment_id,
+            )
+            .await;
+            crate::telemetry::record_duration(
+                crate::telemetry::DurationMetric::AuthFlow,
+                operation_store_started.elapsed(),
+                "auth",
+                "issue_bootstrap",
+                "operation_store",
+                if operation_store.is_ok() {
+                    crate::telemetry::Outcome::Ok
+                } else {
+                    crate::telemetry::Outcome::Error
+                },
+            );
+            operation_store?;
+        }
+        let api_bindings_started = std::time::Instant::now();
+        let api_bindings = crate::platform::auth::current_api_bindings(
+            state.service.repository(),
+            &issuance.participant,
+            issuance.deployment_id.as_deref(),
+        )
+        .await;
+        crate::telemetry::record_duration(
+            crate::telemetry::DurationMetric::AuthFlow,
+            api_bindings_started.elapsed(),
+            "auth",
+            "issue_bootstrap",
+            "api_bindings",
+            if api_bindings.is_ok() {
+                crate::telemetry::Outcome::Ok
+            } else {
+                crate::telemetry::Outcome::Error
+            },
+        );
+        let api_bindings = api_bindings?;
+        Ok(BootstrapResponse {
+            server_now: now,
+            authorization_context,
+            routing: BootstrapRouting {
+                bootstrap_jwt: route.jwt,
+                bootstrap_jwt_expires_at: route.expires_at,
+            },
+            runtime: BootstrapRuntime {
+                connection_id: issuance.connection_id,
+                login_session_id: issuance.login_session_id,
+                participant_id: issuance.participant.participant_id.clone(),
+                inbox_prefix: issuance.inbox_prefix,
+            },
+            api_bindings,
+            transports,
+            authorization: BootstrapAuthorization {
+                participant_id: issuance.participant.participant_id.clone(),
+                participant_digest: issuance.participant.participant_digest.clone(),
+                resource_runtime: project_service_resource_bindings(
+                    &issuance.participant.projection,
+                    &issuance.resource_bindings,
+                    &issuance.participant.participant_id,
+                )?,
+            },
+            companion: None,
         })
-    {
-        let deployment_id = issuance
-            .deployment_id
-            .as_deref()
-            .ok_or_else(|| HttpError::internal("provider_deployment_missing"))?;
-        crate::platform::auth::resources::ensure_operation_store(&state.nats, deployment_id)
-            .await?;
     }
-    let api_bindings = crate::platform::auth::current_api_bindings(
-        state.service.repository(),
-        &issuance.participant,
-        issuance.deployment_id.as_deref(),
-    )
-    .await?;
-    Ok(BootstrapResponse {
-        server_now: now,
-        authorization_context,
-        routing: BootstrapRouting {
-            bootstrap_jwt: route.jwt,
-            bootstrap_jwt_expires_at: route.expires_at,
+    .await;
+    crate::telemetry::record_duration(
+        crate::telemetry::DurationMetric::AuthFlow,
+        total_started.elapsed(),
+        "auth",
+        "issue_bootstrap",
+        "total",
+        if result.is_ok() {
+            crate::telemetry::Outcome::Ok
+        } else {
+            crate::telemetry::Outcome::Error
         },
-        runtime: BootstrapRuntime {
-            connection_id: issuance.connection_id,
-            login_session_id: issuance.login_session_id,
-            participant_id: issuance.participant.participant_id.clone(),
-            inbox_prefix: issuance.inbox_prefix,
-        },
-        api_bindings,
-        transports,
-        authorization: BootstrapAuthorization {
-            participant_id: issuance.participant.participant_id.clone(),
-            participant_digest: issuance.participant.participant_digest.clone(),
-            resource_runtime: project_service_resource_bindings(
-                &issuance.participant.projection,
-                &issuance.resource_bindings,
-                &issuance.participant.participant_id,
-            )?,
-        },
-        companion: None,
-    })
+    );
+    result
 }
 
 #[cfg(test)]

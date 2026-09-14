@@ -2,7 +2,6 @@
 
 use std::env;
 use std::fs;
-use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
@@ -12,6 +11,8 @@ use trellis_local_nats::{LocalNats, LocalNatsPorts, NatsBinarySource, NatsOutput
 use trellis_runtime::{
     NatsEndpointOverride, RuntimeConfig, RuntimeMode, RuntimeOptions, RuntimePathDefaults,
 };
+
+mod telemetry;
 
 const NATS_PORT: u16 = 4222;
 const NATS_HTTP_PORT: u16 = 8222;
@@ -356,40 +357,6 @@ fn ensure_private_runtime_fallback(path: &Path) -> miette::Result<()> {
     prepare_directory(path)
 }
 
-fn init_tracing(verbose: bool, check: bool) -> miette::Result<()> {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        tracing_subscriber::EnvFilter::new(if verbose { "debug" } else { "info" })
-    });
-    let attached = if check {
-        std::io::stderr().is_terminal()
-    } else {
-        std::io::stdout().is_terminal()
-    };
-    let writer = if check {
-        tracing_subscriber::fmt::writer::BoxMakeWriter::new(std::io::stderr)
-    } else {
-        tracing_subscriber::fmt::writer::BoxMakeWriter::new(std::io::stdout)
-    };
-    if attached {
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_target(verbose)
-            .with_ansi(true)
-            .with_writer(writer)
-            .try_init()
-            .map_err(|error| miette!(error.to_string()))?;
-    } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_ansi(false)
-            .json()
-            .with_writer(writer)
-            .try_init()
-            .map_err(|error| miette!(error.to_string()))?;
-    }
-    Ok(())
-}
-
 async fn run(policy: StartupPolicy) -> miette::Result<()> {
     if !policy.paths.config.is_file() {
         return Err(miette!(
@@ -505,8 +472,10 @@ async fn run(policy: StartupPolicy) -> miette::Result<()> {
 #[tokio::main]
 async fn main() -> miette::Result<()> {
     let policy = StartupPolicy::resolve(Args::parse())?;
-    init_tracing(policy.verbose, policy.operation == Operation::Check)?;
-    run(policy).await
+    let telemetry = telemetry::init(policy.verbose, policy.operation == Operation::Check)?;
+    let result = run(policy).await;
+    telemetry.shutdown();
+    result
 }
 
 #[cfg(test)]

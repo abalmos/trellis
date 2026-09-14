@@ -403,293 +403,414 @@ impl CalloutProcessor {
             .await
     }
 
+    #[tracing::instrument(
+        name = "trellis.auth.callout",
+        skip_all,
+        fields(trellis.surface = "auth", trellis.operation = "request")
+    )]
     async fn process(&self, message: async_nats::Message) -> Result<(), AuthorizationStateError> {
-        let reply = message
-            .reply
-            .clone()
-            .ok_or_else(|| denied("authorization request has no reply subject"))?;
-        let server_xkey = server_xkey(message.headers.as_ref())?;
-        let decrypted = self
-            .keys
-            .xkey
-            .open(&message.payload, &server_xkey)
-            .map_err(|_| denied("authorization request could not be decrypted"))?;
-        let encoded_request = std::str::from_utf8(&decrypted)
-            .map_err(|_| denied("authorization request JWT is not UTF-8"))?;
-        let claims = Claims::<AuthRequest>::decode(encoded_request)
-            .map_err(|_| denied("authorization request JWT is invalid"))?;
-        let request = claims.payload();
-        let now_seconds = now_millis()? / 1_000;
-        if claims.iss != request.server.id
-            || claims.sub != self.keys.auth_account
-            || claims.aud.as_deref() != Some("nats-authorization-request")
-            || claims
-                .exp
-                .is_none_or(|expires_at| expires_at <= now_seconds)
-            || claims
-                .nbf
-                .is_some_and(|not_before| not_before > now_seconds)
-            || claims.iat > now_seconds.saturating_add(5) as u64
-            || request.server.xkey.as_deref() != Some(server_xkey.public_key().as_str())
-            || request.client_info.id == 0
-            || request.client_info.host.is_empty()
-            || request.client_info.nonce.is_empty()
-            || !is_nkey(&request.server.id, KeyPairType::Server)
-            || !is_nkey(&request.user_nkey, KeyPairType::User)
-        {
-            return Err(denied("authorization request identity is invalid"));
-        }
+        let total_started = std::time::Instant::now();
+        let process_result = async {
+            let reply = message
+                .reply
+                .clone()
+                .ok_or_else(|| denied("authorization request has no reply subject"))?;
+            let server_xkey = server_xkey(message.headers.as_ref())?;
+            let decrypted = self
+                .keys
+                .xkey
+                .open(&message.payload, &server_xkey)
+                .map_err(|_| denied("authorization request could not be decrypted"))?;
+            let encoded_request = std::str::from_utf8(&decrypted)
+                .map_err(|_| denied("authorization request JWT is not UTF-8"))?;
+            let claims = Claims::<AuthRequest>::decode(encoded_request)
+                .map_err(|_| denied("authorization request JWT is invalid"))?;
+            let request = claims.payload();
+            let now_seconds = now_millis()? / 1_000;
+            if claims.iss != request.server.id
+                || claims.sub != self.keys.auth_account
+                || claims.aud.as_deref() != Some("nats-authorization-request")
+                || claims
+                    .exp
+                    .is_none_or(|expires_at| expires_at <= now_seconds)
+                || claims
+                    .nbf
+                    .is_some_and(|not_before| not_before > now_seconds)
+                || claims.iat > now_seconds.saturating_add(5) as u64
+                || request.server.xkey.as_deref() != Some(server_xkey.public_key().as_str())
+                || request.client_info.id == 0
+                || request.client_info.host.is_empty()
+                || request.client_info.nonce.is_empty()
+                || !is_nkey(&request.server.id, KeyPairType::Server)
+                || !is_nkey(&request.user_nkey, KeyPairType::User)
+            {
+                return Err(denied("authorization request identity is invalid"));
+            }
 
-        let permit = self.limiter.try_acquire();
-        let (user_jwt, denial_code) = match permit.as_ref() {
-            None => (None, Some("rate_limited")),
-            Some(_) => match self.authorize(request).await {
-                Ok(jwt) => (Some(jwt), None),
-                Err(error) => {
-                    tracing::debug!(error = %error, "NATS connection authorization denied");
-                    (None, Some(callout_denial_code(&error)))
-                }
+            let permit = self.limiter.try_acquire();
+            let (user_jwt, denial_code) = match permit.as_ref() {
+                None => (None, Some("rate_limited")),
+                Some(_) => match self.authorize(request).await {
+                    Ok(jwt) => (Some(jwt), None),
+                    Err(error) => {
+                        tracing::debug!(error = %error, "NATS connection authorization denied");
+                        (None, Some(callout_denial_code(&error)))
+                    }
+                },
+            };
+            let outcome = match permit.as_ref() {
+                None => crate::telemetry::Outcome::RateLimited,
+                Some(_) => match denial_code {
+                    Some(_) => crate::telemetry::Outcome::Denied,
+                    None => crate::telemetry::Outcome::Ok,
+                },
+            };
+            let response = self.keys.response(request, user_jwt, denial_code)?;
+            let encrypted = self
+                .keys
+                .xkey
+                .seal(&response, &server_xkey)
+                .map_err(|error| {
+                    AuthorizationStateError::Storage(format!(
+                        "failed to encrypt NATS authorization response: {error}"
+                    ))
+                })?;
+            self.client
+                .publish(reply, encrypted.into())
+                .await
+                .map_err(|error| {
+                    AuthorizationStateError::Storage(format!(
+                        "failed to publish NATS authorization response: {error}"
+                    ))
+                })?;
+            Ok(outcome)
+        }
+        .await;
+        crate::telemetry::record_duration(
+            crate::telemetry::DurationMetric::AuthCallout,
+            total_started.elapsed(),
+            "auth",
+            "request",
+            "total",
+            match &process_result {
+                Ok(outcome) => *outcome,
+                Err(_) => crate::telemetry::Outcome::Error,
             },
-        };
-        let response = self.keys.response(request, user_jwt, denial_code)?;
-        let encrypted = self
-            .keys
-            .xkey
-            .seal(&response, &server_xkey)
-            .map_err(|error| {
-                AuthorizationStateError::Storage(format!(
-                    "failed to encrypt NATS authorization response: {error}"
-                ))
-            })?;
-        self.client
-            .publish(reply, encrypted.into())
-            .await
-            .map_err(|error| {
-                AuthorizationStateError::Storage(format!(
-                    "failed to publish NATS authorization response: {error}"
-                ))
-            })
+        );
+        process_result.map(|_outcome| ())
     }
 
+    #[tracing::instrument(
+        name = "trellis.auth.callout.authorize",
+        skip_all,
+        fields(trellis.surface = "auth", trellis.operation = "authorize")
+    )]
     async fn authorize(&self, request: &AuthRequest) -> Result<String, AuthorizationStateError> {
-        let now = now_millis()?;
-        let now_seconds = now / 1_000;
-        let connect = &request.connect_opts;
-        let token: NatsConnectToken = serde_json::from_str(
-            connect
-                .auth_token
-                .as_deref()
-                .ok_or_else(|| denied("NATS connect token is missing"))?,
-        )
-        .map_err(|_| denied("NATS connect token is invalid"))?;
-        if token.format != CONNECT_TOKEN_FORMAT {
-            return Err(denied("NATS connect token format is invalid"));
-        }
-        let session_nkey = connect
-            .nkey
-            .as_deref()
-            .ok_or_else(|| denied("session NKey is missing"))?;
-        self.keys.validate_bootstrap_jwt(
-            connect
-                .jwt
-                .as_deref()
-                .ok_or_else(|| denied("session bootstrap JWT is missing"))?,
-            session_nkey,
-            now_seconds,
-        )?;
-        verify_nats_nonce_signature(
-            session_nkey,
-            &request.client_info.nonce,
-            connect
-                .sig
-                .as_deref()
-                .ok_or_else(|| denied("NATS nonce signature is missing"))?,
-        )?;
-
-        let verified_context = self
-            .contexts
-            .validator_cache()
-            .resolve_admission_context(&token.context_digest, now_seconds)
-            .await
-            .map_err(|error| denied(error.to_string()))?;
-        verify_connect_nkey_matches_context(session_nkey, &verified_context)?;
-
-        let client_id = request.client_info.id.to_string();
-        let connection_id = connection_id(&request.server.id, &client_id, &request.user_nkey)?;
-        let mut presence = AuthConnectionPresence {
-            storage_revision: 0,
-            format: "trellis.auth-connection-presence.v1".to_owned(),
-            connection_id: connection_id.clone(),
-            runtime_connection_id: verified_context.connection_id().to_owned(),
-            login_session_id: verified_context.login_session_id().map(str::to_owned),
-            principal_id: verified_context.principal_id().to_owned(),
-            principal_kind: verified_context.principal_kind(),
-            participant_id: verified_context.participant_id().to_owned(),
-            deployment_id: verified_context
-                .signed_context()
-                .unsigned
-                .deployment_id
-                .clone(),
-            instance_id: verified_context
-                .signed_context()
-                .unsigned
-                .instance_id
-                .clone(),
-            context_digest: verified_context.context_digest().to_owned(),
-            server_id: request.server.id.clone(),
-            client_id,
-            user_nkey: request.user_nkey.clone(),
-            remote_address: Some(request.client_info.host.clone()),
-            connected_at: now,
-            last_seen_at: now,
-            version: 1,
-        };
-        presence.storage_revision = self
-            .ephemeral
-            .put_connection_presence(presence.clone())
-            .await?;
-        tracing::info!(
-            context_digest = %presence.context_digest,
-            runtime_connection_id = %presence.runtime_connection_id,
-            physical_connection_id = %presence.connection_id,
-            server_id = %presence.server_id,
-            client_id = %presence.client_id,
-            presence_revision = presence.storage_revision,
-            participant_id = %presence.participant_id,
-            "recorded physical connection presence before final admission validation"
-        );
-
-        let result = async {
-            let permissions = self
-                .contexts
-                .transport_permissions(&verified_context, now_seconds)
-                .await
-                .map_err(|error| denied(error.to_string()))?;
-            let device_implements_apis = if verified_context.principal_kind()
-                == AuthorizationPrincipalKind::Device
-            {
-                let retained = self
-                    .repository
-                    .get_context_by_digest(verified_context.context_digest())
-                    .await?
-                    .ok_or_else(|| denied("authorization context is missing from durable state"))?;
-                self.repository
-                    .get_installed_participant_record(
-                        verified_context.participant_id().to_owned(),
-                        Some(retained.installed_revision),
-                    )
-                    .await?
-                    .is_some_and(|(_, participant)| {
-                        participant.participant_kind == ParticipantKind::Device
-                            && participant.state == ParticipantBindingState::Resolved
-                            && !participant.projection.implemented_apis.is_empty()
-                    })
-            } else {
-                false
-            };
-            tracing::debug!(
-                publish_count = permissions.publish.len(),
-                subscribe_count = permissions.subscribe.len(),
-                jobs_list_services = permissions
-                    .publish
-                    .iter()
-                    .any(|subject| subject == "rpc.v1.Jobs.ListServices"),
-                jobs_metrics = permissions
-                    .publish
-                    .iter()
-                    .any(|subject| subject == "rpc.v1.Jobs.Metrics"),
-                events_query = permissions
-                    .publish
-                    .iter()
-                    .any(|subject| subject == "rpc.v1.events.Query"),
-                health_watch = permissions
-                    .publish
-                    .iter()
-                    .any(|subject| subject == "feed.v1.Health.Watch"),
-                "compiled NATS authorization permissions"
-            );
-            let expires_at_ms = [
-                Some(
-                    verified_context
-                        .expires_at()
-                        .checked_mul(1_000)
-                        .ok_or_else(|| denied("authorization context expiry overflowed"))?,
-                ),
-                Some(
-                    now.checked_add(self.user_jwt_ttl_ms)
-                        .ok_or_else(|| denied("NATS user JWT expiry overflowed"))?,
-                ),
-            ]
-            .into_iter()
-            .flatten()
-            .min()
-            .ok_or_else(|| denied("NATS user JWT has no expiry bound"))?;
-            if expires_at_ms <= now {
-                return Err(denied("NATS user JWT expiry has elapsed"));
+        let total_started = std::time::Instant::now();
+        let authorize_result = async {
+            let now = now_millis()?;
+            let now_seconds = now / 1_000;
+            let connect = &request.connect_opts;
+            let token: NatsConnectToken = serde_json::from_str(
+                connect
+                    .auth_token
+                    .as_deref()
+                    .ok_or_else(|| denied("NATS connect token is missing"))?,
+            )
+            .map_err(|_| denied("NATS connect token is invalid"))?;
+            if token.format != CONNECT_TOKEN_FORMAT {
+                return Err(denied("NATS connect token format is invalid"));
             }
-            let expires_at_seconds = expires_at_ms / 1_000;
-            if expires_at_seconds <= now_seconds {
-                return Err(denied("NATS user JWT expiry is below one second"));
-            }
-            let jwt = self.keys.authorized_user_jwt(
-                &request.user_nkey,
-                verified_context.principal_kind(),
-                device_implements_apis,
-                permissions,
-                expires_at_seconds,
+            let session_nkey = connect
+                .nkey
+                .as_deref()
+                .ok_or_else(|| denied("session NKey is missing"))?;
+            self.keys.validate_bootstrap_jwt(
+                connect
+                    .jwt
+                    .as_deref()
+                    .ok_or_else(|| denied("session bootstrap JWT is missing"))?,
+                session_nkey,
+                now_seconds,
             )?;
-            if self
+            verify_nats_nonce_signature(
+                session_nkey,
+                &request.client_info.nonce,
+                connect
+                    .sig
+                    .as_deref()
+                    .ok_or_else(|| denied("NATS nonce signature is missing"))?,
+            )?;
+
+            let context_started = std::time::Instant::now();
+            let resolved_context = self
                 .contexts
                 .validator_cache()
-                .runtime_revocation_time(&token.context_digest)
-                .map_err(|error| denied(error.to_string()))?
-                .is_some()
-            {
+                .resolve_admission_context(&token.context_digest, now_seconds)
+                .await;
+            crate::telemetry::record_duration(
+                crate::telemetry::DurationMetric::AuthCallout,
+                context_started.elapsed(),
+                "auth",
+                "authorize",
+                "context",
+                if resolved_context.is_ok() {
+                    crate::telemetry::Outcome::Ok
+                } else {
+                    crate::telemetry::Outcome::Error
+                },
+            );
+            let verified_context = resolved_context.map_err(|error| denied(error.to_string()))?;
+            verify_connect_nkey_matches_context(session_nkey, &verified_context)?;
+
+            let client_id = request.client_info.id.to_string();
+            let connection_id = connection_id(&request.server.id, &client_id, &request.user_nkey)?;
+            let mut presence = AuthConnectionPresence {
+                storage_revision: 0,
+                format: "trellis.auth-connection-presence.v1".to_owned(),
+                connection_id: connection_id.clone(),
+                runtime_connection_id: verified_context.connection_id().to_owned(),
+                login_session_id: verified_context.login_session_id().map(str::to_owned),
+                principal_id: verified_context.principal_id().to_owned(),
+                principal_kind: verified_context.principal_kind(),
+                participant_id: verified_context.participant_id().to_owned(),
+                deployment_id: verified_context
+                    .signed_context()
+                    .unsigned
+                    .deployment_id
+                    .clone(),
+                instance_id: verified_context
+                    .signed_context()
+                    .unsigned
+                    .instance_id
+                    .clone(),
+                context_digest: verified_context.context_digest().to_owned(),
+                server_id: request.server.id.clone(),
+                client_id,
+                user_nkey: request.user_nkey.clone(),
+                remote_address: Some(request.client_info.host.clone()),
+                connected_at: now,
+                last_seen_at: now,
+                version: 1,
+            };
+            let presence_started = std::time::Instant::now();
+            let presence_revision = self
+                .ephemeral
+                .put_connection_presence(presence.clone())
+                .await;
+            crate::telemetry::record_duration(
+                crate::telemetry::DurationMetric::AuthCallout,
+                presence_started.elapsed(),
+                "auth",
+                "authorize",
+                "presence",
+                if presence_revision.is_ok() {
+                    crate::telemetry::Outcome::Ok
+                } else {
+                    crate::telemetry::Outcome::Error
+                },
+            );
+            presence.storage_revision = presence_revision?;
+            tracing::info!(
+                context_digest = %presence.context_digest,
+                runtime_connection_id = %presence.runtime_connection_id,
+                physical_connection_id = %presence.connection_id,
+                server_id = %presence.server_id,
+                client_id = %presence.client_id,
+                presence_revision = presence.storage_revision,
+                participant_id = %presence.participant_id,
+                "recorded physical connection presence before final admission validation"
+            );
+
+            let result = async {
+                let permissions_started = std::time::Instant::now();
+                let permissions = self
+                    .contexts
+                    .transport_permissions(&verified_context, now_seconds)
+                    .await;
+                crate::telemetry::record_duration(
+                    crate::telemetry::DurationMetric::AuthCallout,
+                    permissions_started.elapsed(),
+                    "auth",
+                    "authorize",
+                    "permissions",
+                    if permissions.is_ok() {
+                        crate::telemetry::Outcome::Ok
+                    } else {
+                        crate::telemetry::Outcome::Error
+                    },
+                );
+                let permissions = permissions.map_err(|error| denied(error.to_string()))?;
+                let device_implements_apis =
+                    if verified_context.principal_kind() == AuthorizationPrincipalKind::Device {
+                        let retained = self
+                            .repository
+                            .get_context_by_digest(verified_context.context_digest())
+                            .await?
+                            .ok_or_else(|| {
+                                denied("authorization context is missing from durable state")
+                            })?;
+                        self.repository
+                            .get_installed_participant_record(
+                                verified_context.participant_id().to_owned(),
+                                Some(retained.installed_revision),
+                            )
+                            .await?
+                            .is_some_and(|(_, participant)| {
+                                participant.participant_kind == ParticipantKind::Device
+                                    && participant.state == ParticipantBindingState::Resolved
+                                    && !participant.projection.implemented_apis.is_empty()
+                            })
+                    } else {
+                        false
+                    };
+                tracing::debug!(
+                    publish_count = permissions.publish.len(),
+                    subscribe_count = permissions.subscribe.len(),
+                    jobs_list_services = permissions
+                        .publish
+                        .iter()
+                        .any(|subject| subject == "rpc.v1.Jobs.ListServices"),
+                    jobs_metrics = permissions
+                        .publish
+                        .iter()
+                        .any(|subject| subject == "rpc.v1.Jobs.Metrics"),
+                    events_query = permissions
+                        .publish
+                        .iter()
+                        .any(|subject| subject == "rpc.v1.events.Query"),
+                    health_watch = permissions
+                        .publish
+                        .iter()
+                        .any(|subject| subject == "feed.v1.Health.Watch"),
+                    "compiled NATS authorization permissions"
+                );
+                let expires_at_ms = [
+                    Some(
+                        verified_context
+                            .expires_at()
+                            .checked_mul(1_000)
+                            .ok_or_else(|| denied("authorization context expiry overflowed"))?,
+                    ),
+                    Some(
+                        now.checked_add(self.user_jwt_ttl_ms)
+                            .ok_or_else(|| denied("NATS user JWT expiry overflowed"))?,
+                    ),
+                ]
+                .into_iter()
+                .flatten()
+                .min()
+                .ok_or_else(|| denied("NATS user JWT has no expiry bound"))?;
+                if expires_at_ms <= now {
+                    return Err(denied("NATS user JWT expiry has elapsed"));
+                }
+                let expires_at_seconds = expires_at_ms / 1_000;
+                if expires_at_seconds <= now_seconds {
+                    return Err(denied("NATS user JWT expiry is below one second"));
+                }
+                let jwt_started = std::time::Instant::now();
+                let jwt = self.keys.authorized_user_jwt(
+                    &request.user_nkey,
+                    verified_context.principal_kind(),
+                    device_implements_apis,
+                    permissions,
+                    expires_at_seconds,
+                );
+                crate::telemetry::record_duration(
+                    crate::telemetry::DurationMetric::AuthCallout,
+                    jwt_started.elapsed(),
+                    "auth",
+                    "authorize",
+                    "jwt",
+                    if jwt.is_ok() {
+                        crate::telemetry::Outcome::Ok
+                    } else {
+                        crate::telemetry::Outcome::Error
+                    },
+                );
+                let jwt = jwt?;
+                if self
+                    .contexts
+                    .validator_cache()
+                    .runtime_revocation_time(&token.context_digest)
+                    .map_err(|error| denied(error.to_string()))?
+                    .is_some()
+                {
+                    self.ephemeral
+                        .delete_connection_presence(&connection_id, presence.storage_revision)
+                        .await?;
+                    return Err(denied("authorization context is not admissible"));
+                }
+                let post_commit_started = std::time::Instant::now();
+                let post_commit = self
+                    .repository
+                    .enqueue_post_commit_actions(vec![super::auth::connection_event_action::<
+                        trellis_runtime_apis::apis::trellis_auth_v1::events::ConnectionsOpened,
+                    >(
+                        &presence,
+                        "Auth.Connections.Opened",
+                        "opened",
+                        None,
+                        now,
+                    )?])
+                    .await;
+                crate::telemetry::record_duration(
+                    crate::telemetry::DurationMetric::AuthCallout,
+                    post_commit_started.elapsed(),
+                    "auth",
+                    "authorize",
+                    "post_commit",
+                    if post_commit.is_ok() {
+                        crate::telemetry::Outcome::Ok
+                    } else {
+                        crate::telemetry::Outcome::Error
+                    },
+                );
+                post_commit?;
+                tracing::debug!(
+                    connection_id = %verified_context.connection_id(),
+                    login_session_id = ?verified_context.login_session_id(),
+                    context_digest = %token.context_digest,
+                    "NATS authorization callout admitted"
+                );
+                Ok(jwt)
+            }
+            .await;
+            if result.is_err() {
+                tracing::warn!(
+                    context_digest = %presence.context_digest,
+                    physical_connection_id = %presence.connection_id,
+                    presence_revision = presence.storage_revision,
+                    error = %result.as_ref().expect_err("checked error"),
+                    "final admission validation failed; deleting exact presence revision"
+                );
                 self.ephemeral
                     .delete_connection_presence(&connection_id, presence.storage_revision)
                     .await?;
-                return Err(denied("authorization context is not admissible"));
+            } else {
+                tracing::info!(
+                    context_digest = %presence.context_digest,
+                    physical_connection_id = %presence.connection_id,
+                    presence_revision = presence.storage_revision,
+                    "final admission validation succeeded"
+                );
             }
-            self.repository
-                .enqueue_post_commit_actions(vec![super::auth::connection_event_action::<
-                    trellis_runtime_apis::apis::trellis_auth_v1::events::ConnectionsOpened,
-                >(
-                    &presence,
-                    "Auth.Connections.Opened",
-                    "opened",
-                    None,
-                    now,
-                )?])
-                .await?;
-            tracing::debug!(
-                connection_id = %verified_context.connection_id(),
-                login_session_id = ?verified_context.login_session_id(),
-                context_digest = %token.context_digest,
-                "NATS authorization callout admitted"
-            );
-            Ok(jwt)
+            result
         }
         .await;
-        if result.is_err() {
-            tracing::warn!(
-                context_digest = %presence.context_digest,
-                physical_connection_id = %presence.connection_id,
-                presence_revision = presence.storage_revision,
-                error = %result.as_ref().expect_err("checked error"),
-                "final admission validation failed; deleting exact presence revision"
-            );
-            self.ephemeral
-                .delete_connection_presence(&connection_id, presence.storage_revision)
-                .await?;
-        } else {
-            tracing::info!(
-                context_digest = %presence.context_digest,
-                physical_connection_id = %presence.connection_id,
-                presence_revision = presence.storage_revision,
-                "final admission validation succeeded"
-            );
-        }
-        result
+        crate::telemetry::record_duration(
+            crate::telemetry::DurationMetric::AuthCallout,
+            total_started.elapsed(),
+            "auth",
+            "authorize",
+            "total",
+            if authorize_result.is_ok() {
+                crate::telemetry::Outcome::Ok
+            } else {
+                crate::telemetry::Outcome::Error
+            },
+        );
+        authorize_result
     }
 }
 

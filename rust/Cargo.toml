@@ -85,6 +85,10 @@ notify-debouncer-mini = "0.7"
 owo-colors = "4.3.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
+opentelemetry = { version = "0.32.0", default-features = false, features = ["metrics", "trace"] }
+opentelemetry_sdk = { version = "0.32.1", default-features = false, features = ["metrics", "trace"] }
+opentelemetry-otlp = { version = "0.32.0", default-features = false, features = ["http-proto", "reqwest-blocking-client", "metrics", "trace"] }
+tracing-opentelemetry = "0.33.0"
 axum = "0.8.8"
 openidconnect = "4.0.1"
 oauth2 = "5.0.0"

@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
@@ -11,6 +12,7 @@ use trellis_runtime_apis::types::{AuthGrantsListRequestOwnerKind, AuthGrantsList
 
 use super::super::application::repository::{ActivationReviewClaim, ActivationReviewDecision};
 use super::super::authority::{IssuanceConnection, IssuanceCredential};
+use super::super::compiled_evidence::{CompiledInstalledEvidence, SemanticJobError};
 use super::super::context::{
     load_sql_context_by_digest, revoke_sql_contexts, AuthorizationContextRevocationReason,
     AuthorizationContextSelector, AuthorizationContextState,
@@ -22,6 +24,7 @@ use super::super::{
     GrantOwnerKind, IdempotencyResultRecord, MutationActor, ParticipantBindingRecord,
     PostCommitActionKind, PostCommitActionRecord, SessionRecord,
 };
+use crate::telemetry::{record_duration, DurationMetric, Outcome};
 
 pub(super) fn require_current_actor(
     connection: &Connection,
@@ -921,6 +924,7 @@ impl SqliteAuthorizationStore {
         .await
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn get_installed_package_evidence(
         &self,
         evidence_digest: &str,
@@ -944,6 +948,7 @@ impl SqliteAuthorizationStore {
         .await
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn get_api_binding(
         &self,
         participant_id: &str,
@@ -981,6 +986,115 @@ impl SqliteAuthorizationStore {
             ).map_err(sql_error)?;
             Ok(())
         }).await
+    }
+
+    pub(crate) async fn get_api_bindings(
+        &self,
+        participant_id: &str,
+    ) -> Result<BTreeMap<String, String>, AuthorizationStateError> {
+        let participant_id = participant_id.to_owned();
+        self.run_read(move |connection| {
+            let mut statement = connection
+                .prepare(
+                    "SELECT api_id, provider_deployment_id FROM auth_api_bindings
+                     WHERE participant_id = ?1 ORDER BY api_id",
+                )
+                .map_err(sql_error)?;
+            let rows = statement
+                .query_map([&participant_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(sql_error)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(sql_error)?;
+            Ok(rows.into_iter().collect())
+        })
+        .await
+    }
+
+    #[tracing::instrument(
+        name = "trellis.contract.compare_selected",
+        skip_all,
+        fields(trellis.surface = "contract", trellis.operation = "compare_selected")
+    )]
+    pub(crate) async fn compare_installed_selection(
+        &self,
+        consumer: Arc<CompiledInstalledEvidence>,
+        selection: trellis_idl::InteractionSelection,
+        provider: Arc<CompiledInstalledEvidence>,
+    ) -> Result<Arc<trellis_idl::CompatibilityReport>, AuthorizationStateError> {
+        let total_started = std::time::Instant::now();
+        let cpu = self.compiled_evidence.cpu_semaphore();
+        let consumer_graph = Arc::clone(&consumer.graph);
+        let provider_graph = Arc::clone(&provider.graph);
+        let job_selection = selection.clone();
+        let result = self
+            .compiled_evidence
+            .compare_selection(&consumer, &selection, &provider, move || async move {
+                let cpu_started = std::time::Instant::now();
+                let cpu_permit = Arc::clone(&cpu).acquire_owned().await;
+                record_duration(
+                    DurationMetric::ContractAnalysis,
+                    cpu_started.elapsed(),
+                    "contract",
+                    "compare_selected",
+                    "cpu_wait",
+                    if cpu_permit.is_ok() {
+                        Outcome::Ok
+                    } else {
+                        Outcome::Error
+                    },
+                );
+                let permit = cpu_permit.map_err(|_| {
+                    SemanticJobError::Storage("semantic CPU pool closed".to_owned())
+                })?;
+                let submitted = std::time::Instant::now();
+                let (report, blocking_queue, compare) = tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    let blocking_queue = submitted.elapsed();
+                    let compute_started = std::time::Instant::now();
+                    let report = trellis_idl::compare_selected(
+                        &consumer_graph,
+                        &job_selection,
+                        &provider_graph,
+                    );
+                    (report, blocking_queue, compute_started.elapsed())
+                })
+                .await
+                .map_err(|error| SemanticJobError::Worker(error.to_string()))?;
+                record_duration(
+                    DurationMetric::ContractAnalysis,
+                    blocking_queue,
+                    "contract",
+                    "compare_selected",
+                    "blocking_queue",
+                    Outcome::Ok,
+                );
+                record_duration(
+                    DurationMetric::ContractAnalysis,
+                    compare,
+                    "contract",
+                    "compare_selected",
+                    "compare",
+                    Outcome::Ok,
+                );
+                Ok(report)
+            })
+            .await
+            .map_err(SemanticJobError::into_state_error);
+        record_duration(
+            DurationMetric::ContractAnalysis,
+            total_started.elapsed(),
+            "contract",
+            "compare_selected",
+            "total",
+            if result.is_ok() {
+                Outcome::Ok
+            } else {
+                Outcome::Error
+            },
+        );
+        result
     }
 
     pub(crate) async fn put_participant_binding(
@@ -1804,6 +1918,30 @@ impl super::super::GrantRepository for SqliteAuthorizationStore {
             provider_deployment_id,
         )
         .await
+    }
+
+    async fn compiled_installed_evidence(
+        &self,
+        evidence_digest: &str,
+    ) -> Result<Arc<CompiledInstalledEvidence>, AuthorizationStateError> {
+        SqliteAuthorizationStore::compiled_installed_evidence(self, evidence_digest).await
+    }
+
+    async fn compare_installed_selection(
+        &self,
+        consumer: Arc<CompiledInstalledEvidence>,
+        selection: trellis_idl::InteractionSelection,
+        provider: Arc<CompiledInstalledEvidence>,
+    ) -> Result<Arc<trellis_idl::CompatibilityReport>, AuthorizationStateError> {
+        SqliteAuthorizationStore::compare_installed_selection(self, consumer, selection, provider)
+            .await
+    }
+
+    async fn get_api_bindings(
+        &self,
+        participant_id: &str,
+    ) -> Result<BTreeMap<String, String>, AuthorizationStateError> {
+        SqliteAuthorizationStore::get_api_bindings(self, participant_id).await
     }
 
     async fn accept_presented_package(

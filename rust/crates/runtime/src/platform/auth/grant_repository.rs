@@ -19,11 +19,38 @@ pub(crate) trait GrantRepository: Send + Sync {
         participant_id: String,
     ) -> Result<bool, AuthorizationStateError>;
 
+    #[allow(dead_code)]
     async fn get_installed_package_evidence(
         &self,
         evidence_digest: &str,
     ) -> Result<Option<trellis_idl::PackageEvidence>, AuthorizationStateError>;
 
+    /// Return the immutable compiled graph for an exact installed evidence
+    /// document, reusing the store's bounded semantic cache.
+    async fn compiled_installed_evidence(
+        &self,
+        evidence_digest: &str,
+    ) -> Result<
+        std::sync::Arc<super::compiled_evidence::CompiledInstalledEvidence>,
+        AuthorizationStateError,
+    >;
+
+    /// Return the immutable selected-surface compatibility result for one
+    /// consumer selection against one provider, reusing the store's cache.
+    async fn compare_installed_selection(
+        &self,
+        consumer: std::sync::Arc<super::compiled_evidence::CompiledInstalledEvidence>,
+        selection: trellis_idl::InteractionSelection,
+        provider: std::sync::Arc<super::compiled_evidence::CompiledInstalledEvidence>,
+    ) -> Result<std::sync::Arc<trellis_idl::CompatibilityReport>, AuthorizationStateError>;
+
+    /// Read every exact API binding row for one consumer scope.
+    async fn get_api_bindings(
+        &self,
+        participant_id: &str,
+    ) -> Result<std::collections::BTreeMap<String, String>, AuthorizationStateError>;
+
+    #[allow(dead_code)]
     async fn get_api_binding(
         &self,
         participant_id: &str,

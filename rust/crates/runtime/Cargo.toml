@@ -36,6 +36,7 @@ nats-jwt-rs.workspace = true
 nkeys.workspace = true
 oauth2.workspace = true
 openidconnect.workspace = true
+opentelemetry.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 rustls.workspace = true

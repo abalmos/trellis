@@ -43,6 +43,7 @@ pub mod storage;
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 /// Runtime supervisor startup and subsystem lifecycle orchestration.
 pub mod supervisor;
+mod telemetry;
 
 pub use config::{
     AuthConfig, AuthorizationConfig, ClientConfig, ConfigError, HttpConfig, LeasesConfig,

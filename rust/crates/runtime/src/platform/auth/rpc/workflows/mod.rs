@@ -20,7 +20,6 @@ pub(super) async fn dispatch(
         || subject == "rpc.v1.auth.Issuers.Revoke"
         || subject.starts_with("rpc.v1.auth.Participants.")
         || subject == "rpc.v1.auth.Deployments.Apply"
-        || subject == "rpc.v1.auth.Deployments.Apply"
     {
         grants::dispatch(processor, subject, payload, caller).await
     } else if subject.starts_with("rpc.v1.auth.Sessions.")

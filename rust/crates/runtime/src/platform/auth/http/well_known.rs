@@ -50,6 +50,11 @@ pub(super) struct ContextRefreshRequest {
 #[derive(Deserialize)]
 pub(super) struct RequiredNullableString(Option<String>);
 
+#[tracing::instrument(
+    name = "trellis.auth.context_refresh",
+    skip_all,
+    fields(trellis.surface = "auth", trellis.operation = "context_refresh")
+)]
 pub(super) async fn refresh_context<R, E>(
     State(state): State<AuthHttpState<R, E>>,
     Json(raw): Json<Value>,
@@ -68,71 +73,88 @@ where
         + 'static,
     E: AuthEphemeralRepository + Clone,
 {
-    let request: ContextRefreshRequest = serde_json::from_value(raw.clone())
-        .map_err(|_| HttpError::bad_request("invalid_context_refresh"))?;
-    if request
-        .name
-        .as_ref()
-        .is_some_and(|name| name.chars().count() > 128)
-    {
-        return Err(HttpError::bad_request("invalid_context_refresh"));
-    }
-    let session = state
-        .service
-        .repository()
-        .get_session(&request.login_session_id)
-        .await?
-        .ok_or_else(|| HttpError::unauthorized("login_not_found"))?;
-    let mut unsigned_request = raw.clone();
-    unsigned_request
-        .as_object_mut()
-        .ok_or_else(|| HttpError::bad_request("invalid_context_refresh"))?
-        .remove("proof");
-    let proof_input = SessionProofInput::authorization_context_refresh(
-        AuthorizationContextRefreshSessionProofInput {
-            origin: state.public_origin.clone(),
-            session_public_key: session.session_public_key.clone(),
-            unsigned_request,
-        },
-    )
-    .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
-    verify_session_proof(
-        &proof_input,
-        &parse_session_proof(&request.proof)
-            .map_err(|_| HttpError::unauthorized("invalid_proof"))?,
-        &session.session_public_key,
-        now_ms()?,
-        state.proof_policy,
-    )
-    .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
-    if let Some(digest) = &request.current_context_digest.0 {
-        let current = state
+    let total_started = std::time::Instant::now();
+    let result = async {
+        let request: ContextRefreshRequest = serde_json::from_value(raw.clone())
+            .map_err(|_| HttpError::bad_request("invalid_context_refresh"))?;
+        if request
+            .name
+            .as_ref()
+            .is_some_and(|name| name.chars().count() > 128)
+        {
+            return Err(HttpError::bad_request("invalid_context_refresh"));
+        }
+        let session = state
             .service
             .repository()
-            .get_context_by_digest(digest)
+            .get_session(&request.login_session_id)
             .await?
-            .ok_or_else(|| HttpError::unauthorized("context_not_found"))?;
-        if current.login_session_id.as_deref() != Some(request.login_session_id.as_str())
-            || current.connection_id != request.connection_id
-            || current.session_public_key != request.session_key
-        {
-            return Err(HttpError::unauthorized("context_owner_mismatch"));
-        }
-    }
-    let now = now_ms()?;
-    Ok(Json(
-        bootstrap::issue_bootstrap(
-            &state,
-            IssuanceConnection {
-                credential: IssuanceCredential::Login(request.login_session_id),
-                connection_id: request.connection_id,
-                session_public_key: request.session_key,
+            .ok_or_else(|| HttpError::unauthorized("login_not_found"))?;
+        let mut unsigned_request = raw.clone();
+        unsigned_request
+            .as_object_mut()
+            .ok_or_else(|| HttpError::bad_request("invalid_context_refresh"))?
+            .remove("proof");
+        let proof_input = SessionProofInput::authorization_context_refresh(
+            AuthorizationContextRefreshSessionProofInput {
+                origin: state.public_origin.clone(),
+                session_public_key: session.session_public_key.clone(),
+                unsigned_request,
             },
-            request.request_id,
-            proof_request_digest(&raw)
-                .map_err(|_| HttpError::bad_request("invalid_context_refresh"))?,
-            now,
         )
-        .await?,
-    ))
+        .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+        verify_session_proof(
+            &proof_input,
+            &parse_session_proof(&request.proof)
+                .map_err(|_| HttpError::unauthorized("invalid_proof"))?,
+            &session.session_public_key,
+            now_ms()?,
+            state.proof_policy,
+        )
+        .map_err(|_| HttpError::unauthorized("invalid_proof"))?;
+        if let Some(digest) = &request.current_context_digest.0 {
+            let current = state
+                .service
+                .repository()
+                .get_context_by_digest(digest)
+                .await?
+                .ok_or_else(|| HttpError::unauthorized("context_not_found"))?;
+            if current.login_session_id.as_deref() != Some(request.login_session_id.as_str())
+                || current.connection_id != request.connection_id
+                || current.session_public_key != request.session_key
+            {
+                return Err(HttpError::unauthorized("context_owner_mismatch"));
+            }
+        }
+        let now = now_ms()?;
+        Ok(Json(
+            bootstrap::issue_bootstrap(
+                &state,
+                IssuanceConnection {
+                    credential: IssuanceCredential::Login(request.login_session_id),
+                    connection_id: request.connection_id,
+                    session_public_key: request.session_key,
+                },
+                request.request_id,
+                proof_request_digest(&raw)
+                    .map_err(|_| HttpError::bad_request("invalid_context_refresh"))?,
+                now,
+            )
+            .await?,
+        ))
+    }
+    .await;
+    crate::telemetry::record_duration(
+        crate::telemetry::DurationMetric::AuthFlow,
+        total_started.elapsed(),
+        "auth",
+        "context_refresh",
+        "total",
+        if result.is_ok() {
+            crate::telemetry::Outcome::Ok
+        } else {
+            crate::telemetry::Outcome::Error
+        },
+    );
+    result
 }

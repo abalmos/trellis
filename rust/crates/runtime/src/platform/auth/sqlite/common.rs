@@ -65,6 +65,9 @@ impl SqliteAuthorizationStore {
                     available: Mutex::new(readers),
                 })
             }),
+            compiled_evidence: Arc::new(
+                super::super::compiled_evidence::CompiledEvidenceCache::new(),
+            ),
         }
     }
 

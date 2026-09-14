@@ -3,7 +3,10 @@ use std::sync::{Arc, Mutex};
 use rusqlite::Connection;
 
 mod accounts;
+mod binding_reads;
 pub(in crate::platform::auth) mod common;
+#[cfg(test)]
+mod compiled_evidence_tests;
 pub(super) mod contexts;
 mod deployments;
 mod evidence;
@@ -25,9 +28,17 @@ use common::SqliteConnectionPool;
 pub struct SqliteAuthorizationStore {
     writer: Arc<Mutex<Connection>>,
     readers: Option<Arc<SqliteConnectionPool>>,
+    compiled_evidence: Arc<super::compiled_evidence::CompiledEvidenceCache>,
 }
 
 const AUTHORIZATION_CONNECTION_POOL_SIZE: usize = 8;
+
+#[cfg(test)]
+impl SqliteAuthorizationStore {
+    fn compiled_evidence_counters(&self) -> (u64, u64) {
+        self.compiled_evidence.counters()
+    }
+}
 
 #[cfg(test)]
 mod pool_tests {
