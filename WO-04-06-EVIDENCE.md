@@ -568,3 +568,80 @@ TRELLIS_TEST_SERVER_BIN="$PWD/rust/target/debug/trellis-server" TRELLIS_TEST_CLI
 or migration was added.
 
 **READY FOR INDEPENDENT WHOLE-RELEASE REVIEW - NOT ACCEPTED**
+
+## Retired-watch revocation correction on `e33053bf`
+
+This addendum corrects the one remaining P2 finding of
+`TRELLIS-WHOLE-RELEASE-REVIEW-e33053b.md`. Check #317 remains the successful
+evidence for its predecessor `e33053bf`; it is not claimed for this tree. F1,
+F2-TypeScript, F3, R3, R4, W3/C2/C3/C6/C7a, and the performance/Rust OTEL work
+are unchanged by this correction.
+
+### Correction
+
+`observe_context_revocation` no longer conflates a retired watch's coverage loss
+with the meaning of its delivered evidence:
+
+- The own-watch coverage mutation, indexed-entry identity capture, negative
+  evidence, and coverage/removal updates now all happen after the own-transition
+  gate is acquired; the callback's `watch_covered` flag is no longer cleared
+  before the gate.
+- Whether the callback's coverage `Arc` is the currently indexed entry is
+  captured **before** any removal, so revocation handling is not confused with
+  "just removed".
+- A valid revocation record marks every currently indexed entry for that digest
+  unusable in addition to the callback's retired coverage, and own handling
+  proceeds even when the delivering watch was retired.
+- A retired watch that simply ends (EOF) without a valid revocation still cannot
+  suspend a successor coverage or the own installation; the early return now
+  applies only when `revoked_at.is_none() && !was_current_entry`.
+- Own handling still suspends the matching active installation or discards the
+  matching private candidate, and revoking an older digest never suspends a
+  newer active installation.
+
+### Regression
+
+New family `retired_watch_distinguishes_revocation_from_coverage_loss` in the
+existing provider-cache test module, using the real signed own-context fixture
+shared through `own_context::tests::test_support` (the only `#[cfg(test)]`
+visibility change; no new production API):
+
+| Case | Result |
+| --- | --- |
+| Retired EOF: successor coverage and own usability intact | passed |
+| Retired genuine revocation: negative evidence retained, indexed entry marked unusable, own suspended, transport rejects the digest, refresh requested | passed |
+| Revoking an older digest with a newer active installation | passed |
+| Revoking a private candidate while the active predecessor stays usable | passed |
+
+The retired-revocation case was confirmed to fail against the pre-correction
+early return at exactly `genuine revocation suspends the active own
+installation`, then pass with the correction restored. The successful
+`candidate_promotion_completes_without_recursive_state_lock` regression is
+unchanged and still passes.
+
+### Real-boundary result on the final source
+
+| Lane | Result |
+| --- | --- |
+| Focused Rust | `retired_watch_distinguishes_revocation_from_coverage_loss` 4/4; `candidate_promotion_completes_without_recursive_state_lock` 1/1; `trellis-rs authorization` 16/16. |
+| Rust static | `cargo fmt --all --check`; warning-denied `trellis-rs` all-target Clippy. |
+| Live resources/reconnect | `generated Rust resources use live NATS` 1/1 (40s), including resource removal, retained-handle invalidation, and restart resumption. |
+| Live companion | Device.Companion 1/1 (24s), including restart and same-context resumption. |
+
+### Commands
+
+```sh
+cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib retired_watch_distinguishes_revocation_from_coverage_loss
+cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib candidate_promotion_completes_without_recursive_state_lock
+cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib authorization
+cargo fmt --manifest-path rust/Cargo.toml --all --check
+cargo clippy --manifest-path rust/Cargo.toml -p trellis-rs --all-targets -- -D warnings
+TRELLIS_TEST_SERVER_BIN="$PWD/rust/target/debug/trellis-server" TRELLIS_TEST_CLI_BIN="$PWD/rust/target/debug/trellis" \
+  deno test -A -c ts/integration/deno.json ts/integration/runtime_test.ts --filter 'generated Rust resources use live NATS'
+TRELLIS_TEST_SERVER_BIN="$PWD/rust/target/debug/trellis-server" TRELLIS_TEST_CLI_BIN="$PWD/rust/target/debug/trellis" \
+  deno test -A -c ts/integration/deno.json ts/integration/device_activation_test.ts
+```
+
+No generated artifact changed; `workorders/` and `target/` stay untracked.
+
+**READY FOR INDEPENDENT WHOLE-RELEASE REVIEW - NOT ACCEPTED**

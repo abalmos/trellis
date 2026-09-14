@@ -960,7 +960,6 @@ async fn observe_context_revocation(
     revocation_deadline: i64,
 ) {
     let entry = watch.next().await;
-    watch_covered.store(false, Ordering::Release);
     let revoked_at = match entry {
         Some(Ok(RegistryWatchEvent::Entry(entry)))
             if !entry.removed
@@ -982,32 +981,42 @@ async fn observe_context_revocation(
         },
         None => None,
     };
-    if let Some(state) = weak_state.upgrade() {
+    // Capture the indexed-entry identity before any removal, then apply coverage
+    // and negative evidence inside the same transition boundary.
+    let was_current_entry = if let Some(state) = weak_state.upgrade() {
         if let Ok(mut state) = state.write() {
+            let current = state
+                .contexts
+                .get(&watch_digest)
+                .is_some_and(|entry| Arc::ptr_eq(&entry.covered, &watch_covered));
             if let Some(at) = revoked_at {
                 state
                     .revocations
                     .insert(watch_digest.clone(), (at, revocation_deadline));
+                // Genuine revocation evidence applies to every indexed entry for
+                // the digest, including a successor coverage that replaced the
+                // callback's own retired watch entry.
+                if let Some(indexed) = state.contexts.get(&watch_digest) {
+                    indexed.covered.store(false, Ordering::Release);
+                }
             }
+            watch_covered.store(false, Ordering::Release);
             if state.contexts.get(&watch_digest).is_some_and(|entry| {
                 Arc::ptr_eq(&entry.covered, &watch_covered)
                     && entry.leases.load(Ordering::Acquire) == 0
             }) {
                 state.contexts.remove(&watch_digest);
             }
+            current
+        } else {
+            false
         }
-    }
-    // A late watch from a retired lease or epoch must not invalidate a newer
-    // transition that reused the same digest.
-    let current_entry = weak_state.upgrade().is_some_and(|state| {
-        state.read().is_ok_and(|state| {
-            state
-                .contexts
-                .get(&watch_digest)
-                .is_some_and(|entry| Arc::ptr_eq(&entry.covered, &watch_covered))
-        })
-    });
-    if !current_entry {
+    } else {
+        false
+    };
+    // Retired coverage loss is not evidence about the digest: only a genuine
+    // revocation may invalidate an own installation from a retired watch.
+    if revoked_at.is_none() && !was_current_entry {
         return;
     }
     if let (Some(own), Some(transition)) = (&own, transition.as_ref()) {
@@ -1303,5 +1312,214 @@ mod wire_tests {
         tokio::task::yield_now().await;
         assert!(cancellations[0].load(Ordering::Acquire));
         assert!(cancellations[1].load(Ordering::Acquire));
+    }
+}
+
+#[cfg(test)]
+mod retired_watch_tests {
+    use futures_util::stream;
+
+    use super::*;
+    use crate::client::authorization::own_context::tests::test_support::{
+        installation, now_seconds, own_context_fixture, OwnContextFixture,
+    };
+    use crate::client::authorization::registry::RegistryWatchEntry;
+
+    fn entry_for(
+        fixture: &OwnContextFixture,
+        covered: Arc<AtomicBool>,
+        epoch: u64,
+    ) -> Arc<CachedContext> {
+        Arc::new(CachedContext {
+            signed: fixture.signed.clone(),
+            issuer: fixture.issuer_key.clone(),
+            verified: Mutex::new(CachedVerifications::default()),
+            epoch,
+            covered,
+            watch: tokio::spawn(async {}).abort_handle(),
+            leases: AtomicUsize::new(0),
+            last_used: AtomicU64::new(0),
+        })
+    }
+
+    fn provider_state(digest: &str, entry: Arc<CachedContext>) -> Arc<RwLock<ProviderState>> {
+        Arc::new(RwLock::new(ProviderState {
+            contexts: HashMap::from([(digest.to_owned(), entry)]),
+            issuers: HashMap::new(),
+            revocations: HashMap::new(),
+        }))
+    }
+
+    fn revocation_event(
+        digest: &str,
+        revision: u64,
+    ) -> Result<RegistryWatchEvent, TrellisClientError> {
+        Ok(RegistryWatchEvent::Entry(RegistryWatchEntry {
+            key: format!("{REVOCATION_PREFIX}{digest}"),
+            value: serde_json::to_vec(&serde_json::json!({ "revokedAt": 111 })).unwrap(),
+            removed: false,
+            revision,
+        }))
+    }
+
+    async fn observe(
+        events: Vec<Result<RegistryWatchEvent, TrellisClientError>>,
+        state: &Arc<RwLock<ProviderState>>,
+        own: &Arc<AuthorizationContextCache>,
+        covered: Arc<AtomicBool>,
+        digest: &str,
+    ) {
+        observe_context_revocation(
+            stream::iter(events),
+            Arc::downgrade(state),
+            Some(Arc::downgrade(own)),
+            covered,
+            digest.to_owned(),
+            now_seconds() + 3_600,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn retired_watch_distinguishes_revocation_from_coverage_loss_retired_loss() {
+        let fixture = own_context_fixture(1);
+        let own = Arc::new(fixture.cache.clone());
+        let successor_covered = Arc::new(AtomicBool::new(true));
+        let state = provider_state(
+            &fixture.digest,
+            entry_for(&fixture, successor_covered.clone(), 1),
+        );
+        let retired_covered = Arc::new(AtomicBool::new(true));
+
+        observe(
+            Vec::new(),
+            &state,
+            &own,
+            retired_covered.clone(),
+            &fixture.digest,
+        )
+        .await;
+
+        assert!(
+            successor_covered.load(Ordering::Acquire),
+            "a retired watch ending must not retire the successor coverage"
+        );
+        assert!(
+            own.context_digest().is_ok(),
+            "retired coverage loss must not suspend own usability"
+        );
+        assert!(!retired_covered.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn retired_watch_distinguishes_revocation_from_coverage_loss_retired_revocation() {
+        let fixture = own_context_fixture(1);
+        let own = Arc::new(fixture.cache.clone());
+        let successor_covered = Arc::new(AtomicBool::new(true));
+        let state = provider_state(
+            &fixture.digest,
+            entry_for(&fixture, successor_covered.clone(), 1),
+        );
+
+        observe(
+            vec![revocation_event(&fixture.digest, 7)],
+            &state,
+            &own,
+            Arc::new(AtomicBool::new(true)),
+            &fixture.digest,
+        )
+        .await;
+
+        assert!(
+            state
+                .read()
+                .unwrap()
+                .revocations
+                .contains_key(&fixture.digest),
+            "genuine revocation evidence is retained for the digest"
+        );
+        assert!(
+            !successor_covered.load(Ordering::Acquire),
+            "an indexed successor entry for the revoked digest is marked unusable"
+        );
+        assert!(
+            own.context_digest().is_err(),
+            "genuine revocation suspends the active own installation"
+        );
+        assert!(
+            own.transport_credentials().is_err(),
+            "the revoked digest is not presented to the transport"
+        );
+    }
+
+    #[tokio::test]
+    async fn retired_watch_distinguishes_revocation_from_coverage_loss_newer_active() {
+        let older = own_context_fixture(1);
+        let newer = own_context_fixture(2);
+        let own = Arc::new(newer.cache.clone());
+        let covered = Arc::new(AtomicBool::new(true));
+        let state = provider_state(&older.digest, entry_for(&older, covered.clone(), 1));
+
+        observe(
+            vec![revocation_event(&older.digest, 7)],
+            &state,
+            &own,
+            Arc::new(AtomicBool::new(true)),
+            &older.digest,
+        )
+        .await;
+
+        assert!(
+            state
+                .read()
+                .unwrap()
+                .revocations
+                .contains_key(&older.digest),
+            "negative evidence for the older digest is retained"
+        );
+        assert!(
+            own.context_digest().is_ok(),
+            "revoking an older digest must not suspend a newer active installation"
+        );
+        assert_eq!(own.context_digest().unwrap(), newer.digest);
+    }
+
+    #[tokio::test]
+    async fn retired_watch_distinguishes_revocation_from_coverage_loss_private_candidate() {
+        let fixture = own_context_fixture(1);
+        let own = Arc::new(fixture.cache.clone());
+        let candidate_digest = own
+            .prepare(installation(
+                &fixture.issuer,
+                &fixture.session,
+                &fixture.connection_id,
+                2,
+                now_seconds(),
+            ))
+            .unwrap();
+        assert_ne!(candidate_digest, fixture.digest);
+        let state = provider_state(
+            &fixture.digest,
+            entry_for(&fixture, Arc::new(AtomicBool::new(true)), 1),
+        );
+
+        observe(
+            vec![revocation_event(&candidate_digest, 9)],
+            &state,
+            &own,
+            Arc::new(AtomicBool::new(true)),
+            &candidate_digest,
+        )
+        .await;
+
+        assert!(
+            own.candidate_digest().is_err(),
+            "a revoked private candidate is discarded"
+        );
+        assert_eq!(
+            own.context_digest().unwrap(),
+            fixture.digest,
+            "the still-valid active predecessor stays usable"
+        );
     }
 }

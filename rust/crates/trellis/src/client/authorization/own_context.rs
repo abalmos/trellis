@@ -818,7 +818,7 @@ pub(super) fn system_now_millis() -> Result<i64, TrellisClientError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::BTreeMap;
     use std::sync::Arc;
     use std::time::Duration;
@@ -838,116 +838,168 @@ mod tests {
     };
     use crate::client::proof::{base64url_encode, sha256};
 
-    fn issuer_key_id(issuer: &SigningKey) -> String {
-        base64url_encode(&sha256(issuer.verifying_key().as_bytes()))
-    }
+    pub(crate) mod test_support {
+        use trellis_protocol::{parse_authorization_context, SignedAuthorizationContext};
 
-    fn installation(
-        issuer: &SigningKey,
-        session: &SessionAuth,
-        connection_id: &str,
-        grant_revision: u64,
-        now: i64,
-    ) -> AuthorizationInstallation {
-        let signed = sign_authorization_context(
-            UnsignedAuthorizationContext {
-                format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
-                issuer_key_id: issuer_key_id(issuer),
-                principal_id: "usr_test".to_owned(),
-                principal_kind: AuthorizationPrincipalKind::User,
-                participant_id: "test.Caller".to_owned(),
-                owner_kind: GrantOwnerKind::User,
-                owner_id: "usr_test".to_owned(),
-                grant_revision,
-                identity_key_id: None,
-                login_session_id: Some("login-test".to_owned()),
-                connection_id: connection_id.to_owned(),
-                session_key: session.session_key.clone(),
-                deployment_id: None,
-                instance_id: None,
-                inbox_prefix: "_INBOX.test".to_owned(),
-                issued_at: now - 60,
-                not_before: now - 60,
-                expires_at: now + 3_600,
-                grants: GrantSet::new(vec![]),
-                platform_privileges: vec![],
-                extensions: Default::default(),
-                critical: vec![],
-            },
-            issuer,
-        )
-        .unwrap();
-        let bundle = AuthorizationContextBundle {
-            context: serde_json::to_value(signed).unwrap(),
-            issuer: AuthorizationIssuerKey {
-                key_id: issuer_key_id(issuer),
-                public_key: base64url_encode(issuer.verifying_key().as_bytes()),
-                state: AuthorizationIssuerState::Active,
-            },
-            authorization_registry: AuthorizationRegistryBinding {
-                context_bucket: "test-contexts".to_owned(),
-            },
-            policy: AuthorizationContextPolicy {
-                allowed_clock_skew_seconds: 30,
-                maximum_context_lifetime_seconds: 86_400,
-                maximum_context_bytes: 1_048_576,
-                maximum_permissions: 1_024,
-                refresh_lead_seconds: 60,
-                refresh_jitter_seconds: 5,
-            },
-        };
-        AuthorizationInstallation {
-            context: bundle,
-            routing: AuthorizationRoutingMaterial {
-                bootstrap_jwt: "route-jwt".to_owned(),
-                bootstrap_jwt_expires_at: now + 3_600,
-            },
-            runtime: AuthorizationRuntimeBinding {
-                connection_id: connection_id.to_owned(),
-                login_session_id: Some("login-test".to_owned()),
-                participant_id: "test.Caller".to_owned(),
-                inbox_prefix: "_INBOX.test".to_owned(),
-                transports: AuthorizationRuntimeTransports {
-                    native: Some(AuthorizationNativeTransport {
-                        nats_servers: vec!["nats://127.0.0.1:4222".to_owned()],
-                    }),
-                    websocket: None,
+        use super::*;
+
+        /// Server-corrected seconds used by the real signed test contexts.
+        pub(crate) fn now_seconds() -> i64 {
+            system_now_millis().unwrap().div_euclid(1_000)
+        }
+
+        fn issuer_key_id(issuer: &SigningKey) -> String {
+            base64url_encode(&sha256(issuer.verifying_key().as_bytes()))
+        }
+
+        pub(crate) fn installation(
+            issuer: &SigningKey,
+            session: &SessionAuth,
+            connection_id: &str,
+            grant_revision: u64,
+            now: i64,
+        ) -> AuthorizationInstallation {
+            let signed = sign_authorization_context(
+                UnsignedAuthorizationContext {
+                    format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
+                    issuer_key_id: issuer_key_id(issuer),
+                    principal_id: "usr_test".to_owned(),
+                    principal_kind: AuthorizationPrincipalKind::User,
+                    participant_id: "test.Caller".to_owned(),
+                    owner_kind: GrantOwnerKind::User,
+                    owner_id: "usr_test".to_owned(),
+                    grant_revision,
+                    identity_key_id: None,
+                    login_session_id: Some("login-test".to_owned()),
+                    connection_id: connection_id.to_owned(),
+                    session_key: session.session_key.clone(),
+                    deployment_id: None,
+                    instance_id: None,
+                    inbox_prefix: "_INBOX.test".to_owned(),
+                    issued_at: now - 60,
+                    not_before: now - 60,
+                    expires_at: now + 3_600,
+                    grants: GrantSet::new(vec![]),
+                    platform_privileges: vec![],
+                    extensions: Default::default(),
+                    critical: vec![],
                 },
-            },
-            api_bindings: BTreeMap::new(),
-            server_clock_offset_ms: 0,
-            authorization: None,
+                issuer,
+            )
+            .unwrap();
+            let bundle = AuthorizationContextBundle {
+                context: serde_json::to_value(signed).unwrap(),
+                issuer: AuthorizationIssuerKey {
+                    key_id: issuer_key_id(issuer),
+                    public_key: base64url_encode(issuer.verifying_key().as_bytes()),
+                    state: AuthorizationIssuerState::Active,
+                },
+                authorization_registry: AuthorizationRegistryBinding {
+                    context_bucket: "test-contexts".to_owned(),
+                },
+                policy: AuthorizationContextPolicy {
+                    allowed_clock_skew_seconds: 30,
+                    maximum_context_lifetime_seconds: 86_400,
+                    maximum_context_bytes: 1_048_576,
+                    maximum_permissions: 1_024,
+                    refresh_lead_seconds: 60,
+                    refresh_jitter_seconds: 5,
+                },
+            };
+            AuthorizationInstallation {
+                context: bundle,
+                routing: AuthorizationRoutingMaterial {
+                    bootstrap_jwt: "route-jwt".to_owned(),
+                    bootstrap_jwt_expires_at: now + 3_600,
+                },
+                runtime: AuthorizationRuntimeBinding {
+                    connection_id: connection_id.to_owned(),
+                    login_session_id: Some("login-test".to_owned()),
+                    participant_id: "test.Caller".to_owned(),
+                    inbox_prefix: "_INBOX.test".to_owned(),
+                    transports: AuthorizationRuntimeTransports {
+                        native: Some(AuthorizationNativeTransport {
+                            nats_servers: vec!["nats://127.0.0.1:4222".to_owned()],
+                        }),
+                        websocket: None,
+                    },
+                },
+                api_bindings: BTreeMap::new(),
+                server_clock_offset_ms: 0,
+                authorization: None,
+            }
+        }
+
+        /// Parse the installed signed context for provider-entry fixtures.
+        pub(crate) fn signed_context(
+            installation: &AuthorizationInstallation,
+        ) -> SignedAuthorizationContext {
+            parse_authorization_context(&installation.context.context).unwrap()
+        }
+
+        /// A cache with one installed real signed context.
+        pub(crate) struct OwnContextFixture {
+            pub(crate) cache: AuthorizationContextCache,
+            pub(crate) issuer: SigningKey,
+            pub(crate) session: SessionAuth,
+            pub(crate) connection_id: String,
+            pub(crate) digest: String,
+            pub(crate) signed: SignedAuthorizationContext,
+            pub(crate) issuer_key: AuthorizationIssuerKey,
+        }
+
+        pub(crate) fn own_context_fixture(grant_revision: u64) -> OwnContextFixture {
+            let now = now_seconds();
+            let issuer = SigningKey::from_bytes(&[7; 32]);
+            let seed = base64url_encode(&[9; 32]);
+            let session = SessionAuth::from_seed_base64url(&seed).unwrap();
+            let connection_id = "01JY0000000000000000000003".to_owned();
+            let cache = AuthorizationContextCache::new(
+                "http://127.0.0.1:1/",
+                "test.Caller".to_owned(),
+                connection_id.clone(),
+                session.session_key.clone(),
+                AuthorizationCredential::User {
+                    login_session_id: "login-test".to_owned(),
+                    installation: Arc::new(SessionAuth::from_seed_base64url(&seed).unwrap()),
+                },
+                None,
+            )
+            .unwrap();
+            let installation = installation(&issuer, &session, &connection_id, grant_revision, now);
+            let signed = signed_context(&installation);
+            let issuer_key = installation.context.issuer.clone();
+            cache.install_initial(installation).unwrap();
+            let digest = cache.retained_context_digest().unwrap();
+            OwnContextFixture {
+                cache,
+                issuer,
+                session,
+                connection_id,
+                digest,
+                signed,
+                issuer_key,
+            }
         }
     }
 
+    use self::test_support::{installation, own_context_fixture};
+
     #[test]
     fn candidate_promotion_completes_without_recursive_state_lock() {
-        let now = system_now_millis().unwrap().div_euclid(1_000);
-        let issuer = SigningKey::from_bytes(&[7; 32]);
-        let seed = base64url_encode(&[9; 32]);
-        let session = SessionAuth::from_seed_base64url(&seed).unwrap();
-        let connection_id = "01JY0000000000000000000003".to_owned();
-        let cache = AuthorizationContextCache::new(
-            "http://127.0.0.1:1/",
-            "test.Caller".to_owned(),
-            connection_id.clone(),
-            session.session_key.clone(),
-            AuthorizationCredential::User {
-                login_session_id: "login-test".to_owned(),
-                installation: Arc::new(SessionAuth::from_seed_base64url(&seed).unwrap()),
-            },
-            None,
-        )
-        .unwrap();
-
-        cache
-            .install_initial(installation(&issuer, &session, &connection_id, 1, now))
-            .unwrap();
-        let installed = cache.retained_context_digest().unwrap();
+        let fixture = own_context_fixture(1);
+        let cache = fixture.cache.clone();
+        let installed = fixture.digest.clone();
         assert_eq!(cache.context_digest().unwrap(), installed);
 
         let candidate = cache
-            .prepare(installation(&issuer, &session, &connection_id, 2, now))
+            .prepare(installation(
+                &fixture.issuer,
+                &fixture.session,
+                &fixture.connection_id,
+                2,
+                test_support::now_seconds(),
+            ))
             .unwrap();
         assert_ne!(candidate, installed);
         assert_eq!(
