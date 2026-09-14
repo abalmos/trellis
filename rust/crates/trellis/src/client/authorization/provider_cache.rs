@@ -53,7 +53,7 @@ struct CachedVerifications {
     historical: Option<VerifiedAuthorizationContext>,
 }
 
-struct CachedContext {
+pub(crate) struct CachedContext {
     signed: SignedAuthorizationContext,
     issuer: AuthorizationIssuerKey,
     verified: Mutex<CachedVerifications>,
@@ -89,6 +89,10 @@ impl Deref for AuthorizationContextLease {
 impl AuthorizationContextLease {
     pub(crate) fn epoch(&self) -> u64 {
         self.entry.epoch
+    }
+
+    pub(crate) fn entry(&self) -> &Arc<CachedContext> {
+        &self.entry
     }
 
     pub(crate) fn context_digest(&self) -> &str {
@@ -417,20 +421,26 @@ impl AuthorizationProviderCache {
             .saturating_add(i64::from(
                 self.verification_policy.allowed_clock_skew_seconds,
             ));
-        let mut state = self.write_state()?;
-        state
-            .revocations
-            .entry(digest.to_owned())
-            .and_modify(|(at, until)| {
-                *at = (*at).max(revoked_at);
-                *until = (*until).max(deadline);
-            })
-            .or_insert((revoked_at, deadline));
-        if let Some(entry) = state.contexts.get(digest) {
-            entry.covered.store(false, Ordering::Release);
+        let transition = self
+            .own
+            .as_ref()
+            .map(|own| own.lock_own_transition())
+            .transpose()?;
+        {
+            let mut state = self.write_state()?;
+            state
+                .revocations
+                .entry(digest.to_owned())
+                .and_modify(|(at, until)| {
+                    *at = (*at).max(revoked_at);
+                    *until = (*until).max(deadline);
+                })
+                .or_insert((revoked_at, deadline));
+            if let Some(entry) = state.contexts.get(digest) {
+                entry.covered.store(false, Ordering::Release);
+            }
         }
-        drop(state);
-        if let Some(own) = &self.own {
+        if let (Some(own), Some(transition)) = (&self.own, transition.as_ref()) {
             if own
                 .stored_context_digest()
                 .is_ok_and(|current| current == digest)
@@ -441,16 +451,16 @@ impl AuthorizationProviderCache {
                 if let Ok(mut lease) = self.own_lease.lock() {
                     lease.take();
                 }
-                own.suspend();
+                own.suspend_locked(transition);
                 own.request_refresh();
             } else if own
-                .candidate_digest()
+                .candidate_digest_locked(transition)
                 .is_ok_and(|candidate| candidate == digest)
             {
                 // A revoked private candidate must never be published, and the
                 // still-valid active predecessor stays untouched.
                 own.mark_revoked(digest);
-                own.invalidate_candidate(digest);
+                own.invalidate_candidate_locked(transition, digest);
                 own.request_refresh();
             }
         }
@@ -472,24 +482,22 @@ impl AuthorizationProviderCache {
         let Some(own) = &self.own else {
             return Ok(());
         };
+        let transition = own.lock_own_transition()?;
         let expected_epoch = self.epoch();
-        {
-            let state = self.read_state()?;
-            if state.revocations.contains_key(expected_digest) {
-                return Err(TrellisClientError::AuthorizationUnavailable(
-                    "authorization context is revoked".into(),
-                ));
-            }
-            let Some(entry) = state.contexts.get(expected_digest) else {
-                return Err(TrellisClientError::AuthorizationUnavailable(
-                    "authorization coverage is unavailable".into(),
-                ));
-            };
-            if !entry.covered.load(Ordering::Acquire) || entry.epoch != expected_epoch {
-                return Err(TrellisClientError::AuthorizationUnavailable(
-                    "authorization coverage changed before publication".into(),
-                ));
-            }
+        if !self.health()?.healthy {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization provider is not connected".into(),
+            ));
+        }
+        if own.revocation_marker().as_deref() == Some(expected_digest) {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization context is revoked".into(),
+            ));
+        }
+        if promote && own.candidate_digest_locked(&transition)? != expected_digest {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization candidate changed before publication".into(),
+            ));
         }
         let lease = self.own_lease.lock().map_err(|_| {
             TrellisClientError::AuthorizationUnavailable("own context lease lock poisoned".into())
@@ -499,23 +507,34 @@ impl AuthorizationProviderCache {
                 "authorization coverage lease is unavailable".into(),
             ));
         };
-        if lease.context_digest() != expected_digest
-            || lease.epoch() != expected_epoch
-            || !self.health()?.healthy
-        {
+        if lease.context_digest() != expected_digest || lease.epoch() != expected_epoch {
             return Err(TrellisClientError::AuthorizationUnavailable(
                 "authorization coverage changed before publication".into(),
             ));
         }
-        if promote {
-            if own.candidate_digest()? != expected_digest {
+        {
+            let state = self.read_state()?;
+            if state.revocations.contains_key(expected_digest) {
                 return Err(TrellisClientError::AuthorizationUnavailable(
-                    "authorization candidate changed before publication".into(),
+                    "authorization context is revoked".into(),
                 ));
             }
-            own.promote(expected_digest)?;
+            match state.contexts.get(expected_digest) {
+                Some(entry)
+                    if Arc::ptr_eq(entry, lease.entry())
+                        && entry.covered.load(Ordering::Acquire)
+                        && entry.epoch == expected_epoch => {}
+                _ => {
+                    return Err(TrellisClientError::AuthorizationUnavailable(
+                        "authorization coverage entry changed before publication".into(),
+                    ));
+                }
+            }
+        }
+        if promote {
+            own.promote_locked(&transition, expected_digest)?;
         } else {
-            own.resume_availability(expected_digest)?;
+            own.resume_availability_locked(&transition, expected_digest)?;
         }
         Ok(())
     }
@@ -952,6 +971,17 @@ async fn observe_context_revocation(
         }
         _ => None,
     };
+    let own = own.and_then(|own| own.upgrade());
+    let transition = match own.as_ref() {
+        Some(own) => match own.lock_own_transition() {
+            Ok(transition) => Some(transition),
+            Err(error) => {
+                tracing::warn!(%error, "own transition lock is unavailable for invalidation");
+                None
+            }
+        },
+        None => None,
+    };
     if let Some(state) = weak_state.upgrade() {
         if let Ok(mut state) = state.write() {
             if let Some(at) = revoked_at {
@@ -980,7 +1010,7 @@ async fn observe_context_revocation(
     if !current_entry {
         return;
     }
-    if let Some(own) = own.and_then(|own| own.upgrade()) {
+    if let (Some(own), Some(transition)) = (&own, transition.as_ref()) {
         if own
             .stored_context_digest()
             .is_ok_and(|digest| digest == watch_digest)
@@ -988,20 +1018,20 @@ async fn observe_context_revocation(
             if revoked_at.is_some() {
                 own.mark_revoked(&watch_digest);
             }
-            own.suspend();
+            own.suspend_locked(transition);
             if revoked_at.is_some() {
                 own.request_refresh();
             } else {
                 own.request_coverage_reconciliation();
             }
         } else if own
-            .candidate_digest()
+            .candidate_digest_locked(transition)
             .is_ok_and(|digest| digest == watch_digest)
         {
             if revoked_at.is_some() {
                 own.mark_revoked(&watch_digest);
             }
-            own.invalidate_candidate(&watch_digest);
+            own.invalidate_candidate_locked(transition, &watch_digest);
             own.request_refresh();
         }
     }

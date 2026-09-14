@@ -43,6 +43,16 @@ pub struct AuthorizationContextCache {
     refresh_request: Arc<Mutex<Option<AuthorizationRefreshRequest>>>,
     candidate: Arc<RwLock<Option<PreparedInstallation>>>,
     revoked_digest: Arc<Mutex<Option<String>>>,
+    transition: Arc<Mutex<()>>,
+}
+
+/// One short synchronization boundary for final own-installation transitions.
+///
+/// The guard is private to the SDK and shared by this cache's clones: it
+/// orders installation, promotion, resumption, invalidation, and suspension so
+/// local publication can never overwrite consumed invalidation evidence.
+pub(crate) struct OwnTransitionGuard<'a> {
+    _guard: std::sync::MutexGuard<'a, ()>,
 }
 
 impl AuthorizationContextCache {
@@ -69,11 +79,31 @@ impl AuthorizationContextCache {
             refresh_request: Arc::new(Mutex::new(None)),
             candidate: Arc::new(RwLock::new(None)),
             revoked_digest: Arc::new(Mutex::new(None)),
+            transition: Arc::new(Mutex::new(())),
+        })
+    }
+
+    /// Acquire the shared own-installation transition boundary.
+    pub(crate) fn lock_own_transition(&self) -> Result<OwnTransitionGuard<'_>, TrellisClientError> {
+        Ok(OwnTransitionGuard {
+            _guard: self.transition.lock().map_err(|_| {
+                TrellisClientError::AuthorizationUnavailable("own transition lock poisoned".into())
+            })?,
         })
     }
 
     fn replace_installation(
         &self,
+        installation: AuthorizationInstallation,
+        promote: bool,
+    ) -> Result<(), TrellisClientError> {
+        let transition = self.lock_own_transition()?;
+        self.replace_installation_locked(&transition, installation, promote)
+    }
+
+    fn replace_installation_locked(
+        &self,
+        _transition: &OwnTransitionGuard<'_>,
         installation: AuthorizationInstallation,
         promote: bool,
     ) -> Result<(), TrellisClientError> {
@@ -237,6 +267,14 @@ impl AuthorizationContextCache {
     }
 
     pub(crate) fn candidate_digest(&self) -> Result<String, TrellisClientError> {
+        let transition = self.lock_own_transition()?;
+        self.candidate_digest_locked(&transition)
+    }
+
+    pub(crate) fn candidate_digest_locked(
+        &self,
+        _transition: &OwnTransitionGuard<'_>,
+    ) -> Result<String, TrellisClientError> {
         self.candidate
             .read()
             .map_err(|_| TrellisClientError::Bootstrap("context candidate lock poisoned".into()))?
@@ -286,43 +324,79 @@ impl AuthorizationContextCache {
         ))
     }
 
-    pub(crate) fn promote(&self, expected_digest: &str) -> Result<(), TrellisClientError> {
-        let mut state = self
-            .state
-            .write()
-            .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))?;
-        let mut candidate = self
-            .candidate
-            .write()
-            .map_err(|_| TrellisClientError::Bootstrap("context candidate lock poisoned".into()))?;
-        let prepared = candidate.take().ok_or_else(|| {
-            TrellisClientError::AuthorizationUnavailable(
-                "authorization candidate is unavailable".into(),
-            )
-        })?;
-        if prepared.current.context_digest != expected_digest || state.current.is_none() {
-            return Err(TrellisClientError::AuthorizationUnavailable(
-                "authorization candidate changed before promotion".into(),
-            ));
-        }
-        let now = self.corrected_now_seconds()?;
+    pub(crate) fn promote_locked(
+        &self,
+        _transition: &OwnTransitionGuard<'_>,
+        expected_digest: &str,
+    ) -> Result<(), TrellisClientError> {
+        let now = {
+            let candidate = self.candidate.read().map_err(|_| {
+                TrellisClientError::Bootstrap("context candidate lock poisoned".into())
+            })?;
+            let prepared = candidate.as_ref().ok_or_else(|| {
+                TrellisClientError::AuthorizationUnavailable(
+                    "authorization candidate is unavailable".into(),
+                )
+            })?;
+            if prepared.current.context_digest != expected_digest {
+                return Err(TrellisClientError::AuthorizationUnavailable(
+                    "authorization candidate changed before promotion".into(),
+                ));
+            }
+            system_now_millis()?
+                .checked_add(prepared.server_clock_offset_ms)
+                .ok_or_else(|| TrellisClientError::Bootstrap("context time overflow".into()))?
+                .div_euclid(1000)
+        };
+        let prepared = {
+            let mut candidate = self.candidate.write().map_err(|_| {
+                TrellisClientError::Bootstrap("context candidate lock poisoned".into())
+            })?;
+            let prepared = candidate.take().ok_or_else(|| {
+                TrellisClientError::AuthorizationUnavailable(
+                    "authorization candidate is unavailable".into(),
+                )
+            })?;
+            if prepared.current.context_digest != expected_digest {
+                return Err(TrellisClientError::AuthorizationUnavailable(
+                    "authorization candidate changed before promotion".into(),
+                ));
+            }
+            prepared
+        };
         if prepared.current.not_before > now || prepared.current.expires_at <= now {
             return Err(TrellisClientError::AuthorizationUnavailable(
                 "authorization candidate is no longer current".into(),
             ));
         }
-        self.clear_revoked(expected_digest);
+        let PreparedInstallation {
+            current,
+            runtime,
+            routing,
+            api_bindings,
+            server_clock_offset_ms,
+            authorization,
+            availability,
+        } = prepared;
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))?;
+        if state.current.is_none() {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "authorization context was cleared before promotion".into(),
+            ));
+        }
         *state = CachedAuthorizationState {
-            current: Some(prepared.current),
-            runtime: Some(prepared.runtime),
-            routing: Some(prepared.routing),
-            api_bindings: prepared.api_bindings,
-            server_clock_offset_ms: prepared.server_clock_offset_ms,
-            authorization: prepared.authorization,
+            current: Some(current),
+            runtime: Some(runtime),
+            routing: Some(routing),
+            api_bindings,
+            server_clock_offset_ms,
+            authorization,
         };
-        drop(candidate);
         drop(state);
-        self.availability.send_replace(prepared.availability);
+        self.availability.send_replace(availability);
         tracing::info!(
             context_digest = self.retained_context_digest().ok(),
             "promoted authorization installation"
@@ -332,6 +406,11 @@ impl AuthorizationContextCache {
 
     /// Discard this connection's context and route without revoking its credential.
     pub fn clear(&self) -> Result<(), TrellisClientError> {
+        let transition = self.lock_own_transition()?;
+        self.clear_locked(&transition)
+    }
+
+    fn clear_locked(&self, _transition: &OwnTransitionGuard<'_>) -> Result<(), TrellisClientError> {
         let mut state = self
             .state
             .write()
@@ -350,6 +429,13 @@ impl AuthorizationContextCache {
     }
 
     pub(crate) fn suspend(&self) {
+        if let Ok(transition) = self.lock_own_transition() {
+            self.suspend_locked(&transition);
+        }
+    }
+
+    /// Withdraw application usability while the transition gate is held.
+    pub(crate) fn suspend_locked(&self, _transition: &OwnTransitionGuard<'_>) {
         let suspended =
             crate::generated::AvailabilitySnapshot::suspended(&self.availability.borrow().clone());
         self.availability.send_replace(suspended);
@@ -406,8 +492,9 @@ impl AuthorizationContextCache {
 
     /// Publish usability again for the retained installation without changing
     /// context or resource identity, after coverage was reinitialized.
-    pub(crate) fn resume_availability(
+    pub(crate) fn resume_availability_locked(
         &self,
+        _transition: &OwnTransitionGuard<'_>,
         expected_digest: &str,
     ) -> Result<(), TrellisClientError> {
         let state = self.state_snapshot()?;
@@ -421,7 +508,10 @@ impl AuthorizationContextCache {
                 "authorization installation changed before resumption".into(),
             ));
         }
-        let now = self.corrected_now_seconds()?;
+        let now = system_now_millis()?
+            .checked_add(state.server_clock_offset_ms)
+            .ok_or_else(|| TrellisClientError::Bootstrap("context time overflow".into()))?
+            .div_euclid(1000);
         if current.not_before > now || current.expires_at <= now {
             return Err(TrellisClientError::AuthorizationUnavailable(
                 "authorization context is no longer current".into(),
@@ -447,7 +537,6 @@ impl AuthorizationContextCache {
                 resources,
                 &previous,
             ));
-        self.clear_revoked(expected_digest);
         tracing::info!(
             context_digest = expected_digest,
             "resumed authorization installation coverage"
@@ -464,22 +553,26 @@ impl AuthorizationContextCache {
         }
     }
 
-    fn clear_revoked(&self, digest: &str) {
-        if let Ok(mut revoked) = self.revoked_digest.lock() {
-            if revoked.as_deref() == Some(digest) {
-                *revoked = None;
-            }
-        }
-    }
-
     fn is_revoked(&self, digest: &str) -> bool {
         self.revoked_digest
             .lock()
             .is_ok_and(|revoked| revoked.as_deref() == Some(digest))
     }
 
-    /// Drop a private candidate that became unusable before publication.
-    pub(crate) fn invalidate_candidate(&self, digest: &str) -> bool {
+    /// Return the locally observed revocation evidence digest, if any.
+    pub(crate) fn revocation_marker(&self) -> Option<String> {
+        self.revoked_digest
+            .lock()
+            .ok()
+            .and_then(|revoked| revoked.clone())
+    }
+
+    /// Discard a matching private candidate while the transition gate is held.
+    pub(crate) fn invalidate_candidate_locked(
+        &self,
+        _transition: &OwnTransitionGuard<'_>,
+        digest: &str,
+    ) -> bool {
         if let Ok(mut candidate) = self.candidate.write() {
             if candidate
                 .as_ref()
@@ -579,46 +672,79 @@ impl AuthorizationContextCache {
         ))
     }
 
-    pub(crate) fn routing_jwt(&self) -> Result<String, TrellisClientError> {
-        let now = self.corrected_now_seconds()?;
-        self.state_snapshot()?
-            .routing
-            .filter(|route| route.bootstrap_jwt_expires_at > now)
-            .map(|route| route.bootstrap_jwt)
-            .ok_or_else(|| {
-                TrellisClientError::Bootstrap("authorization routing JWT expired".into())
-            })
-    }
-
     pub(crate) fn transport_credentials(&self) -> Result<(String, String), TrellisClientError> {
-        if let Some(candidate) = self
-            .candidate
-            .read()
-            .map_err(|_| TrellisClientError::Bootstrap("context candidate lock poisoned".into()))?
-            .as_ref()
-        {
-            if candidate.routing.bootstrap_jwt_expires_at <= self.corrected_now_seconds()? {
+        let candidate = {
+            let candidate = self.candidate.read().map_err(|_| {
+                TrellisClientError::Bootstrap("context candidate lock poisoned".into())
+            })?;
+            candidate.as_ref().map(|candidate| {
+                (
+                    candidate.routing.bootstrap_jwt.clone(),
+                    candidate.routing.bootstrap_jwt_expires_at,
+                    candidate.current.context_digest.clone(),
+                    candidate.current.not_before,
+                    candidate.current.expires_at,
+                    candidate.server_clock_offset_ms,
+                )
+            })
+        };
+        if let Some((jwt, jwt_expires_at, digest, not_before, expires_at, offset)) = candidate {
+            let now = system_now_millis()?
+                .checked_add(offset)
+                .ok_or_else(|| TrellisClientError::Bootstrap("context time overflow".into()))?
+                .div_euclid(1000);
+            if jwt_expires_at <= now || not_before > now || expires_at <= now {
                 return Err(TrellisClientError::Bootstrap(
-                    "authorization routing JWT expired".into(),
+                    "authorization candidate credential expired".into(),
                 ));
             }
-            if self.is_revoked(&candidate.current.context_digest) {
+            if self.is_revoked(&digest) {
                 return Err(TrellisClientError::AuthorizationUnavailable(
                     "authorization candidate is revoked".into(),
                 ));
             }
-            return Ok((
-                candidate.routing.bootstrap_jwt.clone(),
-                candidate.current.context_digest.clone(),
+            return Ok((jwt, digest));
+        }
+        let (routing_jwt, routing_expires_at, digest, not_before, expires_at, offset) = {
+            let state = self
+                .state
+                .read()
+                .map_err(|_| TrellisClientError::Bootstrap("context cache lock poisoned".into()))?;
+            let current = state.current.as_ref().ok_or_else(|| {
+                TrellisClientError::Bootstrap("authorization context is not installed".into())
+            })?;
+            let routing = state.routing.as_ref().ok_or_else(|| {
+                TrellisClientError::Bootstrap("authorization routing JWT unavailable".into())
+            })?;
+            (
+                routing.bootstrap_jwt.clone(),
+                routing.bootstrap_jwt_expires_at,
+                current.context_digest.clone(),
+                current.not_before,
+                current.expires_at,
+                state.server_clock_offset_ms,
+            )
+        };
+        let now = system_now_millis()?
+            .checked_add(offset)
+            .ok_or_else(|| TrellisClientError::Bootstrap("context time overflow".into()))?
+            .div_euclid(1000);
+        if routing_expires_at <= now {
+            return Err(TrellisClientError::Bootstrap(
+                "authorization routing JWT expired".into(),
             ));
         }
-        let digest = self.retained_context_digest()?;
+        if not_before > now || expires_at <= now {
+            return Err(TrellisClientError::Bootstrap(
+                "authorization context expired".into(),
+            ));
+        }
         if self.is_revoked(&digest) {
             return Err(TrellisClientError::AuthorizationUnavailable(
                 "authorization context is revoked".into(),
             ));
         }
-        Ok((self.routing_jwt()?, digest))
+        Ok((routing_jwt, digest))
     }
 
     pub(crate) fn runtime_binding(
@@ -689,4 +815,170 @@ pub(super) fn system_now_millis() -> Result<i64, TrellisClientError> {
             .as_millis(),
     )
     .map_err(|_| TrellisClientError::Bootstrap("context time overflow".into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use ed25519_dalek::SigningKey;
+    use trellis_protocol::{
+        sign_authorization_context, AuthorizationIssuerKey, AuthorizationIssuerState,
+        AuthorizationPrincipalKind, GrantOwnerKind, GrantSet, UnsignedAuthorizationContext,
+        AUTHORIZATION_CONTEXT_FORMAT_V1,
+    };
+
+    use super::*;
+    use crate::client::authorization::types::{
+        AuthorizationContextBundle, AuthorizationContextPolicy, AuthorizationNativeTransport,
+        AuthorizationRegistryBinding, AuthorizationRoutingMaterial, AuthorizationRuntimeBinding,
+        AuthorizationRuntimeTransports,
+    };
+    use crate::client::proof::{base64url_encode, sha256};
+
+    fn issuer_key_id(issuer: &SigningKey) -> String {
+        base64url_encode(&sha256(issuer.verifying_key().as_bytes()))
+    }
+
+    fn installation(
+        issuer: &SigningKey,
+        session: &SessionAuth,
+        connection_id: &str,
+        grant_revision: u64,
+        now: i64,
+    ) -> AuthorizationInstallation {
+        let signed = sign_authorization_context(
+            UnsignedAuthorizationContext {
+                format: AUTHORIZATION_CONTEXT_FORMAT_V1.to_owned(),
+                issuer_key_id: issuer_key_id(issuer),
+                principal_id: "usr_test".to_owned(),
+                principal_kind: AuthorizationPrincipalKind::User,
+                participant_id: "test.Caller".to_owned(),
+                owner_kind: GrantOwnerKind::User,
+                owner_id: "usr_test".to_owned(),
+                grant_revision,
+                identity_key_id: None,
+                login_session_id: Some("login-test".to_owned()),
+                connection_id: connection_id.to_owned(),
+                session_key: session.session_key.clone(),
+                deployment_id: None,
+                instance_id: None,
+                inbox_prefix: "_INBOX.test".to_owned(),
+                issued_at: now - 60,
+                not_before: now - 60,
+                expires_at: now + 3_600,
+                grants: GrantSet::new(vec![]),
+                platform_privileges: vec![],
+                extensions: Default::default(),
+                critical: vec![],
+            },
+            issuer,
+        )
+        .unwrap();
+        let bundle = AuthorizationContextBundle {
+            context: serde_json::to_value(signed).unwrap(),
+            issuer: AuthorizationIssuerKey {
+                key_id: issuer_key_id(issuer),
+                public_key: base64url_encode(issuer.verifying_key().as_bytes()),
+                state: AuthorizationIssuerState::Active,
+            },
+            authorization_registry: AuthorizationRegistryBinding {
+                context_bucket: "test-contexts".to_owned(),
+            },
+            policy: AuthorizationContextPolicy {
+                allowed_clock_skew_seconds: 30,
+                maximum_context_lifetime_seconds: 86_400,
+                maximum_context_bytes: 1_048_576,
+                maximum_permissions: 1_024,
+                refresh_lead_seconds: 60,
+                refresh_jitter_seconds: 5,
+            },
+        };
+        AuthorizationInstallation {
+            context: bundle,
+            routing: AuthorizationRoutingMaterial {
+                bootstrap_jwt: "route-jwt".to_owned(),
+                bootstrap_jwt_expires_at: now + 3_600,
+            },
+            runtime: AuthorizationRuntimeBinding {
+                connection_id: connection_id.to_owned(),
+                login_session_id: Some("login-test".to_owned()),
+                participant_id: "test.Caller".to_owned(),
+                inbox_prefix: "_INBOX.test".to_owned(),
+                transports: AuthorizationRuntimeTransports {
+                    native: Some(AuthorizationNativeTransport {
+                        nats_servers: vec!["nats://127.0.0.1:4222".to_owned()],
+                    }),
+                    websocket: None,
+                },
+            },
+            api_bindings: BTreeMap::new(),
+            server_clock_offset_ms: 0,
+            authorization: None,
+        }
+    }
+
+    #[test]
+    fn candidate_promotion_completes_without_recursive_state_lock() {
+        let now = system_now_millis().unwrap().div_euclid(1_000);
+        let issuer = SigningKey::from_bytes(&[7; 32]);
+        let seed = base64url_encode(&[9; 32]);
+        let session = SessionAuth::from_seed_base64url(&seed).unwrap();
+        let connection_id = "01JY0000000000000000000003".to_owned();
+        let cache = AuthorizationContextCache::new(
+            "http://127.0.0.1:1/",
+            "test.Caller".to_owned(),
+            connection_id.clone(),
+            session.session_key.clone(),
+            AuthorizationCredential::User {
+                login_session_id: "login-test".to_owned(),
+                installation: Arc::new(SessionAuth::from_seed_base64url(&seed).unwrap()),
+            },
+            None,
+        )
+        .unwrap();
+
+        cache
+            .install_initial(installation(&issuer, &session, &connection_id, 1, now))
+            .unwrap();
+        let installed = cache.retained_context_digest().unwrap();
+        assert_eq!(cache.context_digest().unwrap(), installed);
+
+        let candidate = cache
+            .prepare(installation(&issuer, &session, &connection_id, 2, now))
+            .unwrap();
+        assert_ne!(candidate, installed);
+        assert_eq!(
+            cache.retained_context_digest().unwrap(),
+            installed,
+            "a prepared candidate stays private"
+        );
+
+        // Run promotion under a watchdog: a recursive state lock would block a
+        // synchronous guard and never complete this call.
+        let cache_for_thread = cache.clone();
+        let expected = candidate.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let transition = cache_for_thread
+                .lock_own_transition()
+                .map_err(|error| error.to_string())?;
+            let result = cache_for_thread
+                .promote_locked(&transition, &expected)
+                .map_err(|error| error.to_string());
+            let _ = tx.send(result);
+            Ok::<(), String>(())
+        });
+        match rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => panic!("candidate promotion failed: {error}"),
+            Err(_) => panic!("candidate promotion did not complete"),
+        }
+        let _ = thread.join();
+        assert_eq!(cache.retained_context_digest().unwrap(), candidate);
+        assert_eq!(cache.context_digest().unwrap(), candidate);
+        assert!(cache.candidate_digest().is_err());
+    }
 }

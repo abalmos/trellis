@@ -221,6 +221,25 @@ Deno.test("generated TypeScript caller reaches Rust provider", async () => {
       await runtime.waitFor(async () =>
         (await live.get().orThrow()).progress?.value === "persisted"
       );
+
+      // Repeating the exact invocation must return the persisted typed snapshot
+      // through the accepted path without executing the operation again.
+      let replayedAccepted: { snapshot: { progress?: unknown } } | undefined;
+      const replayed = await client.work({ value: "reconnect-live" }).start(
+        {
+          onAccepted: (event: { snapshot: { progress?: unknown } }) => {
+            replayedAccepted = event;
+          },
+        },
+        { invocationId: live.id },
+      ).orThrow();
+      assertEquals(replayed.id, live.id);
+      assertEquals((await replayed.get().orThrow()).state, "running");
+      assertEquals(
+        replayedAccepted?.snapshot.progress,
+        persistedProgress,
+      );
+
       await client.connection.close();
       assertEquals(client.connection.status.phase, "closed");
 

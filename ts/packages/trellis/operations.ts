@@ -759,43 +759,13 @@ class RuntimeOperationRef<
   }
 
   #decodePayload(schema: unknown, value: unknown): unknown {
-    if (
-      value === undefined || value === null || schema === undefined ||
-      schema === null
-    ) {
-      return value;
-    }
-    if (typeof Reflect.get(schema, "decode") === "function") {
-      return (schema as { decode(value: unknown): unknown }).decode(value);
-    }
-    return value;
+    return decodeOperationPayload(schema, value);
   }
 
   #decodeSnapshot(
     snapshot: OperationSnapshot<TProgress, TOutput> | undefined,
   ): OperationSnapshot<TProgress, TOutput> | undefined {
-    if (!snapshot || typeof snapshot !== "object") {
-      return snapshot;
-    }
-    const descriptor = this.#descriptor as {
-      progress?: unknown;
-      output?: unknown;
-    };
-    return {
-      ...snapshot,
-      ...(snapshot.progress === undefined ? {} : {
-        progress: this.#decodePayload(
-          descriptor.progress,
-          snapshot.progress,
-        ) as TProgress,
-      }),
-      ...(snapshot.output === undefined ? {} : {
-        output: this.#decodePayload(
-          descriptor.output,
-          snapshot.output,
-        ) as TOutput,
-      }),
-    };
+    return decodeOperationSnapshot(this.#descriptor, snapshot);
   }
 
   #decodeEvent(
@@ -1163,7 +1133,7 @@ function invokeOperation<
     return ok({
       accepted: {
         type: "accepted",
-        snapshot: envelope.snapshot,
+        snapshot: decodeOperationSnapshot(descriptor, envelope.snapshot)!,
       },
       operation: new RuntimeOperationRef<TDesc, TProgress, TOutput, TUpdate>(
         transport,
@@ -1738,6 +1708,43 @@ export class OperationInvoker<
         TUpdate
       >;
   }
+}
+
+function decodeOperationPayload(schema: unknown, value: unknown): unknown {
+  if (
+    value === undefined || value === null || schema === undefined ||
+    schema === null
+  ) {
+    return value;
+  }
+  if (typeof Reflect.get(schema, "decode") === "function") {
+    return (schema as { decode(value: unknown): unknown }).decode(value);
+  }
+  return value;
+}
+
+function decodeOperationSnapshot<TProgress, TOutput>(
+  descriptor: { progress?: unknown; output?: unknown },
+  snapshot: OperationSnapshot<TProgress, TOutput> | undefined,
+): OperationSnapshot<TProgress, TOutput> | undefined {
+  if (!snapshot || typeof snapshot !== "object") {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    ...(snapshot.progress === undefined ? {} : {
+      progress: decodeOperationPayload(
+        descriptor.progress,
+        snapshot.progress,
+      ) as TProgress,
+    }),
+    ...(snapshot.output === undefined ? {} : {
+      output: decodeOperationPayload(
+        descriptor.output,
+        snapshot.output,
+      ) as TOutput,
+    }),
+  };
 }
 
 function isOperationControlErrorFrame(

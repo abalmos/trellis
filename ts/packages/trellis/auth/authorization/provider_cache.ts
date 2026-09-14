@@ -180,10 +180,18 @@ export class AuthorizationProviderCache {
 
   /** Retain exact revocation coverage for the currently installed own context. */
   async retainOwnContext(): Promise<void> {
-    const digest = this.#cache.current().contextDigest;
-    await this.#retainOwnContext(digest, this.#generation);
-    this.#ownRevokedDigest = undefined;
-    this.#ownUsable = true;
+    const digest = this.#cache.storedContextDigest();
+    if (digest === undefined) {
+      throw new Error("authorization context is unavailable");
+    }
+    const generation = this.#generation;
+    await this.#retainOwnContext(digest, generation);
+    if (!this.#finalizeOwnInstallation("resume", digest, generation)) {
+      this.#cache.requestRefresh();
+      throw new Error(
+        "authorization context coverage changed during resumption",
+      );
+    }
   }
 
   /** Retain candidate coverage on the exact admitted connection generation. */
@@ -196,21 +204,59 @@ export class AuthorizationProviderCache {
 
   /** Promote the candidate only while its admitted coverage remains current. */
   promoteOwnCandidate(digest: string, generation: number): void {
-    if (
-      !this.#connected || generation !== this.#generation ||
-      this.#ownEntry?.contextDigest !== digest || !this.#ownEntry.covered ||
-      this.#ownEntry.revokedAt !== undefined ||
-      this.#ownEntry.generation !== generation ||
-      !this.#cache.hasCandidate() ||
-      this.#cache.transportCurrent().contextDigest !== digest
-    ) {
+    if (!this.#finalizeOwnInstallation("promote", digest, generation)) {
       throw new Error(
         "authorization candidate coverage changed before promotion",
       );
     }
-    this.#cache.promote(digest);
-    this.#ownRevokedDigest = undefined;
+  }
+
+  /**
+   * One synchronous final own-installation publication boundary.
+   *
+   * Rechecks the exact retained entry identity, generation, coverage,
+   * revocation, current active/candidate digest, and validity immediately
+   * before publishing, so invalidation consumed during an awaited retention
+   * can never be overwritten by a later continuation.
+   */
+  #finalizeOwnInstallation(
+    mode: "promote" | "resume",
+    digest: string,
+    generation: number,
+  ): boolean {
+    if (!this.#started || this.#stopped || !this.#connected) return false;
+    if (generation !== this.#generation) return false;
+    const entry = this.#ownEntry;
+    if (
+      !entry || entry.contextDigest !== digest || !entry.covered ||
+      entry.disposed || entry.revokedAt !== undefined ||
+      entry.generation !== generation || this.#contexts.get(digest) !== entry ||
+      this.#ownRevokedDigest === digest
+    ) {
+      return false;
+    }
+    let verified: ReturnType<AuthorizationContextCache["transportCurrent"]>;
+    if (mode === "promote") {
+      if (
+        !this.#cache.hasCandidate() ||
+        this.#cache.transportCurrent().contextDigest !== digest
+      ) return false;
+      verified = this.#cache.transportCurrent();
+    } else {
+      if (this.#cache.hasCandidate()) return false;
+      if (this.#cache.storedContextDigest() !== digest) return false;
+      verified = this.#cache.current();
+    }
+    const now = this.#now();
+    if (verified.context.notBefore > now || verified.context.expiresAt <= now) {
+      return false;
+    }
+    if (mode === "promote") {
+      this.#cache.promote(digest);
+    }
     this.#ownUsable = true;
+    if (mode === "resume") this.#onOwnResumed?.();
+    return true;
   }
 
   connectionGeneration(): number {
@@ -370,7 +416,6 @@ export class AuthorizationProviderCache {
     ) {
       try {
         await this.retainOwnContext();
-        this.#onOwnResumed?.();
         return;
       } catch {
         await new Promise((resolve) => setTimeout(resolve, 1_000));

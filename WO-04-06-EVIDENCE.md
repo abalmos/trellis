@@ -452,3 +452,119 @@ commit. This evidence records local execution only and does not claim an
 exact-candidate CI result.
 
 **READY FOR INDEPENDENT WHOLE-RELEASE REVIEW - NOT ACCEPTED**
+
+## F1-F3 correction candidate on `f594db4`
+
+This addendum corrects the five findings of
+`TRELLIS-WHOLE-RELEASE-REVIEW-f594db4.md`. Check #316 remains the successful
+evidence for its predecessor `f594db4`; it is not claimed for this tree.
+
+### F1 - Rust candidate promotion and promotion-time validation
+
+`AuthorizationContextCache::promote_locked` no longer calls
+`corrected_now_seconds()` under its own state writer: promotion time is derived
+from `system_now_millis()` plus the prepared installation's stored
+`server_clock_offset_ms` with checked arithmetic. The expected candidate is
+validated by reference before it is taken, so a mismatch cannot consume a newer
+candidate. `transport_credentials` copies the small candidate transport tuple
+and clock offset, releases the candidate guard, and only then reads other state,
+removing the inverse state/candidate acquisition order.
+
+Evidence: `candidate_promotion_completes_without_recursive_state_lock`
+(`trellis-rs` own-context tests) builds two real signed contexts, installs C1,
+prepares C2, and runs `promote_locked` on a watchdog thread: it must complete
+within five seconds, the retained digest must equal C2, C1 must remain active
+while the candidate is private, and the candidate slot must be empty afterward.
+A recursive state lock fails the watchdog rather than the broad suite.
+
+### F2 - one guarded own-installation transition in both SDKs
+
+- Rust: `AuthorizationContextCache` owns a private transition mutex shared by
+  its clones. Installation, promotion, same-current resumption, matching
+  watch/direct invalidation, `clear`, `suspend`, and candidate discard all
+  publish through that single gate via locked helpers.
+  `finalize_own_installation` acquires the gate first and then requires a
+  healthy (started, not stopped, connected) provider, no matching local
+  revocation marker, an exact candidate digest in promotion mode, the retained
+  own lease with matching digest and epoch, the exact indexed cache entry by
+  `Arc::ptr_eq` (not equal digest strings) with initialized coverage and current
+  epoch, and no provider-recorded revocation. Publication happens under the same
+  gate with no HTTP, NATS, or awaited work inside it. Same-current resumption no
+  longer erases observed revocation evidence, and a stale watch still cannot
+  suspend a successor entry because the coverage `Arc` identity is compared.
+- TypeScript: `AuthorizationProviderCache.#finalizeOwnInstallation` is one
+  synchronous boundary for promotion and resumption. It rechecks started,
+  stopped, connected, exact generation, the indexed covered non-disposed
+  unrevoked entry, the requested active/candidate digest, and the verified
+  not-before/expiry interval immediately before publishing; `retainOwnContext`
+  captures digest and generation before its await, no longer clears usability
+  unconditionally, and promotes through that finalizer; `#restoreOwnContext`
+  lets the finalizer invoke the existing `onOwnResumed` callback and only
+  retries when finalization genuinely fails.
+
+Evidence: the focused Rust resources case (resource replacement, retained handle
+unavailability after invalidation, restart resumption) and the Device.Companion
+live case (restart, reconnect, same-context resumption with the user/companion
+path) pass; the complete TypeScript live matrix and the Rust live library suite
+cover coverage loss, revocation, and resource removal end to end. Both SDK
+finalizers structurally leave no await between their last check and publication.
+
+### F3 - typed accepted replay snapshots
+
+`operations.ts` now exposes one module-private descriptor snapshot decoder used
+by `RuntimeOperationRef` for get, watch, signal, and cancel frames and applied
+exactly once to the accepted envelope in `invokeOperation`. A repeated
+invocation therefore returns persisted `bigint`/`Uint8Array` progress as typed
+values on the `onAccepted` path as well as through `get()`.
+
+Evidence: the live `generated TypeScript caller reaches Rust provider` case now
+repeats `start` with the same invocation ID and input after typed progress has
+persisted and asserts the accepted snapshot progress equals the typed
+`persistedProgress`, while the operation keeps its identity and running state
+and the watch continues to deliver typed updates. The two-replica transient
+update and forged-proof checks are unchanged.
+
+### Dispositions
+
+| Finding                                               | Disposition                                                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| F1 / R1 promotion deadlock                            | Corrected and unit-regressed with a real signed-context C1-to-C2 promotion.                      |
+| F2 / R1 guarded publication and invalidation ordering | Corrected in both SDKs; resumption, retained-handle, and invalidation behavior re-verified live. |
+| F3 / R2 accepted replay decoder                       | Corrected with a shared decoder and a live idempotent-replay assertion.                          |
+| R3, R4                                                | Unchanged; accepted in source by the review and preserved.                                       |
+| W3, C2, C3, C6, C7a, performance/Rust OTEL            | Unchanged.                                                                                       |
+
+### Local Check-equivalent campaign (parent `f594db4`, 5 implementation files)
+
+| Lane                | Result                                                                                                                                       |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rust focused        | `candidate_promotion_completes_without_recursive_state_lock` 1/1; `trellis-rs authorization` 12/12; `trellis-runtime consent_authority` 1/1. |
+| Rust static         | `cargo fmt --all --check`; warning-denied workspace all-target Clippy passed.                                                                |
+| Rust workspace/live | Full workspace suite passed; live-integration library 123/123; live integration target 2/2; tooling workspace passed.                        |
+| TypeScript focused  | F3 caller 1/1 (1m40s); resources 1/1 (28s); Device.Companion 1/1 (24s).                                                                      |
+| TypeScript live     | Complete matrix 20/20 with 14 nested steps in 8m10s.                                                                                         |
+| TypeScript static   | 224-file format check; public and integration checks; package/UI tests passed.                                                               |
+| Consumers/tooling   | Node/Deno/Svelte consumers with isolated Rust demos, packaged Orders, and UI hosting 3/3 passed after rebuilding the embedded bundle.        |
+| Generated output    | Two installs produced identical tracked diffs (`63632b65…` implementation digest); `git diff --check` clean; no generated artifact changed.  |
+
+### Commands
+
+```sh
+cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib candidate_promotion_completes_without_recursive_state_lock
+cargo test --manifest-path rust/Cargo.toml -p trellis-rs --lib authorization
+cargo test --manifest-path rust/Cargo.toml -p trellis-runtime --lib consent_authority
+cargo fmt --manifest-path rust/Cargo.toml --all --check
+cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path rust/Cargo.toml --workspace
+TRELLIS_TEST_SERVER_BIN="$PWD/rust/target/debug/trellis-server" TRELLIS_TEST_CLI_BIN="$PWD/rust/target/debug/trellis" \
+  cargo test --manifest-path rust/Cargo.toml -p trellis-rs --features live-integration --lib
+TRELLIS_TEST_SERVER_BIN="$PWD/rust/target/debug/trellis-server" TRELLIS_TEST_CLI_BIN="$PWD/rust/target/debug/trellis" \
+  deno test -A -c ts/integration/deno.json ts/integration
+TRELLIS_TEST_SERVER_BIN="$PWD/rust/target/debug/trellis-server" TRELLIS_TEST_CLI_BIN="$PWD/rust/target/debug/trellis" \
+  deno test -A -c ts/integration/deno.json ts/integration/device_activation_test.ts
+```
+
+`workorders/` and `target/` stay untracked and untouched; no compatibility path
+or migration was added.
+
+**READY FOR INDEPENDENT WHOLE-RELEASE REVIEW - NOT ACCEPTED**
