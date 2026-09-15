@@ -9,3 +9,5 @@ pub(crate) use trellis_rs::telemetry::instruments::{
     record_cache_request, record_duration, AuthDurationMetric as DurationMetric, CacheKind,
     CacheResult, Outcome,
 };
+
+pub(crate) mod snapshots;

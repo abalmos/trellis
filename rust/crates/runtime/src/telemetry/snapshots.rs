@@ -1,0 +1,159 @@
+//! Read-only telemetry snapshot samplers for platform components.
+//!
+//! Samplers poll existing authoritative state on a fixed interval and publish
+//! immutable numeric snapshots to observable gauges. They never mutate
+//! business state, never hold a lease, and never run exporter work inside a
+//! gauge callback. A failed poll keeps the previous values and advances only
+//! the error counter; genuine zeros are published as zeros.
+
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use trellis_rs::telemetry::instruments::{self, ObservableFamily};
+use trellis_rs::telemetry::KeyValue;
+
+use crate::platform::auth::{AuthorizationStateError, SqliteAuthorizationStore};
+use crate::shutdown::StopHandle;
+
+/// Snapshot poll interval.
+const SAMPLER_INTERVAL: Duration = Duration::from_secs(15);
+/// Total deadline for one snapshot read.
+const SNAPSHOT_DEADLINE: Duration = Duration::from_secs(2);
+
+/// Latest published values for one snapshot source.
+#[derive(Default)]
+struct SnapshotValues {
+    observed_at: f64,
+    gauges: Vec<(ObservableFamily, f64, Vec<KeyValue>)>,
+}
+
+/// One registered snapshot source with its gauge callbacks.
+struct SnapshotSource {
+    values: Arc<Mutex<SnapshotValues>>,
+}
+
+impl SnapshotSource {
+    /// Registers the observed-time gauge plus the named gauge families.
+    fn register(source: &'static str, families: &[ObservableFamily]) -> Self {
+        let values = Arc::new(Mutex::new(SnapshotValues::default()));
+        let observed = Arc::clone(&values);
+        instruments::register_observable(
+            ObservableFamily::SnapshotObservedTime,
+            Arc::new(move || {
+                let Ok(guard) = observed.lock() else {
+                    return Vec::new();
+                };
+                vec![(
+                    guard.observed_at,
+                    vec![KeyValue::new("trellis.source", source)],
+                )]
+            }),
+        );
+        for family in families {
+            let values = Arc::clone(&values);
+            let family = *family;
+            instruments::register_observable(
+                family,
+                Arc::new(move || {
+                    let Ok(guard) = values.lock() else {
+                        return Vec::new();
+                    };
+                    guard
+                        .gauges
+                        .iter()
+                        .filter(|(registered, _, _)| *registered == family)
+                        .map(|(_, value, attributes)| (*value, attributes.clone()))
+                        .collect()
+                }),
+            );
+        }
+        Self { values }
+    }
+
+    /// Replaces the gauge set and marks the snapshot observed.
+    fn publish(&self, gauges: Vec<(ObservableFamily, f64, Vec<KeyValue>)>) {
+        let Ok(mut values) = self.values.lock() else {
+            return;
+        };
+        values.gauges = gauges;
+        values.observed_at = unix_seconds();
+    }
+}
+
+/// Current wall-clock time in Unix seconds.
+fn unix_seconds() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |duration| duration.as_secs_f64())
+}
+
+/// Records one failed snapshot attempt with a bounded reason.
+fn record_failure(source: &'static str, reason: &'static str) {
+    instruments::add_counter(
+        instruments::CounterFamily::SnapshotErrors,
+        1,
+        &[
+            KeyValue::new("trellis.source", source),
+            KeyValue::new("trellis.reason", reason),
+        ],
+    );
+}
+
+/// Runs the platform Auth snapshot sampler until the runtime stops.
+pub(crate) async fn run_auth_sampler(
+    store: SqliteAuthorizationStore,
+    stop: StopHandle,
+) -> Result<(), AuthorizationStateError> {
+    let source = SnapshotSource::register(
+        "auth",
+        &[
+            ObservableFamily::AuthPostCommitPending,
+            ObservableFamily::AuthPostCommitOldestAge,
+            ObservableFamily::ResourceBindings,
+        ],
+    );
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(SAMPLER_INTERVAL) => {}
+            _ = stop.stopped() => return Ok(()),
+        }
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis() as i64);
+        let deadline =
+            tokio::time::timeout(SNAPSHOT_DEADLINE, store.telemetry_snapshot(now_ms)).await;
+        match deadline {
+            Ok(Ok(snapshot)) => {
+                let mut gauges = vec![
+                    (
+                        ObservableFamily::AuthPostCommitPending,
+                        snapshot.post_commit_pending as f64,
+                        Vec::new(),
+                    ),
+                    (
+                        ObservableFamily::AuthPostCommitOldestAge,
+                        snapshot.post_commit_oldest_age_seconds,
+                        Vec::new(),
+                    ),
+                ];
+                for (kind, state, count) in &snapshot.resources {
+                    gauges.push((
+                        ObservableFamily::ResourceBindings,
+                        *count as f64,
+                        vec![
+                            KeyValue::new("trellis.kind", kind.clone()),
+                            KeyValue::new("trellis.state", state.clone()),
+                        ],
+                    ));
+                }
+                source.publish(gauges);
+            }
+            Ok(Err(_)) => {
+                record_failure("auth", "io");
+            }
+            Err(_) => {
+                record_failure("auth", "timeout");
+            }
+        }
+    }
+}

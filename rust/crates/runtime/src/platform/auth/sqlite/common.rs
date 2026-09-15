@@ -9,6 +9,72 @@ use super::super::AuthorizationStateError;
 use super::{SqliteAuthorizationStore, AUTHORIZATION_CONNECTION_POOL_SIZE};
 use crate::storage::{SqliteStore, StoreError};
 
+/// Read-only aggregate snapshot for telemetry.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct AuthTelemetrySnapshot {
+    /// Outstanding `auth_post_commit_actions` rows.
+    pub(crate) post_commit_pending: u64,
+    /// Age in seconds of the oldest outstanding action; zero when empty.
+    pub(crate) post_commit_oldest_age_seconds: f64,
+    /// Materialized resource bindings by catalog kind and mapped state.
+    pub(crate) resources: Vec<(String, &'static str, u64)>,
+}
+
+impl SqliteAuthorizationStore {
+    /// Reads the telemetry snapshot without mutating or claiming any row.
+    pub(crate) async fn telemetry_snapshot(
+        &self,
+        now_ms: i64,
+    ) -> Result<AuthTelemetrySnapshot, AuthorizationStateError> {
+        self.run_read(move |connection| {
+            let (pending, oldest_created_at): (u64, Option<i64>) = connection
+                .query_row(
+                    "SELECT COUNT(*), MIN(created_at) FROM auth_post_commit_actions",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(sql_error)?;
+            let post_commit_oldest_age_seconds = oldest_created_at
+                .map(|created_at| ((now_ms - created_at).max(0) as f64) / 1000.0)
+                .unwrap_or(0.0);
+            let mut resources = Vec::new();
+            let mut statement = connection
+                .prepare("SELECT kind, state, COUNT(*) FROM auth_resources GROUP BY kind, state")
+                .map_err(sql_error)?;
+            let rows = statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .map_err(sql_error)?;
+            for row in rows {
+                let (kind, state, count) = row.map_err(sql_error)?;
+                resources.push((kind, resource_state_label(&state), count.max(0) as u64));
+            }
+            Ok(AuthTelemetrySnapshot {
+                post_commit_pending: pending,
+                post_commit_oldest_age_seconds,
+                resources,
+            })
+        })
+        .await
+    }
+}
+
+/// Maps one persisted resource state to the bounded catalog state.
+fn resource_state_label(state: &str) -> &'static str {
+    match state {
+        "ready" => "available",
+        "pending" => "pending",
+        "failed" | "destroying" => "unavailable",
+        "detached" => "detached",
+        _ => "unavailable",
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct SqliteConnectionPool {
     available: Mutex<Vec<Connection>>,

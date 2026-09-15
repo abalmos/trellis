@@ -346,8 +346,11 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         return Err(error);
     }
     let task_stop = stop.clone();
+    let sampler_store = auth_store.clone();
+    let sampler_stop = stop.clone();
     let join = tokio::spawn(async move {
         tokio::select! {
+            _ = crate::telemetry::snapshots::run_auth_sampler(sampler_store, sampler_stop) => Ok(()),
             result = portal_reconciliation_worker.run(task_stop.clone()) => {
                 result.map_err(|error| RuntimeError::Platform(error.to_string()))
             }
