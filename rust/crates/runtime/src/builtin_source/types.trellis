@@ -2647,6 +2647,7 @@ model AuthUsersCreateRequest {
   idempotencyKey: AuthUsersCreateRequestIdempotencyKey;
   image: string | null;
   name: string | null;
+  username: string | null;
 }
 
 model AuthUsersCreateResponse {

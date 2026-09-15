@@ -2300,7 +2300,8 @@ export const AuthUsersCreateRequestCodec = codecs.recursive(() => codecs.named("
 	email: codecs.nullable(codecs.string),
 	idempotencyKey: codecs.ref(() => AuthUsersCreateRequestIdempotencyKeyCodec),
 	image: codecs.nullable(codecs.string),
-	name: codecs.nullable(codecs.string)
+	name: codecs.nullable(codecs.string),
+	username: codecs.nullable(codecs.string)
 })));
 export const AuthUsersCreateRequestIdempotencyKeyCodec = codecs.recursive(() => codecs.named("trellis.AuthUsersCreateRequestIdempotencyKey", codecs.string));
 export const AuthUsersCreateResponseCodec = codecs.recursive(() => codecs.named("trellis.AuthUsersCreateResponse", codecs.model({ user: codecs.ref(() => AuthUsersCreateResponseuserCodec) })));

@@ -4,8 +4,8 @@ root = "demo-device"
 [[packages]]
 name = "demo-device"
 version = "1.0.0"
-digest = "s9lk3YuCGEV3g0CLd4gz4XnDENhHEly_ud58fAG_nRs"
-distribution-digest = "sha256:0c8a5e2f815d0b108d61590787f67f65e18f877821f1bd7297418c7b0bf58291"
+digest = "43XOlxVfzqGA_KeSTR2uiumr0UPoXu2R4Ch1uAhtAh0"
+distribution-digest = "sha256:d946aaaac28d0557f448a8590e29869ff964d0650763094c6e53487697f1e98b"
 
 [[packages.dependencies]]
 name = "demo-service"
@@ -15,7 +15,7 @@ digest = "xSE-gdBFo_5s8gRCS9_IkNFYJsVpl2OC_o98Xr6s-jw"
 [[packages.dependencies]]
 name = "trellis"
 version = "0.12.0"
-digest = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY"
+digest = "olfZWlhfujeEP1Au7d1504OBs7YyE-qvox6U3Xi1xpo"
 
 [packages.source]
 kind = "path"
@@ -35,8 +35,8 @@ path = "./../../ts/service"
 [[packages]]
 name = "trellis"
 version = "0.12.0"
-digest = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY"
-distribution-digest = "sha256:cc15320aca48e1019f205d4ab4f31de0780b27d27480169913d30b30f3677721"
+digest = "olfZWlhfujeEP1Au7d1504OBs7YyE-qvox6U3Xi1xpo"
+distribution-digest = "sha256:f073c1bcd82f8a67dfdcfdd9b4435f2e48d0e7f9225dfa947408ade3d1fa12d7"
 dependencies = []
 
 [packages.source]

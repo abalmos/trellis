@@ -723,6 +723,20 @@ impl AccountRepository for SqliteAuthorizationStore {
                     command.consumed_at,
                 )?;
             }
+            let revoked_sessions = {
+                let mut statement = transaction
+                    .prepare(
+                        "SELECT session_id, participant_id FROM auth_sessions
+                         WHERE principal_id = ?1 AND state = 'active'",
+                    )
+                    .map_err(sql_error)?;
+                let rows = statement
+                    .query_map(params![principal_id], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(sql_error)?;
+                rows.collect::<Result<Vec<_>, _>>().map_err(sql_error)?
+            };
             transaction
                 .execute(
                     "UPDATE auth_sessions SET state = 'revoked', revoked_at = ?1, version = version + 1
@@ -737,10 +751,42 @@ impl AccountRepository for SqliteAuthorizationStore {
                 command.consumed_at.div_euclid(1_000),
             )?;
             let completed = consume_sql_flow(&transaction, &flow, command.consumed_at)?;
+            let mut actions = command.actions;
+            for (session_id, participant_id) in &revoked_sessions {
+                let action_id = trellis_protocol::digest_json(&serde_json::json!({
+                    "principalId": principal_id,
+                    "sessionId": session_id,
+                    "event": "Auth.Sessions.Revoked",
+                }))
+                .map_err(|error| {
+                    AuthorizationStateError::InvalidRecord(error.to_string())
+                })?;
+                actions.push(super::super::model::session_revoked_event(
+                    session_id,
+                    participant_id,
+                    &principal_id,
+                    Some("password_reset"),
+                    command.requester_principal_id.as_deref(),
+                    command.consumed_at,
+                    action_id,
+                )?);
+            }
+            let kick_id = trellis_protocol::digest_json(&serde_json::json!({
+                "principalId": principal_id,
+                "request": command.token_hash,
+                "kick": "password_reset",
+            }))
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+            actions.push(super::super::model::principal_session_kick(
+                &principal_id,
+                "password_reset",
+                command.consumed_at,
+                kick_id,
+            ));
             insert_sql_idempotency_and_actions(
                 &transaction,
                 &command.idempotency,
-                &command.actions,
+                &actions,
             )?;
             transaction.commit().map_err(sql_error)?;
             Ok(IdempotentOutcome::Applied(completed))
@@ -1693,4 +1739,284 @@ pub(in crate::platform::auth) fn load_account_flow_by_hash(
     )
     .optional()
     .map_err(sql_error)
+}
+
+#[cfg(test)]
+mod password_reset_action_tests {
+    use super::*;
+    use crate::platform::auth::application::repository::{SessionCreation, SessionRepository};
+    use crate::platform::auth::domain::{NewSession, SessionRecord};
+    use crate::platform::auth::{builtins, AccountFlowKind, IdempotencyResultRecord};
+    use trellis_protocol::ParticipantKind;
+
+    const NOW: i64 = 1_700_000_000_000;
+
+    fn proof(scope: &str, purpose: &str, request: &str, now: i64) -> IdempotencyResultRecord {
+        IdempotencyResultRecord {
+            scope_key: trellis_protocol::digest_json(&json!([scope])).unwrap(),
+            purpose: purpose.to_owned(),
+            signer_id: "test".to_owned(),
+            request_id: request.to_owned(),
+            request_digest: trellis_protocol::digest_json(&json!({ "request": request })).unwrap(),
+            result: json!(null),
+            created_at: now,
+            expires_at: now + 900_000,
+        }
+    }
+
+    async fn seed_user(store: &SqliteAuthorizationStore, principal_id: &str) {
+        let credential = crate::platform::auth::account::bound_local_credential(
+            principal_id.to_owned(),
+            "reset-target",
+            NOW,
+        )
+        .unwrap();
+        let identity = ProviderIdentityLink {
+            provider: "local".to_owned(),
+            provider_subject: "reset-target".to_owned(),
+            principal_id: principal_id.to_owned(),
+            linked_at: NOW,
+            last_seen_at: NOW,
+        };
+        store
+            .create_user_account(AccountCreation {
+                principal: PrincipalRecord {
+                    principal_id: principal_id.to_owned(),
+                    kind: PrincipalKind::User,
+                    state: PrincipalState::Active,
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                    disabled_at: None,
+                    revoked_at: None,
+                },
+                profile: UserProfileRecord {
+                    principal_id: principal_id.to_owned(),
+                    display_name: None,
+                    email: None,
+                    image_url: None,
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                },
+                credential: Some(credential),
+                identity: Some(identity),
+                idempotency: proof("seed.account", "auth.account.create", principal_id, NOW),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+    }
+
+    async fn seed_session(
+        store: &SqliteAuthorizationStore,
+        principal_id: &str,
+        participant_id: &str,
+        participant_kind: ParticipantKind,
+        index: usize,
+    ) -> String {
+        let (_, public_key) = trellis_rs::auth::generate_session_keypair();
+        let session_id = ulid::Ulid::new().to_string();
+        let session = SessionRecord::from_new(NewSession {
+            session_id: session_id.clone(),
+            principal_id: principal_id.to_owned(),
+            participant_id: participant_id.to_owned(),
+            participant_kind,
+            session_public_key: public_key,
+            created_at: NOW,
+            expires_at: Some(NOW + 3_600_000),
+        })
+        .unwrap();
+        let result = store
+            .create_session(SessionCreation {
+                session,
+                idempotency: proof(
+                    &format!("seed.session.{index}"),
+                    "auth.session.create",
+                    &session_id,
+                    NOW + index as i64,
+                ),
+                actions: Vec::new(),
+            })
+            .await;
+        result.unwrap();
+        session_id
+    }
+
+    #[tokio::test]
+    async fn password_reset_emits_one_event_per_session_and_replays_without_duplicates() {
+        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
+        let principal_id = "usr_reset_target";
+        seed_user(&store, principal_id).await;
+        let mut session_ids = Vec::new();
+        for (index, binding) in [
+            builtins::cli_participant_binding(NOW).unwrap(),
+            builtins::console_participant_binding(NOW).unwrap(),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let participant_id = binding.participant_id.clone();
+            let participant_kind = binding.participant_kind;
+            store.put_participant_binding(binding).await.unwrap();
+            session_ids.push(
+                seed_session(
+                    &store,
+                    principal_id,
+                    &participant_id,
+                    participant_kind,
+                    index + 1,
+                )
+                .await,
+            );
+        }
+
+        let token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let token_hash = crate::platform::auth::application::bearer_secret_digest(token).unwrap();
+        store
+            .create_account_flow(AccountFlowCreation {
+                flow: AccountFlowRecord {
+                    flow_id: "flow_reset".to_owned(),
+                    kind: AccountFlowKind::PasswordReset,
+                    token_hash: token_hash.clone(),
+                    target_principal_id: Some(principal_id.to_owned()),
+                    target_provider_id: None,
+                    return_location: None,
+                    payload: json!({ "requestedByPrincipalId": "usr_requester" }),
+                    state: AccountFlowState::Pending,
+                    created_at: NOW,
+                    expires_at: NOW + 300_000,
+                    consumed_at: None,
+                    version: 1,
+                },
+                idempotency: proof("seed.flow", "auth.account.flow.create", "flow_reset", NOW),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        let (hash, profile) =
+            crate::platform::auth::account::hash_password("reset-password-1", None).unwrap();
+        let replacement = LocalCredentialRecord {
+            principal_id: principal_id.to_owned(),
+            normalized_username: "reset-target".to_owned(),
+            password_hash: hash,
+            hash_profile: profile,
+            failed_attempts: 0,
+            locked_until: None,
+            password_changed_at: NOW + 1_000,
+            updated_at: NOW + 1_000,
+            version: 2,
+        };
+        let completion = |idempotency: IdempotencyResultRecord| PasswordResetCompletion {
+            token_hash: token_hash.clone(),
+            expected_flow_version: 1,
+            flow_kind: AccountFlowKind::PasswordReset,
+            requester_principal_id: Some("usr_requester".to_owned()),
+            admin_target: false,
+            expected_credential_version: Some(1),
+            replacement: replacement.clone(),
+            identity: None,
+            bindings: Vec::new(),
+            profile: None,
+            consumed_at: NOW + 1_000,
+            idempotency,
+            actions: Vec::new(),
+        };
+
+        let outcome = store
+            .complete_password_reset(completion(proof(
+                "reset.complete",
+                "account.password.reset",
+                token,
+                NOW + 1_000,
+            )))
+            .await
+            .unwrap();
+        assert!(matches!(outcome, IdempotentOutcome::Applied(_)));
+
+        let session_principal = principal_id.to_owned();
+        let (session_states, actions) = store
+            .run_read(move |connection| {
+                let mut statement = connection
+                    .prepare(
+                        "SELECT state FROM auth_sessions WHERE principal_id = ?1 ORDER BY session_id",
+                    )
+                    .map_err(sql_error)?;
+                let states = statement
+                    .query_map(params![session_principal], |row| row.get::<_, String>(0))
+                    .map_err(sql_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sql_error)?;
+                let mut actions_statement = connection
+                    .prepare(
+                        "SELECT kind, payload_json FROM auth_post_commit_actions
+                         ORDER BY created_at, action_id",
+                    )
+                    .map_err(sql_error)?;
+                let actions = actions_statement
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(sql_error)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sql_error)?;
+                Ok((states, actions))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            session_states,
+            vec!["revoked".to_owned(), "revoked".to_owned()]
+        );
+
+        let events = actions
+            .iter()
+            .filter(|(kind, _)| kind == "event")
+            .collect::<Vec<_>>();
+        let kicks = actions
+            .iter()
+            .filter(|(kind, _)| kind == "kick")
+            .collect::<Vec<_>>();
+        assert_eq!(events.len(), 2, "one revoked event per session");
+        assert_eq!(kicks.len(), 1, "one principal kick");
+        let mut event_sessions = Vec::new();
+        for (_, payload) in &events {
+            let payload: serde_json::Value = serde_json::from_str(payload).unwrap();
+            assert_eq!(payload["eventType"], "Auth.Sessions.Revoked");
+            assert_eq!(payload["reason"], "password_reset");
+            assert_eq!(payload["revokedBy"], "usr_requester");
+            assert!(payload["eventSubject"]
+                .as_str()
+                .is_some_and(|subject| !subject.is_empty()));
+            event_sessions.push(payload["sessionId"].as_str().unwrap().to_owned());
+        }
+        event_sessions.sort();
+        session_ids.sort();
+        assert_eq!(event_sessions, session_ids);
+        let kick_payload: serde_json::Value = serde_json::from_str(&kicks[0].1).unwrap();
+        assert_eq!(kick_payload["principalId"], principal_id);
+
+        let replay = store
+            .complete_password_reset(completion(proof(
+                "reset.complete",
+                "account.password.reset",
+                token,
+                NOW + 1_000,
+            )))
+            .await
+            .unwrap();
+        assert!(matches!(replay, IdempotentOutcome::Replayed(_)));
+        let action_count = store
+            .run_read(|connection| {
+                connection
+                    .query_row("SELECT COUNT(*) FROM auth_post_commit_actions", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                    .map_err(sql_error)
+            })
+            .await
+            .unwrap();
+        assert_eq!(action_count, 3, "replay commits no duplicate events");
+    }
 }

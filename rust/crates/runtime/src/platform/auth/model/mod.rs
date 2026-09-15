@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 mod validation;
 use serde_json::Value;
 use trellis_rs::client::EventDescriptor;
+use trellis_runtime_apis::apis::trellis_auth_v1::events::SessionsRevoked;
 pub(crate) use validation::{validate_provisioned_identity, validate_user_account_replacement};
 
 use super::domain::PrincipalKind;
@@ -628,6 +629,61 @@ pub(crate) fn activation_review_event<D: EventDescriptor>(
         claimed_until: None,
         last_error: None,
     })
+}
+
+/// One canonical `Auth.Sessions.Revoked` event for a session that a bulk
+/// revocation has transitioned to revoked.
+pub(crate) fn session_revoked_event(
+    session_id: &str,
+    participant_id: &str,
+    principal_id: &str,
+    reason: Option<&str>,
+    revoked_by: Option<&str>,
+    now: i64,
+    action_id: String,
+) -> Result<PostCommitActionRecord, AuthorizationStateError> {
+    let mut payload = serde_json::json!({
+        "eventType": "Auth.Sessions.Revoked",
+        "eventId": format!("evt_{action_id}"),
+        "occurredAt": now,
+        "sessionId": session_id,
+        "principalId": principal_id,
+        "participantId": participant_id,
+        "reason": reason,
+        "revokedBy": revoked_by,
+    });
+    payload["eventSubject"] = serde_json::json!(auth_event_subject::<SessionsRevoked>(&payload)?);
+    Ok(PostCommitActionRecord {
+        predecessor_action_id: None,
+        action_id,
+        kind: PostCommitActionKind::Event,
+        payload,
+        created_at: now,
+        attempts: 0,
+        next_attempt_at: now,
+        claimed_until: None,
+        last_error: None,
+    })
+}
+
+/// One principal-scoped kick that removes every live connection of a principal.
+pub(crate) fn principal_session_kick(
+    principal_id: &str,
+    reason: &str,
+    now: i64,
+    action_id: String,
+) -> PostCommitActionRecord {
+    PostCommitActionRecord {
+        predecessor_action_id: None,
+        action_id,
+        kind: PostCommitActionKind::Kick,
+        payload: serde_json::json!({"principalId": principal_id, "reason": reason}),
+        created_at: now,
+        attempts: 0,
+        next_attempt_at: now,
+        claimed_until: None,
+        last_error: None,
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { ulid } from "ulid";
 import { type BrowserContext, chromium, type Page } from "playwright";
 import { join } from "@std/path";
 import type { TrellisTestRuntime } from "@qlever-llc/trellis-test";
@@ -109,9 +110,10 @@ export async function completeConsoleEntry(
   page: Page,
   credentials: { username: string; password: string },
 ): Promise<void> {
-  const ready = waitForConsoleReady(page).then(() => "ready" as const).catch(
-    () => "waiting" as const,
-  );
+  const ready = waitForConsoleConnected(page).then(() => "ready" as const)
+    .catch(
+      () => "waiting" as const,
+    );
   const form = page
     .getByLabel("Username", { exact: true })
     .first()
@@ -133,7 +135,7 @@ export async function completeConsoleEntry(
     await page.getByRole("button", { name: "Sign in" }).click();
   }
   await approveConsentIfRequired(page);
-  await waitForConsoleReady(page);
+  await waitForConsoleConnected(page);
 }
 
 /** Completes a password-reset link in the portal and returns the fixed username when shown. */
@@ -163,8 +165,7 @@ export async function completePasswordReset(
   return username;
 }
 
-/** Opens the console and completes any sign-in or consent it prompts for. */
-export async function openConsole(
+/** Opens the console and completes any sign-in or consent it prompts for. */ export async function openConsole(
   page: Page,
   runtime: TrellisTestRuntime,
   credentials: { username: string; password: string },
@@ -175,16 +176,57 @@ export async function openConsole(
   await completeConsoleEntry(page, credentials);
 }
 
+/** Waits for the authenticated console shell without requiring admin navigation. */
+export async function waitForConsoleConnected(
+  page: Page,
+  timeoutMs = 60_000,
+): Promise<void> {
+  await page.waitForURL(/\/console(\/|$)/, { timeout: timeoutMs });
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const text = await page.locator("body").innerText().catch(() => "");
+    if (text.includes("Connected")) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("the console did not reach the connected state");
+}
+
 /** Waits for the authenticated console shell with its authorized navigation. */
 export async function waitForConsoleReady(
   page: Page,
   timeoutMs = 60_000,
 ): Promise<void> {
-  await page
-    .getByText("Connected", { exact: true })
-    .first()
-    .waitFor({ state: "visible", timeout: timeoutMs });
+  await waitForConsoleConnected(page, timeoutMs);
   await page
     .getByRole("link", { name: "Overview" })
     .waitFor({ state: "visible", timeout: timeoutMs });
+}
+
+/** Creates an ordinary user through admin RPCs and completes its password setup in the portal. */
+export async function createOrdinaryUserWithPassword(
+  runtime: TrellisTestRuntime,
+  user: { username: string; password: string; name?: string },
+): Promise<string> {
+  const created = await runtime.callAdminRpc("authUsersCreate", {
+    email: null,
+    idempotencyKey: ulid(),
+    image: null,
+    name: user.name ?? user.username,
+    username: user.username,
+  });
+  const userId = created.user.userId;
+  const reset = await runtime.callAdminRpc("authUsersPasswordResetCreate", {
+    idempotencyKey: ulid(),
+    returnTarget: null,
+    userId,
+  });
+  const resetUrl = reset.flow.completionUrl;
+  const context = await launchProfile(runtime);
+  try {
+    const page = await context.newPage();
+    await completePasswordReset(page, resetUrl, user.password);
+  } finally {
+    await context.close();
+  }
+  return userId;
 }

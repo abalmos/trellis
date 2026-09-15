@@ -419,17 +419,7 @@ where
                     &request_digest,
                     now,
                 )?,
-                actions: session_revocation_actions(
-                    flow.target_principal_id
-                        .as_deref()
-                        .unwrap_or("account-flow"),
-                    &token_hash,
-                    now,
-                    json!({
-                        "principalId": flow.target_principal_id,
-                        "reason": "password_reset",
-                    }),
-                ),
+                actions: Vec::new(),
             })
             .await?;
         return match outcome {

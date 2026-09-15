@@ -31,7 +31,7 @@ pub(crate) fn participant(id: &str) -> Option<BuiltinParticipant> {
 
 fn api_0() -> ApiRuntimeProjection {
     ApiRuntimeProjection {
-        digest: "sNLVgGp5fF1O6yg5mO9eYhfKtOqfQAWaTkZieEdvkGY".into(),
+        digest: "gXd9NIBjIa49mInD88kcXFC5_pVuL7cvibchdpdXvKo".into(),
         major: 1,
         actions: BTreeMap::from([
             (
@@ -1979,8 +1979,8 @@ fn api_5() -> ApiRuntimeProjection {
 fn participant_0() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "6dqsIxLLOaugs5W8n30acE1shox9jSLgZHqoG32a0zo",
-        needs_digest: "1VpFnVNp_Oos0bv0pp2vFBq-J9JJBJa9eRLhzw-JWzI",
+        participant_digest: "8O2QR0eBkucQxLErznlO6zXzs2VoIyfU5WD_gkHPZCo",
+        needs_digest: "tPQyctQCn0_x8InDqkT9Lb-d3cITdYCmqUPb2tU_wdI",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.cli".into(),
             participant_kind: ParticipantKind::App,
@@ -2471,8 +2471,8 @@ fn participant_0() -> BuiltinParticipant {
 fn participant_1() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "6-f8UmJOA1y9djIemNMczcHVhdgOIl3pOfi3A33tGB8",
-        needs_digest: "Ag7zTGQquyoPXZYi7xisoMhfOgmdhuTrV3hS0WxS7IQ",
+        participant_digest: "OooTgvMtds9s5rVdwdehT6yTzx0vpezHOU7RcFcjoDc",
+        needs_digest: "8uepGFPNCmISlu9ZC-Q4ydIU86zJn9HoasEJ-G4928c",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.console".into(),
             participant_kind: ParticipantKind::App,
@@ -3206,8 +3206,8 @@ fn participant_4() -> BuiltinParticipant {
 fn participant_5() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "xrDWh0dk9B7eJ3duCYKT2XaxeNCPZJ7YdPkS0KMCc9c",
-        needs_digest: "ZcN6jKWZ5OKOgNTtiH0T5VcNQBhJ04c9v-eytdI_Z9k",
+        participant_digest: "NfpCYy0dNnkwKTt7jyjVFshTVB68Vr1nY_GVgNhQslY",
+        needs_digest: "g6luAuyHMaAXPuKQsF-SITnsg8v_5iOM1j8L73A8JqM",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.platform".into(),
             participant_kind: ParticipantKind::Service,
@@ -3320,4 +3320,4 @@ fn resource_permission(
     .expect("generated resource permission")
 }
 
-pub(crate) const PACKAGE_DIGEST: &str = "35TU5WlON47mBCpidXF0zjEIr7zv9uQzeR71O2hy4qY";
+pub(crate) const PACKAGE_DIGEST: &str = "olfZWlhfujeEP1Au7d1504OBs7YyE-qvox6U3Xi1xpo";
