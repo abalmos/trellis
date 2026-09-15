@@ -40,6 +40,22 @@ function errorReason(error: unknown): string | undefined {
   return typeof reason === "string" ? reason : undefined;
 }
 
+/**
+ * Whether a companion resubmission failed because the signed-in user is not
+ * allowed to decide it, which leaves the activation to a reviewer. Malformed,
+ * stale, and transport failures are not reviewer outcomes.
+ */
+export function isDeviceActivationReviewerRequiredFailure(
+  error: unknown,
+): boolean {
+  const reason = errorReason(error);
+  return (
+    reason === "not_authorized" ||
+    reason === "insufficient_permissions" ||
+    reason === "forbidden"
+  );
+}
+
 export function createDeviceActivationReadyView(
   flowId: string,
 ): DeviceActivationView {

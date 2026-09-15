@@ -1,3 +1,4 @@
+import { assertEquals } from "@std/assert";
 import { type BrowserContext, chromium, type Page } from "playwright";
 import { join } from "@std/path";
 import type { TrellisTestRuntime } from "@qlever-llc/trellis-test";
@@ -133,6 +134,33 @@ export async function completeConsoleEntry(
   }
   await approveConsentIfRequired(page);
   await waitForConsoleReady(page);
+}
+
+/** Completes a password-reset link in the portal and returns the fixed username when shown. */
+export async function completePasswordReset(
+  page: Page,
+  resetUrl: string,
+  password: string,
+): Promise<string | undefined> {
+  const flowId = new URL(resetUrl).pathname.split("/").filter(Boolean).at(-1);
+  const pageUrl = new URL("/login/account/password", resetUrl);
+  pageUrl.searchParams.set("flowId", flowId ?? "");
+  await page.goto(pageUrl.toString(), { waitUntil: "domcontentloaded" });
+  const passwordFields = page.locator('input[autocomplete="new-password"]');
+  await passwordFields.first().waitFor({ state: "visible", timeout: 30_000 });
+  assertEquals(await passwordFields.count(), 2);
+  const usernameField = page.locator('input[autocomplete="username"]');
+  let username: string | undefined;
+  if (await visibleWithin(usernameField, 5_000)) {
+    username = await usernameField.inputValue();
+  }
+  await passwordFields.first().fill(password);
+  await passwordFields.nth(1).fill(password);
+  await page.getByRole("button", { name: /password/i }).click();
+  await page
+    .getByText("Password saved")
+    .waitFor({ state: "visible", timeout: 30_000 });
+  return username;
 }
 
 /** Opens the console and completes any sign-in or consent it prompts for. */

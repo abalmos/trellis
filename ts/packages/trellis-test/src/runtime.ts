@@ -222,6 +222,17 @@ export class TrellisTestRuntime implements AsyncDisposable {
     return await this.#getBootstrapUrl();
   }
 
+  /** Forwards one validated low-level Auth RPC over the harness admin transport. */
+  async callAdminRpc<M extends keyof AdminRpc>(
+    method: M,
+    input: AdminRpc[M]["input"],
+  ): Promise<AdminRpc[M]["output"]> {
+    return await this.#admin.callAdminRpc(
+      method,
+      input,
+    ) as AdminRpc[M]["output"];
+  }
+
   /** Completes the first-administrator bootstrap through the harness automation. */
   async ensureAdmin(): Promise<void> {
     await this.#admin.completeBootstrap();

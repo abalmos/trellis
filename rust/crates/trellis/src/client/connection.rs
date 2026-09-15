@@ -980,6 +980,18 @@ impl TrellisClient {
         subject.map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
     }
 
+    /// Derive a bound request subject from a generated action key. The generated
+    /// key carries the API short-name prefix that bound routes do not repeat, so
+    /// it is normalized exactly like `Router::descriptor_subject` does.
+    pub(crate) fn bound_key_subject(
+        &self,
+        family: &str,
+        api_id: &str,
+        key: &str,
+    ) -> Result<String, TrellisClientError> {
+        self.bound_api_subject(family, api_id, descriptor_action(key))
+    }
+
     pub(crate) fn nats(&self) -> async_nats::Client {
         self.nats.clone()
     }
@@ -1205,7 +1217,7 @@ impl TrellisClient {
         let installation = Arc::new(SessionAuth::from_seed_base64url(
             opts.credentials.session_key_seed_base64url,
         )?);
-        let auth = SessionAuth::from_seed_base64url(opts.credentials.session_key_seed_base64url)?;
+        let auth = connection_runtime_auth()?;
         let authorization_contexts = AuthorizationContextCache::new(
             opts.trellis_url,
             opts.participant_id.to_owned(),
@@ -1621,7 +1633,7 @@ impl TrellisClient {
             .encode()
             .map_err(|error| TrellisClientError::Codec(error.to_string()))?;
         let payload = Bytes::from(serde_json::to_vec(&input)?);
-        let subject = self.bound_api_subject("feed", D::API_ID, D::KEY)?;
+        let subject = self.bound_key_subject("feed", D::API_ID, D::KEY)?;
         let context_digest = self.authorization_context_digest()?;
         let inbox = format!(
             "{}.{}",
@@ -1772,7 +1784,7 @@ impl OperationTransport for TrellisClient {
         if api_id.is_empty() {
             return Ok(subject.to_owned());
         }
-        self.bound_api_subject("operation", api_id, operation)
+        self.bound_key_subject("operation", api_id, operation)
     }
 
     async fn request_json_value(
@@ -1969,6 +1981,15 @@ fn event_consumer_config(
     }
 }
 
+fn descriptor_action(action: &str) -> &str {
+    action.split_once('.').map_or(action, |(_, action)| action)
+}
+
+fn connection_runtime_auth() -> Result<SessionAuth, TrellisClientError> {
+    let (context_seed, _) = crate::auth::generate_session_keypair();
+    SessionAuth::from_seed_base64url(&context_seed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::AppliedNativeAuthorization;
@@ -1976,6 +1997,23 @@ mod tests {
         AuthorizationNativeTransport, AuthorizationRuntimeBinding, AuthorizationRuntimeTransports,
         TrellisClientError,
     };
+
+    #[test]
+    fn each_user_connection_gets_an_independent_runtime_key() {
+        let first = super::connection_runtime_auth().expect("runtime auth");
+        let second = super::connection_runtime_auth().expect("runtime auth");
+        assert_ne!(first.session_key, second.session_key);
+    }
+
+    #[test]
+    fn generated_action_keys_normalize_like_bound_routes() {
+        assert_eq!(super::descriptor_action("auth.Sessions.Me"), "Sessions.Me");
+        assert_eq!(
+            super::descriptor_action("core.Resources.Destroy"),
+            "Resources.Destroy"
+        );
+        assert_eq!(super::descriptor_action("Ping"), "Ping");
+    }
 
     fn authorization(
         server: &str,

@@ -2816,6 +2816,402 @@ device Device { app Companion { use access { rpc B; optional capability b; } } }
         assert_eq!(unchanged.provenance, Some(provenance));
     }
 
+    #[tokio::test]
+    async fn default_portal_consent_is_fenced_by_a_later_override() {
+        const NOW: i64 = 1_700_000_000_000;
+        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
+        let actor =
+            crate::platform::auth::tests::conformance::fixtures::install_login_mutation_actor(
+                &store, NOW,
+            )
+            .await
+            .unwrap();
+        let evidence = package_evidence(
+            r#"
+model Empty {}
+api access@v1 {
+  title "Access";
+  description "Access API.";
+  rpc A { input Empty; output Empty; }
+  rpc Public { input Empty; output Empty; }
+  capabilities {
+    public { allows { rpc Public; } }
+    capability a {
+      title "A";
+      description "Use A.";
+      consequence "A is used.";
+      allows { rpc A; }
+    }
+  }
+}
+app Client { use access { rpc A; rpc Public; } }
+"#,
+        );
+        let (participant, evidence_json) = installed(evidence, "Client");
+        let participant_id = participant.participant_id.clone();
+        store
+            .install_participant(
+                actor.clone(),
+                participant.clone(),
+                "binding-default".to_owned(),
+                evidence_json,
+                false,
+                (0, proof("participant.default.install", NOW)),
+            )
+            .await
+            .unwrap();
+        let portal = LoginPortalRecord {
+            portal_id: "portal-default-consent".to_owned(),
+            display_name: "Portal".to_owned(),
+            entry_url: None,
+            builtin: false,
+            disabled: false,
+            removed: false,
+            local_registration_enabled: false,
+            provider_ids: vec!["local".to_owned()],
+            created_at: NOW,
+            updated_at: NOW,
+            version: 1,
+        };
+        let settings = LoginSettingsRecord {
+            portal_id: portal.portal_id.clone(),
+            default_provider_id: Some("local".to_owned()),
+            local_login_enabled: true,
+            federated_registration_enabled: false,
+            provider_selection_enabled: false,
+            updated_at: NOW,
+            version: 1,
+        };
+        store
+            .put_login_portal(LoginPortalMutation {
+                portal: portal.clone(),
+                settings: settings.clone(),
+                expected_version: None,
+                idempotency: proof("portal.default.create", NOW),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        // No override: the decision is prepared against the default selection
+        // and records the default policy snapshot (absent version/fingerprint).
+        let selection = crate::platform::auth::policy::default_portal_authority_selection(
+            &portal.portal_id,
+            &participant,
+        )
+        .unwrap();
+        let snapshot =
+            portal_policy_snapshot(&portal, &settings, &participant_id, None, &BTreeMap::new())
+                .unwrap();
+        assert_eq!(snapshot.policy_version, None);
+        assert_eq!(snapshot.policy_fingerprint, None);
+        let resolved = resolve_authority(
+            &participant,
+            ApprovalMode::Capabilities,
+            &selection.ceiling.capabilities,
+            &[],
+            &[],
+            &selection.ceiling,
+            (&[], true),
+        )
+        .unwrap();
+        let replacement = GrantBindingReplacement {
+            owner_kind: GrantOwnerKind::User,
+            owner_id: actor.principal_id.clone(),
+            participant_id: participant_id.clone(),
+            installed_revision: 1,
+            grants: resolved.exact_grants,
+            approval_mode: ApprovalMode::Capabilities,
+            approved_capabilities: selection.ceiling.capabilities.clone(),
+            approved_resources: Vec::new(),
+            delegation_ceiling: selection.ceiling.clone(),
+            approval_decision_digest: trellis_protocol::digest_json(&json!(["default-consent"]))
+                .unwrap(),
+            companion_approved: false,
+            platform_privileges: Vec::new(),
+            expected_revision: 0,
+            expected_current_installed_revision: Some(1),
+            state: GrantBindingState::Active,
+            expires_at: None,
+            provenance: Some(PortalGrantProvenance {
+                portal_id: portal.portal_id.clone(),
+                provider_id: "local".to_owned(),
+                roles: Vec::new(),
+                effective_policy_digest: selection.effective_policy_digest.clone(),
+            }),
+        };
+        // An operator narrows the policy before the prepared decision commits.
+        store
+            .put_portal_grant_override(
+                PortalGrantOverrideRecord {
+                    portal_id: portal.portal_id.clone(),
+                    participant_id: participant_id.clone(),
+                    direct_capabilities: Vec::new(),
+                    capability_group_keys: Vec::new(),
+                    role_mappings: Vec::new(),
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                },
+                None,
+                proof("portal.default.override", NOW + 1),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .set_consent_grant_binding(
+                    replacement,
+                    crate::platform::auth::ConsentAuthorityPreconditions {
+                        policy: Some(snapshot),
+                        bindings: Vec::new(),
+                    },
+                    proof("portal.default.stale", NOW + 2),
+                )
+                .await,
+            Err(AuthorizationStateError::PortalPolicyChanged)
+        );
+        assert!(store
+            .get_grant_binding(GrantOwnerKind::User, actor.principal_id, participant_id)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn carried_source_lifetime_is_revalidated_at_commit() {
+        const NOW: i64 = 1_700_000_000_000;
+        let wall_clock = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .unwrap();
+        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
+        let actor =
+            crate::platform::auth::tests::conformance::fixtures::install_login_mutation_actor(
+                &store, NOW,
+            )
+            .await
+            .unwrap();
+        let evidence = package_evidence(
+            r#"
+model Empty {}
+api access@v1 {
+  title "Access";
+  description "Access API.";
+  rpc A { input Empty; output Empty; }
+  rpc Public { input Empty; output Empty; }
+  capabilities {
+    public { allows { rpc Public; } }
+    capability a {
+      title "A";
+      description "Use A.";
+      consequence "A is used.";
+      allows { rpc A; }
+    }
+  }
+}
+app Client { use access { rpc A; rpc Public; } }
+"#,
+        );
+        let (participant, evidence_json) = installed(evidence, "Client");
+        let participant_id = participant.participant_id.clone();
+        store
+            .install_participant(
+                actor.clone(),
+                participant.clone(),
+                "binding-carried".to_owned(),
+                evidence_json,
+                false,
+                (0, proof("participant.carried.install", NOW)),
+            )
+            .await
+            .unwrap();
+        let portal = LoginPortalRecord {
+            portal_id: "portal-carried".to_owned(),
+            display_name: "Portal".to_owned(),
+            entry_url: None,
+            builtin: false,
+            disabled: false,
+            removed: false,
+            local_registration_enabled: false,
+            provider_ids: vec!["local".to_owned()],
+            created_at: NOW,
+            updated_at: NOW,
+            version: 1,
+        };
+        let settings = LoginSettingsRecord {
+            portal_id: portal.portal_id.clone(),
+            default_provider_id: Some("local".to_owned()),
+            local_login_enabled: true,
+            federated_registration_enabled: false,
+            provider_selection_enabled: false,
+            updated_at: NOW,
+            version: 1,
+        };
+        store
+            .put_login_portal(LoginPortalMutation {
+                portal: portal.clone(),
+                settings: settings.clone(),
+                expected_version: None,
+                idempotency: proof("portal.carried.create", NOW),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let selection = crate::platform::auth::policy::default_portal_authority_selection(
+            &portal.portal_id,
+            &participant,
+        )
+        .unwrap();
+        let mut selection = selection;
+        selection.ceiling.platform_privileges = vec![PlatformPrivilege::Admin];
+        let resolved = resolve_authority(
+            &participant,
+            ApprovalMode::Capabilities,
+            &selection.ceiling.capabilities,
+            &[],
+            &[PlatformPrivilege::Admin],
+            &selection.ceiling,
+            (&[], true),
+        )
+        .unwrap();
+        let expires_at = wall_clock + 3_600_000;
+        let source = GrantBindingReplacement {
+            owner_kind: GrantOwnerKind::User,
+            owner_id: actor.principal_id.clone(),
+            participant_id: participant_id.clone(),
+            installed_revision: 1,
+            grants: resolved.exact_grants.clone(),
+            approval_mode: ApprovalMode::Capabilities,
+            approved_capabilities: selection.ceiling.capabilities.clone(),
+            approved_resources: Vec::new(),
+            delegation_ceiling: selection.ceiling.clone(),
+            approval_decision_digest: trellis_protocol::digest_json(&json!(["carried-source"]))
+                .unwrap(),
+            companion_approved: false,
+            platform_privileges: vec![PlatformPrivilege::Admin],
+            state: GrantBindingState::Active,
+            expires_at: Some(expires_at),
+            provenance: Some(PortalGrantProvenance {
+                portal_id: portal.portal_id.clone(),
+                provider_id: "local".to_owned(),
+                roles: Vec::new(),
+                effective_policy_digest: selection.effective_policy_digest.clone(),
+            }),
+            expected_revision: 0,
+            expected_current_installed_revision: Some(1),
+        };
+        store
+            .set_grant_binding(source.clone(), proof("carried.source.create", NOW))
+            .await
+            .unwrap();
+        let current = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                actor.principal_id.clone(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        // The production authority construction carries the finite source
+        // lifetime and its binding precondition even with portal provenance.
+        let authority = crate::platform::auth::policy::consent_authority(
+            crate::platform::auth::policy::ConsentAuthoritySource::Portal(Box::new(
+                crate::platform::auth::policy::PortalConsentAuthority {
+                    selection: selection.clone(),
+                    snapshot: portal_policy_snapshot(
+                        &portal,
+                        &settings,
+                        &participant_id,
+                        None,
+                        &BTreeMap::new(),
+                    )
+                    .unwrap(),
+                    provenance: current.provenance.clone().unwrap(),
+                    source: Some(&current),
+                    retained_target: None,
+                },
+            )),
+            wall_clock,
+        )
+        .unwrap();
+        assert_eq!(authority.expires_at, Some(expires_at));
+        assert_eq!(authority.preconditions.bindings.len(), 1);
+        let mut repeated = source.clone();
+        repeated.expected_revision = 1;
+        repeated.approval_decision_digest =
+            trellis_protocol::digest_json(&json!(["repeated-consent"])).unwrap();
+        let stored = store
+            .set_consent_grant_binding(
+                repeated.clone(),
+                authority.preconditions.clone(),
+                proof("carried.repeated", NOW + 1),
+            )
+            .await
+            .unwrap();
+        assert_eq!(stored["binding"]["expiresAt"].as_i64(), Some(expires_at));
+
+        // Preparing again and changing the source before commit is rejected.
+        let prepared = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                actor.principal_id.clone(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let stale_authority = {
+            let prepared = &prepared;
+            crate::platform::auth::policy::consent_authority(
+                crate::platform::auth::policy::ConsentAuthoritySource::Portal(Box::new(
+                    crate::platform::auth::policy::PortalConsentAuthority {
+                        selection: selection.clone(),
+                        snapshot: portal_policy_snapshot(
+                            &portal,
+                            &settings,
+                            &participant_id,
+                            None,
+                            &BTreeMap::new(),
+                        )
+                        .unwrap(),
+                        provenance: prepared.provenance.clone().unwrap(),
+                        source: Some(prepared),
+                        retained_target: None,
+                    },
+                )),
+                wall_clock + 2,
+            )
+            .unwrap()
+        };
+        let mut changed_source = source.clone();
+        changed_source.expected_revision = prepared.revision;
+        changed_source.expires_at = Some(expires_at + 60_000);
+        changed_source.approval_decision_digest =
+            trellis_protocol::digest_json(&json!(["changed-source"])).unwrap();
+        store
+            .set_grant_binding(changed_source, proof("carried.source.change", NOW + 2))
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .set_consent_grant_binding(
+                    {
+                        let mut stale = repeated;
+                        stale.expected_revision = prepared.revision + 1;
+                        stale
+                    },
+                    stale_authority.preconditions,
+                    proof("carried.stale", NOW + 3),
+                )
+                .await,
+            Err(AuthorizationStateError::StorageConflict)
+        );
+    }
+
     fn proof(purpose: &str, now: i64) -> IdempotencyResultRecord {
         IdempotencyResultRecord {
             scope_key: trellis_protocol::digest_json(&json!([purpose])).unwrap(),

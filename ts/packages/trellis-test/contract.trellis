@@ -27,6 +27,8 @@ app cli {
     rpc ServiceInstances.Provision;
     rpc Sessions.Revoke;
     rpc UserIdentities.List;
+    rpc Users.Create;
+    rpc Users.PasswordReset.Create;
   }
   use events {
     rpc Consumers.Inspect;

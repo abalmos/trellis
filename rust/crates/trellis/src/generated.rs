@@ -653,7 +653,7 @@ impl Client {
             .request_json_value(
                 &self
                     .client
-                    .bound_api_subject("rpc", D::API_ID, D::KEY)
+                    .bound_key_subject("rpc", D::API_ID, D::KEY)
                     .map_err(|error| {
                         crate::client::CallError::from_client(error, D::decode_error)
                     })?,

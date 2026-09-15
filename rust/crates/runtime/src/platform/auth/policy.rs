@@ -662,7 +662,6 @@ pub(crate) struct PortalConsentAuthority<'a> {
 }
 
 pub(crate) enum ConsentAuthoritySource<'a> {
-    Public,
     Explicit { target: &'a GrantBinding },
     Portal(Box<PortalConsentAuthority<'a>>),
 }
@@ -672,16 +671,6 @@ pub(crate) fn consent_authority(
     now: i64,
 ) -> Result<ConsentAuthority, AuthorizationStateError> {
     match source {
-        ConsentAuthoritySource::Public => Ok(ConsentAuthority {
-            ceiling: DelegationCeiling {
-                capabilities: Vec::new(),
-                exact_restrictions: None,
-                platform_privileges: Vec::new(),
-            },
-            expires_at: None,
-            provenance: None,
-            preconditions: ConsentAuthorityPreconditions::default(),
-        }),
         ConsentAuthoritySource::Explicit { target }
             if target.provenance.is_none()
                 && target.state == super::GrantBindingState::Active
@@ -766,6 +755,40 @@ struct EffectivePortalAuthority<'a> {
     participant_needs_digest: &'a str,
     capabilities: &'a [ApprovedCapability],
     platform_privileges: &'a [PlatformPrivilege],
+}
+
+/// Format marker for the ordinary no-override portal policy selection: the
+/// participant's installed capability vocabulary is eligible, and the default
+/// selects no platform privileges. The same interpretation is used by consent
+/// presentation, the consent decision, and portal-policy reconciliation.
+const DEFAULT_PORTAL_AUTHORITY_FORMAT: &str = "trellis.portal-default-eligibility.v1";
+
+/// Resolve the effective portal authority for an ordinary participant when the
+/// portal has no override: installed-vocabulary eligibility with its own
+/// deterministic digest, so an unchanged default binding stays valid while a
+/// later explicit override still replaces it.
+pub(crate) fn default_portal_authority_selection(
+    portal_id: &str,
+    participant: &ParticipantBindingRecord,
+) -> Result<PortalAuthoritySelection, AuthorizationStateError> {
+    let ceiling = participant_delegation_ceiling(participant)?;
+    let platform_privileges: Vec<PlatformPrivilege> = Vec::new();
+    let digest_value = serde_json::to_value(EffectivePortalAuthority {
+        format: DEFAULT_PORTAL_AUTHORITY_FORMAT,
+        portal_id,
+        participant_id: &participant.participant_id,
+        participant_digest: &participant.participant_digest,
+        participant_needs_digest: &participant.needs_digest,
+        capabilities: &ceiling.capabilities,
+        platform_privileges: &platform_privileges,
+    })
+    .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    let effective_policy_digest = trellis_protocol::digest_json(&digest_value)
+        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+    Ok(PortalAuthoritySelection {
+        ceiling,
+        effective_policy_digest,
+    })
 }
 
 pub(crate) fn resolve_portal_authority_selection(
