@@ -1633,7 +1633,7 @@ impl TrellisClient {
             .encode()
             .map_err(|error| TrellisClientError::Codec(error.to_string()))?;
         let payload = Bytes::from(serde_json::to_vec(&input)?);
-        let subject = self.bound_api_subject("feed", D::API_ID, D::KEY)?;
+        let subject = self.bound_key_subject("feed", D::API_ID, D::KEY)?;
         let context_digest = self.authorization_context_digest()?;
         let inbox = format!(
             "{}.{}",
@@ -1784,7 +1784,7 @@ impl OperationTransport for TrellisClient {
         if api_id.is_empty() {
             return Ok(subject.to_owned());
         }
-        self.bound_api_subject("operation", api_id, operation)
+        self.bound_key_subject("operation", api_id, operation)
     }
 
     async fn request_json_value(

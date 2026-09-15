@@ -365,6 +365,62 @@ Deno.test("generated TypeScript caller reaches Rust provider", async () => {
       }, { timeoutMs: 120_000 });
       assertEquals(uploaded.state, "completed");
       assertEquals(uploaded.output?.value, `upload:${bytes.length}:true`);
+
+      // Generated Rust caller leg: the same running Rust provider serves the
+      // generated Rust Feed and Operation calls.
+      const callerChild = new Deno.Command("cargo", {
+        args: [
+          "run",
+          "--config",
+          `patch.crates-io.trellis-rs.path=${
+            JSON.stringify(
+              fromFileUrl(
+                new URL("../../rust/crates/trellis", import.meta.url),
+              ),
+            )
+          }`,
+          "--bin",
+          "caller",
+          "--manifest-path",
+          fromFileUrl(
+            new URL(
+              "../../integration/fixtures/runtime/Cargo.toml",
+              import.meta.url,
+            ),
+          ),
+        ],
+        env: {
+          TRELLIS_URL: runtime.trellisUrl,
+          XDG_CONFIG_HOME: join(runtime.workdir, "rust-caller-config"),
+          CARGO_TARGET_DIR: fromFileUrl(
+            new URL("../../rust/target", import.meta.url),
+          ),
+        },
+        stdout: "piped",
+        stderr: "inherit",
+      }).spawn();
+      const callerReader = callerChild.stdout.pipeThrough(
+        new TextDecoderStream(),
+      ).getReader();
+      let callerOutput = "";
+      while (!callerOutput.includes("rust login ")) {
+        const chunk = await callerReader.read();
+        assert(!chunk.done, callerOutput);
+        callerOutput += chunk.value;
+      }
+      const callerLoginUrl = callerOutput.match(/rust login (\S+)/)?.[1];
+      assert(callerLoginUrl);
+      await runtime.completeClientAuth({
+        loginUrl: callerLoginUrl,
+        sessionKey: "completed-by-rust",
+        mode: "session_key",
+      });
+      while (!callerOutput.includes("rust caller complete")) {
+        const chunk = await callerReader.read();
+        assert(!chunk.done, callerOutput);
+        callerOutput += chunk.value;
+      }
+      assert((await callerChild.status).success, callerOutput);
     } finally {
       if (!exited) Deno.kill(-process.pid, "SIGTERM");
       await status;

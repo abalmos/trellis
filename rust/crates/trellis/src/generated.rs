@@ -932,11 +932,8 @@ where
                 action_name(D::DESCRIPTOR_NAME),
             ))
             .map_err(|error| crate::client::CallError::from_client(error, D::decode_error))?;
-        let input = input.encode().map_err(|error| {
-            crate::client::CallError::Protocol(crate::client::ProtocolError::new(error.to_string()))
-        })?;
         self.inner
-            .start_encoded(input)
+            .start(input)
             .await
             .map(|inner| OperationRef { inner })
             .map_err(|error| crate::client::CallError::from_client(error, D::decode_error))
