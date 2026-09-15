@@ -239,6 +239,14 @@ impl AuthorizationProviderCache {
                 .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
         }
         let registry = AuthorizationRegistryReader::open(nats.clone(), binding).await?;
+        let state = Arc::new(RwLock::new(ProviderState {
+            issuers: issuer
+                .into_iter()
+                .map(|issuer| (issuer.key_id.clone(), issuer))
+                .collect(),
+            ..Default::default()
+        }));
+        register_coverage_gauges(&state, &own);
         Ok(Self {
             nats,
             registry,
@@ -246,13 +254,7 @@ impl AuthorizationProviderCache {
             own,
             own_lease: Arc::new(Mutex::new(None)),
             verification_policy,
-            state: Arc::new(RwLock::new(ProviderState {
-                issuers: issuer
-                    .into_iter()
-                    .map(|issuer| (issuer.key_id.clone(), issuer))
-                    .collect(),
-                ..Default::default()
-            })),
+            state,
             in_flight: Arc::new(Mutex::new(HashMap::new())),
             issuer_resolution: Arc::new(tokio::sync::Mutex::new(())),
             closed: Arc::new(AtomicBool::new(false)),
@@ -1176,4 +1178,72 @@ mod wire_tests {
         assert!(cancellations[0].load(Ordering::Acquire));
         assert!(cancellations[1].load(Ordering::Acquire));
     }
+}
+
+type CoverageRegistry = std::sync::Mutex<
+    Vec<(
+        std::sync::Weak<RwLock<ProviderState>>,
+        std::sync::Weak<AuthorizationContextCache>,
+    )>,
+>;
+
+static COVERAGE_REGISTRY: std::sync::OnceLock<CoverageRegistry> = std::sync::OnceLock::new();
+
+/// Registers one provider-cache pair for the aggregate coverage gauge.
+///
+/// The registry holds weak references only, so a dropped client disappears
+/// from the aggregate without any deregistration step.
+fn register_coverage_gauges(
+    state: &std::sync::Arc<RwLock<ProviderState>>,
+    own: &Option<std::sync::Arc<AuthorizationContextCache>>,
+) {
+    static REGISTERED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    let registry = COVERAGE_REGISTRY.get_or_init(|| std::sync::Mutex::new(Vec::new()));
+    if let Ok(mut entries) = registry.lock() {
+        entries.push((
+            std::sync::Arc::downgrade(state),
+            own.as_ref()
+                .map_or_else(std::sync::Weak::new, std::sync::Arc::downgrade),
+        ));
+    }
+    if REGISTERED.set(()).is_err() {
+        return;
+    }
+    crate::telemetry::instruments::register_observable(
+        crate::telemetry::instruments::ObservableFamily::AuthCoverageCount,
+        std::sync::Arc::new(|| {
+            let mut own_covered = 0u64;
+            let mut peer_covered = 0u64;
+            if let Some(registry) = COVERAGE_REGISTRY.get() {
+                if let Ok(entries) = registry.lock() {
+                    for (state, own) in entries.iter() {
+                        if own.strong_count() > 0 {
+                            own_covered += 1;
+                        }
+                        if let Some(state) = state.upgrade() {
+                            if let Ok(state) = state.read() {
+                                peer_covered += state.contexts.len() as u64;
+                            }
+                        }
+                    }
+                }
+            }
+            vec![
+                (
+                    own_covered as f64,
+                    vec![
+                        crate::telemetry::KeyValue::new("trellis.kind", "own"),
+                        crate::telemetry::KeyValue::new("trellis.state", "covered"),
+                    ],
+                ),
+                (
+                    peer_covered as f64,
+                    vec![
+                        crate::telemetry::KeyValue::new("trellis.kind", "peer"),
+                        crate::telemetry::KeyValue::new("trellis.state", "covered"),
+                    ],
+                ),
+            ]
+        }),
+    );
 }

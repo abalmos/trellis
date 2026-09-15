@@ -335,6 +335,7 @@ impl ObservableFamily {
         match self {
             Self::ConnectionCount => "trellis.connection.count",
             Self::AuthCoverageCount => "trellis.auth.coverage.count",
+            Self::AuthCoverageCount => "trellis.auth.coverage.count",
             Self::AuthPostCommitPending => "trellis.auth.post_commit.pending",
             Self::AuthPostCommitOldestAge => "trellis.auth.post_commit.oldest.age",
             Self::JobsReady => "trellis.jobs.ready",
@@ -375,6 +376,7 @@ impl ObservableFamily {
             Self::DeadLetters => "{entry}",
             Self::ResourceBindings => "{resource}",
             Self::ConnectionCount => "{connection}",
+            Self::AuthCoverageCount => "{context}",
             Self::AuthCoverageCount => "{context}",
             Self::AuthPostCommitPending => "{action}",
         }
