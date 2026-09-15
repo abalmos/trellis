@@ -39,6 +39,10 @@ where
         Some(&self.binding.digest)
     }
 
+    fn route_token(&self, subject: &str) -> Option<&'static str> {
+        self.handler.route_token(subject)
+    }
+
     fn handle<'a>(
         &'a self,
         subject: &'a str,

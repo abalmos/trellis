@@ -11,9 +11,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
+use tracing::Instrument as _;
+use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
 use super::error::merge_context;
 use super::{AuthenticatedRouter, RequestContext, RequestValidator, Router, ServerError};
+use crate::telemetry::instruments::{self, DurationFamily, UpDownFamily};
+use crate::telemetry::lifecycle::Observation;
+use crate::telemetry::propagation;
+use crate::telemetry::KeyValue;
 
 static ERROR_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -141,6 +147,14 @@ pub trait RequestHandler: Send + Sync {
         None
     }
 
+    /// Bounded registered route token for one inbound subject, when routed.
+    ///
+    /// The token is interned at registration; it is never parsed from the
+    /// request subject, and unrecognized input reports `_unknown`.
+    fn route_token(&self, _subject: &str) -> Option<&'static str> {
+        None
+    }
+
     fn handle<'a>(
         &'a self,
         subject: &'a str,
@@ -191,6 +205,10 @@ pub trait RequestHandler: Send + Sync {
 }
 
 impl RequestHandler for Router {
+    fn route_token(&self, subject: &str) -> Option<&'static str> {
+        Router::route_token(self, subject)
+    }
+
     fn handle<'a>(
         &'a self,
         subject: &'a str,
@@ -226,6 +244,10 @@ impl<V> RequestHandler for AuthenticatedRouter<V>
 where
     V: RequestValidator + 'static,
 {
+    fn route_token(&self, subject: &str) -> Option<&'static str> {
+        AuthenticatedRouter::route_token(self, subject)
+    }
+
     fn handle<'a>(
         &'a self,
         subject: &'a str,
@@ -538,6 +560,71 @@ fn error_id() -> String {
     format!("rust-server-error-{timestamp}-{sequence}")
 }
 
+/// Outcome classification for one dispatched server request.
+///
+/// Typed error categories are used; human-readable messages are never parsed.
+fn server_outcome(error: &ServerError) -> &'static str {
+    match error {
+        ServerError::DeclaredRpc(_) => "declared_error",
+        ServerError::SchemaValidation { .. }
+        | ServerError::Validation { .. }
+        | ServerError::Json(_)
+        | ServerError::MissingHandler(_)
+        | ServerError::MissingReply { .. }
+        | ServerError::InvalidOperationControlAction { .. }
+        | ServerError::OperationNotFound { .. }
+        | ServerError::OperationAlreadyExists { .. }
+        | ServerError::OperationInvalidId { .. }
+        | ServerError::OperationMismatch { .. }
+        | ServerError::OperationAlreadyTerminal { .. }
+        | ServerError::OperationUnsupportedControl { .. }
+        | ServerError::InvalidResourceBinding { .. }
+        | ServerError::TransferObjectMissing { .. }
+        | ServerError::InvalidTransferId { .. }
+        | ServerError::TransferSequenceOutOfOrder { .. }
+        | ServerError::TransferMissingEof { .. }
+        | ServerError::TransferAlreadyComplete { .. }
+        | ServerError::TransferExpired { .. }
+        | ServerError::InvalidTransferExpiry { .. }
+        | ServerError::InvalidTransferChunkSize { .. }
+        | ServerError::MissingTransferHeader { .. }
+        | ServerError::InvalidTransferHeader { .. }
+        | ServerError::TransferObjectSizeMismatch { .. }
+        | ServerError::StoreObjectTooLarge { .. }
+        | ServerError::TransferObjectTooLarge { .. } => "invalid",
+        ServerError::RequestDenied { .. }
+        | ServerError::MissingSessionKey { .. }
+        | ServerError::MissingProof { .. }
+        | ServerError::MissingAuthorizationContext { .. }
+        | ServerError::ReplyInboxMismatch { .. }
+        | ServerError::TransferSessionMismatch { .. }
+        | ServerError::TransferDigestMismatch { .. } => "denied",
+        ServerError::StoreWaitTimeout { .. } => "timeout",
+        ServerError::OperationCapacityExceeded { .. } => "rate_limited",
+        ServerError::Nats(_)
+        | ServerError::MissingResourceBinding { .. }
+        | ServerError::ResourceUnavailable { .. }
+        | ServerError::StoreCommitIndeterminate { .. } => "unavailable",
+        ServerError::StoreWaitCanceled { .. }
+        | ServerError::StoreWriteCancelled
+        | ServerError::StoreReadCancelled
+        | ServerError::TransferCancelled { .. } => "cancelled",
+        _ => "error",
+    }
+}
+
+/// Trace carrier pairs retained on one inbound request context.
+fn trace_pairs(context: &RequestContext) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    if let Some(traceparent) = &context.traceparent {
+        pairs.push(("traceparent".to_owned(), traceparent.clone()));
+    }
+    if let Some(tracestate) = &context.tracestate {
+        pairs.push(("tracestate".to_owned(), tracestate.clone()));
+    }
+    pairs
+}
+
 /// Dispatch one decoded request to a request handler and encode a reply.
 pub async fn dispatch_one<H>(
     handler: &H,
@@ -565,41 +652,77 @@ pub async fn dispatch_all<H>(
 where
     H: RequestHandler,
 {
-    let reply_to = request.reply_to;
-    let annotations =
-        ErrorAnnotationContext::from_request(&request.subject, &request.context, handler);
-    let result =
-        AssertUnwindSafe(handler.handle_frames(&request.subject, request.payload, request.context))
-            .catch_unwind()
-            .await;
+    let route = handler
+        .route_token(&request.subject)
+        .unwrap_or_else(instruments::unknown_route);
+    let observation = Observation::start_counted(
+        DurationFamily::RpcServer,
+        UpDownFamily::RpcServerInflight,
+        vec![KeyValue::new("trellis.route", route)],
+        "cancelled",
+    );
+    let span = tracing::info_span!(
+        "trellis.rpc.server",
+        "trellis.route" = route,
+        "trellis.request.id" = request
+            .context
+            .request_id
+            .as_deref()
+            .filter(|request_id| request_id.len() <= 128),
+    );
+    // An invalid carrier never changes request handling; the span just becomes
+    // a new local root.
+    let _ = span.set_parent(propagation::extract_context(&trace_pairs(&request.context)));
+    let result = async {
+        let reply_to = request.reply_to;
+        let annotations =
+            ErrorAnnotationContext::from_request(&request.subject, &request.context, handler);
+        let result = AssertUnwindSafe(handler.handle_frames(
+            &request.subject,
+            request.payload,
+            request.context,
+        ))
+        .catch_unwind()
+        .await;
 
-    match result {
-        Ok(Ok(payloads)) => Ok(reply_to.map(|reply_to| {
-            payloads
-                .into_iter()
-                .map(|payload| encode_success_reply(reply_to.clone(), payload))
-                .collect()
-        })),
-        Ok(Err(error)) => match reply_to {
-            Some(reply_to) => Ok(Some(vec![encode_error_reply_with_context(
-                reply_to,
-                &error,
-                &annotations,
-            )])),
-            None => Err(error),
-        },
-        Err(panic) => {
-            let error = panic_to_server_error(panic);
-            match reply_to {
+        match result {
+            Ok(Ok(payloads)) => Ok(reply_to.map(|reply_to| {
+                payloads
+                    .into_iter()
+                    .map(|payload| encode_success_reply(reply_to.clone(), payload))
+                    .collect()
+            })),
+            Ok(Err(error)) => match reply_to {
                 Some(reply_to) => Ok(Some(vec![encode_error_reply_with_context(
                     reply_to,
                     &error,
                     &annotations,
                 )])),
                 None => Err(error),
+            },
+            Err(panic) => {
+                let error = panic_to_server_error(panic);
+                match reply_to {
+                    Some(reply_to) => Ok(Some(vec![encode_error_reply_with_context(
+                        reply_to,
+                        &error,
+                        &annotations,
+                    )])),
+                    None => Err(error),
+                }
             }
         }
     }
+    .instrument(span.clone())
+    .await;
+
+    let outcome = match &result {
+        Ok(_) => "ok",
+        Err(error) => server_outcome(error),
+    };
+    span.record("trellis.outcome", outcome);
+    observation.finish(outcome);
+    result
 }
 
 pub(crate) async fn dispatch_response<H>(
@@ -609,45 +732,78 @@ pub(crate) async fn dispatch_response<H>(
 where
     H: RequestHandler,
 {
-    let reply_to = request.reply_to;
-    let annotations =
-        ErrorAnnotationContext::from_request(&request.subject, &request.context, handler);
-    let result = AssertUnwindSafe(handler.handle_response(
-        &request.subject,
-        request.payload,
-        request.context,
-    ))
-    .catch_unwind()
-    .await;
+    let route = handler
+        .route_token(&request.subject)
+        .unwrap_or_else(instruments::unknown_route);
+    let observation = Observation::start_counted(
+        DurationFamily::RpcServer,
+        UpDownFamily::RpcServerInflight,
+        vec![KeyValue::new("trellis.route", route)],
+        "cancelled",
+    );
+    let span = tracing::info_span!(
+        "trellis.rpc.server",
+        "trellis.route" = route,
+        "trellis.request.id" = request
+            .context
+            .request_id
+            .as_deref()
+            .filter(|request_id| request_id.len() <= 128),
+    );
+    // An invalid carrier never changes request handling; the span just becomes
+    // a new local root.
+    let _ = span.set_parent(propagation::extract_context(&trace_pairs(&request.context)));
+    let result = async {
+        let reply_to = request.reply_to;
+        let annotations =
+            ErrorAnnotationContext::from_request(&request.subject, &request.context, handler);
+        let result = AssertUnwindSafe(handler.handle_response(
+            &request.subject,
+            request.payload,
+            request.context,
+        ))
+        .catch_unwind()
+        .await;
 
-    let Some(reply_to) = reply_to else {
-        return match result {
-            Ok(Ok(_)) => Ok(None),
-            Ok(Err(error)) => Err(error),
-            Err(panic) => Err(panic_to_server_error(panic)),
+        let Some(reply_to) = reply_to else {
+            return match result {
+                Ok(Ok(_)) => Ok(None),
+                Ok(Err(error)) => Err(error),
+                Err(panic) => Err(panic_to_server_error(panic)),
+            };
         };
-    };
 
-    match result {
-        Ok(Ok(response)) => Ok(Some((reply_to, response, annotations))),
-        Ok(Err(error)) => Ok(Some((
-            reply_to.clone(),
-            HandlerResponse::Error(
-                encode_error_reply_with_context(reply_to, &error, &annotations).payload,
-            ),
-            annotations,
-        ))),
-        Err(panic) => {
-            let error = panic_to_server_error(panic);
-            Ok(Some((
+        match result {
+            Ok(Ok(response)) => Ok(Some((reply_to, response, annotations))),
+            Ok(Err(error)) => Ok(Some((
                 reply_to.clone(),
                 HandlerResponse::Error(
                     encode_error_reply_with_context(reply_to, &error, &annotations).payload,
                 ),
                 annotations,
-            )))
+            ))),
+            Err(panic) => {
+                let error = panic_to_server_error(panic);
+                Ok(Some((
+                    reply_to.clone(),
+                    HandlerResponse::Error(
+                        encode_error_reply_with_context(reply_to, &error, &annotations).payload,
+                    ),
+                    annotations,
+                )))
+            }
         }
     }
+    .instrument(span.clone())
+    .await;
+
+    let outcome = match &result {
+        Ok(_) => "ok",
+        Err(error) => server_outcome(error),
+    };
+    span.record("trellis.outcome", outcome);
+    observation.finish(outcome);
+    result
 }
 
 async fn publish_reply(

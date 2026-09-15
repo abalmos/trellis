@@ -26,7 +26,7 @@ pub mod internal {
     pub use super::propagation::*;
 }
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 /// Document-hidden tracer/instrument scope name for Trellis instrumentation.
 pub const INSTRUMENTATION_SCOPE: &str = "@qlever-llc/trellis";
@@ -100,7 +100,7 @@ enum GuardMode {
     },
     /// Trellis installed owned providers.
     #[cfg(feature = "telemetry-otlp")]
-    Owned(Arc<export::OwnedProviders>),
+    Owned(std::sync::Arc<export::OwnedProviders>),
 }
 
 static MODE: OnceLock<GuardMode> = OnceLock::new();
@@ -218,7 +218,7 @@ impl TelemetryGuard {
 #[cfg(feature = "telemetry-otlp")]
 pub fn init_from_env(identity: TelemetryIdentity) -> TelemetryGuard {
     TelemetryGuard {
-        mode: claim_mode(|| GuardMode::Owned(Arc::new(export::build_owned(&identity)))),
+        mode: claim_mode(|| GuardMode::Owned(std::sync::Arc::new(export::build_owned(&identity)))),
     }
 }
 
