@@ -500,7 +500,12 @@ where
                 .capabilities
                 .retain(|capability| selection.ceiling.capabilities.contains(capability));
             delegation_ceiling.platform_privileges = selection.ceiling.platform_privileges.clone();
-            let approved_capabilities = delegation_ceiling.capabilities.clone();
+            let approved_capabilities = current
+                .approved_capabilities
+                .iter()
+                .filter(|capability| delegation_ceiling.capabilities.contains(capability))
+                .cloned()
+                .collect::<Vec<_>>();
             let resolved = super::policy::resolve_authority(
                 &participant,
                 ApprovalMode::Capabilities,
@@ -883,8 +888,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(widened.grants.permissions().len() > initial.exact_grants.permissions().len());
-        assert_eq!(widened.approved_capabilities.len(), 2);
+        // The widened override adds eligibility but must not add an approval
+        // the user never made; the carried Admin privilege remains.
+        assert_eq!(widened.approved_capabilities.len(), 1);
+        assert_eq!(widened.grants, initial.exact_grants);
         assert_eq!(widened.platform_privileges, [PlatformPrivilege::Admin]);
         assert_eq!(widened.installed_revision, 1);
         assert_eq!(widened.expires_at, expires_at);
@@ -1101,7 +1108,7 @@ mod tests {
             .referenced_apis
             .values()
             .flat_map(|api| api.capabilities.iter())
-            .take(1)
+            .take(2)
             .map(|(id, capability)| (id.clone(), GrantSet::new(capability.allows.clone())))
             .collect();
         let participant_id = participant.participant_id.clone();
@@ -1183,6 +1190,13 @@ mod tests {
             .take(1)
             .cloned()
             .collect::<Vec<_>>();
+        let unapproved_capability = selection
+            .ceiling
+            .capabilities
+            .iter()
+            .find(|capability| !approved_capabilities.contains(capability))
+            .cloned()
+            .expect("the fixture selects an unapproved optional capability");
         assert_eq!(approved_capabilities.len(), 1);
         let resolved = resolve_authority(
             &installed,
@@ -1240,6 +1254,48 @@ mod tests {
         assert_eq!(survived.approved_capabilities, approved_capabilities);
         assert_eq!(survived.grants, resolved.exact_grants);
 
+        // An override that makes the second capability eligible must not
+        // approve it: eligibility is not a user approval.
+        store
+            .put_portal_grant_override(
+                PortalGrantOverrideRecord {
+                    portal_id: portal.portal_id.clone(),
+                    participant_id: participant_id.clone(),
+                    direct_capabilities: vec![
+                        approved_capabilities[0].id.clone(),
+                        unapproved_capability.id.clone(),
+                    ],
+                    capability_group_keys: Vec::new(),
+                    role_mappings: Vec::new(),
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                },
+                None,
+                proof("default.override.ab"),
+            )
+            .await
+            .unwrap();
+        worker.reconcile_startup().await.unwrap();
+        let widened = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                "usr_default_reconcile".to_owned(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            widened
+                .delegation_ceiling
+                .capabilities
+                .contains(&unapproved_capability),
+            "the override ceiling contains the eligible capability"
+        );
+        assert_eq!(widened.approved_capabilities, approved_capabilities);
+        assert_eq!(widened.grants, survived.grants);
+
         // A narrower override reduces the approved scope without adding scope.
         store
             .put_portal_grant_override(
@@ -1251,9 +1307,9 @@ mod tests {
                     role_mappings: Vec::new(),
                     created_at: NOW,
                     updated_at: NOW,
-                    version: 1,
+                    version: 2,
                 },
-                None,
+                Some(1),
                 proof("default.override.create"),
             )
             .await

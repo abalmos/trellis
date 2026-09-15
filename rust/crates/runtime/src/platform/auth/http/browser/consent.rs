@@ -63,13 +63,10 @@ where
         policy.as_ref(),
         &groups,
     )?;
-    // An active exact binding remains a lifetime/revision precondition, but the
-    // portal policy (including its absence) always bounds the ordinary ceiling.
-    let source = current.filter(|binding| {
-        binding.provenance.is_none()
-            && binding.state == GrantBindingState::Active
-            && binding.expires_at.is_none_or(|expiry| expiry > now)
-    });
+    // A current active binding is the carried source of authority and lifetime
+    // regardless of whether it already has portal provenance; the portal policy
+    // still bounds capability eligibility.
+    let source = consent_source(current, now);
     super::super::super::policy::consent_authority(
         super::super::super::policy::ConsentAuthoritySource::Portal(Box::new(
             super::super::super::policy::PortalConsentAuthority {
@@ -185,6 +182,10 @@ where
         consent_ceiling(&state, &flow, &binding, current.as_ref(), &attributes, now).await?;
     authority.ceiling.platform_privileges = current
         .as_ref()
+        .filter(|binding| {
+            binding.state == GrantBindingState::Active
+                && binding.expires_at.is_none_or(|expires_at| expires_at > now)
+        })
         .map_or_else(Vec::new, |binding| binding.platform_privileges.clone());
     let actuals = state
         .service
@@ -370,6 +371,13 @@ where
         flow = current;
     }
     Ok(Json(portal_flow_response(&state, flow).await?))
+}
+
+fn consent_source(current: Option<&GrantBinding>, now: i64) -> Option<&GrantBinding> {
+    current.filter(|binding| {
+        binding.state == GrantBindingState::Active
+            && binding.expires_at.is_none_or(|expiry| expiry > now)
+    })
 }
 
 fn validate_consent_decision(
@@ -704,6 +712,10 @@ where
         .await?;
         authority.ceiling.platform_privileges = current
             .as_ref()
+            .filter(|binding| {
+                binding.state == GrantBindingState::Active
+                    && binding.expires_at.is_none_or(|expires_at| expires_at > now)
+            })
             .map_or_else(Vec::new, |binding| binding.platform_privileges.clone());
         let actuals = state
             .service
@@ -906,6 +918,78 @@ mod tests {
     fn administrator_account_continuation_requires_explicit_approval() {
         assert!(!super::automatic_approval_allowed(true));
         assert!(super::automatic_approval_allowed(false));
+    }
+
+    #[tokio::test]
+    async fn carried_source_keeps_provenance_bearing_lifetime(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let store = SqliteAuthorizationStore::open_in_memory()?;
+        let now = 1_700_000_000_000;
+        let actor =
+            crate::platform::auth::tests::conformance::fixtures::install_login_mutation_actor(
+                &store, now,
+            )
+            .await?;
+        let participant = builtins::console_participant_binding(now)?;
+        let participant_id = participant.participant_id.clone();
+        store.put_participant_binding(participant.clone()).await?;
+        let grants = participant.projection.required_grants.clone();
+        let expires_at = now + 60_000;
+        store
+            .set_grant_binding(
+                GrantBindingReplacement {
+                    owner_kind: GrantOwnerKind::User,
+                    owner_id: actor.principal_id.clone(),
+                    participant_id: participant_id.clone(),
+                    installed_revision: 1,
+                    grants,
+                    approval_mode: ApprovalMode::Capabilities,
+                    approved_capabilities: Vec::new(),
+                    approved_resources: Vec::new(),
+                    delegation_ceiling: DelegationCeiling {
+                        capabilities: Vec::new(),
+                        exact_restrictions: None,
+                        platform_privileges: vec![PlatformPrivilege::Admin],
+                    },
+                    approval_decision_digest: digest_parts(&["carried-source"]),
+                    companion_approved: false,
+                    platform_privileges: vec![PlatformPrivilege::Admin],
+                    state: GrantBindingState::Active,
+                    expires_at: Some(expires_at),
+                    provenance: Some(PortalGrantProvenance {
+                        portal_id: "portal".to_owned(),
+                        provider_id: "local".to_owned(),
+                        roles: Vec::new(),
+                        effective_policy_digest: digest_parts(&["carried-policy"]),
+                    }),
+                    expected_revision: 0,
+                    expected_current_installed_revision: Some(1),
+                },
+                idempotency(
+                    "carried-source",
+                    "browser.grant.accept",
+                    "browser-signer",
+                    "carried-source",
+                    &digest_parts(&["carried-source"]),
+                    now,
+                )
+                .expect("test idempotency is valid"),
+            )
+            .await?;
+        let binding = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                actor.principal_id.clone(),
+                participant_id,
+            )
+            .await?
+            .unwrap();
+        // A provenance-bearing, active, unexpired binding is still the carried
+        // source of authority and lifetime for the next explicit consent.
+        let selected = consent_source(Some(&binding), now).expect("active source is carried");
+        assert_eq!(selected.expires_at, Some(expires_at));
+        assert!(consent_source(Some(&binding), expires_at).is_none());
+        Ok(())
     }
 
     #[tokio::test]

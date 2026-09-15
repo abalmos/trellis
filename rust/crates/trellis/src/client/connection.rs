@@ -1205,8 +1205,7 @@ impl TrellisClient {
         let installation = Arc::new(SessionAuth::from_seed_base64url(
             opts.credentials.session_key_seed_base64url,
         )?);
-        let (context_seed, _) = crate::auth::generate_session_keypair();
-        let auth = SessionAuth::from_seed_base64url(&context_seed)?;
+        let auth = connection_runtime_auth()?;
         let authorization_contexts = AuthorizationContextCache::new(
             opts.trellis_url,
             opts.participant_id.to_owned(),
@@ -1970,6 +1969,11 @@ fn event_consumer_config(
     }
 }
 
+fn connection_runtime_auth() -> Result<SessionAuth, TrellisClientError> {
+    let (context_seed, _) = crate::auth::generate_session_keypair();
+    SessionAuth::from_seed_base64url(&context_seed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::AppliedNativeAuthorization;
@@ -1977,6 +1981,13 @@ mod tests {
         AuthorizationNativeTransport, AuthorizationRuntimeBinding, AuthorizationRuntimeTransports,
         TrellisClientError,
     };
+
+    #[test]
+    fn each_user_connection_gets_an_independent_runtime_key() {
+        let first = super::connection_runtime_auth().expect("runtime auth");
+        let second = super::connection_runtime_auth().expect("runtime auth");
+        assert_ne!(first.session_key, second.session_key);
+    }
 
     fn authorization(
         server: &str,
