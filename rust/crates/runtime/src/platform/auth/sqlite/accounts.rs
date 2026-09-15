@@ -1743,6 +1743,8 @@ pub(in crate::platform::auth) fn load_account_flow_by_hash(
 
 #[cfg(test)]
 mod password_reset_action_tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::platform::auth::application::repository::{SessionCreation, SessionRepository};
     use crate::platform::auth::domain::{NewSession, SessionRecord};
@@ -1764,16 +1766,16 @@ mod password_reset_action_tests {
         }
     }
 
-    async fn seed_user(store: &SqliteAuthorizationStore, principal_id: &str) {
+    async fn seed_user(store: &SqliteAuthorizationStore, principal_id: &str, username: &str) {
         let credential = crate::platform::auth::account::bound_local_credential(
             principal_id.to_owned(),
-            "reset-target",
+            username,
             NOW,
         )
         .unwrap();
         let identity = ProviderIdentityLink {
             provider: "local".to_owned(),
-            provider_subject: "reset-target".to_owned(),
+            provider_subject: username.to_owned(),
             principal_id: principal_id.to_owned(),
             linked_at: NOW,
             last_seen_at: NOW,
@@ -1801,7 +1803,12 @@ mod password_reset_action_tests {
                 },
                 credential: Some(credential),
                 identity: Some(identity),
-                idempotency: proof("seed.account", "auth.account.create", principal_id, NOW),
+                idempotency: proof(
+                    &format!("seed.account.{principal_id}"),
+                    "auth.account.create",
+                    principal_id,
+                    NOW,
+                ),
                 actions: Vec::new(),
             })
             .await
@@ -1847,8 +1854,9 @@ mod password_reset_action_tests {
     async fn password_reset_emits_one_event_per_session_and_replays_without_duplicates() {
         let store = SqliteAuthorizationStore::open_in_memory().unwrap();
         let principal_id = "usr_reset_target";
-        seed_user(&store, principal_id).await;
+        seed_user(&store, principal_id, "reset-target").await;
         let mut session_ids = Vec::new();
+        let mut session_participants = BTreeMap::new();
         for (index, binding) in [
             builtins::cli_participant_binding(NOW).unwrap(),
             builtins::console_participant_binding(NOW).unwrap(),
@@ -1859,17 +1867,45 @@ mod password_reset_action_tests {
             let participant_id = binding.participant_id.clone();
             let participant_kind = binding.participant_kind;
             store.put_participant_binding(binding).await.unwrap();
-            session_ids.push(
-                seed_session(
-                    &store,
-                    principal_id,
-                    &participant_id,
-                    participant_kind,
-                    index + 1,
-                )
-                .await,
-            );
+            let session_id = seed_session(
+                &store,
+                principal_id,
+                &participant_id,
+                participant_kind,
+                index + 1,
+            )
+            .await;
+            session_participants.insert(session_id.clone(), participant_id);
+            session_ids.push(session_id);
         }
+        // A different principal's live session must not be touched by the reset.
+        seed_user(&store, "usr_reset_other", "reset-other").await;
+        let (shared_participant_id, shared_participant_kind) = session_participants
+            .values()
+            .next()
+            .and_then(|participant| {
+                session_participants
+                    .iter()
+                    .find(|(_, value)| *value == participant)
+                    .map(|_| participant)
+            })
+            .map(|participant| {
+                let kind = [builtins::cli_participant_binding(NOW).unwrap()]
+                    .into_iter()
+                    .find(|binding| binding.participant_id == *participant)
+                    .expect("seeded participant is a builtin")
+                    .participant_kind;
+                (participant.clone(), kind)
+            })
+            .expect("at least one seeded session");
+        let unrelated_session = seed_session(
+            &store,
+            "usr_reset_other",
+            &shared_participant_id,
+            shared_participant_kind,
+            9,
+        )
+        .await;
 
         let token = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         let token_hash = crate::platform::auth::application::bearer_secret_digest(token).unwrap();
@@ -1989,11 +2025,42 @@ mod password_reset_action_tests {
             assert!(payload["eventSubject"]
                 .as_str()
                 .is_some_and(|subject| !subject.is_empty()));
-            event_sessions.push(payload["sessionId"].as_str().unwrap().to_owned());
+            // uint64 event fields travel as decimal strings on the wire.
+            assert_eq!(payload["occurredAt"], (NOW + 1_000).to_string());
+            let decoded = serde_json::from_value::<
+                trellis_runtime_apis::apis::trellis_auth_v1::events::SessionsRevokedEvent,
+            >(payload.clone())
+            .expect("the generated Auth.Sessions.Revoked decoder accepts the payload");
+            let session_id = decoded.session_id.as_str().to_owned();
+            assert_eq!(decoded.principal_id.as_str(), principal_id);
+            assert_eq!(
+                decoded.participant_id.as_str(),
+                session_participants
+                    .get(&session_id)
+                    .expect("event session was seeded")
+                    .as_str()
+            );
+            assert_eq!(u64::from(decoded.occurred_at.0), (NOW + 1_000) as u64);
+            event_sessions.push(session_id);
         }
         event_sessions.sort();
         session_ids.sort();
         assert_eq!(event_sessions, session_ids);
+
+        // The unrelated principal's session stays active.
+        let unrelated_state = store
+            .run_read(move |connection| {
+                connection
+                    .query_row(
+                        "SELECT state FROM auth_sessions WHERE session_id = ?1",
+                        params![unrelated_session],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .map_err(sql_error)
+            })
+            .await
+            .unwrap();
+        assert_eq!(unrelated_state, "active");
         let kick_payload: serde_json::Value = serde_json::from_str(&kicks[0].1).unwrap();
         assert_eq!(kick_payload["principalId"], principal_id);
 

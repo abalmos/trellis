@@ -2222,7 +2222,8 @@ impl AuthRpcProcessor {
         let mut event_payload = json!({
             "eventType": "Auth.Sessions.Revoked",
             "eventId": format!("evt_{}", digest_parts(&[session_id, idempotency_key])),
-            "occurredAt": now,
+            // Generated uint64 event fields travel as decimal strings.
+            "occurredAt": now.to_string(),
             "sessionId": session_id,
             "principalId": session.principal_id.clone(),
             "participantId": session.participant_id.clone(),

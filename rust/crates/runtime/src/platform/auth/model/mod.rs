@@ -645,7 +645,8 @@ pub(crate) fn session_revoked_event(
     let mut payload = serde_json::json!({
         "eventType": "Auth.Sessions.Revoked",
         "eventId": format!("evt_{action_id}"),
-        "occurredAt": now,
+        // Generated uint64 event fields travel as decimal strings.
+        "occurredAt": now.to_string(),
         "sessionId": session_id,
         "principalId": principal_id,
         "participantId": participant_id,
