@@ -56,6 +56,9 @@ pub mod auth;
 #[doc(hidden)]
 pub mod jobs;
 
+/// Reusable OpenTelemetry ownership and instrumentation.
+pub mod telemetry;
+
 extern crate self as trellis_rs;
 
 #[cfg(test)]
