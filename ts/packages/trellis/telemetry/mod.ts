@@ -17,6 +17,18 @@ export {
 } from "./core.ts";
 export { getEnv } from "./env.ts";
 export { initTelemetry } from "./init.ts";
+export type { TelemetryObservation } from "./lifecycle.ts";
+export { startObservation, withObservation } from "./lifecycle.ts";
+export type {
+  TelemetryIdentity,
+  TelemetryRole,
+  TelemetryRuntimeHandle,
+} from "./runtime.ts";
+export {
+  ensureTelemetryRuntime,
+  initTelemetryRuntime,
+  useHostTelemetryProviders,
+} from "./runtime.ts";
 export {
   buildTrellisDurationMetricAttributes,
   buildTrellisErrorMetricAttributes,
