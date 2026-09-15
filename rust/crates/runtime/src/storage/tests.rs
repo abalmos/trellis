@@ -128,6 +128,17 @@ fn assert_table(path: &Path, table_name: &str) -> rusqlite::Result<()> {
     Ok(())
 }
 
+fn assert_index(path: &Path, index_name: &str) -> rusqlite::Result<()> {
+    let connection = rusqlite::Connection::open(path)?;
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+        [index_name],
+        |row| row.get(0),
+    )?;
+    assert_eq!(count, 1, "missing index {index_name}");
+    Ok(())
+}
+
 fn assert_no_table(path: &Path, table_name: &str) -> rusqlite::Result<()> {
     let connection = rusqlite::Connection::open(path)?;
     assert!(!connection.query_row(
@@ -286,16 +297,29 @@ fn sqlite_platform_store_creates_fresh_schema_and_reruns_safely(
 }
 
 #[test]
-fn sqlite_jobs_projection_store_migrates_marker_schema() -> Result<(), Box<dyn std::error::Error>> {
+fn sqlite_jobs_projection_store_migrates_complete_schema() -> Result<(), Box<dyn std::error::Error>>
+{
     let temp_dir = tempfile::tempdir()?;
     let path = temp_dir.path().join("jobs.sqlite");
     let store = SqliteStore::new(SubsystemName::Jobs, sqlite_config(path.clone()));
 
     store.migrate()?;
+    store.migrate()?;
 
     assert!(path.exists());
     assert_marker(&path, "trellis_jobs_projection_store_marker")?;
     assert_migration(&path, 2000, "jobs_projection_init")?;
+    assert_migration_order(&path, &[2000])?;
+    assert_table(&path, "jobs_projection")?;
+    assert_table(&path, "jobs_metadata_projection")?;
+    assert_table(&path, "jobs_lineage_projection")?;
+    assert_table(&path, "jobs_events_projection")?;
+    assert_table(&path, "jobs_wait_projection")?;
+    assert_table(&path, "jobs_error_projection")?;
+    assert_table(&path, "worker_presence_projection")?;
+    assert_table(&path, "projection_metadata")?;
+    assert_index(&path, "idx_jobs_projection_workbench_updated")?;
+    assert_index(&path, "idx_jobs_metadata_queue_key")?;
     Ok(())
 }
 
@@ -307,24 +331,44 @@ fn sqlite_health_projection_store_creates_parent_directory_and_migrates(
     let store = SqliteStore::new(SubsystemName::Health, sqlite_config(path.clone()));
 
     store.migrate()?;
+    store.migrate()?;
 
     assert!(path.exists());
     assert_marker(&path, "trellis_health_projection_store_marker")?;
     assert_migration(&path, 3000, "health_projection_init")?;
+    assert_migration_order(&path, &[3000])?;
+    assert_table(&path, "health_projection_meta")?;
+    assert_table(&path, "health_latest")?;
+    assert_table(&path, "health_status_intervals")?;
+    assert_table(&path, "health_metric_buckets")?;
+    assert_table(&path, "health_check_metric_buckets")?;
+    assert_table(&path, "health_transition_outbox")?;
+    assert_table(&path, "health_rejections")?;
     Ok(())
 }
 
 #[test]
-fn sqlite_events_store_migrates_marker_schema() -> Result<(), Box<dyn std::error::Error>> {
+fn sqlite_events_store_migrates_complete_schema() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
     let path = temp_dir.path().join("events.sqlite");
     let store = SqliteStore::new(SubsystemName::Events, sqlite_config(path.clone()));
 
     store.migrate()?;
+    store.migrate()?;
 
     assert!(path.exists());
     assert_marker(&path, "trellis_events_store_marker")?;
     assert_migration(&path, 4000, "events_init")?;
+    assert_migration_order(&path, &[4000])?;
+    assert_table(&path, "events")?;
+    assert_table(&path, "events_projection_metadata")?;
+    assert_table(&path, "events_consumer_samples")?;
+    assert_table(&path, "consumer_dead_letters")?;
+    assert_table(&path, "consumer_dlq_projection_checkpoint")?;
+    assert_table(&path, "consumer_dlq_commands")?;
+    assert_table(&path, "consumer_dlq_transitions")?;
+    assert_index(&path, "idx_events_payload_size")?;
+    assert_index(&path, "idx_consumer_dead_letters_resource_state")?;
     Ok(())
 }
 
@@ -454,7 +498,7 @@ fn runtime_stores_all_mode_migrates_all_selected_subsystems(
     assert_marker(&events_path, "trellis_events_store_marker")?;
     assert_migration_order(&platform_path, &[1000])?;
     assert_migration_order(&jobs_path, &[2000])?;
-    assert_migration_order(&health_path, &[3000, 3001])?;
+    assert_migration_order(&health_path, &[3000])?;
     assert_migration_order(&events_path, &[4000])?;
     Ok(())
 }

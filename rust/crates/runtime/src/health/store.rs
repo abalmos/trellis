@@ -879,7 +879,7 @@ mod tests {
         let connection = Connection::open_in_memory().expect("open health test database");
         connection
             .execute_batch(include_str!(
-                "../storage/sqlite/health/V3001__health_projection.sql"
+                "../storage/sqlite/health/V3000__health_projection_init.sql"
             ))
             .expect("apply health schema");
         HealthStore::new(connection).expect("open health store")
