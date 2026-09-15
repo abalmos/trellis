@@ -37,6 +37,8 @@ const expectedAdminMethods = {
   authGrantsSet: "grantsSet",
   authGrantsRevoke: "grantsRevoke",
   authServiceInstancesProvision: "serviceInstancesProvision",
+  authUsersCreate: "usersCreate",
+  authUsersPasswordResetCreate: "usersPasswordResetCreate",
   authServiceInstancesDisable: "serviceInstancesDisable",
   authSessionsRevoke: "sessionsRevoke",
   eventsConsumersQuery: "consumersQuery",
@@ -125,6 +127,7 @@ Deno.test("participant install forwards opaque package evidence", async () => {
     deploymentBindingRevisions: new Map(),
     deploymentIds: new Map(),
     installedParticipants: new Map(),
+    pendingApprovals: new Map(),
     rpc: <M extends TrellisTestAdminRpcMethod>(
       method: M,
       input: AdminRpc[M]["input"],
@@ -158,6 +161,7 @@ Deno.test("concurrent deployment creation shares failure and permits retry", asy
     deploymentBindingRevisions: new Map(),
     deploymentIds: new Map(),
     installedParticipants: new Map(),
+    pendingApprovals: new Map(),
     rpc: <M extends TrellisTestAdminRpcMethod>(
       method: M,
       _input: AdminRpc[M]["input"],

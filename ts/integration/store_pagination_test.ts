@@ -86,6 +86,7 @@ Deno.test("generated keyset clients cross the live runtime boundary", async () =
           idempotencyKey: crypto.randomUUID(),
           image: null,
           name: `pagination-user-${index.toString().padStart(2, "0")}`,
+          username: null,
         }).orThrow();
       }
       for (let index = 0; index < 101; index++) {
