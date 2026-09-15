@@ -166,3 +166,119 @@ mod tests {
         guard.release();
     }
 }
+
+/// One process-local connection registration for observable state gauges.
+///
+/// The registry holds only a kind and current state per connection; it never
+/// holds a credential, session, or connection handle, and it creates no
+/// per-connection metric series.
+pub struct ConnectionRegistration {
+    id: u64,
+    kind: &'static str,
+}
+
+type ConnectionStates =
+    std::sync::Mutex<std::collections::BTreeMap<u64, (&'static str, &'static str)>>;
+
+static CONNECTIONS: std::sync::OnceLock<ConnectionStates> = std::sync::OnceLock::new();
+static NEXT_CONNECTION_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Returns the process-local connection state registry.
+fn registry() -> &'static ConnectionStates {
+    CONNECTIONS.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+}
+
+/// Registers the connection count gauge once per process.
+fn ensure_connection_gauge() {
+    static REGISTERED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    if REGISTERED.set(()).is_err() {
+        return;
+    }
+    super::instruments::register_observable(
+        super::instruments::ObservableFamily::ConnectionCount,
+        std::sync::Arc::new(|| {
+            let Ok(states) = registry().lock() else {
+                return Vec::new();
+            };
+            let mut counts: std::collections::BTreeMap<(&'static str, &'static str), u64> =
+                std::collections::BTreeMap::new();
+            for (kind, state) in states.values() {
+                *counts.entry((*kind, *state)).or_default() += 1;
+            }
+            counts
+                .into_iter()
+                .map(|((kind, state), count)| {
+                    (
+                        count as f64,
+                        vec![
+                            KeyValue::new("trellis.participant.kind", kind),
+                            KeyValue::new("trellis.state", state),
+                        ],
+                    )
+                })
+                .collect()
+        }),
+    );
+}
+
+impl ConnectionRegistration {
+    /// Registers one connection in the `connecting` state.
+    pub fn start(kind: &'static str) -> Self {
+        ensure_connection_gauge();
+        let id = NEXT_CONNECTION_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut states) = registry().lock() {
+            states.insert(id, (kind, "connecting"));
+        }
+        Self { id, kind }
+    }
+
+    /// Records a completed successful installation.
+    pub fn usable(&self) {
+        self.transition("usable", "connected");
+    }
+
+    /// Records one observed refresh that kept the connection usable.
+    pub fn refreshed(&self) {
+        self.transition("usable", "refreshed");
+    }
+
+    /// Records suspended coverage.
+    pub fn suspended(&self, reason: &'static str) {
+        self.transition("suspended", reason);
+    }
+
+    /// Records one observed lifecycle transition.
+    fn transition(&self, state: &'static str, reason: &'static str) {
+        if let Ok(mut states) = registry().lock() {
+            states.insert(self.id, (self.kind, state));
+        }
+        super::instruments::add_counter(
+            super::instruments::CounterFamily::ConnectionTransitions,
+            1,
+            &[
+                KeyValue::new("trellis.participant.kind", self.kind),
+                KeyValue::new("trellis.reason", reason),
+            ],
+        );
+    }
+}
+
+impl Drop for ConnectionRegistration {
+    fn drop(&mut self) {
+        let state = registry()
+            .lock()
+            .ok()
+            .and_then(|mut states| states.remove(&self.id))
+            .map(|(_, state)| state);
+        if state.is_some_and(|state| state != "terminal") {
+            super::instruments::add_counter(
+                super::instruments::CounterFamily::ConnectionTransitions,
+                1,
+                &[
+                    KeyValue::new("trellis.participant.kind", self.kind),
+                    KeyValue::new("trellis.reason", "closed"),
+                ],
+            );
+        }
+    }
+}

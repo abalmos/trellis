@@ -988,6 +988,8 @@ pub(crate) struct TrellisClient {
     applied_native_authorization: Arc<tokio::sync::Mutex<AppliedNativeAuthorization>>,
     authorization_context_refresh_task: Option<JoinHandle<()>>,
     companion: Option<Arc<TrellisClient>>,
+    /// Process-local connection state registration for telemetry gauges.
+    connection: std::sync::Arc<crate::telemetry::lifecycle::ConnectionRegistration>,
 }
 
 impl TrellisClient {
@@ -1084,6 +1086,9 @@ impl TrellisClient {
             "cancelled",
         );
         let result = Self::connect_native_inner(opts).await;
+        if let Ok(client) = &result {
+            client.connection.usable();
+        }
         let outcome = match &result {
             Ok(_) => "ok",
             Err(error) => Self::client_outcome(error),
@@ -1199,7 +1204,9 @@ impl TrellisClient {
             started_at: now_rfc3339(),
             publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
         };
-        let mut connected = Self::connect_context(auth, contexts, timeout_ms).await?;
+        let mut connected =
+            Self::connect_context(auth, contexts, timeout_ms, participant_kind_label(&kind))
+                .await?;
         connected.service_bootstrap_binding = Some(CoreBootstrapBinding::new(
             BootstrapBinding {
                 contract_id: authorization.participant_id,
@@ -1273,6 +1280,9 @@ impl TrellisClient {
             "cancelled",
         );
         let result = Self::connect_user_inner(opts).await;
+        if let Ok(client) = &result {
+            client.connection.usable();
+        }
         let outcome = match &result {
             Ok(_) => "ok",
             Err(error) => Self::client_outcome(error),
@@ -1300,13 +1310,14 @@ impl TrellisClient {
         )?;
         let authorization_contexts = Arc::new(authorization_contexts);
         authorization_contexts.refresh(&auth).await?;
-        Self::connect_context(auth, authorization_contexts, opts.timeout_ms).await
+        Self::connect_context(auth, authorization_contexts, opts.timeout_ms, "user").await
     }
 
     async fn connect_context(
         auth: SessionAuth,
         authorization_contexts: Arc<AuthorizationContextCache>,
         timeout_ms: u64,
+        kind: &'static str,
     ) -> Result<Self, TrellisClientError> {
         let inbox_prefix = authorization_contexts.runtime_binding()?.inbox_prefix;
         let applied_native_authorization =
@@ -1343,6 +1354,9 @@ impl TrellisClient {
             service_bootstrap_binding: None,
             health_heartbeat_task: None,
             authorization_contexts: Some(authorization_contexts),
+            connection: std::sync::Arc::new(
+                crate::telemetry::lifecycle::ConnectionRegistration::start(kind),
+            ),
             applied_native_authorization,
             authorization_context_refresh_task,
             companion: None,
@@ -1371,6 +1385,9 @@ impl TrellisClient {
         &self,
     ) -> Result<AuthorizationContextBundle, TrellisClientError> {
         let result = self.refresh_authorization_context_inner().await;
+        if result.is_ok() {
+            self.connection.refreshed();
+        }
         let outcome = match &result {
             Ok(_) => "ok",
             Err(error) => Self::client_outcome(error),
