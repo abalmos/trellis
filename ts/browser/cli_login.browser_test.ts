@@ -21,10 +21,37 @@ function cliBinary(): string {
   return binary;
 }
 
-Deno.test("CLI agent login completes through the browser portal", async () => {
+type RuntimeLike = Parameters<typeof launchProfile>[0];
+
+function jsonOutput(stdout: string): Record<string, unknown> {
+  return JSON.parse(
+    stdout.slice(stdout.indexOf("{"), stdout.lastIndexOf("}") + 1),
+  );
+}
+
+async function runCli(
+  args: readonly string[],
+  configHome: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const child = new Deno.Command(cliBinary(), {
+    args: [...args],
+    env: { XDG_CONFIG_HOME: configHome },
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  const [status, stdout, stderr] = await Promise.all([
+    child.status,
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+  ]);
+  return { code: status.code, stdout, stderr };
+}
+
+Deno.test("CLI login authorizes independent runtime keys through one durable login", async () => {
   await withTrellisRuntime(async (runtime) => {
     await runtime.ensureAdmin();
     const configHome = await Deno.makeTempDir({ prefix: "trellis-cli-login-" });
+
     const child = new Deno.Command(cliBinary(), {
       args: ["--format", "json", "login", runtime.trellisUrl],
       env: { XDG_CONFIG_HOME: configHome },
@@ -69,15 +96,22 @@ Deno.test("CLI agent login completes through the browser portal", async () => {
       if (chunk.done) break;
       progress += chunk.value;
     }
-    const status = await child.status;
-    const stdout = new TextDecoder().decode(
-      await new Response(child.stdout).arrayBuffer(),
+    assertEquals((await child.status).code, 0, progress);
+    const login = jsonOutput(
+      new TextDecoder().decode(await new Response(child.stdout).arrayBuffer()),
     );
-    assertEquals(status.code, 0, progress);
-    const result = JSON.parse(
-      stdout.slice(stdout.indexOf("{"), stdout.lastIndexOf("}") + 1),
-    );
-    assert(result.sessionKey, stdout);
-    assert(result.userId, stdout);
+    assert(login.sessionKey, JSON.stringify(login));
+    assert(login.userId, JSON.stringify(login));
+
+    // Every `whoami` run opens its own connection with a runtime key it
+    // generates locally and calls the deployment-bound Sessions.Me through the
+    // stored durable login, so both runs must authenticate the same user.
+    const first = await runCli(["--format", "json", "whoami"], configHome);
+    assertEquals(first.code, 0, first.stderr);
+    assertEquals(jsonOutput(first.stdout).userId, login.userId);
+
+    const second = await runCli(["--format", "json", "whoami"], configHome);
+    assertEquals(second.code, 0, second.stderr);
+    assertEquals(jsonOutput(second.stdout).userId, login.userId);
   }, browserRuntimeOptions());
 });
