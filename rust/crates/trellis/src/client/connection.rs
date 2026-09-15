@@ -19,6 +19,19 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use trellis_protocol::{NativeBootstrapSessionProofInput, SessionProofInput};
 
+use crate::telemetry::instruments::{CounterFamily, DurationFamily};
+use crate::telemetry::lifecycle::Observation;
+use crate::telemetry::KeyValue;
+
+/// Catalog participant kind for one authorization principal kind.
+fn participant_kind_label(kind: &trellis_protocol::AuthorizationPrincipalKind) -> &'static str {
+    match kind {
+        trellis_protocol::AuthorizationPrincipalKind::User => "user",
+        trellis_protocol::AuthorizationPrincipalKind::Service => "service",
+        trellis_protocol::AuthorizationPrincipalKind::Device => "device",
+    }
+}
+
 use super::events::{EVENT_ID_HEADER, EVENT_TIME_HEADER};
 use crate::client::operations::OperationTransport;
 use crate::client::proof::{base64url_decode, new_request_id, now_iat_seconds};
@@ -1033,6 +1046,29 @@ impl TrellisClient {
     }
 
     async fn connect_native(opts: NativeConnectOptions<'_>) -> Result<Self, TrellisClientError> {
+        let observation = Observation::start(
+            DurationFamily::Connect,
+            vec![
+                KeyValue::new("trellis.phase", "total"),
+                KeyValue::new(
+                    "trellis.participant.kind",
+                    participant_kind_label(&opts.kind),
+                ),
+            ],
+            "cancelled",
+        );
+        let result = Self::connect_native_inner(opts).await;
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(error) => Self::client_outcome(error),
+        };
+        observation.finish(outcome);
+        result
+    }
+
+    async fn connect_native_inner(
+        opts: NativeConnectOptions<'_>,
+    ) -> Result<Self, TrellisClientError> {
         let NativeConnectOptions {
             trellis_url,
             participant_id,
@@ -1202,6 +1238,24 @@ impl TrellisClient {
 
     /// Issue fresh connection authority from a durable user login before connecting.
     pub async fn connect_user(opts: UserConnectOptions<'_>) -> Result<Self, TrellisClientError> {
+        let observation = Observation::start(
+            DurationFamily::Connect,
+            vec![
+                KeyValue::new("trellis.phase", "total"),
+                KeyValue::new("trellis.participant.kind", "user"),
+            ],
+            "cancelled",
+        );
+        let result = Self::connect_user_inner(opts).await;
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(error) => Self::client_outcome(error),
+        };
+        observation.finish(outcome);
+        result
+    }
+
+    async fn connect_user_inner(opts: UserConnectOptions<'_>) -> Result<Self, TrellisClientError> {
         let installation = Arc::new(SessionAuth::from_seed_base64url(
             opts.credentials.session_key_seed_base64url,
         )?);
@@ -1288,6 +1342,25 @@ impl TrellisClient {
 
     /// Refresh and verify the current authorization context immediately.
     pub async fn refresh_authorization_context(
+        &self,
+    ) -> Result<AuthorizationContextBundle, TrellisClientError> {
+        let result = self.refresh_authorization_context_inner().await;
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(error) => Self::client_outcome(error),
+        };
+        crate::telemetry::instruments::add_counter(
+            CounterFamily::AuthRefreshAttempts,
+            1,
+            &[
+                KeyValue::new("trellis.participant.kind", "user"),
+                KeyValue::new("trellis.outcome", outcome),
+            ],
+        );
+        result
+    }
+
+    async fn refresh_authorization_context_inner(
         &self,
     ) -> Result<AuthorizationContextBundle, TrellisClientError> {
         let contexts = self.authorization_contexts.as_ref().ok_or_else(|| {

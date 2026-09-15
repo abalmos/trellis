@@ -36,21 +36,26 @@ struct SnapshotSource {
 
 impl SnapshotSource {
     /// Registers the observed-time gauge plus the named gauge families.
-    fn register(source: &'static str, families: &[ObservableFamily]) -> Self {
+    ///
+    /// `source` is `None` for sources outside the snapshot freshness contract
+    /// (for example supervisor component state).
+    fn register(source: Option<&'static str>, families: &[ObservableFamily]) -> Self {
         let values = Arc::new(Mutex::new(SnapshotValues::default()));
-        let observed = Arc::clone(&values);
-        instruments::register_observable(
-            ObservableFamily::SnapshotObservedTime,
-            Arc::new(move || {
-                let Ok(guard) = observed.lock() else {
-                    return Vec::new();
-                };
-                vec![(
-                    guard.observed_at,
-                    vec![KeyValue::new("trellis.source", source)],
-                )]
-            }),
-        );
+        if let Some(source) = source {
+            let observed = Arc::clone(&values);
+            instruments::register_observable(
+                ObservableFamily::SnapshotObservedTime,
+                Arc::new(move || {
+                    let Ok(guard) = observed.lock() else {
+                        return Vec::new();
+                    };
+                    vec![(
+                        guard.observed_at,
+                        vec![KeyValue::new("trellis.source", source)],
+                    )]
+                }),
+            );
+        }
         for family in families {
             let values = Arc::clone(&values);
             let family = *family;
@@ -104,7 +109,7 @@ fn record_failure(source: &'static str, reason: &'static str) {
 /// Runs the Jobs snapshot sampler until the runtime stops.
 pub(crate) async fn run_jobs_sampler(store: SqliteJobsStore, stop: StopHandle) {
     let source = SnapshotSource::register(
-        "jobs",
+        Some("jobs"),
         &[
             ObservableFamily::JobsReady,
             ObservableFamily::JobsOldestReadyAge,
@@ -163,7 +168,7 @@ pub(crate) async fn run_jobs_sampler(store: SqliteJobsStore, stop: StopHandle) {
 
 /// Runs the Events dead-letter snapshot sampler until the runtime stops.
 pub(crate) async fn run_events_sampler(store: EventsStore, stop: StopHandle) {
-    let source = SnapshotSource::register("events_dlq", &[ObservableFamily::DeadLetters]);
+    let source = SnapshotSource::register(Some("events_dlq"), &[ObservableFamily::DeadLetters]);
     loop {
         tokio::select! {
             _ = tokio::time::sleep(SAMPLER_INTERVAL) => {}
@@ -192,13 +197,50 @@ pub(crate) async fn run_events_sampler(store: EventsStore, stop: StopHandle) {
     }
 }
 
+/// Publishes selected component readiness and observation time.
+pub(crate) fn spawn_component_sampler(
+    components: Vec<&'static str>,
+    stop: StopHandle,
+) -> tokio::task::JoinHandle<()> {
+    let source = SnapshotSource::register(
+        None,
+        &[
+            ObservableFamily::ComponentReady,
+            ObservableFamily::ComponentObservedTime,
+        ],
+    );
+    tokio::spawn(async move {
+        loop {
+            let now = unix_seconds();
+            let mut gauges = Vec::new();
+            for component in &components {
+                gauges.push((
+                    ObservableFamily::ComponentReady,
+                    1.0,
+                    vec![KeyValue::new("trellis.component", *component)],
+                ));
+                gauges.push((
+                    ObservableFamily::ComponentObservedTime,
+                    now,
+                    vec![KeyValue::new("trellis.component", *component)],
+                ));
+            }
+            source.publish(gauges);
+            tokio::select! {
+                _ = tokio::time::sleep(SAMPLER_INTERVAL) => {}
+                _ = stop.stopped() => return,
+            }
+        }
+    })
+}
+
 /// Runs the platform Auth snapshot sampler until the runtime stops.
 pub(crate) async fn run_auth_sampler(
     store: SqliteAuthorizationStore,
     stop: StopHandle,
 ) -> Result<(), AuthorizationStateError> {
     let source = SnapshotSource::register(
-        "auth",
+        Some("auth"),
         &[
             ObservableFamily::AuthPostCommitPending,
             ObservableFamily::AuthPostCommitOldestAge,

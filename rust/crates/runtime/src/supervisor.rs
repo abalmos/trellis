@@ -719,6 +719,15 @@ async fn run_owned(
     };
     let mut handles = start_subsystems(&context).await?;
     let root_stop = StopHandle::new();
+    // Only components selected by the runtime mode report ready; others are
+    // absent rather than failed.
+    let _component_sampler = crate::telemetry::snapshots::spawn_component_sampler(
+        handles
+            .iter()
+            .map(|handle| component_label(handle.name))
+            .collect(),
+        root_stop.clone(),
+    );
     let server_stop = root_stop.clone();
     let http_router = context.take_http_router()?;
     let mut server = Box::pin(crate::run_http_server(
@@ -949,6 +958,15 @@ async fn join_subsystems(
     }
 
     first_error.map_or(Ok(()), Err)
+}
+
+fn component_label(name: SubsystemName) -> &'static str {
+    match name {
+        SubsystemName::Platform => "platform",
+        SubsystemName::Jobs => "jobs",
+        SubsystemName::Events => "events",
+        SubsystemName::Health => "health",
+    }
 }
 
 async fn start_subsystems(context: &RuntimeContext) -> Result<Vec<SubsystemHandle>, RuntimeError> {
