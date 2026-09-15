@@ -157,6 +157,12 @@ impl SqliteAuthorizationStore {
             let operation_started = Instant::now();
             let result = operation(&mut connection);
             let operation_elapsed = operation_started.elapsed();
+            observe_storage(
+                "write",
+                spawn_delay + wait_elapsed,
+                operation_elapsed,
+                &result,
+            );
             if spawn_delay >= Duration::from_secs(1)
                 || wait_elapsed >= Duration::from_secs(1)
                 || operation_elapsed >= Duration::from_secs(1)
@@ -189,6 +195,36 @@ impl SqliteAuthorizationStore {
     }
 }
 
+/// Records the bounded storage phases for one Auth SQLite operation.
+fn observe_storage<T>(
+    operation: &'static str,
+    wait: Duration,
+    execute: Duration,
+    result: &Result<T, AuthorizationStateError>,
+) {
+    let outcome = if result.is_ok() { "ok" } else { "error" };
+    let attributes = |phase: &'static str| {
+        vec![
+            trellis_rs::telemetry::KeyValue::new("trellis.backend", "auth_sql"),
+            trellis_rs::telemetry::KeyValue::new("trellis.operation", operation),
+            trellis_rs::telemetry::KeyValue::new("trellis.phase", phase),
+            trellis_rs::telemetry::KeyValue::new("trellis.outcome", outcome),
+        ]
+    };
+    let family = trellis_rs::telemetry::instruments::DurationFamily::Storage;
+    trellis_rs::telemetry::instruments::record_family_duration(family, wait, &attributes("wait"));
+    trellis_rs::telemetry::instruments::record_family_duration(
+        family,
+        execute,
+        &attributes("execute"),
+    );
+    trellis_rs::telemetry::instruments::record_family_duration(
+        family,
+        wait + execute,
+        &attributes("total"),
+    );
+}
+
 async fn run_on_pool<T, F>(
     pool: Arc<SqliteConnectionPool>,
     operation: F,
@@ -219,6 +255,12 @@ where
         let operation_started = Instant::now();
         let result = operation(&mut connection);
         let operation_elapsed = operation_started.elapsed();
+        observe_storage(
+            "read",
+            spawn_delay + wait_elapsed,
+            operation_elapsed,
+            &result,
+        );
         pool.available
             .lock()
             .map_err(|_| {
