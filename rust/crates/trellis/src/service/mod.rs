@@ -59,9 +59,9 @@ pub use local_validator::{
 pub use operation_repository::{
     operation_invocation_digest, DurableOperationRecord, DurableOperationSignal,
     KvOperationRepository, OperationRepository, RevisionedOperationRecord,
-    MAX_OPERATION_DURATION_MS, MAX_OPERATION_ERROR_BYTES, MAX_OPERATION_INPUT_BYTES,
-    MAX_OPERATION_OUTPUT_BYTES, MAX_OPERATION_PROGRESS_BYTES, MAX_OPERATION_RECORD_BYTES,
-    MAX_OPERATION_SIGNALS, MAX_OPERATION_SIGNAL_BYTES,
+    MAX_OPERATION_ERROR_BYTES, MAX_OPERATION_INPUT_BYTES, MAX_OPERATION_OUTPUT_BYTES,
+    MAX_OPERATION_PROGRESS_BYTES, MAX_OPERATION_RECORD_BYTES, MAX_OPERATION_SIGNALS,
+    MAX_OPERATION_SIGNAL_BYTES,
 };
 pub use operations::{
     control_subject, AcceptedOperation, OperationControl, OperationControlRequest,

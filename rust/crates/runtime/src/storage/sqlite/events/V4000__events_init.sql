@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_event_id ON events (event_id);
 CREATE INDEX IF NOT EXISTS idx_events_event_time ON events (event_time_ns DESC, stream_sequence DESC);
+CREATE INDEX IF NOT EXISTS idx_events_payload_size ON events (payload_size_bytes DESC, stream_sequence DESC);
 CREATE INDEX IF NOT EXISTS idx_events_subject ON events (subject);
 CREATE INDEX IF NOT EXISTS idx_events_owner ON events (owner_contract_id, owner_event_name);
 CREATE INDEX IF NOT EXISTS idx_events_publisher_deployment ON events (publisher_deployment_id);

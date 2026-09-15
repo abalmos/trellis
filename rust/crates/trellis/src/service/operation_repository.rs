@@ -22,8 +22,6 @@ pub const MAX_OPERATION_SIGNALS: usize = 100;
 pub const MAX_OPERATION_SIGNAL_BYTES: usize = 64 * 1024;
 /// Maximum encoded size of one complete operation record.
 pub const MAX_OPERATION_RECORD_BYTES: usize = 1024 * 1024;
-/// Legacy seven-day duration value; active operations are not duration-limited.
-pub const MAX_OPERATION_DURATION_MS: i64 = 7 * 24 * 60 * 60 * 1_000;
 /// Complete durable identity, ownership, and lifecycle record for one invocation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

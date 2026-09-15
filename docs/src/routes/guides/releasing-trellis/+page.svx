@@ -125,6 +125,18 @@ The JSR publish set is:
 
 The workflow runs JSR dry-runs for the publishable core packages before the release gate. The source `@qlever-llc/trellis-svelte` package is built and smoke-tested before release, then staged and published after the matching core JSR version is available; a prepublication JSR dry-run cannot resolve that unreleased dependency.
 
+### Database schema baselines
+
+Before the first release, each independently migrated schema has exactly one
+initialization migration. Schema changes edit that baseline in place and use
+fresh development and test databases; do not append migrations to carry an
+earlier pre-release database forward, and older pre-release schema revisions are
+unsupported. The migration runners, history/checksum validation, checks, and
+baseline files are retained infrastructure, and ordinary restarts of a database
+created from the current baseline keep their data without reapplying schema. At
+the first release, freeze each shipped baseline; from then on, schema changes
+add new ordered migrations instead of editing a shipped one.
+
 ## 1. Pick the release
 
 Identify the previous release tag and choose the next version.

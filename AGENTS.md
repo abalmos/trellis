@@ -32,6 +32,12 @@
   dual-write behavior for a breaking change, ask whether a compatibility path is
   actually wanted. Prefer a clean break unless the user asks for compatibility
   or persisted data or shipped behavior requires it.
+- Before the first release, each independently migrated schema keeps exactly one
+  initialization migration: edit that baseline in place for schema changes and
+  use fresh development and test databases instead of appending migrations to
+  carry an earlier pre-release database forward. Keep the migration runners,
+  history/checksum validation, checks, and baseline files. At the first release,
+  freeze each shipped baseline; later schema changes add ordered migrations.
 - Preserve the platform boundary from `design/core/trellis-patterns.md`: the
   Trellis platform repo owns runtime, protocol, tooling, and Trellis-owned
   contracts; cloud repos own domain services, apps, and domain models unless a
