@@ -1605,6 +1605,14 @@ impl AuthRpcProcessor {
         if issued.state != super::context::AuthorizationContextState::Active {
             return Err(AuthorizationStateError::NotAuthorized);
         }
+        // The runtime proof key is the key bound into the issued context, which
+        // may differ from the durable login credential that authorized it.
+        if issued.principal_id != validated.principal_id
+            || issued.participant_id != validated.context.participant_id()
+            || issued.session_public_key != validated.session_public_key
+        {
+            return Err(AuthorizationStateError::NotAuthorized);
+        }
         let installed = self
             .service
             .repository()
@@ -1620,7 +1628,6 @@ impl AuthRpcProcessor {
                     .ok_or(AuthorizationStateError::SessionMissing)?;
                 if session.principal_id != validated.principal_id
                     || session.participant_id != validated.context.participant_id()
-                    || session.session_public_key != validated.session_public_key
                 {
                     return Err(AuthorizationStateError::NotAuthorized);
                 }

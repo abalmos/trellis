@@ -978,7 +978,8 @@ pub struct PlatformTtlConfig {
     /// Device flow TTL.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_flow: Option<u64>,
-    /// Pending auth TTL.
+    /// Pending auth TTL in milliseconds (default 900000, maximum 86400000,
+    /// matching browser-flow record retention).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_auth: Option<u64>,
     /// Connection tracking TTL.

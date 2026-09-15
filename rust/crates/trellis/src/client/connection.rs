@@ -1205,7 +1205,8 @@ impl TrellisClient {
         let installation = Arc::new(SessionAuth::from_seed_base64url(
             opts.credentials.session_key_seed_base64url,
         )?);
-        let auth = SessionAuth::from_seed_base64url(opts.credentials.session_key_seed_base64url)?;
+        let (context_seed, _) = crate::auth::generate_session_keypair();
+        let auth = SessionAuth::from_seed_base64url(&context_seed)?;
         let authorization_contexts = AuthorizationContextCache::new(
             opts.trellis_url,
             opts.participant_id.to_owned(),

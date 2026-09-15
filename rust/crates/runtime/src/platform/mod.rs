@@ -34,6 +34,29 @@ use auth_callout::{AuthCallout, CalloutKeys};
 use auth_operation::AuthOperationRuntime;
 use auth_post_commit::{AuthEventPublisher, AuthPostCommitRuntime};
 
+/// Browser-flow records are retained for one day, so a configured pending-auth
+/// TTL beyond that would advertise flows after their record has expired.
+const BROWSER_FLOW_TTL_MAX_MS: i64 = 86_400_000;
+
+/// Resolve the configured browser-flow TTL, bounded by the positive check and
+/// the browser-flow record retention window.
+fn browser_flow_ttl_ms(config: &RuntimeConfig) -> Result<i64, RuntimeError> {
+    let Some(ttl) = config
+        .platform
+        .as_ref()
+        .and_then(|platform| platform.ttl_ms.as_ref())
+        .and_then(|ttl| ttl.pending_auth)
+    else {
+        return Ok(15 * 60_000);
+    };
+    match i64::try_from(ttl) {
+        Ok(ttl) if ttl > 0 && ttl <= BROWSER_FLOW_TTL_MAX_MS => Ok(ttl),
+        _ => Err(RuntimeError::Platform(format!(
+            "platform.ttl_ms.pending_auth must be a positive millisecond value no greater than {BROWSER_FLOW_TTL_MAX_MS}"
+        ))),
+    }
+}
+
 pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, RuntimeError> {
     let _owner = context.owner(crate::ownership::OwnerGroup::Platform)?;
     let auth_store = SqliteAuthorizationStore::open(context.stores.platform()?)?;
@@ -303,24 +326,13 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     )
     .await?;
     let http = context.config.http.as_ref();
-    let browser_flow_ttl_ms = match context
-        .config
-        .platform
-        .as_ref()
-        .and_then(|platform| platform.ttl_ms.as_ref())
-        .and_then(|ttl| ttl.pending_auth)
-    {
-        Some(ttl) => match i64::try_from(ttl) {
-            Ok(ttl) if ttl > 0 => ttl,
-            _ => {
-                stop.stop();
-                validator_join.abort();
-                return Err(RuntimeError::Platform(
-                    "platform.ttl_ms.pending_auth must be a positive millisecond value".to_owned(),
-                ));
-            }
-        },
-        None => 15 * 60_000,
+    let browser_flow_ttl_ms = match browser_flow_ttl_ms(&context.config) {
+        Ok(ttl) => ttl,
+        Err(error) => {
+            stop.stop();
+            validator_join.abort();
+            return Err(error);
+        }
     };
     let oidc_providers =
         match auth::discover_oidc_providers(context.config.oauth.as_ref(), &public_origin).await {
@@ -922,6 +934,26 @@ fn advertised_endpoints(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_flow_ttl_is_positive_and_bounded_by_record_retention() {
+        let with_ttl = |value: u64| {
+            RuntimeConfig::from_toml_str(&format!("[platform.ttl_ms]\npending_auth = {value}\n"))
+                .expect("valid TOML")
+        };
+        let default = RuntimeConfig::from_toml_str("").expect("empty config");
+        assert_eq!(browser_flow_ttl_ms(&default).expect("default"), 15 * 60_000);
+        assert_eq!(
+            browser_flow_ttl_ms(&with_ttl(5_000)).expect("short test ttl"),
+            5_000
+        );
+        assert_eq!(
+            browser_flow_ttl_ms(&with_ttl(86_400_000)).expect("retention bound"),
+            86_400_000
+        );
+        assert!(browser_flow_ttl_ms(&with_ttl(0)).is_err());
+        assert!(browser_flow_ttl_ms(&with_ttl(86_400_001)).is_err());
+    }
 
     fn config_with_client_endpoints() -> RuntimeConfig {
         RuntimeConfig::from_toml_str(

@@ -15,6 +15,7 @@ import {
   createDeviceActivationSignInRequiredView,
   createInvalidDeviceActivationView,
   type DeviceActivationView,
+  isDeviceActivationReviewerRequiredFailure,
   mapDeviceActivationFailure,
   mapDeviceActivationProgress,
   mapDeviceActivationTerminal,
@@ -420,9 +421,12 @@ export class DeviceActivationControllerCore {
               confirmationCode,
               companionApproval: buildCompanionApproval(companionConsent),
             });
-          } catch {
-            // The signed-in user cannot decide this activation; a reviewer
-            // with the activation capability completes it later.
+          } catch (error) {
+            // Only a permission outcome means a reviewer must decide later;
+            // malformed, stale, or transport failures stay visible/retryable.
+            if (!isDeviceActivationReviewerRequiredFailure(error)) {
+              throw error;
+            }
           }
         }
       }

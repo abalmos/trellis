@@ -345,7 +345,37 @@ where
             .try_into()
             .map_err(|_| AuthorizationStateError::Storage("current time exceeds i64".to_owned()))?;
         let retry_portal_id = binding.portal_id.clone();
-        let result = if !provider_allowed || batch.policy.is_none() {
+        // With no override, the unchanged ordinary default remains the effective
+        // policy: eligibility over the installed vocabulary that the binding was
+        // consented under. Companion children stay strict and a binding whose
+        // recorded policy no longer applies is revoked.
+        let default_authority = if batch.policy.is_none()
+            && !self
+                .service
+                .repository()
+                .is_companion_participant(binding.participant_id.clone())
+                .await?
+        {
+            let (_, participant) = self
+                .service
+                .repository()
+                .get_installed_participant_record(
+                    binding.participant_id.clone(),
+                    Some(current.installed_revision),
+                )
+                .await?
+                .ok_or(AuthorizationStateError::ParticipantMissing)?;
+            let selection = super::policy::default_portal_authority_selection(
+                &binding.portal_id,
+                &participant,
+            )?;
+            (current_provenance.effective_policy_digest == selection.effective_policy_digest)
+                .then_some((participant, selection))
+        } else {
+            None
+        };
+        let result = if !provider_allowed || (batch.policy.is_none() && default_authority.is_none())
+        {
             let request = json!({
                 "principalId": binding.principal_id,
                 "participantId": binding.participant_id,
@@ -362,6 +392,77 @@ where
                     current.revision,
                     batch.snapshot.clone(),
                     idempotency("portal.policy.revoke", &request_digest, &request, now)?,
+                )
+                .await
+                .map(|_| ())
+        } else if let Some((participant, selection)) = default_authority {
+            // Reduce existing approvals to what the unchanged default still
+            // makes eligible; never add an approval the user did not make.
+            let mut delegation_ceiling = selection.ceiling.clone();
+            delegation_ceiling.platform_privileges = current.platform_privileges.clone();
+            let approved_capabilities = current
+                .approved_capabilities
+                .iter()
+                .filter(|capability| delegation_ceiling.capabilities.contains(capability))
+                .cloned()
+                .collect::<Vec<_>>();
+            let resolved = super::policy::resolve_authority(
+                &participant,
+                ApprovalMode::Capabilities,
+                &approved_capabilities,
+                &current.approved_resources,
+                &current.platform_privileges,
+                &delegation_ceiling,
+                (&[], true),
+            )?;
+            let grants = resolved.exact_grants;
+            let platform_privileges = resolved.platform_privileges;
+            let provenance = PortalGrantProvenance {
+                portal_id: binding.portal_id.clone(),
+                provider_id: binding.provider_id.clone(),
+                roles: binding.roles.clone(),
+                effective_policy_digest: selection.effective_policy_digest.clone(),
+            };
+            if current.grants == grants
+                && current.platform_privileges == platform_privileges
+                && current.approved_capabilities == approved_capabilities
+                && current.delegation_ceiling == delegation_ceiling
+                && current.provenance.as_ref() == Some(&provenance)
+            {
+                return Ok(());
+            }
+            let request = json!({
+                "principalId": binding.principal_id,
+                "participantId": binding.participant_id,
+                "expectedRevision": current.revision,
+                "effectivePolicyDigest": selection.effective_policy_digest,
+            });
+            let request_digest = trellis_protocol::digest_json(&request)
+                .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
+            self.service
+                .repository()
+                .set_portal_grant_binding(
+                    GrantBindingReplacement {
+                        owner_kind: GrantOwnerKind::User,
+                        owner_id: binding.principal_id,
+                        participant_id: binding.participant_id,
+                        installed_revision: current.installed_revision,
+                        grants,
+                        approval_mode: ApprovalMode::Capabilities,
+                        approved_capabilities,
+                        approved_resources: current.approved_resources,
+                        delegation_ceiling,
+                        approval_decision_digest: request_digest.clone(),
+                        companion_approved: current.companion_approved,
+                        platform_privileges,
+                        state: GrantBindingState::Active,
+                        expires_at: current.expires_at,
+                        provenance: Some(provenance),
+                        expected_revision: current.revision,
+                        expected_current_installed_revision: None,
+                    },
+                    batch.snapshot.clone(),
+                    idempotency("portal.policy.replace", &request_digest, &request, now)?,
                 )
                 .await
                 .map(|_| ())
@@ -977,6 +1078,201 @@ mod tests {
                 .await
                 .unwrap(),
             Some(manual.clone())
+        );
+    }
+
+    #[tokio::test]
+    async fn ordinary_default_binding_survives_reconciliation_and_narrows() {
+        const NOW: i64 = 1_700_000_000_000;
+        let proof = |purpose: &str| IdempotencyResultRecord {
+            scope_key: trellis_protocol::digest_json(&json!([purpose])).unwrap(),
+            purpose: purpose.to_owned(),
+            signer_id: "test".to_owned(),
+            request_id: purpose.to_owned(),
+            request_digest: trellis_protocol::digest_json(&json!({ "purpose": purpose })).unwrap(),
+            result: Value::Null,
+            created_at: NOW,
+            expires_at: NOW + 60_000,
+        };
+        let store = SqliteAuthorizationStore::open_in_memory().unwrap();
+        let mut participant = builtins::cli_participant_binding(NOW).unwrap();
+        participant.projection.optional_capability_definitions = participant
+            .projection
+            .referenced_apis
+            .values()
+            .flat_map(|api| api.capabilities.iter())
+            .take(1)
+            .map(|(id, capability)| (id.clone(), GrantSet::new(capability.allows.clone())))
+            .collect();
+        let participant_id = participant.participant_id.clone();
+        store.put_participant_binding(participant).await.unwrap();
+        store
+            .create_user_account(AccountCreation {
+                principal: PrincipalRecord {
+                    principal_id: "usr_default_reconcile".to_owned(),
+                    kind: PrincipalKind::User,
+                    state: PrincipalState::Active,
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                    disabled_at: None,
+                    revoked_at: None,
+                },
+                profile: UserProfileRecord {
+                    principal_id: "usr_default_reconcile".to_owned(),
+                    display_name: None,
+                    email: None,
+                    image_url: None,
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                },
+                credential: None::<LocalCredentialRecord>,
+                identity: None,
+                idempotency: proof("default.account.create"),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let portal = LoginPortalRecord {
+            portal_id: "portal-default".to_owned(),
+            display_name: "Portal".to_owned(),
+            entry_url: None,
+            builtin: false,
+            disabled: false,
+            removed: false,
+            local_registration_enabled: false,
+            provider_ids: vec!["local".to_owned()],
+            created_at: NOW,
+            updated_at: NOW,
+            version: 1,
+        };
+        let settings = LoginSettingsRecord {
+            portal_id: portal.portal_id.clone(),
+            default_provider_id: Some("local".to_owned()),
+            local_login_enabled: true,
+            federated_registration_enabled: false,
+            provider_selection_enabled: false,
+            updated_at: NOW,
+            version: 1,
+        };
+        store
+            .put_login_portal(LoginPortalMutation {
+                portal: portal.clone(),
+                settings,
+                expected_version: None,
+                idempotency: proof("default.portal.create"),
+                actions: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let (_, installed) = store
+            .get_installed_participant_record(participant_id.clone(), Some(1))
+            .await
+            .unwrap()
+            .unwrap();
+        let selection = crate::platform::auth::policy::default_portal_authority_selection(
+            &portal.portal_id,
+            &installed,
+        )
+        .unwrap();
+        let approved_capabilities = selection
+            .ceiling
+            .capabilities
+            .iter()
+            .take(1)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(approved_capabilities.len(), 1);
+        let resolved = resolve_authority(
+            &installed,
+            ApprovalMode::Capabilities,
+            &approved_capabilities,
+            &[],
+            &[],
+            &selection.ceiling,
+            (&[], true),
+        )
+        .unwrap();
+        store
+            .set_grant_binding(
+                GrantBindingReplacement {
+                    owner_kind: GrantOwnerKind::User,
+                    owner_id: "usr_default_reconcile".to_owned(),
+                    participant_id: participant_id.clone(),
+                    installed_revision: 1,
+                    grants: resolved.exact_grants.clone(),
+                    approval_mode: ApprovalMode::Capabilities,
+                    approved_capabilities: approved_capabilities.clone(),
+                    approved_resources: Vec::new(),
+                    delegation_ceiling: selection.ceiling.clone(),
+                    approval_decision_digest: "A".repeat(43),
+                    companion_approved: false,
+                    platform_privileges: Vec::new(),
+                    state: GrantBindingState::Active,
+                    expires_at: None,
+                    provenance: Some(PortalGrantProvenance {
+                        portal_id: portal.portal_id.clone(),
+                        provider_id: "local".to_owned(),
+                        roles: Vec::new(),
+                        effective_policy_digest: selection.effective_policy_digest.clone(),
+                    }),
+                    expected_revision: 0,
+                    expected_current_installed_revision: None,
+                },
+                proof("default.binding.create"),
+            )
+            .await
+            .unwrap();
+        let service = AuthService::new(store.clone(), AuthServiceConfig::default()).unwrap();
+        let (_, worker) = portal_policy_reconciliation(service);
+        worker.reconcile_startup().await.unwrap();
+        let survived = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                "usr_default_reconcile".to_owned(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(survived.state, GrantBindingState::Active);
+        assert_eq!(survived.approved_capabilities, approved_capabilities);
+        assert_eq!(survived.grants, resolved.exact_grants);
+
+        // A narrower override reduces the approved scope without adding scope.
+        store
+            .put_portal_grant_override(
+                PortalGrantOverrideRecord {
+                    portal_id: portal.portal_id.clone(),
+                    participant_id: participant_id.clone(),
+                    direct_capabilities: Vec::new(),
+                    capability_group_keys: Vec::new(),
+                    role_mappings: Vec::new(),
+                    created_at: NOW,
+                    updated_at: NOW,
+                    version: 1,
+                },
+                None,
+                proof("default.override.create"),
+            )
+            .await
+            .unwrap();
+        worker.reconcile_startup().await.unwrap();
+        let narrowed = store
+            .get_grant_binding(
+                GrantOwnerKind::User,
+                "usr_default_reconcile".to_owned(),
+                participant_id.clone(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(narrowed.state, GrantBindingState::Active);
+        assert!(narrowed.approved_capabilities.is_empty());
+        assert!(
+            narrowed.grants.permissions().len() < survived.grants.permissions().len(),
+            "narrowing must reduce the granted scope"
         );
     }
 }
