@@ -332,13 +332,14 @@ async fn users_show_command(format: OutputFormat, args: &UserRefArgs) -> miette:
 async fn users_create_command(format: OutputFormat, args: &UserCreateArgs) -> miette::Result<()> {
     let (_state, connected) = connect_authenticated_cli_client().await?;
     let auth_client = AuthClient::from_generated(connected.clone());
-    let _username = trimmed_optional(&args.username)
+    let username = trimmed_optional(&args.username)
         .ok_or_else(|| miette::miette!("--username is required to create a local user"))?;
     let user = auth_client
         .users_create(&auth_types::AuthUsersCreateRequest {
             email: wire(trimmed_optional(&args.email))?,
             name: wire(trimmed_optional(&args.name))?,
             image: wire(None::<String>)?,
+            username: wire(Some(username))?,
             idempotency_key: wire(cli_idempotency_key())?,
         })
         .await

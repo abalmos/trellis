@@ -17,7 +17,7 @@ pub enum LocalAuthentication {
     Denied,
 }
 
-/// Administrator input for a credential-less user account.
+/// Administrator input for a user account, optionally bound to a local login.
 #[derive(Clone, Debug)]
 pub struct CreateUserInput {
     /// Required-nullable display name.
@@ -26,6 +26,8 @@ pub struct CreateUserInput {
     pub email: Option<String>,
     /// Required-nullable image URL.
     pub image: Option<String>,
+    /// Optional bound local identity username, created without a password.
+    pub username: Option<String>,
     /// Creation time in Unix milliseconds.
     pub created_at: i64,
     /// Durable request proof and replay result.
@@ -543,6 +545,7 @@ where
         } = input;
         super::validation::validate_idempotency_and_actions(&idempotency, &actions)?;
         super::super::domain::require_protocol_timestamp("consumedAt", consumed_at)?;
+        let username = username.filter(|username| !username.trim().is_empty());
         let token_hash = bearer_secret_digest(&token)?;
         let flow = self
             .repository
@@ -765,15 +768,38 @@ where
             updated_at: input.created_at,
             version: 1,
         };
-        super::validation::validate_new_user_account(&principal, &profile, None, None)?;
+        let (credential, identity) = match input.username.as_deref() {
+            Some(username) => {
+                let credential = super::super::account::bound_local_credential(
+                    principal_id.clone(),
+                    username,
+                    input.created_at,
+                )?;
+                let identity = super::super::ProviderIdentityLink {
+                    provider: "local".to_owned(),
+                    provider_subject: credential.normalized_username.clone(),
+                    principal_id: principal_id.clone(),
+                    linked_at: input.created_at,
+                    last_seen_at: input.created_at,
+                };
+                (Some(credential), Some(identity))
+            }
+            None => (None, None),
+        };
+        super::validation::validate_new_user_account(
+            &principal,
+            &profile,
+            credential.as_ref(),
+            identity.as_ref(),
+        )?;
         input.idempotency.result = json!({ "principalId": principal_id });
         match self
             .repository
             .create_user_account(AccountCreation {
                 principal: principal.clone(),
                 profile: profile.clone(),
-                credential: None,
-                identity: None,
+                credential,
+                identity,
                 idempotency: input.idempotency,
                 actions: input.actions,
             })

@@ -1,7 +1,7 @@
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::{Algorithm, Argon2, Params, Version};
 
-use super::AuthorizationStateError;
+use super::{AuthorizationStateError, LocalCredentialRecord};
 
 const HASH_PROFILE: u32 = 1;
 const MEMORY_KIB: u32 = 19_456;
@@ -20,6 +20,31 @@ pub(super) fn normalize_username(value: &str) -> Result<String, AuthorizationSta
         ));
     }
     Ok(normalized)
+}
+
+/// Build the bound local identity for a newly created user: the login name is
+/// reserved, but no password is set until a password setup or reset completes.
+pub(super) fn bound_local_credential(
+    principal_id: String,
+    username: &str,
+    now: i64,
+) -> Result<LocalCredentialRecord, AuthorizationStateError> {
+    // Reserve the login name with a secret placeholder no caller knows, so
+    // authentication fails until a password setup or reset completes.
+    let (placeholder_seed, _) = trellis_rs::auth::generate_session_keypair();
+    let (password_hash, hash_profile) =
+        hash_password(&placeholder_seed, Some(MIN_PASSWORD_LENGTH))?;
+    Ok(LocalCredentialRecord {
+        principal_id,
+        normalized_username: normalize_username(username)?,
+        password_hash,
+        hash_profile,
+        failed_attempts: 0,
+        locked_until: None,
+        password_changed_at: now,
+        updated_at: now,
+        version: 1,
+    })
 }
 
 pub(super) fn hash_password(
@@ -70,7 +95,7 @@ fn password_hasher() -> Result<Argon2<'static>, AuthorizationStateError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hash_password, normalize_username, verify_password};
+    use super::{bound_local_credential, hash_password, normalize_username, verify_password};
 
     #[test]
     fn password_profile_round_trips_and_rejects_wrong_password() {
@@ -90,5 +115,16 @@ mod tests {
         assert!(hash_password("short", None).is_err());
         assert!(hash_password("long-enough", Some(7)).is_err());
         assert!(!verify_password("not-a-phc-hash", "anything"));
+    }
+
+    #[test]
+    fn bound_local_identity_reserves_username_without_a_known_password() {
+        let credential =
+            bound_local_credential("usr_test".to_owned(), "  Alice ", 1_700_000_000_000).unwrap();
+        assert_eq!(credential.normalized_username, "alice");
+        assert!(!credential.password_hash.is_empty());
+        assert!(!verify_password(&credential.password_hash, "anything"));
+        assert!(!verify_password(&credential.password_hash, "alice"));
+        assert!(bound_local_credential("usr_test".to_owned(), "   ", 0).is_err());
     }
 }

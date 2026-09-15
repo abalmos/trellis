@@ -443,31 +443,6 @@ fn digest_parts(parts: &[&str]) -> String {
     URL_SAFE_NO_PAD.encode(digest.finalize())
 }
 
-fn session_revocation_actions(
-    scope: &str,
-    request_id: &str,
-    now: i64,
-    payload: Value,
-) -> Vec<PostCommitActionRecord> {
-    [
-        (PostCommitActionKind::Event, "event"),
-        (PostCommitActionKind::Kick, "kick"),
-    ]
-    .into_iter()
-    .map(|(kind, suffix)| PostCommitActionRecord {
-        predecessor_action_id: None,
-        action_id: digest_parts(&[scope, request_id, suffix]),
-        kind,
-        payload: payload.clone(),
-        created_at: now,
-        attempts: 0,
-        next_attempt_at: now,
-        claimed_until: None,
-        last_error: None,
-    })
-    .collect()
-}
-
 fn proof_request_digest(raw: &Value) -> Result<String, trellis_protocol::ProtocolError> {
     session_proof_request_digest(raw)
 }

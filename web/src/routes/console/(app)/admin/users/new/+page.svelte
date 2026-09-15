@@ -112,12 +112,13 @@
     return { href };
   }
 
-  function buildCreateInput(_username: string): apis.auth.UsersCreateInput {
+  function buildCreateInput(username: string): apis.auth.UsersCreateInput {
     return {
       email: trimmedOptional(email) ?? null,
       idempotencyKey: ulid(),
       image: null,
       name: trimmedOptional(name) ?? null,
+      username,
     };
   }
 

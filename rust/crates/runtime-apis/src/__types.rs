@@ -18610,6 +18610,7 @@ pub mod trellis {
         pub idempotency_key: crate::__types::trellis::AuthUsersCreateRequestIdempotencyKey,
         pub image: crate::__types::Nullable<String>,
         pub name: crate::__types::Nullable<String>,
+        pub username: crate::__types::Nullable<String>,
     }
     #[derive(
         Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,

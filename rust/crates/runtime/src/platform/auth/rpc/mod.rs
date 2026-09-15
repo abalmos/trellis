@@ -2349,6 +2349,7 @@ impl AuthRpcProcessor {
                 name: nullable_string(&input, "name")?,
                 email: nullable_string(&input, "email")?,
                 image: nullable_string(&input, "image")?,
+                username: nullable_string(&input, "username")?,
                 created_at: now,
                 idempotency: rpc_idempotency(
                     "Auth.Users.Create",

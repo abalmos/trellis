@@ -5782,6 +5782,7 @@ export type AuthUsersCreateRequest = {
 	readonly idempotencyKey: AuthUsersCreateRequestIdempotencyKey;
 	readonly image: string | null;
 	readonly name: string | null;
+	readonly username: string | null;
 	readonly [key: string]: unknown;
 };
 export declare const AuthUsersCreateRequestCodec: {
