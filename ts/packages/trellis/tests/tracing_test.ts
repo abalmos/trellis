@@ -28,7 +28,7 @@ Deno.test("Telemetry Module", async (t) => {
       async () => {
         const { startClientSpan, SpanKind } = await import("../telemetry.ts");
 
-        const span = startClientSpan("TestMethod", "test.subject");
+        const span = startClientSpan("auth.Sessions.Me");
 
         assertExists(span);
         assertExists(span.spanContext());
@@ -45,7 +45,7 @@ Deno.test("Telemetry Module", async (t) => {
       async () => {
         const { startServerSpan, SpanKind } = await import("../telemetry.ts");
 
-        const span = startServerSpan("TestMethod", "test.subject");
+        const span = startServerSpan("auth.Sessions.Me");
 
         assertExists(span);
         assertExists(span.spanContext());
@@ -69,7 +69,7 @@ Deno.test("Telemetry Module", async (t) => {
         } = await import("../telemetry.ts");
 
         // Create a "client" span that would inject context
-        const clientSpan = startClientSpan("ClientMethod", "client.subject");
+        const clientSpan = startClientSpan("auth.Sessions.Me");
         const carrier = createMapCarrier();
 
         // Inject the client's trace context into the carrier
@@ -80,8 +80,7 @@ Deno.test("Telemetry Module", async (t) => {
 
         // Create server span with parent context
         const serverSpan = startServerSpan(
-          "ServerMethod",
-          "server.subject",
+          "auth.Sessions.Me",
           parentContext,
         );
 
@@ -108,7 +107,7 @@ Deno.test("Telemetry Module", async (t) => {
           createMapCarrier,
         } = await import("../telemetry.ts");
 
-        const span = startClientSpan("TestMethod", "test.subject");
+        const span = startClientSpan("auth.Sessions.Me");
         const carrier = createMapCarrier();
 
         // Inject trace context while span is active
@@ -151,7 +150,7 @@ Deno.test("Telemetry Module", async (t) => {
         "../telemetry.ts"
       );
 
-      const span = startClientSpan("TestMethod", "test.subject");
+      const span = startClientSpan("auth.Sessions.Me");
       span.setStatus({ code: SpanStatusCode.OK });
 
       // Should not throw
@@ -166,7 +165,7 @@ Deno.test("Telemetry Module", async (t) => {
           "../telemetry.ts"
         );
 
-        const span = startClientSpan("TestMethod", "test.subject");
+        const span = startClientSpan("auth.Sessions.Me");
         span.setStatus({ code: SpanStatusCode.ERROR, message: "Test error" });
 
         // Should not throw
@@ -178,7 +177,7 @@ Deno.test("Telemetry Module", async (t) => {
     await t.step("span should allow recording exceptions", async () => {
       const { startClientSpan } = await import("../telemetry.ts");
 
-      const span = startClientSpan("TestMethod", "test.subject");
+      const span = startClientSpan("auth.Sessions.Me");
       span.recordException(new Error("Test exception"));
 
       // Should not throw
@@ -255,7 +254,7 @@ Deno.test("Telemetry Module", async (t) => {
         "../telemetry.ts"
       );
 
-      const span = startClientSpan("TestMethod", "test.subject");
+      const span = startClientSpan("auth.Sessions.Me");
 
       // Run code within the span's context
       await withSpan(span, async () => {
@@ -276,4 +275,46 @@ Deno.test({
     const { initTelemetry } = await import("../telemetry.ts");
     initTelemetry("no-env-permission-service");
   },
+});
+
+Deno.test("catalog route tokens and recorders stay bounded", async (t) => {
+  const {
+    recordCatalogCounter,
+    recordCatalogDuration,
+    recordCatalogUpDown,
+    routeToken,
+  } = await import("../telemetry.ts");
+
+  await t.step("registered tokens are stable and interned", () => {
+    const first = routeToken("rpc", "auth.Sessions.Me");
+    assertEquals(first, "auth.Sessions.Me");
+    assertEquals(routeToken("rpc", "auth.Sessions.Me"), first);
+  });
+
+  await t.step("overlong and overflow tokens map to _other", () => {
+    assertEquals(routeToken("http", "x".repeat(129)), "_other");
+    for (let index = 0; index < 200; index += 1) {
+      routeToken("job", `bounded.job.${index}`);
+    }
+    assertEquals(routeToken("job", "bounded.job.overflow"), "_other");
+  });
+
+  await t.step("recorders accept only bounded attributes", () => {
+    recordCatalogDuration("trellis.rpc.client.duration", 12.5, {
+      "trellis.route": "auth.Sessions.Me",
+      "trellis.outcome": "ok",
+      "messaging.destination": "rpc.v1.secret",
+    });
+    recordCatalogCounter("trellis.rpc.client.attempts", 1, {
+      "trellis.route": "auth.Sessions.Me",
+      "trellis.outcome": "ok",
+    });
+    recordCatalogUpDown("trellis.rpc.server.inflight", 1, {
+      "trellis.route": "auth.Sessions.Me",
+    });
+    recordCatalogDuration("trellis.rpc.client.duration", 1, {
+      "trellis.route": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    });
+    assertEquals(true, true);
+  });
 });

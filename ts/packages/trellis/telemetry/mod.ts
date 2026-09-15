@@ -33,8 +33,20 @@ export {
   buildTrellisDurationMetricAttributes,
   buildTrellisErrorMetricAttributes,
   getTrellisMeter,
+  recordCatalogCounter,
+  recordCatalogDuration,
+  recordCatalogUpDown,
+  recordRpcAttempt,
   recordTrellisDuration,
   recordTrellisError,
+  routeToken,
+  UNKNOWN_ROUTE,
+} from "./metrics.ts";
+export type {
+  TrellisCatalogCounter,
+  TrellisCatalogDuration,
+  TrellisCatalogUpDown,
+  TrellisRouteFamily,
 } from "./metrics.ts";
 export type {
   TrellisDurationMetricAttributes,
@@ -48,4 +60,5 @@ export {
   getTrellisTracer,
   startClientSpan,
   startServerSpan,
+  trellisRoute,
 } from "./trellis.ts";
