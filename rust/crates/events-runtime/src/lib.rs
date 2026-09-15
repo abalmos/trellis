@@ -10,6 +10,7 @@ mod projector;
 mod query;
 mod router;
 pub mod storage;
+pub mod telemetry;
 mod watch;
 mod wire;
 

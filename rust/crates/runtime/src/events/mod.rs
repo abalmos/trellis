@@ -349,6 +349,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     let mut replay_dispatcher = start_replay_dispatcher(context.trellis_nats.clone(), journal)
         .await
         .map_err(runtime_error)?;
+    let sampler_store = store.clone();
     let mut advisories = start_exhaustion_advisory_loop(
         context.trellis_nats.clone(),
         crate::resources::JOBS_ADVISORIES_STREAM,
@@ -387,6 +388,10 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             tokio::select! {
                 biased;
                 () = task_stop.stopped() => Ok(()),
+                _ = crate::telemetry::snapshots::run_events_sampler(
+                    sampler_store,
+                    task_stop.clone(),
+                ) => Ok(()),
                 result = &mut api_loop => result.map_err(runtime_error),
                 result = projector.wait() => {
                     projector.discard_completed();

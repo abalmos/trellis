@@ -14,6 +14,7 @@ use trellis_rs::telemetry::KeyValue;
 
 use crate::platform::auth::{AuthorizationStateError, SqliteAuthorizationStore};
 use crate::shutdown::StopHandle;
+use trellis_events_runtime::storage::EventsStore;
 use trellis_jobs_runtime::storage::SqliteJobsStore;
 
 /// Snapshot poll interval.
@@ -156,6 +157,37 @@ pub(crate) async fn run_jobs_sampler(store: SqliteJobsStore, stop: StopHandle) {
             Err(_) => {
                 record_failure("jobs", "timeout");
             }
+        }
+    }
+}
+
+/// Runs the Events dead-letter snapshot sampler until the runtime stops.
+pub(crate) async fn run_events_sampler(store: EventsStore, stop: StopHandle) {
+    let source = SnapshotSource::register("events_dlq", &[ObservableFamily::DeadLetters]);
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(SAMPLER_INTERVAL) => {}
+            _ = stop.stopped() => return,
+        }
+        match store.telemetry_snapshot() {
+            Ok(snapshot) => source.publish(vec![
+                (
+                    ObservableFamily::DeadLetters,
+                    snapshot.open as f64,
+                    vec![KeyValue::new("trellis.state", "open")],
+                ),
+                (
+                    ObservableFamily::DeadLetters,
+                    snapshot.replay_pending as f64,
+                    vec![KeyValue::new("trellis.state", "replay_pending")],
+                ),
+                (
+                    ObservableFamily::DeadLetters,
+                    snapshot.replaying as f64,
+                    vec![KeyValue::new("trellis.state", "replaying")],
+                ),
+            ]),
+            Err(_) => record_failure("events_dlq", "io"),
         }
     }
 }
