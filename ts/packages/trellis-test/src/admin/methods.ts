@@ -129,6 +129,14 @@ export const adminMethods = {
     apis.auth.API.actions["rpc:ServiceInstances.Provision"],
     (client, input) => client.serviceInstancesProvision(input).orThrow(),
   ),
+  authUsersCreate: adminMethod(
+    apis.auth.API.actions["rpc:Users.Create"],
+    (client, input) => client.usersCreate(input).orThrow(),
+  ),
+  authUsersPasswordResetCreate: adminMethod(
+    apis.auth.API.actions["rpc:Users.PasswordReset.Create"],
+    (client, input) => client.usersPasswordResetCreate(input).orThrow(),
+  ),
   authServiceInstancesDisable: adminMethod(
     apis.auth.API.actions["rpc:ServiceInstances.Disable"],
     (client, input) => client.serviceInstancesDisable(input).orThrow(),
