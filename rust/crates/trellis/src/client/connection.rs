@@ -1329,22 +1329,113 @@ impl TrellisClient {
         subject: &str,
         payload: Bytes,
     ) -> Result<async_nats::Message, TrellisClientError> {
-        // Create the exact reply inbox before signing so the proof binds the
-        // reply subject the response arrives on.
-        let nats = self.nats();
-        let reply = nats.new_inbox();
-        let headers = self.signed_headers(subject, &reply, &payload)?;
-        let request = async_nats::Request::new()
-            .inbox(reply)
-            .headers(headers)
-            .payload(payload);
+        self.request_routed(
+            subject,
+            payload,
+            crate::telemetry::instruments::unknown_route(),
+        )
+        .await
+    }
 
-        let future = nats.send_request(subject.to_string(), request);
-        let message = timeout(std::time::Duration::from_millis(self.timeout_ms), future)
-            .await
-            .map_err(|_| TrellisClientError::Timeout)?
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-        Ok(message)
+    /// One request transport attempt with a caller span and catalog metrics.
+    ///
+    /// `route` is the bounded registered token supplied by the typed caller;
+    /// raw callers pass `_unknown`. The caller span covers the whole logical
+    /// call from the typed facade, and each transport attempt records one
+    /// attempt counter sample.
+    pub(crate) async fn request_routed(
+        &self,
+        subject: &str,
+        payload: Bytes,
+        route: &'static str,
+    ) -> Result<async_nats::Message, TrellisClientError> {
+        use crate::telemetry::instruments::{CounterFamily, DurationFamily};
+        use crate::telemetry::lifecycle::Observation;
+        use crate::telemetry::propagation;
+        use tracing::Instrument as _;
+
+        let attributes = vec![crate::telemetry::KeyValue::new("trellis.route", route)];
+        let observation = Observation::start(DurationFamily::RpcClient, attributes, "cancelled");
+        let span = tracing::info_span!(
+            "trellis.rpc.client",
+            "trellis.route" = route,
+            "otel.kind" = "client",
+        );
+        let result = async {
+            // Create the exact reply inbox before signing so the proof binds the
+            // reply subject the response arrives on.
+            let nats = self.nats();
+            let reply = nats.new_inbox();
+            let mut headers = self.signed_headers(subject, &reply, &payload)?;
+            // Untrusted diagnostic metadata only; never part of the proof.
+            let mut trace_pairs = Vec::new();
+            propagation::inject_context(&opentelemetry::Context::current(), &mut trace_pairs);
+            for (key, value) in trace_pairs {
+                match key.as_str() {
+                    "traceparent" => {
+                        headers.insert("traceparent", value.as_str());
+                    }
+                    "tracestate" => {
+                        headers.insert("tracestate", value.as_str());
+                    }
+                    _ => {}
+                }
+            }
+            let request = async_nats::Request::new()
+                .inbox(reply)
+                .headers(headers)
+                .payload(payload);
+
+            let future = nats.send_request(subject.to_string(), request);
+            let message = timeout(std::time::Duration::from_millis(self.timeout_ms), future)
+                .await
+                .map_err(|_| TrellisClientError::Timeout)?
+                .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
+            Ok(message)
+        }
+        .instrument(span.clone())
+        .await;
+
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(error) => Self::client_outcome(error),
+        };
+        span.record("trellis.outcome", outcome);
+        observation.finish(outcome);
+        crate::telemetry::instruments::add_counter(
+            CounterFamily::RpcClientAttempts,
+            1,
+            &[
+                crate::telemetry::KeyValue::new("trellis.route", route),
+                crate::telemetry::KeyValue::new("trellis.outcome", outcome),
+            ],
+        );
+        result
+    }
+
+    /// Outcome classification for one client transport result.
+    fn client_outcome(error: &TrellisClientError) -> &'static str {
+        match error {
+            TrellisClientError::Timeout => "timeout",
+            TrellisClientError::Nats(_)
+            | TrellisClientError::NatsConnect(_)
+            | TrellisClientError::NatsRequest(_)
+            | TrellisClientError::BootstrapHttp { .. }
+            | TrellisClientError::AuthorizationUnavailable(_) => "unavailable",
+            TrellisClientError::RpcError(_) => "declared_error",
+            TrellisClientError::TransferCancelled => "cancelled",
+            TrellisClientError::Base64(_)
+            | TrellisClientError::InvalidSeedLen(_)
+            | TrellisClientError::Json(_)
+            | TrellisClientError::Codec(_)
+            | TrellisClientError::Subject(_)
+            | TrellisClientError::Bootstrap(_)
+            | TrellisClientError::OperationProtocol(_)
+            | TrellisClientError::TransferProtocol(_)
+            | TrellisClientError::EventSubscriptionProtocol(_)
+            | TrellisClientError::FeedProtocol(_) => "invalid",
+            _ => "error",
+        }
     }
 
     pub(crate) fn signed_headers(
@@ -1400,8 +1491,23 @@ impl TrellisClient {
     }
 
     async fn request_json(&self, subject: &str, body: Value) -> Result<Value, TrellisClientError> {
+        self.request_json_routed(
+            subject,
+            body,
+            crate::telemetry::instruments::unknown_route(),
+        )
+        .await
+    }
+
+    /// One JSON request with a bounded registered route token.
+    async fn request_json_routed(
+        &self,
+        subject: &str,
+        body: Value,
+        route: &'static str,
+    ) -> Result<Value, TrellisClientError> {
         let payload = Bytes::from(serde_json::to_vec(&body)?);
-        let message = self.request(subject, payload).await?;
+        let message = self.request_routed(subject, payload, route).await?;
 
         decode_json_message(message)
     }
@@ -1412,7 +1518,22 @@ impl TrellisClient {
         subject: &str,
         body: &Value,
     ) -> Result<Value, TrellisClientError> {
-        self.request_json(subject, body.clone()).await
+        self.request_json_routed(
+            subject,
+            body.clone(),
+            crate::telemetry::instruments::unknown_route(),
+        )
+        .await
+    }
+
+    /// Call one descriptor-backed subject with its bounded route token.
+    pub(crate) async fn request_json_value_routed(
+        &self,
+        subject: &str,
+        body: &Value,
+        route: &'static str,
+    ) -> Result<Value, TrellisClientError> {
+        self.request_json_routed(subject, body.clone(), route).await
     }
 
     /// Publish one descriptor-backed event.

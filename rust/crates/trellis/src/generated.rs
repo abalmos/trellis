@@ -650,7 +650,7 @@ impl Client {
         })?;
         let output = self
             .client
-            .request_json_value(
+            .request_json_value_routed(
                 &self
                     .client
                     .bound_api_subject("rpc", D::API_ID, D::KEY)
@@ -658,6 +658,10 @@ impl Client {
                         crate::client::CallError::from_client(error, D::decode_error)
                     })?,
                 &input,
+                crate::telemetry::instruments::route_token(
+                    crate::telemetry::instruments::RouteFamily::Rpc,
+                    &format!("{}:{}", D::API_ID, D::KEY),
+                ),
             )
             .await
             .map_err(|error| crate::client::CallError::from_client(error, D::decode_error))?;
