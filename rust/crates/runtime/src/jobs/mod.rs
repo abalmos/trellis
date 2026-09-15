@@ -170,11 +170,21 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         Arc::new(context.platform_verifier.get().cloned().ok_or_else(|| {
             RuntimeError::Platform("local authorization verifier is not ready".to_owned())
         })?);
+    let sampler_store = store.clone();
     let loops = RuntimeLoops::start(jobs_runtime, &resources, store, resolver).await?;
     let nats = context.trellis_nats.clone();
+    let sampler_nats = nats.clone();
     let join = tokio::spawn(async move {
         let _owner = owner;
         let mut loops = loops;
+        let samplers = crate::telemetry::snapshots::SamplerOwner::start(vec![Box::pin(
+            crate::telemetry::snapshots::run_jobs_sampler(
+                sampler_store,
+                sampler_nats,
+                resources.jobs_stream.clone(),
+                task_stop.clone(),
+            ),
+        )]);
         let api_loop =
             run_builtin_authenticated_router(nats, JOBS_API_ID, JOBS_SUBJECTS, router, validator);
         tokio::pin!(api_loop);
@@ -203,6 +213,8 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             }
         };
         task_stop.stop();
+        // Telemetry samplers own their tasks and never own business lifetime.
+        samplers.stop().await;
         loops.stop().await;
         if let Some(join) = validator_join {
             let _ = join.await;

@@ -1,5 +1,6 @@
 import type { NatsConnection } from "@nats-io/nats-core";
 import { logger as noopLogger, type LoggerLike } from "./globals.ts";
+import { recordCatalogCounter } from "./telemetry/metrics.ts";
 
 /** Identifies the Trellis runtime that owns a connection. */
 export type TrellisConnectionKind = "client" | "device" | "service";
@@ -235,6 +236,17 @@ export class TrellisConnection {
     ) {
       return;
     }
+
+    // Completed state changes are observed from the real authority transition
+    // owner; transport polls and retry logs never create samples. The live
+    // connection count is an observable gauge owned by each process registry.
+    recordCatalogCounter("trellis.connection.transitions", 1, {
+      "trellis.participant.kind": status.kind,
+      "trellis.reason": connectionTransitionReason(
+        status.phase,
+        this.#status.phase,
+      ),
+    });
 
     this.#status = status;
     this.#log.debug(
@@ -586,4 +598,27 @@ function normalizeTransportEvent(event: unknown): {
     ...("data" in record ? { data: record.data } : {}),
     ...("error" in record ? { error: record.error } : {}),
   };
+}
+
+/** Catalog transition reason for one completed phase change. */
+function connectionTransitionReason(
+  next: TrellisConnectionPhase,
+  previous: TrellisConnectionPhase,
+):
+  | "connected"
+  | "disconnect"
+  | "coverage_lost"
+  | "revoked"
+  | "refreshed"
+  | "resumed"
+  | "terminal"
+  | "closed" {
+  if (next === "closed") return "closed";
+  if (next === "error") return "terminal";
+  if (next === "connected") {
+    return previous === "disconnected" || previous === "reconnecting"
+      ? "resumed"
+      : "connected";
+  }
+  return "disconnect";
 }

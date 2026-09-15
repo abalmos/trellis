@@ -378,8 +378,15 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         return Err(error);
     }
     let task_stop = stop.clone();
+    let sampler_store = auth_store.clone();
+    let sampler_stop = stop.clone();
+    // Telemetry samplers own their tasks and never own business lifetime.
+    let samplers = crate::telemetry::snapshots::SamplerOwner::start(vec![Box::pin(async move {
+        let _ = crate::telemetry::snapshots::run_auth_sampler(sampler_store, sampler_stop).await;
+    })]);
     let join = tokio::spawn(async move {
-        tokio::select! {
+        let samplers = samplers;
+        let result = tokio::select! {
             result = portal_reconciliation_worker.run(task_stop.clone()) => {
                 result.map_err(|error| RuntimeError::Platform(error.to_string()))
             }
@@ -397,7 +404,10 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
                     ))),
                 }
             },
-        }
+        };
+        // Telemetry samplers own their tasks and never own business lifetime.
+        samplers.stop().await;
+        result
     });
 
     Ok(SubsystemHandle {

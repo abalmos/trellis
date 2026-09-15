@@ -41,6 +41,20 @@ import {
   type TrellisErrorMetricAttributes,
 } from "../../telemetry/mod.ts";
 import {
+  recordCatalogCounter,
+  recordCatalogDuration,
+  recordCatalogUpDown,
+  routeToken,
+} from "../../telemetry/metrics.ts";
+import {
+  createMapCarrier,
+  extractTraceContext,
+  validateTraceparent,
+  validateTracestate,
+} from "../../telemetry/carrier.ts";
+import { getTrellisTracer } from "../../telemetry/trace.ts";
+import { ROOT_CONTEXT, SpanKind, trace } from "@opentelemetry/api";
+import {
   annotateHandlerBoundaryError,
   buildRuntimeOperationSnapshot,
   type DurableOperationRecord,
@@ -274,6 +288,21 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
   #log: LoggerLike;
   #operations = new Map<string, RuntimeOperationRecord>();
   #activeOperationFences = new Map<string, RuntimeOperationFence>();
+  #executionObservations = new Map<
+    RuntimeOperationRecord,
+    {
+      fence: RuntimeOperationFence;
+      finish: (
+        outcome:
+          | "completed"
+          | "failed"
+          | "cancelled"
+          | "lease_lost"
+          | "interrupted"
+          | "error",
+      ) => void;
+    }
+  >();
   #operationUpdateSequences = new Map<string, number>();
   #mountedOperationControls = new Set<string>();
   #stopPromise?: Promise<void>;
@@ -458,6 +487,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       creatorParticipantId: durable.creatorParticipantId,
       apiId: durable.apiId,
       input: durable.input,
+      ...(durable.telemetry ? { telemetry: durable.telemetry } : {}),
       revision: durable.revision,
       ownerInstanceId: durable.ownerInstanceId,
       ownerConnectionId: durable.ownerConnectionId,
@@ -516,7 +546,13 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     runtime.leaseExpiresAt = new Date(Date.now() + 30_000).toISOString();
     try {
       await this.saveOperationRecord(runtime);
-    } catch {
+    } catch (cause) {
+      recordCatalogCounter("trellis.operation.ownership.events", 1, {
+        "trellis.action": "recover",
+        "trellis.outcome": isOperationRevisionConflict(cause)
+          ? "conflict"
+          : "error",
+      });
       if (this.#operations.get(runtime.id) === runtime) {
         this.#operations.delete(runtime.id);
       }
@@ -524,6 +560,10 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     }
     runtime.reclaimed = true;
     this.#activeOperationFences.set(runtime.id, this.#operationFence(runtime));
+    recordCatalogCounter("trellis.operation.ownership.events", 1, {
+      "trellis.action": "recover",
+      "trellis.outcome": "ok",
+    });
     return runtime;
   }
 
@@ -573,6 +613,10 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
         for (let retry = 0;; retry++) {
           const durable = await this.loadOperationRecord(runtime.id);
           if (!durable || !this.#ownsOperation(durable, fence)) {
+            recordCatalogCounter("trellis.operation.ownership.events", 1, {
+              "trellis.action": "control",
+              "trellis.outcome": "lost",
+            });
             runtime.cancellation.abort("operation ownership lost");
             return err(this.#operationAlreadyTerminalError(runtime));
           }
@@ -582,7 +626,13 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
             durable.snapshot.state === "cancelled" ||
             durable.cancelRequestedAt ||
             runtime.cancellation.signal.aborted
-          ) return err(this.#operationAlreadyTerminalError(runtime));
+          ) {
+            recordCatalogCounter("trellis.operation.ownership.events", 1, {
+              "trellis.action": "control",
+              "trellis.outcome": "rejected",
+            });
+            return err(this.#operationAlreadyTerminalError(runtime));
+          }
           runtime.revision = durable.revision;
           runtime.snapshot = durable.snapshot;
           runtime.sequence = durable.sequence + 1;
@@ -598,9 +648,19 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
             state === "cancelled";
           try {
             await this.saveOperationRecord(runtime);
+            recordCatalogCounter("trellis.operation.ownership.events", 1, {
+              "trellis.action": "control",
+              "trellis.outcome": "ok",
+            });
             break;
           } catch (cause) {
             if (retry >= 3 || !isOperationRevisionConflict(cause)) {
+              recordCatalogCounter("trellis.operation.ownership.events", 1, {
+                "trellis.action": "control",
+                "trellis.outcome": isOperationRevisionConflict(cause)
+                  ? "conflict"
+                  : "error",
+              });
               runtime.cancellation.abort("operation ownership lost");
               throw cause;
             }
@@ -608,6 +668,15 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
         }
 
         if (runtime.terminal) {
+          const observation = this.#executionObservations.get(runtime);
+          if (
+            observation &&
+            observation.fence.ownerInstanceId === fence.ownerInstanceId &&
+            observation.fence.ownerConnectionId === fence.ownerConnectionId &&
+            observation.fence.ownerEpoch === fence.ownerEpoch &&
+            (state === "completed" || state === "failed" ||
+              state === "cancelled")
+          ) observation.finish(state);
           this.#releaseOperationFence(runtime.id, fence);
           this.#rejectSignalWaiters(runtime);
         }
@@ -819,6 +888,10 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
         runtime.ownerInstanceId !== fence.ownerInstanceId ||
         runtime.ownerEpoch !== fence.ownerEpoch
       ) {
+        recordCatalogCounter("trellis.operation.ownership.events", 1, {
+          "trellis.action": "control",
+          "trellis.outcome": "lost",
+        });
         return err(
           new UnexpectedError({
             cause: new Error("operation update rejected by owner fence"),
@@ -1102,8 +1175,18 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
           );
         }
       }
+      recordCatalogCounter("trellis.operation.ownership.events", 1, {
+        "trellis.action": "control",
+        "trellis.outcome": isOperationRevisionConflict(cause)
+          ? "conflict"
+          : "error",
+      });
       throw cause;
     }
+    recordCatalogCounter("trellis.operation.ownership.events", 1, {
+      "trellis.action": "control",
+      "trellis.outcome": "ok",
+    });
     const result = ok(signal);
     for (const waiter of runtime.signalWaiters) {
       waiter(result);
@@ -1159,9 +1242,19 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
           signal.acknowledged = true;
           try {
             await this.saveOperationRecord(runtime);
+            recordCatalogCounter("trellis.operation.ownership.events", 1, {
+              "trellis.action": "control",
+              "trellis.outcome": "ok",
+            });
             return ok(undefined);
           } catch (cause) {
             if (retry >= 3 || !isOperationRevisionConflict(cause)) {
+              recordCatalogCounter("trellis.operation.ownership.events", 1, {
+                "trellis.action": "control",
+                "trellis.outcome": isOperationRevisionConflict(cause)
+                  ? "conflict"
+                  : "error",
+              });
               runtime.cancellation.abort("operation ownership lost");
               throw cause;
             }
@@ -1560,6 +1653,10 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               current.terminal = true;
               try {
                 await this.saveOperationRecord(current);
+                recordCatalogCounter("trellis.operation.ownership.events", 1, {
+                  "trellis.action": "control",
+                  "trellis.outcome": "ok",
+                });
                 break;
               } catch (cause) {
                 this.#operations.delete(current.id);
@@ -1571,6 +1668,14 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                 current = reloaded;
               }
             }
+            const observation = this.#executionObservations.get(current);
+            if (
+              observation &&
+              observation.fence.ownerInstanceId === current.ownerInstanceId &&
+              observation.fence.ownerConnectionId ===
+                current.ownerConnectionId &&
+              observation.fence.ownerEpoch === current.ownerEpoch
+            ) observation.finish("cancelled");
             current.cancellation.abort("operation cancelled");
             msg.respond(
               JSON.stringify({ kind: "snapshot", snapshot: current.snapshot }),
@@ -1661,6 +1766,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
         `Unknown operation '${operation.toString()}'. Did you forget to include its API module?`,
       );
     }
+    const route = routeToken("operation", String(operation));
 
     return {
       control: (operationId) => {
@@ -1824,7 +1930,80 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
           runtime.revision = admitted.revision;
           runtime.leaseExpiresAt = admitted.leaseExpiresAt;
           runtime.snapshot = admitted.snapshot;
+          const carrier = createMapCarrier();
+          if (admitted.telemetry) {
+            carrier.set("traceparent", admitted.telemetry.traceparent);
+            if (admitted.telemetry.tracestate) {
+              carrier.set("tracestate", admitted.telemetry.tracestate);
+            }
+          }
+          const producer = trace.getSpanContext(extractTraceContext(carrier));
+          const links = producer ? [{ context: producer }] : [];
+          const startedAt = performance.now();
+          const existingObservation = this.#executionObservations.get(runtime);
+          const observation = existingObservation ?? {
+            fence,
+            finish: (
+              outcome:
+                | "completed"
+                | "failed"
+                | "cancelled"
+                | "lease_lost"
+                | "interrupted"
+                | "error",
+            ) => {
+              if (this.#executionObservations.get(runtime) !== observation) {
+                return;
+              }
+              this.#executionObservations.delete(runtime);
+              runtime.cancellation.signal.removeEventListener("abort", onAbort);
+              recordCatalogDuration(
+                "trellis.operation.execution.duration",
+                performance.now() - startedAt,
+                { "trellis.route": route, "trellis.outcome": outcome },
+              );
+              recordCatalogUpDown("trellis.operation.active", -1, {
+                "trellis.route": route,
+              });
+              const finishSpan = getTrellisTracer().startSpan(
+                "trellis.operation.execute.finish",
+                {
+                  kind: SpanKind.CONSUMER,
+                  attributes: {
+                    "trellis.route": route,
+                    "trellis.outcome": outcome,
+                  },
+                  links,
+                },
+                ROOT_CONTEXT,
+              );
+              finishSpan.end();
+            },
+          };
+          const onAbort = () => observation.finish("lease_lost");
+          if (!existingObservation) {
+            this.#executionObservations.set(runtime, observation);
+            recordCatalogUpDown("trellis.operation.active", 1, {
+              "trellis.route": route,
+            });
+            runtime.cancellation.signal.addEventListener("abort", onAbort, {
+              once: true,
+            });
+            const startSpan = getTrellisTracer().startSpan(
+              "trellis.operation.execute.start",
+              {
+                kind: SpanKind.CONSUMER,
+                attributes: { "trellis.route": route },
+                links,
+              },
+              ROOT_CONTEXT,
+            );
+            startSpan.end();
+            if (runtime.cancellation.signal.aborted) onAbort();
+          }
           const op = makeOperation(runtime, fence, operationContext);
+          let deferred = false;
+          let unfinishedOutcome: "interrupted" | "error" = "interrupted";
           try {
             const handlerResult: unknown = await handler(
               transferSession
@@ -1854,6 +2033,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               ? handlerResult.take()
               : handlerResult;
             if (isErr(handlerOutcome)) {
+              unfinishedOutcome = "error";
               const error = annotateHandlerBoundaryError(handlerOutcome.error, {
                 operation: String(operation),
                 requestId: operationContext.requestId,
@@ -1869,13 +2049,17 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               await op.fail(error);
               return;
             }
-            if (isOperationDeferred(handlerOutcome)) return;
+            if (isOperationDeferred(handlerOutcome)) {
+              deferred = true;
+              return;
+            }
             if (isTerminalRuntimeOperationSnapshot(handlerOutcome)) {
               return;
             }
             if (!runtime.terminal) await op.complete(handlerOutcome);
           } catch (cause) {
             if (runtime.cancellation.signal.aborted) return;
+            unfinishedOutcome = "error";
             const error = annotateHandlerBoundaryError(cause, {
               operation: String(operation),
               requestId: operationContext.requestId,
@@ -1896,6 +2080,14 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                 phase: "failure_persist",
               });
             }
+          } finally {
+            if (!deferred) {
+              observation.finish(
+                runtime.cancellation.signal.aborted
+                  ? "lease_lost"
+                  : unfinishedOutcome,
+              );
+            }
           }
         };
 
@@ -1909,28 +2101,43 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               return;
             }
             void this.#queueOperationFrame(runtime, async () => {
-              for (let retry = 0;; retry++) {
-                const durable = await this.loadOperationRecord(runtime.id);
-                if (
-                  !durable || durable.cancelRequestedAt ||
-                  durable.snapshot.state === "cancelled" ||
-                  !this.#ownsOperation(durable, fence)
-                ) throw new Error("operation ownership lost");
-                runtime.revision = durable.revision;
-                runtime.snapshot = durable.snapshot;
-                runtime.sequence = durable.sequence;
-                runtime.signalSequence = durable.signalSequence;
-                runtime.signals = durable.signals;
-                runtime.leaseExpiresAt = new Date(Date.now() + 30_000)
-                  .toISOString();
-                try {
-                  await this.saveOperationRecord(runtime);
-                  return;
-                } catch (cause) {
-                  if (retry >= 3 || !isOperationRevisionConflict(cause)) {
-                    throw cause;
+              let outcome = "error";
+              try {
+                for (let retry = 0;; retry++) {
+                  const durable = await this.loadOperationRecord(runtime.id);
+                  if (
+                    !durable || durable.cancelRequestedAt ||
+                    durable.snapshot.state === "cancelled" ||
+                    !this.#ownsOperation(durable, fence)
+                  ) {
+                    outcome = "lost";
+                    throw new Error("operation ownership lost");
+                  }
+                  runtime.revision = durable.revision;
+                  runtime.snapshot = durable.snapshot;
+                  runtime.sequence = durable.sequence;
+                  runtime.signalSequence = durable.signalSequence;
+                  runtime.signals = durable.signals;
+                  runtime.leaseExpiresAt = new Date(Date.now() + 30_000)
+                    .toISOString();
+                  try {
+                    await this.saveOperationRecord(runtime);
+                    outcome = "ok";
+                    return;
+                  } catch (cause) {
+                    if (retry >= 3 || !isOperationRevisionConflict(cause)) {
+                      outcome = isOperationRevisionConflict(cause)
+                        ? "conflict"
+                        : "error";
+                      throw cause;
+                    }
                   }
                 }
+              } finally {
+                recordCatalogCounter("trellis.operation.ownership.events", 1, {
+                  "trellis.action": "renew",
+                  "trellis.outcome": outcome,
+                });
               }
             }).catch(() => {
               runtime.cancellation.abort("operation ownership lost");
@@ -2323,6 +2530,20 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
             }
 
             const createdAt = now();
+            const traceparents = msg.headers?.values("traceparent") ?? [];
+            const tracestates = msg.headers?.values("tracestate") ?? [];
+            const traceparent = traceparents.length === 1
+              ? traceparents[0]
+              : undefined;
+            const telemetry = validateTraceparent(traceparent)
+              ? {
+                traceparent,
+                ...(tracestates.length === 1 &&
+                    validateTracestate(tracestates[0])
+                  ? { tracestate: tracestates[0] }
+                  : {}),
+              }
+              : undefined;
             const runtime: RuntimeOperationRecord = reclaimed ?? {
               id: operationId,
               service: this.name,
@@ -2334,6 +2555,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               creatorParticipantId: value.caller.participantId,
               apiId,
               input: value.input,
+              ...(telemetry ? { telemetry } : {}),
               revision: 1,
               ownerInstanceId: this.#operationOwnerId,
               ownerConnectionId: this.#operationConnectionId,
@@ -2366,7 +2588,17 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               this.#operations.set(operationId, runtime);
               try {
                 await this.saveOperationRecord(runtime);
+                recordCatalogCounter("trellis.operation.ownership.events", 1, {
+                  "trellis.action": "claim",
+                  "trellis.outcome": "ok",
+                });
               } catch (cause) {
+                recordCatalogCounter("trellis.operation.ownership.events", 1, {
+                  "trellis.action": "claim",
+                  "trellis.outcome": isOperationRevisionConflict(cause)
+                    ? "conflict"
+                    : "error",
+                });
                 this.#operations.delete(operationId);
                 const accepted = await this.#resolveOperation(operationId);
                 if (!accepted) {
@@ -2474,6 +2706,9 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
 
   async stop(): Promise<void> {
     this.#stopPromise ??= (async () => {
+      for (const observation of this.#executionObservations.values()) {
+        observation.finish("interrupted");
+      }
       if (this.#nats.isClosed()) {
         return;
       }

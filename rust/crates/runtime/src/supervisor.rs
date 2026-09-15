@@ -719,6 +719,24 @@ async fn run_owned(
     };
     let mut handles = start_subsystems(&context).await?;
     let root_stop = StopHandle::new();
+    // Only components selected by the runtime mode report ready; others are
+    // absent rather than failed. Readiness is written here from the real
+    // lifecycle: ready once a subsystem has started, not-ready as soon as the
+    // runtime begins stopping.
+    let component_readiness =
+        std::sync::Arc::new(crate::telemetry::snapshots::ComponentReadiness::default());
+    let component_names: Vec<&'static str> = handles
+        .iter()
+        .map(|handle| component_label(handle.name))
+        .collect();
+    for name in &component_names {
+        component_readiness.set(name, 1.0);
+    }
+    let _component_sampler = crate::telemetry::snapshots::spawn_component_sampler(
+        component_names.clone(),
+        std::sync::Arc::clone(&component_readiness),
+        root_stop.clone(),
+    );
     let server_stop = root_stop.clone();
     let http_router = context.take_http_router()?;
     let mut server = Box::pin(crate::run_http_server(
@@ -732,8 +750,15 @@ async fn run_owned(
         &mut handles,
         crate::shutdown::shutdown_signal(),
         ownership.wait_for_renewal_failure(),
+        &component_readiness,
+        &component_names,
     )
     .await;
+    // From this point the runtime is stopping, so selected components stop
+    // being ready regardless of how the stop was triggered.
+    for name in &component_names {
+        component_readiness.set(name, 0.0);
+    }
 
     root_stop.stop();
     let shutdown = finish_shutdown(
@@ -767,6 +792,8 @@ async fn wait_for_runtime_event<F, S, R>(
     handles: &mut Vec<SubsystemHandle>,
     signal: S,
     renewal: R,
+    readiness: &crate::telemetry::snapshots::ComponentReadiness,
+    component_names: &[&'static str],
 ) -> (Result<(), RuntimeError>, bool, RuntimeStopCause)
 where
     F: Future<Output = Result<(), ServerError>>,
@@ -790,6 +817,12 @@ where
         ),
         (index, task_result) = wait_for_subsystem(handles), if !handles.is_empty() => {
             let failed = handles.swap_remove(index);
+            // The failing component is no longer ready; the supervisor records
+            // the transition before reporting the failure.
+            let label = component_label(failed.name);
+            if component_names.contains(&label) {
+                readiness.set(label, 0.0);
+            }
             let result = match task_result {
                 Ok(Ok(())) => Err(RuntimeError::SubsystemExited { subsystem: failed.name }),
                 Ok(Err(error)) => Err(error),
@@ -951,6 +984,15 @@ async fn join_subsystems(
     first_error.map_or(Ok(()), Err)
 }
 
+fn component_label(name: SubsystemName) -> &'static str {
+    match name {
+        SubsystemName::Platform => "platform",
+        SubsystemName::Jobs => "jobs",
+        SubsystemName::Events => "events",
+        SubsystemName::Health => "health",
+    }
+}
+
 async fn start_subsystems(context: &RuntimeContext) -> Result<Vec<SubsystemHandle>, RuntimeError> {
     let mut handles = Vec::new();
     for subsystem in context.mode.subsystems() {
@@ -1018,11 +1060,14 @@ mod tests {
         let mut server = Box::pin(std::future::pending::<Result<(), ServerError>>());
         let mut handles = Vec::new();
 
+        let readiness = crate::telemetry::snapshots::ComponentReadiness::default();
         let (result, server_finished, cause) = wait_for_runtime_event(
             server.as_mut(),
             &mut handles,
             std::future::ready(()),
             std::future::pending(),
+            &readiness,
+            &[],
         )
         .await;
 
@@ -1040,6 +1085,7 @@ mod tests {
             join: tokio::spawn(async { Ok(()) }),
         }];
 
+        let readiness = crate::telemetry::snapshots::ComponentReadiness::default();
         let (result, server_finished, cause) = wait_for_runtime_event(
             server.as_mut(),
             &mut handles,
@@ -1047,6 +1093,8 @@ mod tests {
             std::future::ready(RuntimeError::OwnerRenewalRoundTimeout {
                 owner_id: "owner".to_owned(),
             }),
+            &readiness,
+            &["jobs"],
         )
         .await;
 

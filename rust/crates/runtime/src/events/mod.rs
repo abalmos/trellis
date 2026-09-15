@@ -41,6 +41,22 @@ struct SqliteConsumerResolver {
     path: std::path::PathBuf,
 }
 
+/// Owner-captured inventory reader; telemetry never calls the business resolver.
+#[derive(Clone)]
+pub(crate) struct ConsumerTelemetryReader {
+    path: std::path::PathBuf,
+}
+
+impl ConsumerTelemetryReader {
+    pub(crate) fn new(path: std::path::PathBuf) -> Self {
+        Self { path }
+    }
+
+    pub(crate) fn read(&self) -> Result<Vec<ConsumerBinding>, String> {
+        list_consumers(&self.path)
+    }
+}
+
 impl ConsumerBindingResolver for SqliteConsumerResolver {
     fn by_resource<'a>(
         &'a self,
@@ -194,6 +210,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     let resolver: Arc<dyn ConsumerBindingResolver> = Arc::new(SqliteConsumerResolver {
         path: platform_storage.path.clone(),
     });
+    let consumer_telemetry = ConsumerTelemetryReader::new(platform_storage.path.clone());
     let query = EventsQuery::new(store.clone(), events_runtime.clone(), Arc::clone(&resolver));
     let mut router = trellis_events_runtime::build_router_with_query(query.clone());
     let verifier = context.platform_verifier.get().cloned().ok_or_else(|| {
@@ -339,6 +356,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     secure_consumer_routes(&mut router, query, authorizer.clone());
     EventsManagement::new(store.clone(), journal.clone(), delivery.clone(), authorizer)
         .register(&mut router);
+    let consumer_runtime = events_runtime.clone();
     let mut projector = start_events_projector(events_runtime, store.clone(), event_verifier)
         .await
         .map_err(runtime_error)?;
@@ -349,6 +367,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     let mut replay_dispatcher = start_replay_dispatcher(context.trellis_nats.clone(), journal)
         .await
         .map_err(runtime_error)?;
+    let sampler_store = store.clone();
     let mut advisories = start_exhaustion_advisory_loop(
         context.trellis_nats.clone(),
         crate::resources::JOBS_ADVISORIES_STREAM,
@@ -360,6 +379,18 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     let nats = context.trellis_nats.clone();
     let join = tokio::spawn(async move {
         let _owner = owner;
+        let _samplers = crate::telemetry::snapshots::SamplerOwner::start(vec![
+            Box::pin(crate::telemetry::snapshots::run_events_sampler(
+                sampler_store.clone(),
+                task_stop.clone(),
+            )),
+            Box::pin(crate::telemetry::snapshots::run_consumer_sampler(
+                consumer_runtime,
+                consumer_telemetry,
+                sampler_store.clone(),
+                task_stop.clone(),
+            )),
+        ]);
         let api_loop = run_builtin_authenticated_router(
             nats,
             events::API_ID,
@@ -427,6 +458,8 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             }
         };
         task_stop.stop();
+        // Telemetry samplers own their tasks and never own business lifetime.
+        _samplers.stop().await;
         projector.stop().await;
         dead_letter_projector.stop().await;
         replay_dispatcher.stop().await;

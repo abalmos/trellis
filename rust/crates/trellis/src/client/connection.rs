@@ -19,6 +19,19 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use trellis_protocol::{NativeBootstrapSessionProofInput, SessionProofInput};
 
+use crate::telemetry::instruments::{CounterFamily, DurationFamily};
+use crate::telemetry::lifecycle::Observation;
+use crate::telemetry::KeyValue;
+
+/// Catalog participant kind for one authorization principal kind.
+fn participant_kind_label(kind: &trellis_protocol::AuthorizationPrincipalKind) -> &'static str {
+    match kind {
+        trellis_protocol::AuthorizationPrincipalKind::User => "user",
+        trellis_protocol::AuthorizationPrincipalKind::Service => "service",
+        trellis_protocol::AuthorizationPrincipalKind::Device => "device",
+    }
+}
+
 use super::events::{EVENT_ID_HEADER, EVENT_TIME_HEADER};
 use crate::client::operations::OperationTransport;
 use crate::client::proof::{base64url_decode, new_request_id, now_iat_seconds};
@@ -75,6 +88,39 @@ struct FeedCancelGuard {
     subject: String,
     reply: String,
     payload: Bytes,
+}
+
+/// Owns one client feed's active count and end reason.
+struct FeedRuntimeGuard {
+    #[allow(dead_code)]
+    cancel: FeedCancelGuard,
+    _inflight: crate::telemetry::lifecycle::InflightGuard,
+    ended: bool,
+}
+
+impl FeedRuntimeGuard {
+    /// Records the stream end once with a bounded reason.
+    fn finish(&mut self, reason: &'static str) {
+        if self.ended {
+            return;
+        }
+        self.ended = true;
+        crate::telemetry::instruments::add_counter(
+            CounterFamily::FeedEnds,
+            1,
+            &[
+                KeyValue::new("trellis.side", "client"),
+                KeyValue::new("trellis.reason", reason),
+            ],
+        );
+    }
+}
+
+impl Drop for FeedRuntimeGuard {
+    fn drop(&mut self) {
+        // Dropping an unfinished stream is an expected cancellation.
+        self.finish("cancelled");
+    }
 }
 
 impl Drop for FeedCancelGuard {
@@ -300,25 +346,34 @@ impl<T> EventMessage<T> {
 
     /// Acknowledge successful handling of the message.
     pub async fn ack(&self) -> Result<(), TrellisClientError> {
-        self.message
+        let result = self
+            .message
             .ack()
             .await
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()));
+        record_delivery_disposition("ack", &result);
+        result
     }
 
     /// Negatively acknowledge the message so JetStream may redeliver it.
     pub async fn nak(&self) -> Result<(), TrellisClientError> {
-        self.message
+        let result = self
+            .message
             .ack_with(AckKind::Nak(None))
             .await
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()));
+        record_delivery_disposition("nak", &result);
+        result
     }
 
     pub(crate) async fn nak_after(&self, delay: Duration) -> Result<(), TrellisClientError> {
-        self.message
+        let result = self
+            .message
             .ack_with(AckKind::Nak(Some(delay)))
             .await
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()));
+        record_delivery_disposition("nak", &result);
+        result
     }
 
     pub(crate) async fn ack_progress(&self) -> Result<(), TrellisClientError> {
@@ -357,11 +412,28 @@ impl<T> EventMessage<T> {
 
     /// Terminate the message without successful acknowledgement or redelivery.
     pub async fn term(&self) -> Result<(), TrellisClientError> {
-        self.message
+        let result = self
+            .message
             .ack_with(AckKind::Term)
             .await
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()));
+        record_delivery_disposition("term", &result);
+        result
     }
+}
+
+/// Records one observed final delivery disposition handoff.
+fn record_delivery_disposition(action: &'static str, result: &Result<(), TrellisClientError>) {
+    let outcome = if result.is_ok() { "ok" } else { "error" };
+    crate::telemetry::instruments::add_counter(
+        CounterFamily::DeliveryDispositions,
+        1,
+        &[
+            KeyValue::new("trellis.family", "event"),
+            KeyValue::new("trellis.action", action),
+            KeyValue::new("trellis.outcome", outcome),
+        ],
+    );
 }
 
 #[derive(Debug, Deserialize)]
@@ -974,6 +1046,8 @@ pub(crate) struct TrellisClient {
     applied_native_authorization: Arc<tokio::sync::Mutex<AppliedNativeAuthorization>>,
     authorization_context_refresh_task: Option<JoinHandle<()>>,
     companion: Option<Arc<TrellisClient>>,
+    /// Process-local connection state registration for telemetry gauges.
+    connection: std::sync::Arc<crate::telemetry::lifecycle::ConnectionRegistration>,
 }
 
 impl TrellisClient {
@@ -1071,6 +1145,32 @@ impl TrellisClient {
     }
 
     async fn connect_native(opts: NativeConnectOptions<'_>) -> Result<Self, TrellisClientError> {
+        let observation = Observation::start(
+            DurationFamily::Connect,
+            vec![
+                KeyValue::new("trellis.phase", "total"),
+                KeyValue::new(
+                    "trellis.participant.kind",
+                    participant_kind_label(&opts.kind),
+                ),
+            ],
+            "cancelled",
+        );
+        let result = Self::connect_native_inner(opts).await;
+        if let Ok(client) = &result {
+            client.connection.usable();
+        }
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(error) => Self::client_outcome(error),
+        };
+        observation.finish(outcome);
+        result
+    }
+
+    async fn connect_native_inner(
+        opts: NativeConnectOptions<'_>,
+    ) -> Result<Self, TrellisClientError> {
         let NativeConnectOptions {
             trellis_url,
             participant_id,
@@ -1177,7 +1277,9 @@ impl TrellisClient {
             started_at: now_rfc3339(),
             publish_interval_ms: HEALTH_HEARTBEAT_INTERVAL_MS,
         };
-        let mut connected = Self::connect_context(auth, contexts, timeout_ms).await?;
+        let mut connected =
+            Self::connect_context(auth, contexts, timeout_ms, participant_kind_label(&kind))
+                .await?;
         connected.service_bootstrap_binding = Some(CoreBootstrapBinding::new(
             BootstrapBinding {
                 contract_id: authorization.participant_id,
@@ -1246,6 +1348,27 @@ impl TrellisClient {
 
     /// Issue fresh connection authority from a durable user login before connecting.
     pub async fn connect_user(opts: UserConnectOptions<'_>) -> Result<Self, TrellisClientError> {
+        let observation = Observation::start(
+            DurationFamily::Connect,
+            vec![
+                KeyValue::new("trellis.phase", "total"),
+                KeyValue::new("trellis.participant.kind", "user"),
+            ],
+            "cancelled",
+        );
+        let result = Self::connect_user_inner(opts).await;
+        if let Ok(client) = &result {
+            client.connection.usable();
+        }
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(error) => Self::client_outcome(error),
+        };
+        observation.finish(outcome);
+        result
+    }
+
+    async fn connect_user_inner(opts: UserConnectOptions<'_>) -> Result<Self, TrellisClientError> {
         let installation = Arc::new(SessionAuth::from_seed_base64url(
             opts.credentials.session_key_seed_base64url,
         )?);
@@ -1264,13 +1387,14 @@ impl TrellisClient {
         )?;
         let authorization_contexts = Arc::new(authorization_contexts);
         authorization_contexts.refresh(&auth).await?;
-        Self::connect_context(auth, authorization_contexts, opts.timeout_ms).await
+        Self::connect_context(auth, authorization_contexts, opts.timeout_ms, "user").await
     }
 
     async fn connect_context(
         auth: SessionAuth,
         authorization_contexts: Arc<AuthorizationContextCache>,
         timeout_ms: u64,
+        kind: &'static str,
     ) -> Result<Self, TrellisClientError> {
         let inbox_prefix = authorization_contexts.runtime_binding()?.inbox_prefix;
         let applied_native_authorization =
@@ -1307,6 +1431,9 @@ impl TrellisClient {
             service_bootstrap_binding: None,
             health_heartbeat_task: None,
             authorization_contexts: Some(authorization_contexts),
+            connection: std::sync::Arc::new(
+                crate::telemetry::lifecycle::ConnectionRegistration::start(kind),
+            ),
             applied_native_authorization,
             authorization_context_refresh_task,
             companion: None,
@@ -1332,6 +1459,28 @@ impl TrellisClient {
 
     /// Refresh and verify the current authorization context immediately.
     pub async fn refresh_authorization_context(
+        &self,
+    ) -> Result<AuthorizationContextBundle, TrellisClientError> {
+        let result = self.refresh_authorization_context_inner().await;
+        if result.is_ok() {
+            self.connection.refreshed();
+        }
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(error) => Self::client_outcome(error),
+        };
+        crate::telemetry::instruments::add_counter(
+            CounterFamily::AuthRefreshAttempts,
+            1,
+            &[
+                KeyValue::new("trellis.participant.kind", "user"),
+                KeyValue::new("trellis.outcome", outcome),
+            ],
+        );
+        result
+    }
+
+    async fn refresh_authorization_context_inner(
         &self,
     ) -> Result<AuthorizationContextBundle, TrellisClientError> {
         let contexts = self.authorization_contexts.as_ref().ok_or_else(|| {
@@ -1369,27 +1518,105 @@ impl TrellisClient {
             .watch_availability()
     }
 
-    async fn request(
+    /// One request transport attempt with a caller span and catalog metrics.
+    ///
+    /// `route` is the bounded registered token supplied by the typed caller;
+    /// raw callers pass `_unknown`. The caller span covers the whole logical
+    /// call from the typed facade, and each transport attempt records one
+    /// attempt counter sample.
+    pub(crate) async fn request_routed(
         &self,
         subject: &str,
         payload: Bytes,
+        route: &'static str,
     ) -> Result<async_nats::Message, TrellisClientError> {
-        // Create the exact reply inbox before signing so the proof binds the
-        // reply subject the response arrives on.
-        let nats = self.nats();
-        let reply = nats.new_inbox();
-        let headers = self.signed_headers(subject, &reply, &payload)?;
-        let request = async_nats::Request::new()
-            .inbox(reply)
-            .headers(headers)
-            .payload(payload);
+        use crate::telemetry::instruments::{CounterFamily, DurationFamily};
+        use crate::telemetry::lifecycle::Observation;
+        use crate::telemetry::propagation;
+        use tracing::Instrument as _;
 
-        let future = nats.send_request(subject.to_string(), request);
-        let message = timeout(std::time::Duration::from_millis(self.timeout_ms), future)
-            .await
-            .map_err(|_| TrellisClientError::Timeout)?
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-        Ok(message)
+        let attributes = vec![crate::telemetry::KeyValue::new("trellis.route", route)];
+        let observation = Observation::start(DurationFamily::RpcClient, attributes, "cancelled");
+        let span = tracing::info_span!(
+            "trellis.rpc.client",
+            "trellis.route" = route,
+            "otel.kind" = "client",
+        );
+        let result = async {
+            // Create the exact reply inbox before signing so the proof binds the
+            // reply subject the response arrives on.
+            let nats = self.nats();
+            let reply = nats.new_inbox();
+            let mut headers = self.signed_headers(subject, &reply, &payload)?;
+            // Untrusted diagnostic metadata only; never part of the proof.
+            let mut trace_pairs = Vec::new();
+            propagation::inject_context(&opentelemetry::Context::current(), &mut trace_pairs);
+            for (key, value) in trace_pairs {
+                match key.as_str() {
+                    "traceparent" => {
+                        headers.insert("traceparent", value.as_str());
+                    }
+                    "tracestate" => {
+                        headers.insert("tracestate", value.as_str());
+                    }
+                    _ => {}
+                }
+            }
+            let request = async_nats::Request::new()
+                .inbox(reply)
+                .headers(headers)
+                .payload(payload);
+
+            let future = nats.send_request(subject.to_string(), request);
+            let message = timeout(std::time::Duration::from_millis(self.timeout_ms), future)
+                .await
+                .map_err(|_| TrellisClientError::Timeout)?
+                .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
+            Ok(message)
+        }
+        .instrument(span.clone())
+        .await;
+
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(error) => Self::client_outcome(error),
+        };
+        span.record("trellis.outcome", outcome);
+        observation.finish(outcome);
+        crate::telemetry::instruments::add_counter(
+            CounterFamily::RpcClientAttempts,
+            1,
+            &[
+                crate::telemetry::KeyValue::new("trellis.route", route),
+                crate::telemetry::KeyValue::new("trellis.outcome", outcome),
+            ],
+        );
+        result
+    }
+
+    /// Outcome classification for one client transport result.
+    fn client_outcome(error: &TrellisClientError) -> &'static str {
+        match error {
+            TrellisClientError::Timeout => "timeout",
+            TrellisClientError::Nats(_)
+            | TrellisClientError::NatsConnect(_)
+            | TrellisClientError::NatsRequest(_)
+            | TrellisClientError::BootstrapHttp { .. }
+            | TrellisClientError::AuthorizationUnavailable(_) => "unavailable",
+            TrellisClientError::RpcError(_) => "declared_error",
+            TrellisClientError::TransferCancelled => "cancelled",
+            TrellisClientError::Base64(_)
+            | TrellisClientError::InvalidSeedLen(_)
+            | TrellisClientError::Json(_)
+            | TrellisClientError::Codec(_)
+            | TrellisClientError::Subject(_)
+            | TrellisClientError::Bootstrap(_)
+            | TrellisClientError::OperationProtocol(_)
+            | TrellisClientError::TransferProtocol(_)
+            | TrellisClientError::EventSubscriptionProtocol(_)
+            | TrellisClientError::FeedProtocol(_) => "invalid",
+            _ => "error",
+        }
     }
 
     pub(crate) fn signed_headers(
@@ -1444,9 +1671,15 @@ impl TrellisClient {
         })
     }
 
-    async fn request_json(&self, subject: &str, body: Value) -> Result<Value, TrellisClientError> {
+    /// One JSON request with a bounded registered route token.
+    async fn request_json_routed(
+        &self,
+        subject: &str,
+        body: Value,
+        route: &'static str,
+    ) -> Result<Value, TrellisClientError> {
         let payload = Bytes::from(serde_json::to_vec(&body)?);
-        let message = self.request(subject, payload).await?;
+        let message = self.request_routed(subject, payload, route).await?;
 
         decode_json_message(message)
     }
@@ -1457,7 +1690,22 @@ impl TrellisClient {
         subject: &str,
         body: &Value,
     ) -> Result<Value, TrellisClientError> {
-        self.request_json(subject, body.clone()).await
+        self.request_json_routed(
+            subject,
+            body.clone(),
+            crate::telemetry::instruments::unknown_route(),
+        )
+        .await
+    }
+
+    /// Call one descriptor-backed subject with its bounded route token.
+    pub(crate) async fn request_json_value_routed(
+        &self,
+        subject: &str,
+        body: &Value,
+        route: &'static str,
+    ) -> Result<Value, TrellisClientError> {
+        self.request_json_routed(subject, body.clone(), route).await
     }
 
     /// Publish one descriptor-backed event.
@@ -1477,15 +1725,32 @@ impl TrellisClient {
         let event = event
             .clone()
             .with_subject(self.descriptor_subject(event.subject()));
-        let context_digest = self.authorization_context_digest()?;
-        publish_prepared_event(
-            &self.nats(),
-            &self.auth,
-            &context_digest,
-            self.timeout_ms,
-            &event,
-        )
-        .await
+        let route = crate::telemetry::instruments::route_token(
+            crate::telemetry::instruments::RouteFamily::Event,
+            event.descriptor_identity(),
+        );
+        let observation = Observation::start(
+            DurationFamily::EventPublish,
+            vec![
+                KeyValue::new("trellis.route", route),
+                KeyValue::new("trellis.delivery", "durable"),
+            ],
+            "cancelled",
+        );
+        let result = async {
+            let context_digest = self.authorization_context_digest()?;
+            publish_prepared_event(
+                &self.nats(),
+                &self.auth,
+                &context_digest,
+                self.timeout_ms,
+                &event,
+            )
+            .await
+        }
+        .await;
+        observation.finish(if result.is_ok() { "ok" } else { "error" });
+        result
     }
 
     /// Subscribe to one descriptor-backed event subject with explicit subscription options.
@@ -1730,11 +1995,19 @@ impl TrellisClient {
                 "feedId": feed_id,
             }))?),
         };
+        let guard = FeedRuntimeGuard {
+            cancel,
+            _inflight: crate::telemetry::lifecycle::InflightGuard::acquire(
+                crate::telemetry::instruments::UpDownFamily::FeedActive,
+                vec![crate::telemetry::KeyValue::new("trellis.side", "client")],
+            ),
+            ended: false,
+        };
         let stream = stream::try_unfold(
-            (subscriber, first_event, cancel),
-            |(mut subscriber, first_event, cancel)| async move {
+            (subscriber, first_event, guard),
+            |(mut subscriber, first_event, mut guard)| async move {
                 if let Some(event) = first_event {
-                    return Ok(Some((event, (subscriber, None, cancel))));
+                    return Ok(Some((event, (subscriber, None, guard))));
                 }
 
                 match subscriber.next().await {
@@ -1744,9 +2017,12 @@ impl TrellisClient {
                                 "feed emitted duplicate ready acknowledgement".to_string(),
                             )
                         })?;
-                        Ok(Some((event, (subscriber, None, cancel))))
+                        Ok(Some((event, (subscriber, None, guard))))
                     }
-                    None => Ok(None),
+                    None => {
+                        guard.finish("complete");
+                        Ok(None)
+                    }
                 }
             },
         );
@@ -1784,13 +2060,32 @@ impl TrellisClient {
     where
         W: tokio::io::AsyncWrite + Unpin + Send + ?Sized,
     {
-        crate::client::transfer::get_download_grant_into_with_cancel(
+        let observation = Observation::start(
+            DurationFamily::Transfer,
+            vec![KeyValue::new("trellis.direction", "download")],
+            "cancelled",
+        );
+        let result = crate::client::transfer::get_download_grant_into_with_cancel(
             self,
             grant,
             writer,
             Some(cancellation),
         )
-        .await
+        .await;
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(TrellisClientError::TransferCancelled) => "cancelled",
+            Err(error) => Self::client_outcome(error),
+        };
+        observation.finish(outcome);
+        if let Ok(info) = &result {
+            crate::telemetry::instruments::add_counter(
+                CounterFamily::TransferWireBytes,
+                info.size,
+                &[KeyValue::new("trellis.direction", "download")],
+            );
+        }
+        result
     }
 }
 

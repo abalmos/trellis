@@ -313,6 +313,15 @@ async fn run_owner(
         fence = owner.fence.acquisition_revision(),
         "starting health owner loop"
     );
+    // Telemetry samplers own their tasks and never own business lifetime.
+    let _samplers = crate::telemetry::snapshots::SamplerOwner::start(vec![Box::pin(
+        crate::telemetry::snapshots::run_health_sampler(
+            nats.clone(),
+            HEALTH_STREAM.to_string(),
+            config.projection_id.clone(),
+            stop.clone(),
+        ),
+    )]);
     let stream = jetstream
         .get_stream(HEALTH_STREAM)
         .await
@@ -367,7 +376,10 @@ async fn run_owner(
                     publish_invalidation(&nats, &config.invalidation_subject, commit).await?;
                 }
             }
-            () = stop.stopped() => return Ok(()),
+            () = stop.stopped() => {
+                _samplers.stop().await;
+                return Ok(());
+            }
         }
     }
 }

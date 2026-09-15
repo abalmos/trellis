@@ -57,12 +57,17 @@ import {
   createNatsHeaderCarrier,
   extractTraceContext,
   injectTraceContext,
+  recordCatalogDuration,
+  recordCatalogUpDown,
+  recordRpcAttempt,
   recordTrellisError,
   SpanStatusCode,
   startClientSpan,
   startServerSpan,
   trace,
   type TrellisErrorMetricAttributes,
+  trellisRoute,
+  UNKNOWN_ROUTE,
   withSpanAsync,
 } from "./telemetry/mod.ts";
 import { Type } from "typebox";
@@ -435,6 +440,41 @@ function requestFailedTransportError(args: {
       ...(args.context ?? {}),
     },
   });
+}
+
+/** Bounded catalog outcome for one logical RPC failure. */
+function outcomeForFailure(
+  error: BaseError,
+):
+  | "declared_error"
+  | "denied"
+  | "invalid"
+  | "rate_limited"
+  | "timeout"
+  | "unavailable"
+  | "cancelled"
+  | "error" {
+  if (error instanceof RemoteError) return "declared_error";
+  if (error instanceof TransportError) {
+    switch (Reflect.get(error, "code")) {
+      case "trellis.request.denied":
+        return "denied";
+      case "trellis.request.unavailable":
+        return "unavailable";
+      case "trellis.request.timeout":
+        return "timeout";
+      case "trellis.request.cancelled":
+        return "cancelled";
+      case "trellis.request.invalid_response":
+      case "trellis.request.invalid":
+        return "invalid";
+      case "trellis.request.rate_limited":
+        return "rate_limited";
+      default:
+        return "error";
+    }
+  }
+  return "error";
 }
 
 function classifyRequestTransportFailure(args: {
@@ -1215,6 +1255,7 @@ export type RuntimeOperationRecord = {
   creatorParticipantId: string;
   apiId: string;
   input: unknown;
+  telemetry?: { traceparent: string; tracestate?: string };
   revision: number;
   ownerInstanceId: string;
   ownerConnectionId: string;
@@ -1244,6 +1285,7 @@ export type DurableOperationRecord = {
   apiId: string;
   operation: string;
   input: unknown;
+  telemetry?: { traceparent: string; tracestate?: string };
   revision: number;
   ownerInstanceId: string;
   ownerConnectionId: string;
@@ -1304,6 +1346,10 @@ export const DurableOperationRecordSchema = Type.Object({
   apiId: Type.String(),
   operation: Type.String(),
   input: Type.Any(),
+  telemetry: Type.Optional(Type.Object({
+    traceparent: Type.String(),
+    tracestate: Type.Optional(Type.String()),
+  })),
   ownerInstanceId: Type.String(),
   ownerConnectionId: Type.String(),
   ownerEpoch: Type.Number(),
@@ -2757,6 +2803,7 @@ export class Trellis<
       apiId: runtime.apiId,
       operation: runtime.operation,
       input: runtime.input,
+      ...(runtime.telemetry ? { telemetry: runtime.telemetry } : {}),
       revision,
       ownerInstanceId: runtime.ownerInstanceId,
       ownerConnectionId: runtime.ownerConnectionId,
@@ -2911,10 +2958,12 @@ export class Trellis<
         });
         return subject;
       }
-      const span = startClientSpan(method, subject);
+      const route = trellisRoute("rpc", method);
+      const span = startClientSpan(route);
       const attempt = async (): Promise<Result<TOutput, BaseError>> => {
         const msgResult = await this.#requestMessageWithRetry({
           method,
+          route,
           subject,
           payload: msg,
           timeout: opts?.timeout ?? this.timeout,
@@ -3045,17 +3094,29 @@ export class Trellis<
       };
 
       return await withSpanAsync(span, async () => {
+        // One logical RPC duration including retries, serialization, and final
+        // decode. The attempt counter remains the transport-attempt boundary.
+        const logicalStartedAt = performance.now();
+        const recordLogicalOutcome = (outcome: string): void => {
+          recordCatalogDuration(
+            "trellis.rpc.client.duration",
+            performance.now() - logicalStartedAt,
+            { "trellis.route": route, "trellis.outcome": outcome },
+          );
+        };
         try {
           const result = await attempt();
           const value = result.take();
+          const outcome = isErr(value) ? outcomeForFailure(value.error) : "ok";
           if (isErr(value)) {
             span.setStatus({
               code: SpanStatusCode.ERROR,
-              message: value.error.message,
+              message: outcome,
             });
           } else {
             span.setStatus({ code: SpanStatusCode.OK });
           }
+          recordLogicalOutcome(outcome);
           return result;
         } catch (cause) {
           const unexpected = cause instanceof TransportError
@@ -3063,9 +3124,9 @@ export class Trellis<
             : new UnexpectedError({ cause });
           span.setStatus({
             code: SpanStatusCode.ERROR,
-            message: unexpected.message,
+            message: "error",
           });
-          span.recordException(unexpected);
+          recordLogicalOutcome("error");
           recordRuntimeError(unexpected, {
             surface: "rpc",
             direction: "client",
@@ -3725,10 +3786,11 @@ export class Trellis<
 
     const transport: OperationTransport = {
       requestJson: (subject, body) => {
+        const route = trellisRoute("operation", operation.toString());
         const error = unavailable?.();
         return error
           ? AsyncResult.from(Promise.resolve(err(error)))
-          : this.#requestJson(subject, body as JsonValue);
+          : this.#requestJson(subject, body as JsonValue, route);
       },
       watchJson: (subject, body) => {
         const error = unavailable?.();
@@ -3909,10 +3971,37 @@ export class Trellis<
     );
 
     // Start a server span for this RPC handler
-    const span = startServerSpan(method, msg.subject, parentContext);
+    const span = startServerSpan(trellisRoute("rpc", method), parentContext);
     const incomingTraceId = traceIdFromTraceparent(
       msg.headers?.get("traceparent"),
     );
+
+    const serverRoute = trellisRoute("rpc", method);
+    const serverStartedAt = performance.now();
+    recordCatalogUpDown("trellis.rpc.server.inflight", 1, {
+      "trellis.route": serverRoute,
+    });
+    const finishServerObservation = (
+      outcome:
+        | "ok"
+        | "declared_error"
+        | "invalid"
+        | "denied"
+        | "rate_limited"
+        | "timeout"
+        | "unavailable"
+        | "cancelled"
+        | "error",
+    ): void => {
+      recordCatalogUpDown("trellis.rpc.server.inflight", -1, {
+        "trellis.route": serverRoute,
+      });
+      recordCatalogDuration(
+        "trellis.rpc.server.duration",
+        performance.now() - serverStartedAt,
+        { "trellis.route": serverRoute, "trellis.outcome": outcome },
+      );
+    };
 
     // Execute the handler within the span's context
     return withSpanAsync(span, async () => {
@@ -4061,9 +4150,8 @@ export class Trellis<
           );
           span.setStatus({
             code: SpanStatusCode.ERROR,
-            message: error.message,
+            message: "handler failed",
           });
-          span.recordException(error);
           recordRuntimeError(error, {
             surface: "rpc",
             direction: "server",
@@ -4100,7 +4188,7 @@ export class Trellis<
           );
           span.setStatus({
             code: SpanStatusCode.ERROR,
-            message: error.message,
+            message: "handler error",
           });
           recordRuntimeError(error, {
             surface: "rpc",
@@ -4133,6 +4221,9 @@ export class Trellis<
       const result = await execute();
       if (isErr(result)) {
         result.error.withTraceId(activeTraceId(span) ?? incomingTraceId);
+        finishServerObservation(outcomeForFailure(result.error));
+      } else {
+        finishServerObservation("ok");
       }
       span.end();
       return result;
@@ -4331,6 +4422,19 @@ export class Trellis<
     event: PreparedTrellisEvent,
   ): AsyncResult<void, UnexpectedError> {
     return AsyncResult.from((async () => {
+      const startedAt = performance.now();
+      const route = trellisRoute("event", event.descriptorIdentity);
+      const finish = (outcome: "ok" | "error"): void => {
+        recordCatalogDuration(
+          "trellis.event.publish.duration",
+          performance.now() - startedAt,
+          {
+            "trellis.route": route,
+            "trellis.delivery": "durable",
+            "trellis.outcome": outcome,
+          },
+        );
+      };
       try {
         const headers = natsHeaders();
         for (const [key, value] of Object.entries(event.headers)) {
@@ -4351,8 +4455,10 @@ export class Trellis<
         await this.#js.publish(event.subject, event.encodedPayload, {
           headers,
         });
+        finish("ok");
         return ok(undefined);
       } catch (cause) {
+        finish("error");
         const error = new UnexpectedError({
           cause,
           context: { event: event.event },
@@ -4536,6 +4642,17 @@ export class Trellis<
       contractDigest: this.contractDigest,
       traceId: traceIdFromTraceparent(args.message.headers?.get("traceparent")),
     };
+    // One handler-delivery attempt including its existing verification and
+    // disposition boundary.
+    const route = trellisRoute("consumer", String(args.event));
+    const startedAt = performance.now();
+    const finish = (outcome: string): void => {
+      recordCatalogDuration(
+        "trellis.event.process.duration",
+        performance.now() - startedAt,
+        { "trellis.route": route, "trellis.outcome": outcome },
+      );
+    };
     try {
       const result = await Promise.resolve(args.fn(
         args.payload as EventOf<TA, EventsOf<TA>>,
@@ -4548,10 +4665,13 @@ export class Trellis<
       ));
       const outcome = isResultLike(result) ? result.take() : result;
       if (isErr(outcome)) {
+        finish("retry");
         return err(annotateHandlerBoundaryError(outcome.error, annotation));
       }
+      finish("ok");
       return ok(undefined);
     } catch (cause) {
+      finish("error");
       return err(annotateHandlerBoundaryError(cause, annotation));
     }
   }
@@ -5343,6 +5463,8 @@ export class Trellis<
 
   async #requestMessageWithRetry(args: {
     method?: string;
+    /** Bounded registered-route token for attempt accounting. */
+    route?: string;
     subject: string;
     payload: string;
     timeout: number;
@@ -5350,6 +5472,9 @@ export class Trellis<
     callerCapabilities?: readonly string[];
     span?: Span;
   }): Promise<Result<Msg, TransportError>> {
+    const recordAttempt = (outcome: string): void => {
+      if (args.route !== undefined) recordRpcAttempt(args.route, outcome);
+    };
     for (let retry = 0; retry <= this.#noResponderMaxRetries; retry++) {
       if (args.signal?.aborted) {
         return err(classifyRequestTransportFailure({
@@ -5444,6 +5569,7 @@ export class Trellis<
       });
 
       if (result.isOk()) {
+        recordAttempt("ok");
         return ok(result.take() as Msg);
       }
 
@@ -5452,6 +5578,7 @@ export class Trellis<
       const isNoResponders = message.includes("no responders");
 
       if (isNoResponders && retry < this.#noResponderMaxRetries) {
+        recordAttempt("unavailable");
         this.#log.debug(
           { method: args.method, subject: args.subject, retry },
           "No responders, retrying...",
@@ -5475,6 +5602,13 @@ export class Trellis<
         { method: args.method, subject: args.subject, error: message },
         "NATS request failed",
       );
+      recordAttempt(
+        args.signal?.aborted
+          ? "cancelled"
+          : /timeout/i.test(message)
+          ? "timeout"
+          : "unavailable",
+      );
       return err(classifyRequestTransportFailure({
         method: args.method,
         subject: args.subject,
@@ -5483,6 +5617,7 @@ export class Trellis<
       }));
     }
 
+    recordAttempt("unavailable");
     return err(
       requestFailedTransportError({
         code: "trellis.request.retry_exhausted",
@@ -5499,13 +5634,15 @@ export class Trellis<
   #requestJson(
     subject: string,
     body: JsonValue,
+    route: string = UNKNOWN_ROUTE,
   ): AsyncResult<JsonValue, TransportError | UnexpectedError> {
     return AsyncResult.from((async () => {
-      const span = startClientSpan(subject, subject);
+      const span = startClientSpan(route);
       return await withSpanAsync(span, async () => {
         try {
           const payload = JSON.stringify(body);
           const response = (await this.#requestMessageWithRetry({
+            route,
             subject,
             payload,
             timeout: this.timeout,
@@ -5554,9 +5691,8 @@ export class Trellis<
           const error = new UnexpectedError({ cause });
           span.setStatus({
             code: SpanStatusCode.ERROR,
-            message: error.message,
+            message: "operation transport failure",
           });
-          span.recordException(error);
           recordRuntimeError(error, {
             surface: "operation",
             direction: "client",

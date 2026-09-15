@@ -39,6 +39,7 @@ mod browser;
 mod error;
 mod router;
 mod security;
+mod telemetry;
 mod well_known;
 use browser::BrowserFlowResponse;
 use error::{map_issuance_error, HttpError};

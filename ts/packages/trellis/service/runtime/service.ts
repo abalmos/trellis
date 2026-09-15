@@ -2640,7 +2640,8 @@ export function connectTrellisServiceWithRuntimeDeps<
       } satisfies TrellisServiceRuntimeDeps;
       const serviceName = args.name ?? args.participant.identity;
       if (args.telemetry !== false && args.telemetry?.enabled !== false) {
-        runtimeDeps.initTelemetry?.(serviceName);
+        // Await the single owner before the first instrument starts.
+        await runtimeDeps.initTelemetry?.(serviceName);
       }
       const identityAuth = await createAuth({
         sessionKeySeed: args.seed,

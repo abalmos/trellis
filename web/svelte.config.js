@@ -45,6 +45,10 @@ const config = {
         rootDir,
         "../ts/packages/trellis/service/mod.ts",
       ),
+      "@qlever-llc/trellis/telemetry/browser": resolve(
+        rootDir,
+        "../ts/packages/trellis/telemetry/browser.ts",
+      ),
       "@qlever-llc/trellis/telemetry": resolve(
         rootDir,
         "../ts/packages/trellis/telemetry.ts",

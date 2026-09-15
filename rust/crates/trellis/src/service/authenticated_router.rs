@@ -122,6 +122,16 @@ impl<V> AuthenticatedRouter<V>
 where
     V: RequestValidator + 'static,
 {
+    /// Registered route token for one inbound request subject.
+    pub(crate) fn route_token(&self, subject: &str) -> Option<&'static str> {
+        self.router.route_token(subject)
+    }
+
+    /// Whether one subject is a registered unary request/reply RPC surface.
+    pub(crate) fn is_unary_rpc_route(&self, subject: &str) -> bool {
+        self.router.is_unary_rpc_route(subject)
+    }
+
     #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(router: Router, validator: V) -> Self {
         Self {

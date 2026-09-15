@@ -7,6 +7,19 @@ import {
   assertRejects,
 } from "@std/assert";
 import { AsyncResult } from "@qlever-llc/result";
+import { metrics, propagation, trace } from "@opentelemetry/api";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import {
+  AggregationTemporality,
+  InMemoryMetricExporter,
+  MeterProvider,
+  PeriodicExportingMetricReader,
+} from "npm:@opentelemetry/sdk-metrics@^2.7.0";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 
 import {
   JobNotEnqueuedError,
@@ -50,6 +63,21 @@ function unsupportedCoordinator(): JobKeyCoordinator {
 }
 
 Deno.test("JobManager creates and publishes job context", async () => {
+  const metricExporter = new InMemoryMetricExporter(
+    AggregationTemporality.CUMULATIVE,
+  );
+  const reader = new PeriodicExportingMetricReader({
+    exporter: metricExporter,
+    exportIntervalMillis: 60_000,
+  });
+  metrics.setGlobalMeterProvider(new MeterProvider({ readers: [reader] }));
+  const spanExporter = new InMemorySpanExporter();
+  trace.setGlobalTracerProvider(
+    new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(spanExporter)],
+    }),
+  );
+  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
   const published: PublishedMessage[] = [];
   const manager = new JobManager<{ siteId: string }, { ok: boolean }>({
     nc: {
@@ -113,6 +141,26 @@ Deno.test("JobManager creates and publishes job context", async () => {
   );
 
   assertEquals(outcome.outcome, "completed");
+  await reader.forceFlush();
+  const attempts = metricExporter.getMetrics().flatMap((resource) =>
+    resource.scopeMetrics.flatMap((scope) => scope.metrics)
+  ).filter((metric) =>
+    metric.descriptor.name === "trellis.job.attempt.duration"
+  );
+  assertEquals(attempts.length, 1);
+  assertEquals(attempts[0].dataPoints[0].attributes, {
+    "trellis.route": "refresh",
+    "trellis.outcome": "completed",
+  });
+  const [span] = spanExporter.getFinishedSpans().filter((span) =>
+    span.name === "trellis.job.attempt"
+  );
+  assertExists(span);
+  assertEquals(span.parentSpanContext, undefined);
+  assertEquals(span.links[0]?.context.traceId, job.context.traceId);
+  metrics.disable();
+  trace.disable();
+  propagation.disable();
   assertEquals(published.length, 3);
   for (const message of published) {
     const event = JSON.parse(new TextDecoder().decode(message.payload)) as {

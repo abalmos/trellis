@@ -10,6 +10,7 @@ mod projector;
 mod query;
 mod router;
 pub mod storage;
+pub mod telemetry;
 mod watch;
 mod wire;
 
@@ -22,8 +23,8 @@ pub use management::{
     secure_consumer_routes, EventsManagement, ManagementAction, ManagementAuthorizer,
 };
 pub use projector::{
-    start_events_projector, EventAuthorizationInput, EventVerifier, EventsProjectorHandle,
-    EventsRuntime, VerifiedEventPublisher,
+    projector_consumer_name, start_events_projector, EventAuthorizationInput, EventVerifier,
+    EventsProjectorHandle, EventsRuntime, VerifiedEventPublisher,
 };
 pub use query::{EventsQuery, EventsQueryError};
 pub use router::build_router_with_query;

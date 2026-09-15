@@ -8,13 +8,28 @@ use std::sync::{
 };
 use std::time::Duration;
 use tokio::sync::Notify;
+use tracing_subscriber::prelude::*;
 use trellis_rs::jobs::JobProcessError;
 use trellis_rs::service::ServiceConnectOptions;
+use trellis_rs::telemetry::{init_from_env, TelemetryIdentity, TelemetryRole};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+    let telemetry = init_from_env(TelemetryIdentity::new(
+        "runtime-rust-provider",
+        TelemetryRole::Service,
+        env!("CARGO_PKG_VERSION"),
+    ));
+    tracing_subscriber::registry()
+        .with(
+            telemetry
+                .tracer()
+                .map(|tracer| tracing_opentelemetry::layer().with_tracer(tracer)),
+        )
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_filter(tracing_subscriber::EnvFilter::from_default_env()),
+        )
         .init();
     let url = std::env::var("TRELLIS_URL")?;
     let identity = std::env::var("TRELLIS_IDENTITY_SEED")?;
@@ -209,5 +224,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         });
     service.run().await?;
+    telemetry.shutdown().await;
     Ok(())
 }

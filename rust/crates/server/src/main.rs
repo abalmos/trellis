@@ -474,7 +474,7 @@ async fn main() -> miette::Result<()> {
     let policy = StartupPolicy::resolve(Args::parse())?;
     let telemetry = telemetry::init(policy.verbose, policy.operation == Operation::Check)?;
     let result = run(policy).await;
-    telemetry.shutdown();
+    telemetry.shutdown().await;
     result
 }
 

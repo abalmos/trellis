@@ -11,9 +11,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
+use tracing::Instrument as _;
+use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
 use super::error::merge_context;
 use super::{AuthenticatedRouter, RequestContext, RequestValidator, Router, ServerError};
+use crate::telemetry::instruments::{self, DurationFamily, UpDownFamily};
+use crate::telemetry::lifecycle::Observation;
+use crate::telemetry::propagation;
+use crate::telemetry::KeyValue;
 
 static ERROR_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -141,6 +147,23 @@ pub trait RequestHandler: Send + Sync {
         None
     }
 
+    /// Bounded registered route token for one inbound subject, when routed.
+    ///
+    /// The token is interned at registration; it is never parsed from the
+    /// request subject, and unrecognized input reports `_unknown`.
+    fn route_token(&self, _subject: &str) -> Option<&'static str> {
+        None
+    }
+
+    /// Whether one inbound subject is a registered unary request/reply RPC.
+    ///
+    /// Handlers backed by a router answer from the registered surface kind so a
+    /// Feed or Operation route is never a unary request. Other handlers default
+    /// to their declared route token, which is request/reply by construction.
+    fn is_unary_rpc_route(&self, subject: &str) -> bool {
+        self.route_token(subject).is_some()
+    }
+
     fn handle<'a>(
         &'a self,
         subject: &'a str,
@@ -191,6 +214,14 @@ pub trait RequestHandler: Send + Sync {
 }
 
 impl RequestHandler for Router {
+    fn route_token(&self, subject: &str) -> Option<&'static str> {
+        Router::route_token(self, subject)
+    }
+
+    fn is_unary_rpc_route(&self, subject: &str) -> bool {
+        Router::is_unary_rpc_route(self, subject)
+    }
+
     fn handle<'a>(
         &'a self,
         subject: &'a str,
@@ -226,6 +257,14 @@ impl<V> RequestHandler for AuthenticatedRouter<V>
 where
     V: RequestValidator + 'static,
 {
+    fn route_token(&self, subject: &str) -> Option<&'static str> {
+        AuthenticatedRouter::route_token(self, subject)
+    }
+
+    fn is_unary_rpc_route(&self, subject: &str) -> bool {
+        AuthenticatedRouter::is_unary_rpc_route(self, subject)
+    }
+
     fn handle<'a>(
         &'a self,
         subject: &'a str,
@@ -259,6 +298,33 @@ where
 
 /// Decode one inbound NATS message into host request fields.
 #[doc = concat!("Trellis API operation `", stringify!(decode_nats_request), "`.")]
+/// Reads one W3C trace header only when exactly one valid value is present.
+///
+/// Absent, duplicated, or malformed values yield `None`, which makes the
+/// request a new local root without rejecting the business request.
+fn single_trace_header(message: &async_nats::Message, name: &str) -> Option<String> {
+    let headers = message.headers.as_ref()?;
+    let mut matching = headers
+        .iter()
+        .filter(|(key, _)| key.to_string().eq_ignore_ascii_case(name));
+    let (_, values) = matching.next()?;
+    if matching.next().is_some() {
+        return None;
+    }
+    // Exactly one value must be present; duplicates within a repeated header
+    // are rejected the same way as a repeated header name.
+    let mut values = values.iter();
+    let value = values.next()?.as_str().to_owned();
+    if values.next().is_some() {
+        return None;
+    }
+    if name == "traceparent" {
+        crate::telemetry::propagation::validate_traceparent(&value).then_some(value)
+    } else {
+        crate::telemetry::propagation::validate_tracestate(&value).then_some(value)
+    }
+}
+
 pub fn decode_nats_request(message: &async_nats::Message) -> InboundRequest {
     let subject = message.subject.to_string();
     let reply_to = message.reply.as_ref().map(ToString::to_string);
@@ -287,16 +353,12 @@ pub fn decode_nats_request(message: &async_nats::Message) -> InboundRequest {
         .as_ref()
         .and_then(|headers| headers.get("request-id"))
         .map(|value| value.as_str().to_string());
-    let traceparent = message
-        .headers
-        .as_ref()
-        .and_then(|headers| headers.get("traceparent"))
-        .map(|value| value.as_str().to_string());
-    let tracestate = message
-        .headers
-        .as_ref()
-        .and_then(|headers| headers.get("tracestate"))
-        .map(|value| value.as_str().to_string());
+    // Trace context is validated at the real carrier boundary while the
+    // original header set is available: `HeaderMap::get` returns only the
+    // first value, so duplicates must be rejected here rather than silently
+    // selecting one.
+    let traceparent = single_trace_header(message, "traceparent");
+    let tracestate = single_trace_header(message, "tracestate");
 
     InboundRequest {
         subject: subject.clone(),
@@ -538,6 +600,202 @@ fn error_id() -> String {
     format!("rust-server-error-{timestamp}-{sequence}")
 }
 
+/// Outcome classification for one dispatched server request.
+///
+/// Typed error categories are used; human-readable messages are never parsed.
+fn server_outcome(error: &ServerError) -> &'static str {
+    match error {
+        ServerError::DeclaredRpc(_) => "declared_error",
+        ServerError::SchemaValidation { .. }
+        | ServerError::Validation { .. }
+        | ServerError::MissingHandler(_)
+        | ServerError::MissingReply { .. }
+        | ServerError::InvalidOperationControlAction { .. }
+        | ServerError::OperationNotFound { .. }
+        | ServerError::OperationAlreadyExists { .. }
+        | ServerError::OperationInvalidId { .. }
+        | ServerError::OperationMismatch { .. }
+        | ServerError::OperationAlreadyTerminal { .. }
+        | ServerError::OperationUnsupportedControl { .. }
+        | ServerError::InvalidResourceBinding { .. }
+        | ServerError::TransferObjectMissing { .. }
+        | ServerError::InvalidTransferId { .. }
+        | ServerError::TransferSequenceOutOfOrder { .. }
+        | ServerError::TransferMissingEof { .. }
+        | ServerError::TransferAlreadyComplete { .. }
+        | ServerError::TransferExpired { .. }
+        | ServerError::InvalidTransferExpiry { .. }
+        | ServerError::InvalidTransferChunkSize { .. }
+        | ServerError::MissingTransferHeader { .. }
+        | ServerError::InvalidTransferHeader { .. }
+        | ServerError::TransferObjectSizeMismatch { .. }
+        | ServerError::StoreObjectTooLarge { .. }
+        | ServerError::TransferObjectTooLarge { .. } => "invalid",
+        ServerError::RequestDenied { .. }
+        | ServerError::MissingSessionKey { .. }
+        | ServerError::MissingProof { .. }
+        | ServerError::MissingAuthorizationContext { .. }
+        | ServerError::ReplyInboxMismatch { .. }
+        | ServerError::TransferSessionMismatch { .. }
+        | ServerError::TransferDigestMismatch { .. } => "denied",
+        ServerError::StoreWaitTimeout { .. } => "timeout",
+        ServerError::Json(_) => "error",
+        ServerError::OperationCapacityExceeded { .. } => "rate_limited",
+        ServerError::Nats(_)
+        | ServerError::MissingResourceBinding { .. }
+        | ServerError::ResourceUnavailable { .. }
+        | ServerError::StoreCommitIndeterminate { .. } => "unavailable",
+        ServerError::StoreWaitCanceled { .. }
+        | ServerError::StoreWriteCancelled
+        | ServerError::StoreReadCancelled
+        | ServerError::TransferCancelled { .. } => "cancelled",
+        _ => "error",
+    }
+}
+
+/// Trace carrier pairs retained on one inbound request context.
+fn trace_pairs(context: &RequestContext) -> Vec<(String, String)> {
+    let mut pairs = Vec::new();
+    if let Some(traceparent) = &context.traceparent {
+        pairs.push(("traceparent".to_owned(), traceparent.clone()));
+    }
+    if let Some(tracestate) = &context.tracestate {
+        pairs.push(("tracestate".to_owned(), tracestate.clone()));
+    }
+    pairs
+}
+
+/// One dispatched request's business outcome before error erasure.
+///
+/// Dispatch converts handler errors and panics into encoded error replies so
+/// callers receive their exact payload. The observation must classify the
+/// business result, not the envelope construction, so the typed outcome is
+/// carried alongside the reply.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DispatchOutcome {
+    /// The handler produced a response without a business error.
+    Ok,
+    /// The handler returned or panicked with an error category.
+    Failed(&'static str),
+}
+
+impl DispatchOutcome {
+    /// Bounded catalog value for the observation.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Failed(outcome) => outcome,
+        }
+    }
+}
+
+/// Runs one handler call and returns its business outcome with the result.
+async fn dispatch_outcome<T>(
+    call: impl std::future::Future<Output = Result<T, ServerError>>,
+) -> (DispatchOutcome, Result<T, ServerError>) {
+    match AssertUnwindSafe(call).catch_unwind().await {
+        Ok(Ok(value)) => (DispatchOutcome::Ok, Ok(value)),
+        Ok(Err(error)) => (DispatchOutcome::Failed(server_outcome(&error)), Err(error)),
+        // A handler panic is an internal failure. The wire payload is
+        // unchanged, but the observation must not classify it as an
+        // unavailable dependency.
+        Err(panic) => (
+            DispatchOutcome::Failed("error"),
+            Err(panic_to_server_error(panic)),
+        ),
+    }
+}
+
+/// One dispatched response ready for publication.
+///
+/// The unary server observation stays open until the reply is actually handed
+/// to the transport, so a failed handoff is not recorded as a success. Stream
+/// and feed responses never carry the unary observation.
+pub(crate) struct DispatchedResponse {
+    pub(crate) reply_to: String,
+    pub(crate) response: HandlerResponse,
+    pub(crate) annotations: ErrorAnnotationContext,
+    unary: Option<UnaryRequest>,
+    pub(crate) outcome: DispatchOutcome,
+}
+
+/// Owns the unary span and counted observation across dispatch and reply handoff.
+struct UnaryRequest {
+    observation: Option<Observation>,
+    span: tracing::Span,
+}
+
+impl UnaryRequest {
+    fn start(context: &RequestContext, route: &'static str) -> Self {
+        let observation = Observation::start_counted(
+            DurationFamily::RpcServer,
+            UpDownFamily::RpcServerInflight,
+            vec![KeyValue::new("trellis.route", route)],
+            "cancelled",
+        );
+        let span = tracing::info_span!(
+            "trellis.rpc.server",
+            "trellis.route" = route,
+            "trellis.request.id" = context.request_id.as_deref().filter(|id| id.len() <= 128),
+            "trellis.outcome" = tracing::field::Empty,
+        );
+        let _ = span.set_parent(propagation::extract_context(&trace_pairs(context)));
+        Self {
+            observation: Some(observation),
+            span,
+        }
+    }
+
+    fn finish(&mut self, outcome: DispatchOutcome, handoff: Option<&ServerError>) {
+        let final_outcome = handoff.map_or(outcome.as_str(), server_outcome);
+        self.span.record("trellis.outcome", final_outcome);
+        if handoff.is_some() {
+            self.span
+                .set_status(opentelemetry::trace::Status::error("reply handoff failed"));
+        } else if matches!(outcome, DispatchOutcome::Failed(_)) {
+            self.span
+                .set_status(opentelemetry::trace::Status::error("request failed"));
+        }
+        if let Some(observation) = self.observation.take() {
+            observation.finish(final_outcome);
+        }
+    }
+
+    fn discard(mut self) {
+        if let Some(observation) = self.observation.take() {
+            observation.discard();
+        }
+    }
+}
+
+impl Drop for UnaryRequest {
+    fn drop(&mut self) {
+        if self.observation.is_some() {
+            self.span.record("trellis.outcome", "cancelled");
+            self.span
+                .set_status(opentelemetry::trace::Status::error("request cancelled"));
+        }
+    }
+}
+
+/// Result of one decoded dispatch before reply handoff.
+pub(crate) enum DispatchResponse {
+    /// The request carried no reply inbox, so nothing is published.
+    NoReply,
+    /// One response is ready to publish.
+    Reply(Box<DispatchedResponse>),
+}
+
+impl HandlerResponse {
+    /// Whether this response is a unary RPC for the server duration family.
+    ///
+    /// Stream and Feed responses have their own lifetimes and must never be
+    /// counted as unary RPC successes.
+    pub(crate) fn is_unary(&self) -> bool {
+        matches!(self, Self::Frames(_) | Self::Error(_))
+    }
+}
+
 /// Dispatch one decoded request to a request handler and encode a reply.
 pub async fn dispatch_one<H>(
     handler: &H,
@@ -565,22 +823,27 @@ pub async fn dispatch_all<H>(
 where
     H: RequestHandler,
 {
+    let registered_route = handler.route_token(&request.subject);
+    let route = registered_route.unwrap_or_else(instruments::unknown_route);
+    let mut unary = (handler.is_unary_rpc_route(&request.subject) && request.reply_to.is_some())
+        .then(|| UnaryRequest::start(&request.context, route));
     let reply_to = request.reply_to;
     let annotations =
         ErrorAnnotationContext::from_request(&request.subject, &request.context, handler);
-    let result =
-        AssertUnwindSafe(handler.handle_frames(&request.subject, request.payload, request.context))
-            .catch_unwind()
-            .await;
-
-    match result {
-        Ok(Ok(payloads)) => Ok(reply_to.map(|reply_to| {
+    let call = handler.handle_frames(&request.subject, request.payload, request.context);
+    let (dispatch, result) = if let Some(unary) = &unary {
+        dispatch_outcome(call.instrument(unary.span.clone())).await
+    } else {
+        dispatch_outcome(call).await
+    };
+    let result = match result {
+        Ok(payloads) => Ok(reply_to.map(|reply_to| {
             payloads
                 .into_iter()
                 .map(|payload| encode_success_reply(reply_to.clone(), payload))
                 .collect()
         })),
-        Ok(Err(error)) => match reply_to {
+        Err(error) => match reply_to {
             Some(reply_to) => Ok(Some(vec![encode_error_reply_with_context(
                 reply_to,
                 &error,
@@ -588,66 +851,75 @@ where
             )])),
             None => Err(error),
         },
-        Err(panic) => {
-            let error = panic_to_server_error(panic);
-            match reply_to {
-                Some(reply_to) => Ok(Some(vec![encode_error_reply_with_context(
-                    reply_to,
-                    &error,
-                    &annotations,
-                )])),
-                None => Err(error),
-            }
-        }
+    };
+
+    if let Some(unary) = &mut unary {
+        unary.finish(dispatch, None);
     }
+    result
 }
 
 pub(crate) async fn dispatch_response<H>(
     handler: &H,
     request: InboundRequest,
-) -> Result<Option<(String, HandlerResponse, ErrorAnnotationContext)>, ServerError>
+) -> Result<DispatchResponse, ServerError>
 where
     H: RequestHandler,
 {
+    let registered_route = handler.route_token(&request.subject);
+    let route = registered_route.unwrap_or_else(instruments::unknown_route);
+    let mut unary = handler
+        .is_unary_rpc_route(&request.subject)
+        .then(|| UnaryRequest::start(&request.context, route));
     let reply_to = request.reply_to;
     let annotations =
         ErrorAnnotationContext::from_request(&request.subject, &request.context, handler);
-    let result = AssertUnwindSafe(handler.handle_response(
-        &request.subject,
-        request.payload,
-        request.context,
-    ))
-    .catch_unwind()
-    .await;
+    let call = handler.handle_response(&request.subject, request.payload, request.context);
+    let (dispatch, result) = if let Some(unary) = &unary {
+        dispatch_outcome(call.instrument(unary.span.clone())).await
+    } else {
+        dispatch_outcome(call).await
+    };
 
     let Some(reply_to) = reply_to else {
+        // The saved typed outcome is authoritative; no reclassification.
+        if let Some(unary) = &mut unary {
+            unary.finish(dispatch, None);
+        }
         return match result {
-            Ok(Ok(_)) => Ok(None),
-            Ok(Err(error)) => Err(error),
-            Err(panic) => Err(panic_to_server_error(panic)),
+            Ok(_) => Ok(DispatchResponse::NoReply),
+            Err(error) => Err(error),
         };
     };
 
-    match result {
-        Ok(Ok(response)) => Ok(Some((reply_to, response, annotations))),
-        Ok(Err(error)) => Ok(Some((
-            reply_to.clone(),
+    // The typed outcome from dispatch is authoritative even when the error was
+    // translated into a wire envelope; only a reply-publication failure may
+    // amend it later.
+    let (response, outcome) = match result {
+        Ok(response) => (response, dispatch),
+        Err(error) => (
             HandlerResponse::Error(
-                encode_error_reply_with_context(reply_to, &error, &annotations).payload,
+                encode_error_reply_with_context(reply_to.clone(), &error, &annotations).payload,
             ),
-            annotations,
-        ))),
-        Err(panic) => {
-            let error = panic_to_server_error(panic);
-            Ok(Some((
-                reply_to.clone(),
-                HandlerResponse::Error(
-                    encode_error_reply_with_context(reply_to, &error, &annotations).payload,
-                ),
-                annotations,
-            )))
+            dispatch,
+        ),
+    };
+    // A stream or feed response owns its own lifetime; the unary server
+    // observation and span must not count it, and only a registered route is a
+    // unary surface. A unary observation and span stay open for the caller to
+    // finish after the reply handoff.
+    if !response.is_unary() {
+        if let Some(unary) = unary.take() {
+            unary.discard();
         }
     }
+    Ok(DispatchResponse::Reply(Box::new(DispatchedResponse {
+        reply_to,
+        response,
+        annotations,
+        unary,
+        outcome,
+    })))
 }
 
 async fn publish_reply(
@@ -672,6 +944,27 @@ async fn publish_reply(
 }
 
 async fn publish_response(
+    client: &async_nats::Client,
+    dispatched: DispatchedResponse,
+) -> Result<(), ServerError> {
+    let DispatchedResponse {
+        reply_to,
+        response,
+        annotations,
+        mut unary,
+        outcome,
+    } = dispatched;
+    let result = publish_handler_response(client, reply_to, response, &annotations).await;
+    // The unary observation and its span end with the actual reply handoff. A
+    // delivered business failure sets an error status with a static bounded
+    // description; a failed publication is an unavailable request.
+    if let Some(unary) = &mut unary {
+        unary.finish(outcome, result.as_ref().err());
+    }
+    result
+}
+
+async fn publish_handler_response(
     client: &async_nats::Client,
     reply_to: String,
     response: HandlerResponse,
@@ -796,14 +1089,16 @@ where
                 in_flight.push(async move {
                     let subject = request.subject.clone();
                     match dispatch_response(handler, request).await {
-                        Ok(Some((reply_to, response, annotations))) => {
-                            tracing::debug!(%subject, %reply_to, request_id = ?annotations.request_id, "publishing service request reply");
-                            if let Err(error) = publish_response(client, reply_to.clone(), response, &annotations).await {
-                                tracing::warn!(%subject, %reply_to, request_id = ?annotations.request_id, %error, "service request reply publish failed");
+                        Ok(DispatchResponse::Reply(dispatched)) => {
+                            let reply_to = dispatched.reply_to.clone();
+                            let request_id = dispatched.annotations.request_id.clone();
+                            tracing::debug!(%subject, %reply_to, request_id = ?request_id, "publishing service request reply");
+                            if let Err(error) = publish_response(client, *dispatched).await {
+                                tracing::warn!(%subject, %reply_to, request_id = ?request_id, %error, "service request reply publish failed");
                                 return Err(error);
                             }
                         }
-                        Ok(None) => {}
+                        Ok(DispatchResponse::NoReply) => {}
                         Err(_) => {}
                     }
                     Ok::<(), ServerError>(())
@@ -839,6 +1134,10 @@ mod tests {
     struct DeclaredErrorHandler;
 
     impl RequestHandler for DeclaredErrorHandler {
+        fn route_token(&self, subject: &str) -> Option<&'static str> {
+            route_token_for(subject)
+        }
+
         fn handle<'a>(
             &'a self,
             _subject: &'a str,
@@ -867,6 +1166,10 @@ mod tests {
     struct PanicHandler;
 
     impl RequestHandler for PanicHandler {
+        fn route_token(&self, subject: &str) -> Option<&'static str> {
+            route_token_for(subject)
+        }
+
         fn handle<'a>(
             &'a self,
             _subject: &'a str,
@@ -1095,5 +1398,282 @@ mod tests {
             },
             handler,
         )
+    }
+
+    /// Distinct route tokens keep concurrent provider tests independent.
+    const SUCCESS_ROUTE: &str = "test@v1:Route.Success";
+    const DECLARED_ROUTE: &str = "test@v1:Route.Declared";
+    const DENIED_ROUTE: &str = "test@v1:Route.Denied";
+    const PANIC_ROUTE: &str = "test@v1:Route.Panic";
+    const ENVELOPE_ROUTE: &str = "test@v1:Route.Envelope";
+
+    fn route_token_for(subject: &str) -> Option<&'static str> {
+        match subject {
+            "test.success" => Some(SUCCESS_ROUTE),
+            "test.declared" => Some(DECLARED_ROUTE),
+            "test.denied" => Some(DENIED_ROUTE),
+            "test.panic" => Some(PANIC_ROUTE),
+            "test.envelope" => Some(ENVELOPE_ROUTE),
+            _ => None,
+        }
+    }
+
+    struct DeniedHandler;
+
+    impl RequestHandler for DeniedHandler {
+        fn route_token(&self, subject: &str) -> Option<&'static str> {
+            route_token_for(subject)
+        }
+
+        fn handle<'a>(
+            &'a self,
+            subject: &'a str,
+            _payload: Bytes,
+            _context: RequestContext,
+        ) -> BoxFuture<'a, Result<Bytes, ServerError>> {
+            Box::pin(async move {
+                Err(ServerError::RequestDenied {
+                    subject: subject.to_string(),
+                    session_key: "session-key".to_string(),
+                })
+            })
+        }
+    }
+
+    struct SuccessHandler;
+
+    impl RequestHandler for SuccessHandler {
+        fn route_token(&self, subject: &str) -> Option<&'static str> {
+            route_token_for(subject)
+        }
+
+        fn handle<'a>(
+            &'a self,
+            _subject: &'a str,
+            _payload: Bytes,
+            _context: RequestContext,
+        ) -> BoxFuture<'a, Result<Bytes, ServerError>> {
+            Box::pin(async { Ok(Bytes::from_static(b"{}")) })
+        }
+    }
+
+    /// Reads `trellis.rpc.server` samples by outcome for one route token.
+    ///
+    /// Filtering by the exact registered token keeps concurrently running
+    /// provider tests from observing each other's samples.
+    fn server_outcomes_for(
+        capture: &crate::telemetry::capture::MetricCapture,
+        route: &str,
+    ) -> Vec<(String, u64)> {
+        capture
+            .points_for("trellis.rpc.server.duration")
+            .into_iter()
+            .filter(|point| {
+                point
+                    .attributes
+                    .iter()
+                    .any(|(key, value)| key == "trellis.route" && value == route)
+            })
+            .filter_map(|point| {
+                let outcome = point
+                    .attributes
+                    .iter()
+                    .find(|(key, _)| key == "trellis.outcome")
+                    .map(|(_, value)| value.clone())?;
+                Some((outcome, point.count))
+            })
+            .collect()
+    }
+
+    /// Runs one real dispatch and returns its route's cumulative samples.
+    async fn recorded_dispatch<H: RequestHandler>(
+        handler: H,
+        subject: &'static str,
+        capture: &crate::telemetry::capture::MetricCapture,
+    ) -> Vec<(String, u64)> {
+        let host = test_service_host(handler);
+        let _ = dispatch_all(&host, test_request(subject)).await;
+        capture.flush();
+        let route = route_token_for(subject).expect("test subjects carry a route token");
+        let mut samples = server_outcomes_for(capture, route);
+        samples.sort();
+        samples
+    }
+
+    #[tokio::test]
+    async fn dispatch_outcomes_classify_business_results_not_envelopes() {
+        let _guard = crate::telemetry::capture::meter_test_lock().await;
+        let capture = crate::telemetry::capture::process_capture();
+
+        // Counts are cumulative across the process, so each phase compares the
+        // increase it caused rather than an absolute total.
+        capture.flush();
+        let baseline = server_outcomes_for(&capture, SUCCESS_ROUTE)
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let after_success = recorded_dispatch(SuccessHandler, "test.success", &capture).await;
+        let added = added_since(&baseline, &after_success);
+        assert_eq!(
+            added,
+            vec![("ok".to_string(), 1)],
+            "one success must add exactly one ok sample"
+        );
+        let baseline = after_success
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        let after_declared =
+            recorded_dispatch(DeclaredErrorHandler, "test.declared", &capture).await;
+        assert_eq!(
+            added_since(&baseline, &after_declared),
+            vec![("declared_error".to_string(), 1)],
+            "an error reply must add only the declared_error sample"
+        );
+        let baseline = after_declared
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        let after_denied = recorded_dispatch(DeniedHandler, "test.denied", &capture).await;
+        assert_eq!(
+            added_since(&baseline, &after_denied),
+            vec![("denied".to_string(), 1)],
+            "a denial must add exactly one denied sample"
+        );
+        let baseline = after_denied
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        let after_panic = recorded_dispatch(PanicHandler, "test.panic", &capture).await;
+        assert_eq!(
+            added_since(&baseline, &after_panic),
+            vec![("error".to_string(), 1)],
+            "a panic must add exactly one internal error sample"
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_error_envelope_never_records_ok() {
+        let _guard = crate::telemetry::capture::meter_test_lock().await;
+        let capture = crate::telemetry::capture::process_capture();
+        let baseline = std::collections::BTreeMap::new();
+
+        let host = test_service_host(DeclaredErrorHandler);
+        let replies = dispatch_all(&host, test_request("test.envelope"))
+            .await
+            .expect("dispatch should not fail")
+            .expect("reply should be encoded");
+        // The caller still receives the exact encoded error envelope.
+        assert!(replies[0].is_error);
+        capture.flush();
+
+        let added = added_since(&baseline, &server_outcomes_for(&capture, ENVELOPE_ROUTE));
+        assert_eq!(
+            added,
+            vec![("declared_error".to_string(), 1)],
+            "an error envelope must add the error sample and never an ok sample"
+        );
+    }
+
+    struct FeedHandler;
+
+    impl RequestHandler for FeedHandler {
+        fn route_token(&self, _subject: &str) -> Option<&'static str> {
+            Some("test@v1:Route.Feed")
+        }
+
+        fn is_unary_rpc_route(&self, _subject: &str) -> bool {
+            false
+        }
+
+        fn handle<'a>(
+            &'a self,
+            _subject: &'a str,
+            _payload: Bytes,
+            _context: RequestContext,
+        ) -> BoxFuture<'a, Result<Bytes, ServerError>> {
+            Box::pin(async { Ok(Bytes::from_static(b"{}")) })
+        }
+
+        fn handle_response<'a>(
+            &'a self,
+            _subject: &'a str,
+            _payload: Bytes,
+            _context: RequestContext,
+        ) -> BoxFuture<'a, Result<HandlerResponse, ServerError>> {
+            Box::pin(async {
+                let frames = futures_util::stream::iter(vec![Ok(Bytes::from_static(b"{}"))]);
+                Ok(HandlerResponse::FeedStream {
+                    stream: Box::pin(frames),
+                    control_subject: "feed.control".to_owned(),
+                    feed_id: "feed-1".to_owned(),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn feed_streams_never_acquire_a_unary_sample() {
+        let _guard = crate::telemetry::capture::meter_test_lock().await;
+        let capture = crate::telemetry::capture::process_capture();
+        capture.flush();
+
+        // FeedStream success must not record a unary server sample.
+        let host = test_service_host(FeedHandler);
+        let dispatched = dispatch_response(&host, test_request("test.feed"))
+            .await
+            .expect("dispatch should not fail");
+        assert!(matches!(dispatched, DispatchResponse::Reply(_)));
+        assert!(
+            server_outcomes_for(&capture, "test@v1:Route.Feed").is_empty(),
+            "a feed stream must not acquire a unary sample"
+        );
+
+        // A feed error path must also stay out of the unary family even though
+        // its wire error is a single frame: ownership comes from the registered
+        // surface kind, not the response shape.
+        assert!(HandlerResponse::Error(Bytes::new()).is_unary());
+        assert!(
+            !host.is_unary_rpc_route("test.feed"),
+            "a non-unary registered surface must not own a unary sample"
+        );
+    }
+
+    #[tokio::test]
+    async fn dropped_unary_handoff_records_one_cancellation() {
+        let _guard = crate::telemetry::capture::meter_test_lock().await;
+        let capture = crate::telemetry::capture::process_capture();
+        capture.flush();
+        let baseline = server_outcomes_for(&capture, SUCCESS_ROUTE)
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let host = test_service_host(SuccessHandler);
+        let dispatched = dispatch_response(&host, test_request("test.success"))
+            .await
+            .unwrap();
+        let DispatchResponse::Reply(reply) = dispatched else {
+            panic!("expected unary reply");
+        };
+        drop(reply);
+        capture.flush();
+        assert_eq!(
+            added_since(&baseline, &server_outcomes_for(&capture, SUCCESS_ROUTE)),
+            vec![("cancelled".to_owned(), 1)]
+        );
+    }
+
+    /// Outcome counts added between two cumulative samples.
+    fn added_since(
+        baseline: &std::collections::BTreeMap<String, u64>,
+        current: &[(String, u64)],
+    ) -> Vec<(String, u64)> {
+        let mut added: Vec<(String, u64)> = current
+            .iter()
+            .filter_map(|(outcome, count)| {
+                let previous = baseline.get(outcome).copied().unwrap_or(0);
+                (*count > previous).then_some((outcome.clone(), count - previous))
+            })
+            .collect();
+        added.sort();
+        added
     }
 }

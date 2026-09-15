@@ -112,6 +112,10 @@ struct Route {
     handler: BoxedHandler,
     capabilities: RouteCapabilities,
     permission: RoutePermissionSpec,
+    /// Bounded registered route token for metric labels.
+    route_token: &'static str,
+    /// Whether this registered surface is a unary request/reply RPC.
+    unary_rpc: bool,
 }
 
 /// Exact permission surface recorded at registration time for one route.
@@ -291,6 +295,28 @@ impl Router {
             .collect()
     }
 
+    /// Interns one bounded route token at registration time.
+    ///
+    /// Feed surfaces share the request-route family: their open is a
+    /// request/response RPC at the shared dispatch boundary, while the feed's
+    /// own lifetime is observed by the feed instruments, not this token.
+    fn intern_route(&self, api: &str, key: &str) -> &'static str {
+        crate::telemetry::instruments::route_token(
+            crate::telemetry::instruments::RouteFamily::Rpc,
+            &format!("{api}:{key}"),
+        )
+    }
+
+    /// Registered route token for one inbound request subject.
+    pub(crate) fn route_token(&self, subject: &str) -> Option<&'static str> {
+        self.route(subject).map(|route| route.route_token)
+    }
+
+    /// Whether one registered subject is a unary request/reply RPC surface.
+    pub(crate) fn is_unary_rpc_route(&self, subject: &str) -> bool {
+        self.route(subject).is_some_and(|route| route.unary_rpc)
+    }
+
     fn descriptor_name(&self, name: &str) -> String {
         name.split_once('.')
             .map_or(name, |(_, action)| action)
@@ -316,6 +342,8 @@ impl Router {
                     self.descriptor_name(D::KEY),
                     PermissionAction::Call,
                 ),
+                route_token: self.intern_route(D::API_ID, D::KEY),
+                unary_rpc: true,
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let handler = Arc::clone(&handler);
@@ -370,6 +398,8 @@ impl Router {
                     self.descriptor_name(D::KEY),
                     PermissionAction::Call,
                 ),
+                route_token: self.intern_route(D::API_ID, D::KEY),
+                unary_rpc: true,
                 handler: Box::new(|_, _| {
                     Box::pin(async {
                         Err(ServerError::Nats(
@@ -399,6 +429,7 @@ impl Router {
                 },
             ) as BoxedHandler
         };
+        let operation_token = self.intern_route(D::API_ID, &name);
         self.handlers.insert(
             subject.clone(),
             Route {
@@ -411,6 +442,8 @@ impl Router {
                     name.clone(),
                     PermissionAction::Invoke,
                 ),
+                route_token: operation_token,
+                unary_rpc: false,
                 handler: metadata_handler(),
             },
         );
@@ -423,6 +456,8 @@ impl Router {
                     control: self.descriptor_capabilities(D::CONTROL_CAPABILITIES),
                 },
                 permission: RoutePermissionSpec::OperationControl(D::API_ID.to_owned(), name),
+                route_token: operation_token,
+                unary_rpc: false,
                 handler: metadata_handler(),
             },
         );
@@ -460,6 +495,8 @@ impl Router {
                     self.descriptor_name(D::KEY),
                     PermissionAction::Subscribe,
                 ),
+                route_token: self.intern_route(D::API_ID, D::KEY),
+                unary_rpc: false,
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let handler = Arc::clone(&handler);
@@ -538,6 +575,8 @@ impl Router {
                     self.descriptor_name(D::KEY),
                     PermissionAction::Subscribe,
                 ),
+                route_token: self.intern_route(D::API_ID, D::KEY),
+                unary_rpc: false,
                 handler: Box::new(move |ctx, payload| {
                     let cancellations = Arc::clone(&cancellations);
                     let cancellation_subject = cancellation_subject.clone();
@@ -634,6 +673,8 @@ impl Router {
                     self.descriptor_name(D::KEY),
                     PermissionAction::Invoke,
                 ),
+                route_token: self.intern_route(D::API_ID, D::KEY),
+                unary_rpc: false,
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let start = Arc::clone(&start);
@@ -671,6 +712,8 @@ impl Router {
                     D::API_ID.to_owned(),
                     self.descriptor_name(D::KEY),
                 ),
+                route_token: self.intern_route(D::API_ID, D::KEY),
+                unary_rpc: false,
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let get = Arc::clone(&get);
