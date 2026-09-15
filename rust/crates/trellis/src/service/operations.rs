@@ -623,11 +623,21 @@ where
             caller: claimed.record.caller,
             ..RequestContext::default()
         };
+        let route = crate::telemetry::instruments::route_token(
+            crate::telemetry::instruments::RouteFamily::Operation,
+            &format!("{}:{}", D::API_ID, D::KEY),
+        );
         tokio::spawn(async move {
+            let observation = crate::telemetry::lifecycle::Observation::start_counted(
+                crate::telemetry::instruments::DurationFamily::OperationExecution,
+                crate::telemetry::instruments::UpDownFamily::OperationActive,
+                vec![crate::telemetry::KeyValue::new("trellis.route", route)],
+                "interrupted",
+            );
             let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(10));
             heartbeat.tick().await;
             let mut execution = Box::pin(handler(context, input, control));
-            loop {
+            let outcome = loop {
                 tokio::select! {
                     result = &mut execution => {
                         drop(execution);
@@ -644,7 +654,7 @@ where
                                 &mutation_gate,
                                 &claimed.record.invocation_id,
                             ).await;
-                        } else if let Err(error) = result {
+                        } else if let Err(error) = &result {
                             tracing::error!(%error, "operation handler failed");
                             let _ = durable_snapshot_update::<D>(
                                 &repository,
@@ -663,7 +673,13 @@ where
                                 },
                             ).await;
                         }
-                        break;
+                        break if cancellation_requested {
+                            "cancelled"
+                        } else if result.is_err() {
+                            "failed"
+                        } else {
+                            "completed"
+                        };
                     }
                     changed = cancellation.next() => {
                         match changed {
@@ -675,26 +691,29 @@ where
                                     &mutation_gate,
                                     &claimed.record.invocation_id,
                                 ).await;
-                                break;
+                                break "cancelled";
                             }
                             Some(Ok(current)) if fence.matches(&current.record) => {}
-                            Some(Ok(_)) => break,
+                            Some(Ok(_)) => break "lease_lost",
                             Some(Err(error)) => {
                                 tracing::warn!(%error, "operation cancellation watch failed");
-                                break;
+                                break "error";
                             }
-                            None => break,
+                            None => break "interrupted",
                         }
                     }
                     _ = heartbeat.tick() => {
                         let _guard = mutation_gate.lock().await;
                         let now = now_ms();
-                        if repository.renew(&claimed.record.invocation_id, &fence.executor_id, fence.owner_epoch, now, now + 30_000).await.is_err() {
-                            break;
+                        let renewed = repository.renew(&claimed.record.invocation_id, &fence.executor_id, fence.owner_epoch, now, now + 30_000).await;
+                        record_ownership_event("renew", renewed.is_ok());
+                        if renewed.is_err() {
+                            break "lease_lost";
                         }
                     }
                 }
-            }
+            };
+            observation.finish(outcome);
         });
         Ok(())
     }
@@ -777,7 +796,7 @@ where
                         let staging = staging.clone();
                         tokio::spawn(async move {
                             let now = now_ms();
-                            if let Ok(claimed) = repository
+                            let claim = repository
                                 .claim_for_connection(
                                     &operation_id,
                                     &executor_id,
@@ -785,8 +804,9 @@ where
                                     now,
                                     now + 30_000,
                                 )
-                                .await
-                            {
+                                .await;
+                            record_ownership_event("claim", claim.is_ok());
+                            if let Ok(claimed) = claim {
                                 let reconciled = async {
                                     if !D::UPLOAD {
                                         return Ok(claimed);
@@ -1045,7 +1065,9 @@ where
                     now,
                     now + 30_000,
                 )
-                .await?;
+                .await;
+            record_ownership_event("claim", claimed.is_ok());
+            let claimed = claimed?;
             let fence = OwnerFence::from(&claimed.record)?;
             if D::UPLOAD {
                 let mut upload: DurableOperationUpload =
@@ -3666,4 +3688,16 @@ mod tests {
         nats.stop().unwrap();
         drop(recovered);
     }
+}
+
+/// Records one observed operation ownership result.
+fn record_ownership_event(action: &'static str, ok: bool) {
+    crate::telemetry::instruments::add_counter(
+        crate::telemetry::instruments::CounterFamily::OperationOwnershipEvents,
+        1,
+        &[
+            crate::telemetry::KeyValue::new("trellis.action", action),
+            crate::telemetry::KeyValue::new("trellis.outcome", if ok { "ok" } else { "error" }),
+        ],
+    );
 }

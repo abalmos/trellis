@@ -339,6 +339,8 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     secure_consumer_routes(&mut router, query, authorizer.clone());
     EventsManagement::new(store.clone(), journal.clone(), delivery.clone(), authorizer)
         .register(&mut router);
+    let consumer_runtime = events_runtime.clone();
+    let consumer_resolver = Arc::clone(&resolver);
     let mut projector = start_events_projector(events_runtime, store.clone(), event_verifier)
         .await
         .map_err(runtime_error)?;
@@ -390,6 +392,11 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
                 () = task_stop.stopped() => Ok(()),
                 _ = crate::telemetry::snapshots::run_events_sampler(
                     sampler_store,
+                    task_stop.clone(),
+                ) => Ok(()),
+                _ = crate::telemetry::snapshots::run_consumer_sampler(
+                    consumer_runtime,
+                    consumer_resolver,
                     task_stop.clone(),
                 ) => Ok(()),
                 result = &mut api_loop => result.map_err(runtime_error),

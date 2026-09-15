@@ -6,8 +6,9 @@
 //! gauge callback. A failed poll keeps the previous values and advances only
 //! the error counter; genuine zeros are published as zeros.
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use trellis_rs::telemetry::instruments::{self, ObservableFamily};
 use trellis_rs::telemetry::KeyValue;
@@ -15,7 +16,9 @@ use trellis_rs::telemetry::KeyValue;
 use crate::platform::auth::{AuthorizationStateError, SqliteAuthorizationStore};
 use crate::shutdown::StopHandle;
 use trellis_events_runtime::storage::EventsStore;
+use trellis_events_runtime::ConsumerBindingResolver;
 use trellis_jobs_runtime::storage::SqliteJobsStore;
+use trellis_rs::service::EventsRuntime;
 
 /// Snapshot poll interval.
 const SAMPLER_INTERVAL: Duration = Duration::from_secs(15);
@@ -232,6 +235,96 @@ pub(crate) fn spawn_component_sampler(
             }
         }
     })
+}
+
+/// Runs the declared-Consumer inventory sampler until the runtime stops.
+pub(crate) async fn run_consumer_sampler(
+    runtime: EventsRuntime,
+    resolver: Arc<dyn ConsumerBindingResolver>,
+    stop: StopHandle,
+) {
+    let source = SnapshotSource::register(
+        Some("events"),
+        &[
+            ObservableFamily::ConsumerPending,
+            ObservableFamily::ConsumerAckPending,
+            ObservableFamily::ConsumerMissing,
+            ObservableFamily::ConsumerProgressAge,
+        ],
+    );
+    // Sampler-private liveness memory; no metric label carries a consumer name.
+    let mut progress: HashMap<(String, String), (u64, Instant)> = HashMap::new();
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(SAMPLER_INTERVAL) => {}
+            _ = stop.stopped() => return,
+        }
+        let live = match runtime.consumers().await {
+            Ok(live) => live,
+            Err(_) => {
+                record_failure("events", "io");
+                continue;
+            }
+        };
+        let bindings = match resolver.all().await {
+            Ok(bindings) => bindings,
+            Err(_) => {
+                record_failure("events", "invalid");
+                continue;
+            }
+        };
+        let now = Instant::now();
+        let mut pending = 0u64;
+        let mut ack_pending = 0u64;
+        let mut missing = 0u64;
+        let mut max_progress_age = 0.0f64;
+        for binding in &bindings {
+            let Some(info) = live.iter().find(|info| {
+                info.stream_name == binding.stream && info.name == binding.consumer_name
+            }) else {
+                missing += 1;
+                continue;
+            };
+            pending += info.num_pending;
+            ack_pending += info.num_ack_pending as u64;
+            let outstanding = info.num_pending + info.num_ack_pending as u64;
+            let key = (info.stream_name.clone(), info.name.clone());
+            let floor = info.ack_floor.stream_sequence;
+            let entry = progress.entry(key).or_insert((floor, now));
+            if outstanding == 0 {
+                // An idle consumer is not stalled.
+                entry.0 = floor;
+                entry.1 = now;
+            } else if floor != entry.0 {
+                // Any observed ack-floor movement is progress.
+                entry.0 = floor;
+                entry.1 = now;
+            }
+            max_progress_age = max_progress_age.max((now - entry.1).as_secs_f64());
+        }
+        source.publish(vec![
+            (
+                ObservableFamily::ConsumerPending,
+                pending as f64,
+                Vec::new(),
+            ),
+            (
+                ObservableFamily::ConsumerAckPending,
+                ack_pending as f64,
+                Vec::new(),
+            ),
+            (
+                ObservableFamily::ConsumerMissing,
+                missing as f64,
+                Vec::new(),
+            ),
+            (
+                ObservableFamily::ConsumerProgressAge,
+                max_progress_age,
+                Vec::new(),
+            ),
+        ]);
+    }
 }
 
 /// Runs the platform Auth snapshot sampler until the runtime stops.
