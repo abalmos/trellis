@@ -57,6 +57,7 @@ import {
   createNatsHeaderCarrier,
   extractTraceContext,
   injectTraceContext,
+  recordCatalogDuration,
   recordRpcAttempt,
   recordTrellisError,
   SpanStatusCode,
@@ -3744,10 +3745,11 @@ export class Trellis<
 
     const transport: OperationTransport = {
       requestJson: (subject, body) => {
+        const route = trellisRoute("operation", operation.toString());
         const error = unavailable?.();
         return error
           ? AsyncResult.from(Promise.resolve(err(error)))
-          : this.#requestJson(subject, body as JsonValue);
+          : this.#requestJson(subject, body as JsonValue, route);
       },
       watchJson: (subject, body) => {
         const error = unavailable?.();
@@ -4350,6 +4352,19 @@ export class Trellis<
     event: PreparedTrellisEvent,
   ): AsyncResult<void, UnexpectedError> {
     return AsyncResult.from((async () => {
+      const startedAt = performance.now();
+      const route = trellisRoute("event", event.descriptorIdentity);
+      const finish = (outcome: "ok" | "error"): void => {
+        recordCatalogDuration(
+          "trellis.event.publish.duration",
+          performance.now() - startedAt,
+          {
+            "trellis.route": route,
+            "trellis.delivery": "durable",
+            "trellis.outcome": outcome,
+          },
+        );
+      };
       try {
         const headers = natsHeaders();
         for (const [key, value] of Object.entries(event.headers)) {
@@ -4370,8 +4385,10 @@ export class Trellis<
         await this.#js.publish(event.subject, event.encodedPayload, {
           headers,
         });
+        finish("ok");
         return ok(undefined);
       } catch (cause) {
+        finish("error");
         const error = new UnexpectedError({
           cause,
           context: { event: event.event },
@@ -5533,13 +5550,15 @@ export class Trellis<
   #requestJson(
     subject: string,
     body: JsonValue,
+    route: string = UNKNOWN_ROUTE,
   ): AsyncResult<JsonValue, TransportError | UnexpectedError> {
     return AsyncResult.from((async () => {
-      const span = startClientSpan(UNKNOWN_ROUTE);
+      const span = startClientSpan(route);
       return await withSpanAsync(span, async () => {
         try {
           const payload = JSON.stringify(body);
           const response = (await this.#requestMessageWithRetry({
+            route,
             subject,
             payload,
             timeout: this.timeout,

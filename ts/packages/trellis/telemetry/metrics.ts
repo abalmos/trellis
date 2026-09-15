@@ -529,6 +529,7 @@ export const TRELLIS_CATALOG_COUNTERS = [
   "trellis.delivery.dispositions",
   "trellis.dlq.transitions",
   "trellis.feed.ends",
+  "trellis.transfer.wire.bytes",
   "trellis.runtime.lease.events",
   "trellis.snapshot.errors",
   "trellis.telemetry.route_overflow",
