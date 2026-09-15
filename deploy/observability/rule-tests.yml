@@ -1,0 +1,84 @@
+# Deterministic policy tests. No Trellis instance or machine-speed assertion.
+rule_files:
+  - recording-rules.yml
+  - expected-components.yml
+  - alert-rules.yml
+evaluation_interval: 30s
+tests:
+  - name: quiet-consumer-is-not-stalled
+    interval: 15s
+    input_series:
+      - series: 'trellis_consumer_pending{telemetry_pipeline="native",trellis_cluster="example"}'
+        values: '0x80'
+      - series: 'trellis_consumer_ack_pending{telemetry_pipeline="native",trellis_cluster="example"}'
+        values: '0x80'
+      - series: 'trellis_consumer_progress_age{telemetry_pipeline="native",trellis_cluster="example"}'
+        values: '600x80'
+      - series: 'trellis_snapshot_observed_time{telemetry_pipeline="native",trellis_cluster="example",trellis_source="events"}'
+        values: '0+15x80'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TrellisConsumerStalled
+        exp_alerts: []
+  - name: stale-snapshot-does-not-assert-current-consumer-stall
+    interval: 15s
+    input_series:
+      - series: 'trellis_consumer_pending{telemetry_pipeline="native",trellis_cluster="example"}'
+        values: '10x80'
+      - series: 'trellis_consumer_ack_pending{telemetry_pipeline="native",trellis_cluster="example"}'
+        values: '0x80'
+      - series: 'trellis_consumer_progress_age{telemetry_pipeline="native",trellis_cluster="example"}'
+        values: '600x80'
+      - series: 'trellis_snapshot_observed_time{telemetry_pipeline="native",trellis_cluster="example",trellis_source="events"}'
+        values: '0x80'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TrellisConsumerStalled
+        exp_alerts: []
+  - name: outstanding-work-with-current-snapshot-does-alert
+    interval: 15s
+    input_series:
+      - series: 'trellis_consumer_pending{telemetry_pipeline="native",trellis_cluster="example"}'
+        values: '10x80'
+      - series: 'trellis_consumer_ack_pending{telemetry_pipeline="native",trellis_cluster="example"}'
+        values: '0x80'
+      - series: 'trellis_consumer_progress_age{telemetry_pipeline="native",trellis_cluster="example"}'
+        values: '600x80'
+      - series: 'trellis_snapshot_observed_time{telemetry_pipeline="native",trellis_cluster="example",trellis_source="events"}'
+        values: '0+15x80'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TrellisConsumerStalled
+        exp_alerts:
+          - exp_labels: {trellis_cluster: example, severity: warning}
+            exp_annotations:
+              summary: A Consumer has outstanding work without observed ACK progress
+              description: 'Cluster example. Current value: 600. Check telemetry freshness before interpreting last-known gauges.'
+              runbook: docs/observability/runbooks.md#consumer-stalled
+  - name: no-reporting-process-does-not-look-healthy
+    interval: 15s
+    input_series: []
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TrellisRequiredComponentUnavailable
+        exp_alerts:
+          - exp_labels: {trellis_cluster: example, trellis_component: platform, severity: critical}
+            exp_annotations:
+              summary: A configured Trellis component is absent or not healthy
+              description: 'Cluster example. Current value: 1. Check telemetry freshness before interpreting last-known gauges.'
+              runbook: docs/observability/runbooks.md#component-unavailable
+          - exp_labels: {trellis_cluster: example, trellis_component: jobs, severity: critical}
+            exp_annotations:
+              summary: A configured Trellis component is absent or not healthy
+              description: 'Cluster example. Current value: 1. Check telemetry freshness before interpreting last-known gauges.'
+              runbook: docs/observability/runbooks.md#component-unavailable
+          - exp_labels: {trellis_cluster: example, trellis_component: events, severity: critical}
+            exp_annotations:
+              summary: A configured Trellis component is absent or not healthy
+              description: 'Cluster example. Current value: 1. Check telemetry freshness before interpreting last-known gauges.'
+              runbook: docs/observability/runbooks.md#component-unavailable
+          - exp_labels: {trellis_cluster: example, trellis_component: health, severity: critical}
+            exp_annotations:
+              summary: A configured Trellis component is absent or not healthy
+              description: 'Cluster example. Current value: 1. Check telemetry freshness before interpreting last-known gauges.'
+              runbook: docs/observability/runbooks.md#component-unavailable
