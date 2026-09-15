@@ -131,7 +131,7 @@ impl crate::generated::RpcDescriptor for ConsumerReportDelivery {
     const API_ID: &'static str = "trellis.events@v1";
     const DESCRIPTOR_NAME: &'static str = "rpc:Consumers.ReportDelivery";
     const SUBJECT: &'static str = "";
-    const KEY: &'static str = "Consumers.ReportDelivery";
+    const KEY: &'static str = "events.Consumers.ReportDelivery";
     const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const DOWNLOAD: bool = false;
 
@@ -148,7 +148,7 @@ impl crate::generated::RpcDescriptor for ConsumerDeadLetterInspect {
     const API_ID: &'static str = "trellis.events@v1";
     const DESCRIPTOR_NAME: &'static str = "rpc:DeadLetters.Inspect";
     const SUBJECT: &'static str = "";
-    const KEY: &'static str = "DeadLetters.Inspect";
+    const KEY: &'static str = "events.DeadLetters.Inspect";
     const CALLER_CAPABILITIES: &'static [&'static str] = &[];
     const DOWNLOAD: bool = false;
 
