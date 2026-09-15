@@ -2,7 +2,10 @@ import { assertEquals } from "@std/assert";
 
 import { AuthError } from "@qlever-llc/trellis";
 
-import { mapDeviceActivationFailure } from "./activation_view.ts";
+import {
+  isDeviceActivationReviewerRequiredFailure,
+  mapDeviceActivationFailure,
+} from "./activation_view.ts";
 
 Deno.test("mapDeviceActivationFailure uses exact terminal auth codes", () => {
   assertEquals(
@@ -47,4 +50,32 @@ Deno.test("mapDeviceActivationFailure gives a helpful generic invalid request me
         "Trellis rejected this activation request. Start again from the device.",
     },
   );
+});
+
+Deno.test("reviewer fallback is reserved for permission outcomes", () => {
+  assertEquals(
+    isDeviceActivationReviewerRequiredFailure(
+      new AuthError({ reason: "not_authorized" }),
+    ),
+    true,
+  );
+  assertEquals(
+    isDeviceActivationReviewerRequiredFailure(
+      new AuthError({ reason: "forbidden" }),
+    ),
+    true,
+  );
+  assertEquals(
+    isDeviceActivationReviewerRequiredFailure(
+      new AuthError({ reason: "invalid_request" }),
+    ),
+    false,
+  );
+  assertEquals(
+    isDeviceActivationReviewerRequiredFailure(
+      new Error("transport failed"),
+    ),
+    false,
+  );
+  assertEquals(isDeviceActivationReviewerRequiredFailure(undefined), false);
 });
