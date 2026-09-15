@@ -14,6 +14,7 @@ use trellis_rs::telemetry::KeyValue;
 
 use crate::platform::auth::{AuthorizationStateError, SqliteAuthorizationStore};
 use crate::shutdown::StopHandle;
+use trellis_jobs_runtime::storage::SqliteJobsStore;
 
 /// Snapshot poll interval.
 const SAMPLER_INTERVAL: Duration = Duration::from_secs(15);
@@ -97,6 +98,66 @@ fn record_failure(source: &'static str, reason: &'static str) {
             KeyValue::new("trellis.reason", reason),
         ],
     );
+}
+
+/// Runs the Jobs snapshot sampler until the runtime stops.
+pub(crate) async fn run_jobs_sampler(store: SqliteJobsStore, stop: StopHandle) {
+    let source = SnapshotSource::register(
+        "jobs",
+        &[
+            ObservableFamily::JobsReady,
+            ObservableFamily::JobsOldestReadyAge,
+            ObservableFamily::JobsDead,
+            ObservableFamily::JobsWaitingRetry,
+            ObservableFamily::JobsWorkerRegistrations,
+        ],
+    );
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(SAMPLER_INTERVAL) => {}
+            _ = stop.stopped() => return,
+        }
+        let now = time::OffsetDateTime::now_utc();
+        let now_nanos = now.unix_timestamp_nanos() as i64;
+        let snapshot_store = store.clone();
+        let deadline = tokio::time::timeout(SNAPSHOT_DEADLINE, async move {
+            snapshot_store.telemetry_snapshot(now_nanos, now)
+        })
+        .await;
+        match deadline {
+            Ok(Ok(snapshot)) => {
+                source.publish(vec![
+                    (
+                        ObservableFamily::JobsReady,
+                        snapshot.ready as f64,
+                        Vec::new(),
+                    ),
+                    (
+                        ObservableFamily::JobsOldestReadyAge,
+                        snapshot.oldest_ready_age_seconds,
+                        Vec::new(),
+                    ),
+                    (ObservableFamily::JobsDead, snapshot.dead as f64, Vec::new()),
+                    (
+                        ObservableFamily::JobsWaitingRetry,
+                        snapshot.waiting_retry as f64,
+                        Vec::new(),
+                    ),
+                    (
+                        ObservableFamily::JobsWorkerRegistrations,
+                        snapshot.worker_registrations as f64,
+                        Vec::new(),
+                    ),
+                ]);
+            }
+            Ok(Err(_)) => {
+                record_failure("jobs", "io");
+            }
+            Err(_) => {
+                record_failure("jobs", "timeout");
+            }
+        }
+    }
 }
 
 /// Runs the platform Auth snapshot sampler until the runtime stops.

@@ -12,6 +12,7 @@ mod query;
 mod resolver;
 mod router;
 pub mod storage;
+pub mod telemetry;
 mod watch;
 pub mod worker_presence;
 

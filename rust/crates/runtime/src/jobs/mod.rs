@@ -170,6 +170,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         Arc::new(context.platform_verifier.get().cloned().ok_or_else(|| {
             RuntimeError::Platform("local authorization verifier is not ready".to_owned())
         })?);
+    let sampler_store = store.clone();
     let loops = RuntimeLoops::start(jobs_runtime, &resources, store, resolver).await?;
     let nats = context.trellis_nats.clone();
     let join = tokio::spawn(async move {
@@ -197,6 +198,10 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             tokio::select! {
                 biased;
                 () = task_stop.stopped() => Ok(()),
+                _ = crate::telemetry::snapshots::run_jobs_sampler(
+                    sampler_store,
+                    task_stop.clone(),
+                ) => Ok(()),
                 result = &mut api_loop => result.map_err(runtime_error),
                 result = loops.wait_for_failure() => result,
                 result = &mut validator_exit => result,
