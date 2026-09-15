@@ -90,6 +90,39 @@ struct FeedCancelGuard {
     payload: Bytes,
 }
 
+/// Owns one client feed's active count and end reason.
+struct FeedRuntimeGuard {
+    #[allow(dead_code)]
+    cancel: FeedCancelGuard,
+    _inflight: crate::telemetry::lifecycle::InflightGuard,
+    ended: bool,
+}
+
+impl FeedRuntimeGuard {
+    /// Records the stream end once with a bounded reason.
+    fn finish(&mut self, reason: &'static str) {
+        if self.ended {
+            return;
+        }
+        self.ended = true;
+        crate::telemetry::instruments::add_counter(
+            CounterFamily::FeedEnds,
+            1,
+            &[
+                KeyValue::new("trellis.side", "client"),
+                KeyValue::new("trellis.reason", reason),
+            ],
+        );
+    }
+}
+
+impl Drop for FeedRuntimeGuard {
+    fn drop(&mut self) {
+        // Dropping an unfinished stream is an expected cancellation.
+        self.finish("cancelled");
+    }
+}
+
 impl Drop for FeedCancelGuard {
     fn drop(&mut self) {
         let nats = self.nats.clone();
@@ -1939,11 +1972,19 @@ impl TrellisClient {
                 "feedId": feed_id,
             }))?),
         };
+        let guard = FeedRuntimeGuard {
+            cancel,
+            _inflight: crate::telemetry::lifecycle::InflightGuard::acquire(
+                crate::telemetry::instruments::UpDownFamily::FeedActive,
+                vec![crate::telemetry::KeyValue::new("trellis.side", "client")],
+            ),
+            ended: false,
+        };
         let stream = stream::try_unfold(
-            (subscriber, first_event, cancel),
-            |(mut subscriber, first_event, cancel)| async move {
+            (subscriber, first_event, guard),
+            |(mut subscriber, first_event, mut guard)| async move {
                 if let Some(event) = first_event {
-                    return Ok(Some((event, (subscriber, None, cancel))));
+                    return Ok(Some((event, (subscriber, None, guard))));
                 }
 
                 match subscriber.next().await {
@@ -1953,9 +1994,12 @@ impl TrellisClient {
                                 "feed emitted duplicate ready acknowledgement".to_string(),
                             )
                         })?;
-                        Ok(Some((event, (subscriber, None, cancel))))
+                        Ok(Some((event, (subscriber, None, guard))))
                     }
-                    None => Ok(None),
+                    None => {
+                        guard.finish("complete");
+                        Ok(None)
+                    }
                 }
             },
         );
@@ -1993,13 +2037,32 @@ impl TrellisClient {
     where
         W: tokio::io::AsyncWrite + Unpin + Send + ?Sized,
     {
-        crate::client::transfer::get_download_grant_into_with_cancel(
+        let observation = Observation::start(
+            DurationFamily::Transfer,
+            vec![KeyValue::new("trellis.direction", "download")],
+            "cancelled",
+        );
+        let result = crate::client::transfer::get_download_grant_into_with_cancel(
             self,
             grant,
             writer,
             Some(cancellation),
         )
-        .await
+        .await;
+        let outcome = match &result {
+            Ok(_) => "ok",
+            Err(TrellisClientError::TransferCancelled) => "cancelled",
+            Err(error) => Self::client_outcome(error),
+        };
+        observation.finish(outcome);
+        if let Ok(info) = &result {
+            crate::telemetry::instruments::add_counter(
+                CounterFamily::TransferWireBytes,
+                info.size,
+                &[KeyValue::new("trellis.direction", "download")],
+            );
+        }
+        result
     }
 }
 

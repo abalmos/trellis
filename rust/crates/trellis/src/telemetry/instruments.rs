@@ -206,6 +206,8 @@ pub enum CounterFamily {
     DeadLetterTransitions,
     /// Feed stream terminations.
     FeedEnds,
+    /// Actual transmitted/received transfer payload bytes.
+    TransferWireBytes,
     /// Existing singleton lease actions.
     RuntimeLeaseEvents,
     /// Failed telemetry snapshot polling attempts.
@@ -226,6 +228,7 @@ impl CounterFamily {
             Self::DeliveryDispositions => "trellis.delivery.dispositions",
             Self::DeadLetterTransitions => "trellis.dlq.transitions",
             Self::FeedEnds => "trellis.feed.ends",
+            Self::TransferWireBytes => "trellis.transfer.wire.bytes",
             Self::RuntimeLeaseEvents => "trellis.runtime.lease.events",
             Self::SnapshotErrors => "trellis.snapshot.errors",
             Self::RouteOverflow => "trellis.telemetry.route_overflow",
@@ -241,6 +244,7 @@ impl CounterFamily {
             Self::JobLeaseEvents | Self::RuntimeLeaseEvents => "{event}",
             Self::OperationOwnershipEvents => "{event}",
             Self::FeedEnds => "{subscription}",
+            Self::TransferWireBytes => "By",
             Self::RpcClientAttempts => "{attempt}",
             Self::AuthRefreshAttempts => "{attempt}",
             Self::SnapshotErrors => "{error}",
