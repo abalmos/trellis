@@ -405,7 +405,16 @@ where
     Fut: Future<Output = Result<Value, JobProcessError<E>>>,
     E: ToString,
 {
-    manager
+    let route = crate::telemetry::instruments::route_token(
+        crate::telemetry::instruments::RouteFamily::Job,
+        &job.job_type,
+    );
+    let observation = crate::telemetry::lifecycle::Observation::start(
+        crate::telemetry::instruments::DurationFamily::JobAttempt,
+        vec![crate::telemetry::KeyValue::new("trellis.route", route)],
+        "interrupted",
+    );
+    let result = manager
         .process_with_heartbeat_and_terminal_hooks(
             job,
             cancellation,
@@ -415,7 +424,19 @@ where
             handler,
         )
         .await
-        .map_err(|error| RuntimeWorkerError::Process(error.to_string()))
+        .map_err(|error| RuntimeWorkerError::Process(error.to_string()));
+    let outcome = match &result {
+        Ok(JobProcessOutcome::Completed { .. }) => "completed",
+        Ok(JobProcessOutcome::Retry { .. }) => "retry",
+        Ok(JobProcessOutcome::Failed { .. }) => "failed",
+        Ok(JobProcessOutcome::Cancelled { .. }) => "cancelled",
+        Ok(JobProcessOutcome::Interrupted { .. }) => "interrupted",
+        // A stale completion is an observed lease loss, not a completion.
+        Ok(JobProcessOutcome::StaleCompletionIgnored { .. }) => "lease_lost",
+        Err(_) => "error",
+    };
+    observation.finish(outcome);
+    result
 }
 
 fn parse_work_payload_job(payload: &[u8]) -> Option<Job> {

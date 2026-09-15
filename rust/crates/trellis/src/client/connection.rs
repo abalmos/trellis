@@ -301,25 +301,34 @@ impl<T> EventMessage<T> {
 
     /// Acknowledge successful handling of the message.
     pub async fn ack(&self) -> Result<(), TrellisClientError> {
-        self.message
+        let result = self
+            .message
             .ack()
             .await
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()));
+        record_delivery_disposition("ack", &result);
+        result
     }
 
     /// Negatively acknowledge the message so JetStream may redeliver it.
     pub async fn nak(&self) -> Result<(), TrellisClientError> {
-        self.message
+        let result = self
+            .message
             .ack_with(AckKind::Nak(None))
             .await
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()));
+        record_delivery_disposition("nak", &result);
+        result
     }
 
     pub(crate) async fn nak_after(&self, delay: Duration) -> Result<(), TrellisClientError> {
-        self.message
+        let result = self
+            .message
             .ack_with(AckKind::Nak(Some(delay)))
             .await
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()));
+        record_delivery_disposition("nak", &result);
+        result
     }
 
     pub(crate) async fn ack_progress(&self) -> Result<(), TrellisClientError> {
@@ -358,11 +367,28 @@ impl<T> EventMessage<T> {
 
     /// Terminate the message without successful acknowledgement or redelivery.
     pub async fn term(&self) -> Result<(), TrellisClientError> {
-        self.message
+        let result = self
+            .message
             .ack_with(AckKind::Term)
             .await
-            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()));
+        record_delivery_disposition("term", &result);
+        result
     }
+}
+
+/// Records one observed final delivery disposition handoff.
+fn record_delivery_disposition(action: &'static str, result: &Result<(), TrellisClientError>) {
+    let outcome = if result.is_ok() { "ok" } else { "error" };
+    crate::telemetry::instruments::add_counter(
+        CounterFamily::DeliveryDispositions,
+        1,
+        &[
+            KeyValue::new("trellis.family", "event"),
+            KeyValue::new("trellis.action", action),
+            KeyValue::new("trellis.outcome", outcome),
+        ],
+    );
 }
 
 #[derive(Debug, Deserialize)]
@@ -1626,15 +1652,32 @@ impl TrellisClient {
         let event = event
             .clone()
             .with_subject(self.descriptor_subject(event.subject()));
-        let context_digest = self.authorization_context_digest()?;
-        publish_prepared_event(
-            &self.nats(),
-            &self.auth,
-            &context_digest,
-            self.timeout_ms,
-            &event,
-        )
-        .await
+        let route = crate::telemetry::instruments::route_token(
+            crate::telemetry::instruments::RouteFamily::Event,
+            event.descriptor_identity(),
+        );
+        let observation = Observation::start(
+            DurationFamily::EventPublish,
+            vec![
+                KeyValue::new("trellis.route", route),
+                KeyValue::new("trellis.delivery", "durable"),
+            ],
+            "cancelled",
+        );
+        let result = async {
+            let context_digest = self.authorization_context_digest()?;
+            publish_prepared_event(
+                &self.nats(),
+                &self.auth,
+                &context_digest,
+                self.timeout_ms,
+                &event,
+            )
+            .await
+        }
+        .await;
+        observation.finish(if result.is_ok() { "ok" } else { "error" });
+        result
     }
 
     /// Subscribe to one descriptor-backed event subject with explicit subscription options.
