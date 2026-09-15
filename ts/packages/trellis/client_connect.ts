@@ -67,7 +67,10 @@ import {
   type TrellisOpts,
 } from "./session.ts";
 import { TypedStore } from "./store.ts";
-import { recordTrellisDuration } from "./telemetry/mod.ts";
+import {
+  recordCatalogDuration,
+  recordTrellisDuration,
+} from "./telemetry/mod.ts";
 
 type ClientContract = GeneratedParticipant;
 
@@ -158,24 +161,54 @@ function createConnectedClient(args: {
 
 function clientConnectResult<T>(
   promise: Promise<T>,
+  observation?: { startedAt: number },
 ): AsyncResult<T, TransportError | UnexpectedError | ClientAuthHandledError> {
+  const finish = (outcome: "ok" | "error", value?: unknown): void => {
+    if (!observation) return;
+    recordCatalogDuration(
+      "trellis.connect.duration",
+      performance.now() - observation.startedAt,
+      {
+        "trellis.phase": "total",
+        ...(outcome === "ok"
+          ? { "trellis.participant.kind": connectParticipantKind(value) }
+          : {}),
+        "trellis.outcome": outcome,
+      },
+    );
+  };
   return AsyncResult.from(
     promise.then(
       (value): Result<
         T,
         TransportError | UnexpectedError | ClientAuthHandledError
-      > => Result.ok(value),
+      > => {
+        finish("ok", value);
+        return Result.ok(value);
+      },
       (
         cause,
-      ): Result<T, TransportError | UnexpectedError | ClientAuthHandledError> =>
-        Result.err(
+      ): Result<
+        T,
+        TransportError | UnexpectedError | ClientAuthHandledError
+      > => {
+        finish("error");
+        return Result.err(
           cause instanceof TransportError ||
             cause instanceof ClientAuthHandledError
             ? cause
             : new UnexpectedError({ cause }),
-        ),
+        );
+      },
     ),
   );
+}
+
+/** Bounded participant kind for one connected client, when it is known. */
+function connectParticipantKind(value: unknown): "user" | "service" | "device" {
+  const kind = (value as { session?: { principalKind?: unknown } } | undefined)
+    ?.session?.principalKind;
+  return kind === "user" || kind === "device" ? kind : "service";
 }
 
 type BrowserClientAuthOptions = {
@@ -1676,6 +1709,8 @@ export class TrellisClient {
     unknown,
     TransportError | UnexpectedError | ClientAuthHandledError
   > {
-    return clientConnectResult(connectClientWithDeps(args, defaultDeps));
+    return clientConnectResult(connectClientWithDeps(args, defaultDeps), {
+      startedAt: performance.now(),
+    });
   }
 }
