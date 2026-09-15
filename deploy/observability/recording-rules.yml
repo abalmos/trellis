@@ -1,0 +1,41 @@
+groups:
+- name: trellis.recordings
+  interval: 30s
+  rules:
+  - record: trellis:rpc_requests:5m
+    expr: sum by (trellis_cluster) (rate(trellis_rpc_server_duration_count{telemetry_pipeline="native",trellis_outcome=~"ok|declared_error|timeout|unavailable|error"}[5m]))
+  - record: trellis:rpc_errors:5m
+    expr: sum by (trellis_cluster) (rate(trellis_rpc_server_duration_count{telemetry_pipeline="native",trellis_outcome=~"timeout|unavailable|error"}[5m]))
+      or on (trellis_cluster) (0 * trellis:rpc_requests:5m)
+  - record: trellis:rpc_error_ratio:5m
+    expr: trellis:rpc_errors:5m / clamp_min(trellis:rpc_requests:5m, 0.000001) and on (trellis_cluster) (trellis:rpc_requests:5m > 0)
+  - record: trellis:rpc_requests:30m
+    expr: sum by (trellis_cluster) (rate(trellis_rpc_server_duration_count{telemetry_pipeline="native",trellis_outcome=~"ok|declared_error|timeout|unavailable|error"}[30m]))
+  - record: trellis:rpc_errors:30m
+    expr: sum by (trellis_cluster) (rate(trellis_rpc_server_duration_count{telemetry_pipeline="native",trellis_outcome=~"timeout|unavailable|error"}[30m]))
+      or on (trellis_cluster) (0 * trellis:rpc_requests:30m)
+  - record: trellis:rpc_error_ratio:30m
+    expr: trellis:rpc_errors:30m / clamp_min(trellis:rpc_requests:30m, 0.000001) and on (trellis_cluster) (trellis:rpc_requests:30m > 0)
+  - record: trellis:rpc_requests:1h
+    expr: sum by (trellis_cluster) (rate(trellis_rpc_server_duration_count{telemetry_pipeline="native",trellis_outcome=~"ok|declared_error|timeout|unavailable|error"}[1h]))
+  - record: trellis:rpc_errors:1h
+    expr: sum by (trellis_cluster) (rate(trellis_rpc_server_duration_count{telemetry_pipeline="native",trellis_outcome=~"timeout|unavailable|error"}[1h]))
+      or on (trellis_cluster) (0 * trellis:rpc_requests:1h)
+  - record: trellis:rpc_error_ratio:1h
+    expr: trellis:rpc_errors:1h / clamp_min(trellis:rpc_requests:1h, 0.000001) and on (trellis_cluster) (trellis:rpc_requests:1h > 0)
+  - record: trellis:rpc_requests:6h
+    expr: sum by (trellis_cluster) (rate(trellis_rpc_server_duration_count{telemetry_pipeline="native",trellis_outcome=~"ok|declared_error|timeout|unavailable|error"}[6h]))
+  - record: trellis:rpc_errors:6h
+    expr: sum by (trellis_cluster) (rate(trellis_rpc_server_duration_count{telemetry_pipeline="native",trellis_outcome=~"timeout|unavailable|error"}[6h]))
+      or on (trellis_cluster) (0 * trellis:rpc_requests:6h)
+  - record: trellis:rpc_error_ratio:6h
+    expr: trellis:rpc_errors:6h / clamp_min(trellis:rpc_requests:6h, 0.000001) and on (trellis_cluster) (trellis:rpc_requests:6h > 0)
+  - record: trellis:component_present
+    expr: max by (trellis_cluster, trellis_component) ((trellis_runtime_component_ready{telemetry_pipeline="native"} == 1) and on (job, instance, trellis_cluster,
+      trellis_component) ((time() - trellis_runtime_component_observed_time{telemetry_pipeline="native"}) < 45))
+  - record: trellis:snapshot_fresh
+    expr: max by (trellis_cluster, trellis_source) ((time() - trellis_snapshot_observed_time{telemetry_pipeline="native"}) < bool 45)
+  - record: trellis:auth_refresh:p95
+    expr: histogram_quantile(0.95, sum by (trellis_cluster, le) (rate(trellis_auth_flow_duration_bucket{telemetry_pipeline="native",trellis_operation="context_refresh",trellis_phase="total"}[5m])))
+  - record: trellis:projection_snapshot_fresh
+    expr: label_replace(trellis:snapshot_fresh{trellis_source=~"jobs|events|events_dlq|health"}, "trellis_component", "$1", "trellis_source", "(.*)")
