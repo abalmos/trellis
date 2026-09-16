@@ -31,6 +31,21 @@ fn parses_login_logout_and_whoami_top_level_commands() {
     match cli.command {
         TopLevelCommand::Login(args) => {
             assert_eq!(args.trellis_url, "https://trellis.example.com");
+            assert!(!args.allow_insecure_origin);
+        }
+        other => panic!("unexpected top-level command: {other:?}"),
+    }
+
+    let cli = Cli::parse_from([
+        "trellis",
+        "login",
+        "http://tsd.oats:8090",
+        "--allow-insecure-origin",
+    ]);
+    match cli.command {
+        TopLevelCommand::Login(args) => {
+            assert_eq!(args.trellis_url, "http://tsd.oats:8090");
+            assert!(args.allow_insecure_origin);
         }
         other => panic!("unexpected top-level command: {other:?}"),
     }

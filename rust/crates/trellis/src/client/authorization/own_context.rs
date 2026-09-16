@@ -56,17 +56,18 @@ pub(crate) struct OwnTransitionGuard<'a> {
 }
 
 impl AuthorizationContextCache {
-    pub(crate) fn new(
+    pub(crate) fn new_with_insecure_origin(
         trellis_url: &str,
         participant_id: String,
         connection_id: String,
         session_key: String,
         credential: AuthorizationCredential,
         name: Option<String>,
+        allow_insecure_origin: bool,
     ) -> Result<Self, TrellisClientError> {
         let (availability, _) = tokio::sync::watch::channel(Default::default());
         Ok(Self {
-            http: BootstrapHttp::new(trellis_url, false)?,
+            http: BootstrapHttp::new(trellis_url, allow_insecure_origin)?,
             credential: Arc::new(credential),
             connection_id,
             participant_id,
@@ -954,7 +955,7 @@ pub(crate) mod tests {
             let seed = base64url_encode(&[9; 32]);
             let session = SessionAuth::from_seed_base64url(&seed).unwrap();
             let connection_id = "01JY0000000000000000000003".to_owned();
-            let cache = AuthorizationContextCache::new(
+            let cache = AuthorizationContextCache::new_with_insecure_origin(
                 "http://127.0.0.1:1/",
                 "test.Caller".to_owned(),
                 connection_id.clone(),
@@ -964,6 +965,7 @@ pub(crate) mod tests {
                     installation: Arc::new(SessionAuth::from_seed_base64url(&seed).unwrap()),
                 },
                 None,
+                false,
             )
             .unwrap();
             let installation = installation(&issuer, &session, &connection_id, grant_revision, now);

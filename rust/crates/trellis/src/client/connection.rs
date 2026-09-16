@@ -129,6 +129,9 @@ pub struct ServiceConnectWithContractOptions<'a> {
     pub provisioned_identity_seed_base64url: &'a str,
     pub name: Option<&'a str>,
     pub timeout_ms: u64,
+    /// Accept a non-loopback HTTP Trellis origin explicitly allow-listed by the
+    /// runtime; defaults to strict HTTPS-or-loopback validation.
+    pub allow_insecure_origin: bool,
 }
 
 /// Runtime and device-identity options for an activated device principal.
@@ -141,6 +144,7 @@ pub struct DeviceConnectOptions<'a, C> {
     companion_installation_seed_base64url: Option<&'a str>,
     timeout_ms: u64,
     name: Option<&'a str>,
+    allow_insecure_origin: bool,
     contract_type: std::marker::PhantomData<C>,
 }
 
@@ -157,6 +161,7 @@ impl<'a, C: crate::generated::ParticipantDescriptor> DeviceConnectOptions<'a, C>
             companion_installation_seed_base64url: None,
             timeout_ms: crate::service::DEFAULT_TIMEOUT_MS,
             name: None,
+            allow_insecure_origin: false,
             contract_type: std::marker::PhantomData,
         }
     }
@@ -166,6 +171,13 @@ impl<'a, C> DeviceConnectOptions<'a, C> {
     /// Set the request/connect timeout in milliseconds.
     pub const fn with_timeout_ms(mut self, timeout_ms: u64) -> Self {
         self.timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Accept a non-loopback HTTP Trellis origin explicitly allow-listed by the
+    /// operator. Defaults to strict HTTPS-or-loopback validation.
+    pub const fn with_insecure_origin(mut self, allow_insecure_origin: bool) -> Self {
+        self.allow_insecure_origin = allow_insecure_origin;
         self
     }
 
@@ -417,6 +429,7 @@ struct NativeConnectOptions<'a> {
     companion_descriptor: Option<crate::generated::CompanionDescriptor>,
     name: Option<&'a str>,
     timeout_ms: u64,
+    allow_insecure_origin: bool,
     kind: trellis_protocol::AuthorizationPrincipalKind,
 }
 
@@ -436,7 +449,10 @@ pub(crate) async fn fetch_device_activation<C: crate::generated::ParticipantDesc
     confirmation_code: &str,
 ) -> Result<DeviceEnrollmentResponse, TrellisClientError> {
     let identity_auth = SessionAuth::from_seed_base64url(opts.identity_seed_base64url)?;
-    let origin = super::canonical_trellis_origin(opts.trellis_url)?;
+    let origin = super::canonical_trellis_origin_with_insecure(
+        opts.trellis_url,
+        opts.allow_insecure_origin,
+    )?;
     let mut request = serde_json::json!({
         "requestId": new_request_id(),
         "iat": now_context_millis()?,
@@ -900,6 +916,7 @@ pub struct UserConnectOptions<'a> {
     credentials: UserSessionCredentials<'a>,
     participant_id: &'a str,
     name: Option<&'a str>,
+    allow_insecure_origin: bool,
 }
 
 /// Secret session credential for a user connection.
@@ -924,12 +941,20 @@ impl<'a> UserConnectOptions<'a> {
             credentials,
             participant_id,
             name: None,
+            allow_insecure_origin: false,
         }
     }
 
     /// Attach optional display metadata without changing login or connection identity.
     pub fn with_name(mut self, name: &'a str) -> Self {
         self.name = Some(name);
+        self
+    }
+
+    /// Accept a non-loopback HTTP Trellis origin explicitly allow-listed by the
+    /// operator. Defaults to strict HTTPS-or-loopback validation.
+    pub const fn with_insecure_origin(mut self, allow_insecure_origin: bool) -> Self {
+        self.allow_insecure_origin = allow_insecure_origin;
         self
     }
 }
@@ -1039,6 +1064,7 @@ impl TrellisClient {
             companion_descriptor: None,
             name: opts.name,
             timeout_ms: opts.timeout_ms,
+            allow_insecure_origin: opts.allow_insecure_origin,
             kind: trellis_protocol::AuthorizationPrincipalKind::Service,
         })
         .await
@@ -1055,6 +1081,7 @@ impl TrellisClient {
             companion_descriptor,
             name,
             timeout_ms,
+            allow_insecure_origin,
             kind,
         } = opts;
         let identity = Arc::new(SessionAuth::from_seed_base64url(identity_seed)?);
@@ -1079,7 +1106,7 @@ impl TrellisClient {
             }
             (None, None) => None,
         };
-        let contexts = Arc::new(AuthorizationContextCache::new(
+        let contexts = Arc::new(AuthorizationContextCache::new_with_insecure_origin(
             trellis_url,
             participant_id.to_owned(),
             ulid::Ulid::new().to_string(),
@@ -1092,6 +1119,7 @@ impl TrellisClient {
                 companion: companion_credential,
             },
             name.map(str::to_owned),
+            allow_insecure_origin,
         )?);
         let mut retry_delay = Duration::from_millis(100);
         loop {
@@ -1163,15 +1191,18 @@ impl TrellisClient {
                     "device bootstrap returned a companion without its installation seed".into(),
                 )
             })?;
-            match Self::connect_user(UserConnectOptions::new(
-                trellis_url,
-                timeout_ms,
-                UserSessionCredentials {
-                    login_session_id: &companion.login_session_id,
-                    session_key_seed_base64url: seed,
-                },
-                &companion.participant_id,
-            ))
+            match Self::connect_user(
+                UserConnectOptions::new(
+                    trellis_url,
+                    timeout_ms,
+                    UserSessionCredentials {
+                        login_session_id: &companion.login_session_id,
+                        session_key_seed_base64url: seed,
+                    },
+                    &companion.participant_id,
+                )
+                .with_insecure_origin(allow_insecure_origin),
+            )
             .await
             {
                 Ok(child) => connected.companion = Some(Arc::new(child)),
@@ -1207,6 +1238,7 @@ impl TrellisClient {
             companion_descriptor: C::COMPANION,
             name: opts.name,
             timeout_ms: opts.timeout_ms,
+            allow_insecure_origin: opts.allow_insecure_origin,
             kind: trellis_protocol::AuthorizationPrincipalKind::Device,
         })
         .await
@@ -1218,7 +1250,7 @@ impl TrellisClient {
             opts.credentials.session_key_seed_base64url,
         )?);
         let auth = connection_runtime_auth()?;
-        let authorization_contexts = AuthorizationContextCache::new(
+        let authorization_contexts = AuthorizationContextCache::new_with_insecure_origin(
             opts.trellis_url,
             opts.participant_id.to_owned(),
             ulid::Ulid::new().to_string(),
@@ -1228,6 +1260,7 @@ impl TrellisClient {
                 installation,
             },
             opts.name.map(str::to_owned),
+            opts.allow_insecure_origin,
         )?;
         let authorization_contexts = Arc::new(authorization_contexts);
         authorization_contexts.refresh(&auth).await?;

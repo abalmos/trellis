@@ -15,8 +15,12 @@ pub fn canonical_trellis_origin(trellis_url: &str) -> Result<String, TrellisClie
 }
 
 /// Return the configured origin, additionally accepting non-loopback HTTP when
-/// the runtime explicitly allow-listed it as an insecure origin.
-fn canonical_trellis_origin_with_insecure(
+/// the caller explicitly allow-listed it as an insecure origin.
+///
+/// Callers select this only from an explicit operator opt-in (for example the
+/// CLI `--allow-insecure-origin` flag or a service's connect options); the
+/// default path stays [`canonical_trellis_origin`].
+pub fn canonical_trellis_origin_with_insecure(
     trellis_url: &str,
     allow_insecure: bool,
 ) -> Result<String, TrellisClientError> {

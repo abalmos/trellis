@@ -8,6 +8,11 @@ pub struct LoginArgs {
     #[arg(value_name = "TRELLIS_URL")]
     /// Base URL for the Trellis deployment.
     pub trellis_url: String,
+
+    #[arg(long)]
+    /// Accept a non-loopback HTTP Trellis origin that the runtime has
+    /// explicitly allow-listed in `allow_insecure_origins`.
+    pub allow_insecure_origin: bool,
 }
 
 #[derive(Debug, Args)]
