@@ -47,32 +47,34 @@ pub(super) fn public_rpc_error(subject: &str, error: &AuthorizationStateError) -
             "Approval of the current deployment consent request is required.",
         ),
         AuthorizationStateError::WrongPrincipalKind => (
-            "AuthError",
+            "trellis.auth@v1::AuthError",
             "wrong_principal_kind",
             "This operation requires a user login.",
         ),
         AuthorizationStateError::CurrentIssuerConflict => (
-            "AuthError",
+            "trellis.auth@v1::AuthError",
             "issuer_current",
             "Select a replacement signing issuer before revoking this key.",
         ),
         AuthorizationStateError::RevisionConflict { .. } => (
-            "AuthError",
+            "trellis.auth@v1::AuthError",
             "revision_conflict",
             "The current revision differs from expectedRevision.",
         ),
-        AuthorizationStateError::InvalidRecord(_) => {
-            ("AuthError", "invalid_request", "The request is invalid.")
-        }
+        AuthorizationStateError::InvalidRecord(_) => (
+            "trellis.auth@v1::AuthError",
+            "invalid_request",
+            "The request is invalid.",
+        ),
         AuthorizationStateError::PortalPolicyChanged | AuthorizationStateError::StorageConflict => {
             (
-                "AuthError",
+                "trellis.auth@v1::AuthError",
                 "conflict",
                 "The request conflicts with current authentication state.",
             )
         }
         AuthorizationStateError::IdentityMissing => (
-            "AuthError",
+            "trellis.auth@v1::AuthError",
             "identity_not_found",
             "The requested identity was not found.",
         ),
@@ -82,17 +84,17 @@ pub(super) fn public_rpc_error(subject: &str, error: &AuthorizationStateError) -
         | AuthorizationStateError::IssuerMissing
         | AuthorizationStateError::SessionMissing
         | AuthorizationStateError::AuthorityMissing => (
-            "AuthError",
+            "trellis.auth@v1::AuthError",
             "not_found",
             "The requested authentication record was not found.",
         ),
         error if error.is_expected_denial() => (
-            "AuthError",
+            "trellis.auth@v1::AuthError",
             "not_authorized",
             "The request is not authorized.",
         ),
         _ => (
-            "UnexpectedError",
+            "trellis.auth@v1::UnexpectedError",
             "internal_error",
             "The request could not be completed.",
         ),
@@ -139,7 +141,7 @@ mod tests {
             ),
         ] {
             let response = public_rpc_error("rpc.v1.auth.Sessions.Logout", &error);
-            assert_eq!(response["type"], "AuthError");
+            assert_eq!(response["type"], "trellis.auth@v1::AuthError");
             assert_eq!(response["reason"], reason);
         }
     }

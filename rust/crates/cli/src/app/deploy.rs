@@ -150,7 +150,8 @@ pub(super) fn compile_participant_input(
             ))
         }
     };
-    let participant_path = participant.identity().as_str().to_owned();
+    let participant_path = participant.name().to_owned();
+    let participant_id = participant.identity().as_str().to_owned();
     let participant_digest = trellis_idl::participant_digest(&compiled, participant.identity())?;
     let package_evidence = auth_types::AuthPackageEvidence {
         root_package: compiled.root().as_str().to_owned(),
@@ -176,7 +177,7 @@ pub(super) fn compile_participant_input(
             .collect::<miette::Result<_>>()?,
     };
     Ok(CompiledParticipantInput {
-        participant_id: participant_path.clone(),
+        participant_id,
         participant_digest,
         participant_path,
         package_digest: compiled.root_digest().to_owned(),
@@ -447,7 +448,7 @@ fn approval_from_consent(
     auth_types::Approval {
         approved_capabilities,
         approved_resources,
-        companion_approved: approve_all || args.approve_companion,
+        companion_approved: consent.companion.is_some() && (approve_all || args.approve_companion),
         decision_digest: consent.decision_digest.clone(),
         delegation_ceiling: None,
         expected_grant_revision: consent.expected_grant_revision,
@@ -1245,5 +1246,24 @@ mod tests {
         assert_eq!(approval.approved_capabilities.len(), 1);
         assert_eq!(approval.approved_capabilities[0].id, "api::write");
         assert!(!approval.companion_approved);
+
+        let with_companion = approval_from_consent(
+            &auth_types::ConsentRequest {
+                companion: Some(auth_types::ConsentCompanion {
+                    capabilities: Vec::new(),
+                    kind: auth_types::ResourceOwnerKind::Device,
+                    participant_id: "acme.device@v1".to_string(),
+                    required: false,
+                    resources: Vec::new(),
+                }),
+                ..consent
+            },
+            &args,
+            true,
+        );
+        assert!(with_companion.companion_approved);
+
+        let without_companion = approval_from_consent(&plan, &args, true);
+        assert!(!without_companion.companion_approved);
     }
 }

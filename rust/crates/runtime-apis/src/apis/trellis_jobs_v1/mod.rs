@@ -15,7 +15,32 @@ pub mod errors {
         pub fn payload(
             &self,
         ) -> Result<crate::__types::trellis::JobsNotFoundErrorData, serde_json::Error> {
-            serde_json::from_value(serde_json::Value::Object(self.error.extra.clone()))
+            let mut payload = self.error.extra.clone();
+            payload.insert(
+                "id".to_owned(),
+                serde_json::Value::String(self.error.id.clone()),
+            );
+            payload.insert(
+                "type".to_owned(),
+                serde_json::Value::String(self.error.error_type.clone()),
+            );
+            payload.insert(
+                "message".to_owned(),
+                serde_json::Value::String(self.error.message.clone()),
+            );
+            if let Some(context) = &self.error.context {
+                payload.insert(
+                    "context".to_owned(),
+                    serde_json::Value::Object(context.clone()),
+                );
+            }
+            if let Some(trace_id) = &self.error.trace_id {
+                payload.insert(
+                    "traceId".to_owned(),
+                    serde_json::Value::String(trace_id.clone()),
+                );
+            }
+            serde_json::from_value(serde_json::Value::Object(payload))
         }
     }
     impl std::fmt::Display for NotFoundError {

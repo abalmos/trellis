@@ -1154,6 +1154,7 @@ impl SqliteAuthorizationStore {
                  "revision": revision, "participantDigest": binding.participant_digest, "installedAt": binding.resolved_at,
                  "packageDigest": binding.package_digest, "evidenceDigest": binding.evidence_digest,
                  "participantPath": binding.participant_path,
+                "companionRequired": resolved.companion_required,
                 "packageEvidence": package_evidence,
                 "requiredGrants": resolved.required_grants,
                 "optionalBundles": resolved.optional_grant_bundles.iter().map(|(id, grant)| json!({

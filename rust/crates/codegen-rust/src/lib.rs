@@ -524,7 +524,7 @@ fn render_api(graph: &PackageGraph, api: &ApiDefinition) -> Result<String, Codeg
         ));
         out.push_str(" }\n");
         if let Some(payload) = payload {
-            out.push_str(&format!("impl {rust_name} {{ pub fn payload(&self) -> Result<{}, serde_json::Error> {{ serde_json::from_value(serde_json::Value::Object(self.error.extra.clone())) }} }}\n", type_path(payload)));
+            out.push_str(&format!("impl {rust_name} {{ pub fn payload(&self) -> Result<{}, serde_json::Error> {{ let mut payload = self.error.extra.clone(); payload.insert(\"id\".to_owned(), serde_json::Value::String(self.error.id.clone())); payload.insert(\"type\".to_owned(), serde_json::Value::String(self.error.error_type.clone())); payload.insert(\"message\".to_owned(), serde_json::Value::String(self.error.message.clone())); if let Some(context) = &self.error.context {{ payload.insert(\"context\".to_owned(), serde_json::Value::Object(context.clone())); }} if let Some(trace_id) = &self.error.trace_id {{ payload.insert(\"traceId\".to_owned(), serde_json::Value::String(trace_id.clone())); }} serde_json::from_value(serde_json::Value::Object(payload)) }} }}\n", type_path(payload)));
         }
         let qualified = format!("{}::{name}", api.identity());
         out.push_str(&format!("impl std::fmt::Display for {rust_name} {{ fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ formatter.write_str(&self.error.message) }} }}\nimpl std::error::Error for {rust_name} {{}}\nimpl trellis_rs::generated::TrellisError for {rust_name} {{ const TYPE: &'static str = {qualified:?}; }}\n"));
@@ -1883,6 +1883,9 @@ mod tests {
         assert!(api.contains("type Update = WorkProgress"));
         assert!(api.contains("const UPDATE_SCHEMA_JSON: Option<&'static str> = Some("));
         assert!(api.contains("fixture.first@v1::Missing"));
+        assert!(api.contains("let mut payload = self.error.extra.clone();"));
+        assert!(api.contains("self.error.id.clone()"));
+        assert!(api.contains("self.error.message.clone()"));
         assert!(api.contains("trellis_rs::generated::RpcDescriptor"));
     }
 

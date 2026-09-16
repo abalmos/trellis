@@ -332,39 +332,40 @@ impl AuthRpcProcessor {
             .get_deployment_profile(deployment_id)
             .await?
             .ok_or(AuthorizationStateError::NotFound)?;
-        let participant_id = profile.participant_id.clone().ok_or_else(|| {
-            AuthorizationStateError::InvalidRecord(
-                "deployment has no installed participant".to_owned(),
-            )
-        })?;
-        let binding = self
-            .service
-            .repository()
-            .get_grant_binding(
-                GrantOwnerKind::Deployment,
-                deployment_id.to_owned(),
-                participant_id.clone(),
-            )
-            .await?;
+        let participant_id = profile.participant_id.clone();
+        let binding = match &participant_id {
+            Some(participant_id) => {
+                self.service
+                    .repository()
+                    .get_grant_binding(
+                        GrantOwnerKind::Deployment,
+                        deployment_id.to_owned(),
+                        participant_id.clone(),
+                    )
+                    .await?
+            }
+            None => None,
+        };
         if binding.is_some()
             && !(caller.context.owner_kind() == GrantOwnerKind::Deployment
                 && caller.context.owner_id() == deployment_id)
         {
             require_admin(caller)?;
         }
-        let resources = if let Some(binding) = &binding {
-            self.service
-                .repository()
-                .get_resource_bindings(
-                    GrantOwnerKind::Deployment,
-                    deployment_id.to_owned(),
-                    participant_id,
-                    binding.installed_revision,
-                )
-                .await?
-        } else {
-            Vec::new()
-        };
+        let resources =
+            if let (Some(binding), Some(participant_id)) = (&binding, participant_id.clone()) {
+                self.service
+                    .repository()
+                    .get_resource_bindings(
+                        GrantOwnerKind::Deployment,
+                        deployment_id.to_owned(),
+                        participant_id,
+                        binding.installed_revision,
+                    )
+                    .await?
+            } else {
+                Vec::new()
+            };
         Ok(json!({
             "deployment": self.deployment_value(profile).await?,
             "binding": binding,
@@ -3297,13 +3298,13 @@ mod tests {
         );
         let encoded = serde_json::to_string(&payload).unwrap();
         assert!(!encoded.contains(secret));
-        assert_eq!(payload["type"], "UnexpectedError");
+        assert_eq!(payload["type"], "trellis.auth@v1::UnexpectedError");
         assert_eq!(payload["context"]["code"], "internal_error");
         let invalid = public_rpc_error(
             "rpc.v1.auth.Grants.Set",
             &AuthorizationStateError::InvalidRecord(secret.to_owned()),
         );
-        assert_eq!(invalid["type"], "AuthError");
+        assert_eq!(invalid["type"], "trellis.auth@v1::AuthError");
         assert_eq!(invalid["reason"], "invalid_request");
         assert!(!serde_json::to_string(&invalid).unwrap().contains(secret));
     }
