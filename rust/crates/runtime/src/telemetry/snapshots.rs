@@ -278,6 +278,24 @@ pub(crate) async fn run_consumer_sampler(
         let mut ack_pending = 0u64;
         let mut missing = 0u64;
         let mut max_progress_age = 0.0f64;
+        let mut projection_pending = 0u64;
+        let mut projection_ack_pending = 0u64;
+        let mut max_projection_age = 0.0f64;
+        for info in &live {
+            if trellis_events_runtime::telemetry::is_projection_consumer(&info.name) {
+                projection_pending += info.num_pending;
+                projection_ack_pending += info.num_ack_pending as u64;
+                let outstanding = info.num_pending + info.num_ack_pending as u64;
+                let key = (info.stream_name.clone(), info.name.clone());
+                let floor = info.ack_floor.stream_sequence;
+                let entry = progress.entry(key).or_insert((floor, now));
+                if outstanding == 0 || floor != entry.0 {
+                    entry.0 = floor;
+                    entry.1 = now;
+                }
+                max_projection_age = max_projection_age.max((now - entry.1).as_secs_f64());
+            }
+        }
         for binding in &bindings {
             let Some(info) = live.iter().find(|info| {
                 info.stream_name == binding.stream && info.name == binding.consumer_name
@@ -322,6 +340,16 @@ pub(crate) async fn run_consumer_sampler(
                 ObservableFamily::ConsumerProgressAge,
                 max_progress_age,
                 Vec::new(),
+            ),
+            (
+                ObservableFamily::ProjectionPending,
+                projection_pending as f64,
+                vec![KeyValue::new("trellis.component", "events")],
+            ),
+            (
+                ObservableFamily::ProjectionProgressAge,
+                max_projection_age,
+                vec![KeyValue::new("trellis.component", "events")],
             ),
         ]);
     }
