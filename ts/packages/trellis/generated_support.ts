@@ -119,20 +119,37 @@ function encodeBase64(value: Uint8Array): string {
 }
 
 function timestamp(value: unknown): Timestamp {
-  if (
-    typeof value !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{0,8}[1-9])?Z$/.test(value)
-  ) {
-    return fail("canonical timestamp");
+  if (typeof value !== "string") return fail("RFC 3339 timestamp");
+  const match =
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})$/i
+      .exec(value);
+  if (!match) return fail("RFC 3339 timestamp");
+  const [, seconds, fraction, offset] = match;
+  if (seconds.slice(-2) === "60") {
+    return fail("RFC 3339 timestamp without leap second");
   }
-  const wholeSeconds = `${value.slice(0, 19)}Z`;
+  const localSeconds = seconds.replace("t", "T");
+  const local = new Date(`${localSeconds}Z`);
   if (
-    Number.isNaN(Date.parse(wholeSeconds)) ||
-    new Date(wholeSeconds).toISOString().slice(0, 19) !== value.slice(0, 19)
+    Number.isNaN(local.getTime()) ||
+    local.toISOString().slice(0, 19) !== localSeconds
   ) {
-    return fail("canonical timestamp");
+    return fail("RFC 3339 timestamp");
   }
-  return value as Timestamp;
+  if (
+    offset.toUpperCase() !== "Z" &&
+    (+offset.slice(1, 3) > 23 || +offset.slice(4) > 59)
+  ) {
+    return fail("RFC 3339 timestamp");
+  }
+  const utc = new Date(`${localSeconds}${offset.toUpperCase()}`);
+  if (Number.isNaN(utc.getTime())) return fail("RFC 3339 timestamp");
+  const canonical = utc.toISOString().slice(0, 19);
+  if (canonical[0] === "+" || canonical[0] === "-") {
+    return fail("RFC 3339 timestamp");
+  }
+  const digits = fraction?.replace(/0+$/, "");
+  return `${canonical}${digits ? `.${digits}` : ""}Z` as Timestamp;
 }
 
 const ulidPattern = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/;

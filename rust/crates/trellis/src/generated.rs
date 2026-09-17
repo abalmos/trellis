@@ -1282,21 +1282,32 @@ impl PackageEvidence {
     }
 }
 
-/// Canonical UTC RFC 3339 timestamp used by generated SDKs.
+/// RFC 3339 timestamp normalized to canonical UTC by generated SDKs.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Timestamp(String);
 
 impl Timestamp {
-    /// Parse and validate a canonical timestamp with up to nanosecond precision.
+    /// Parse an RFC 3339 timestamp with up to nanosecond precision and normalize it.
     pub fn parse(value: &str) -> Result<Self, TimestampError> {
         use time::format_description::well_known::Rfc3339;
 
-        let parsed = time::OffsetDateTime::parse(value, &Rfc3339)?;
-        let canonical = parsed.format(&Rfc3339)?;
-        if canonical != value {
-            return Err(TimestampError::NonCanonical);
+        if !matches!(value.as_bytes().get(10), Some(b'T' | b't')) {
+            return Err(TimestampError::Separator);
         }
-        Ok(Self(canonical))
+        if value.get(17..19) == Some("60") {
+            return Err(TimestampError::LeapSecond);
+        }
+        if value
+            .get(19..)
+            .and_then(|tail| tail.strip_prefix('.'))
+            .is_some_and(|fraction| fraction.bytes().take_while(u8::is_ascii_digit).count() > 9)
+        {
+            return Err(TimestampError::Precision);
+        }
+        let parsed = time::OffsetDateTime::parse(value, &Rfc3339)?;
+        Ok(Self(
+            parsed.to_offset(time::UtcOffset::UTC).format(&Rfc3339)?,
+        ))
     }
 
     /// Borrow the canonical wire string.
@@ -1338,7 +1349,7 @@ impl<'de> Deserialize<'de> for Timestamp {
     }
 }
 
-/// Invalid or non-canonical generated timestamp.
+/// Invalid generated timestamp.
 #[derive(Debug, thiserror::Error)]
 pub enum TimestampError {
     /// The value is not RFC 3339.
@@ -1347,9 +1358,15 @@ pub enum TimestampError {
     /// A parsed timestamp could not be rendered.
     #[error("could not format RFC 3339 timestamp: {0}")]
     Format(#[from] time::error::Format),
-    /// The value does not use the canonical UTC spelling.
-    #[error("timestamp must use canonical UTC RFC 3339 spelling")]
-    NonCanonical,
+    /// A fractional second exceeds nanosecond precision.
+    #[error("timestamp exceeds nanosecond precision")]
+    Precision,
+    /// A non-RFC 3339 date/time separator was used.
+    #[error("timestamp requires an RFC 3339 date/time separator")]
+    Separator,
+    /// Leap seconds cannot be represented without losing precision.
+    #[error("leap seconds are not supported in timestamps")]
+    LeapSecond,
 }
 
 /// Validated uppercase canonical ULID used by generated SDKs.
@@ -1723,7 +1740,39 @@ mod tests {
                 .as_str(),
             "2026-09-10T12:34:56.123456789Z"
         );
-        assert!(Timestamp::parse("2026-09-10T12:34:56.120Z").is_err());
+        for (input, canonical) in [
+            ("2026-09-10T12:34:56.000Z", "2026-09-10T12:34:56Z"),
+            ("2026-09-10T12:34:56.010Z", "2026-09-10T12:34:56.01Z"),
+            ("2026-09-10T12:34:56.100Z", "2026-09-10T12:34:56.1Z"),
+            ("2026-09-10T12:34:56.120Z", "2026-09-10T12:34:56.12Z"),
+            ("2026-09-10T12:34:56.123Z", "2026-09-10T12:34:56.123Z"),
+            ("2026-09-10T12:34:56.500Z", "2026-09-10T12:34:56.5Z"),
+            ("2026-09-10T12:34:56.999Z", "2026-09-10T12:34:56.999Z"),
+            ("2026-09-10T14:34:56.120+02:00", "2026-09-10T12:34:56.12Z"),
+            ("2026-09-10T12:34:56.120+00:00", "2026-09-10T12:34:56.12Z"),
+            ("2026-09-10t12:34:56.120z", "2026-09-10T12:34:56.12Z"),
+        ] {
+            let timestamp = Timestamp::parse(input).unwrap();
+            assert_eq!(timestamp.as_str(), canonical);
+            assert_eq!(serde_json::to_value(&timestamp).unwrap(), canonical);
+        }
+        for second in 0..60 {
+            for millis in [0, 10, 100, 120, 123, 500, 999] {
+                let input = format!("2026-09-10T12:34:{second:02}.{millis:03}Z");
+                let fraction = format!(".{millis:03}");
+                let fraction = if millis == 0 {
+                    ""
+                } else {
+                    fraction.trim_end_matches('0')
+                };
+                let expected = format!("2026-09-10T12:34:{second:02}{fraction}Z");
+                assert_eq!(Timestamp::parse(&input).unwrap().as_str(), expected);
+            }
+        }
+        assert!(Timestamp::parse("2026-09-10T12:34:56.1234567890Z").is_err());
+        assert!(Timestamp::parse("2026-09-10.12:34:56.1234567891Z").is_err());
+        assert!(Timestamp::parse("2016-12-31T23:59:60Z").is_err());
+        assert!(Timestamp::parse("2026-02-30T12:34:56Z").is_err());
         assert_eq!(
             Ulid::parse("01ARZ3NDEKTSV4RRFFQ69G5FAV")
                 .unwrap()

@@ -69,9 +69,53 @@ Deno.test("generated codecs preserve wire representations and composition", () =
     ) as string,
     "2026-09-10T12:34:56.123456789Z",
   );
-  assertThrows(() =>
-    generated.codecs.timestamp.decode("2026-09-10T12:34:56.120Z")
-  );
+  for (
+    const [input, canonical] of [
+      ["2026-09-10T12:34:56.000Z", "2026-09-10T12:34:56Z"],
+      ["2026-09-10T12:34:56.010Z", "2026-09-10T12:34:56.01Z"],
+      ["2026-09-10T12:34:56.100Z", "2026-09-10T12:34:56.1Z"],
+      ["2026-09-10T12:34:56.120Z", "2026-09-10T12:34:56.12Z"],
+      ["2026-09-10T12:34:56.123Z", "2026-09-10T12:34:56.123Z"],
+      ["2026-09-10T12:34:56.500Z", "2026-09-10T12:34:56.5Z"],
+      ["2026-09-10T12:34:56.999Z", "2026-09-10T12:34:56.999Z"],
+      ["2026-09-10T14:34:56.120+02:00", "2026-09-10T12:34:56.12Z"],
+      ["2026-09-10T12:34:56.120+00:00", "2026-09-10T12:34:56.12Z"],
+      ["2026-09-10t12:34:56.120z", "2026-09-10T12:34:56.12Z"],
+      ["2026-09-10T12:34:56.123456789Z", "2026-09-10T12:34:56.123456789Z"],
+    ]
+  ) {
+    assertEquals(generated.codecs.timestamp.decode(input), canonical);
+    assertEquals(
+      generated.codecs.timestamp.encode(
+        generated.codecs.timestamp.decode(input),
+      ),
+      canonical,
+    );
+  }
+  for (let second = 0; second < 60; second++) {
+    for (const millis of [0, 10, 100, 120, 123, 500, 999]) {
+      const base = `2026-09-10T12:34:${String(second).padStart(2, "0")}`;
+      const fraction = millis
+        ? `.${String(millis).padStart(3, "0")}`.replace(/0+$/, "")
+        : "";
+      assertEquals(
+        generated.codecs.timestamp.decode(
+          `${base}.${String(millis).padStart(3, "0")}Z`,
+        ),
+        `${base}${fraction}Z`,
+      );
+    }
+  }
+  for (
+    const invalid of [
+      "2026-02-30T12:34:56Z",
+      "2026-09-10T12:34:56.1234567890Z",
+      "2026-09-10.12:34:56.1234567891Z",
+      "2016-12-31T23:59:60Z",
+      "2026-09-10T12:34:56+24:00",
+      "2026-09-10T12:34:56+00:60",
+    ]
+  ) assertThrows(() => generated.codecs.timestamp.decode(invalid));
   assertThrows(() => generated.codecs.i64.decode(Number.MAX_SAFE_INTEGER));
   assertThrows(() => generated.codecs.bytes.decode("AAE"));
   assertThrows(() => generated.codecs.bytes.decode("AB=="));
