@@ -69,8 +69,14 @@ impl futures_util::Stream for RegistryWatch {
                         if status == StatusCode::IDLE_HEARTBEAT {
                             if let Some(reply) = message.reply.clone() {
                                 let client = self.client.clone();
+                                let subject = self.subject.clone();
                                 tokio::spawn(async move {
-                                    let _ = client.publish(reply, Vec::new().into()).await;
+                                    tracing::debug!(%subject, %reply, "publishing authorization revocation watch heartbeat response");
+                                    if let Err(error) =
+                                        client.publish(reply.clone(), Vec::new().into()).await
+                                    {
+                                        tracing::warn!(%subject, %reply, %error, "authorization revocation watch heartbeat response publish failed");
+                                    }
                                 });
                             }
                             let last_consumer_sequence = message

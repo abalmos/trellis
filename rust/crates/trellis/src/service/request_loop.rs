@@ -675,7 +675,7 @@ async fn publish_response(
     client: &async_nats::Client,
     reply_to: String,
     response: HandlerResponse,
-    annotations: ErrorAnnotationContext,
+    annotations: &ErrorAnnotationContext,
 ) -> Result<(), ServerError> {
     match response {
         HandlerResponse::Frames(frames) => {
@@ -700,7 +700,7 @@ async fn publish_response(
                 Ok(Some(Err(error))) => {
                     publish_reply(
                         client,
-                        encode_error_reply_with_context(reply_to.clone(), &error, &annotations),
+                        encode_error_reply_with_context(reply_to.clone(), &error, annotations),
                     )
                     .await?;
                     break;
@@ -710,7 +710,7 @@ async fn publish_response(
                     let error = panic_to_server_error(panic);
                     publish_reply(
                         client,
-                        encode_error_reply_with_context(reply_to.clone(), &error, &annotations),
+                        encode_error_reply_with_context(reply_to.clone(), &error, annotations),
                     )
                     .await?;
                     break;
@@ -741,7 +741,7 @@ async fn publish_response(
                     Ok(Some(Err(error))) => {
                         publish_reply(
                             client,
-                            encode_error_reply_with_context(reply_to.clone(), &error, &annotations),
+                            encode_error_reply_with_context(reply_to.clone(), &error, annotations),
                         )
                         .await?;
                         break;
@@ -751,7 +751,7 @@ async fn publish_response(
                         let error = panic_to_server_error(panic);
                         publish_reply(
                             client,
-                            encode_error_reply_with_context(reply_to.clone(), &error, &annotations),
+                            encode_error_reply_with_context(reply_to.clone(), &error, annotations),
                         )
                         .await?;
                         break;
@@ -794,8 +794,15 @@ where
                 let client = &client;
                 let handler = &handler;
                 in_flight.push(async move {
+                    let subject = request.subject.clone();
                     match dispatch_response(handler, request).await {
-                        Ok(Some((reply_to, response, annotations))) => publish_response(client, reply_to, response, annotations).await?,
+                        Ok(Some((reply_to, response, annotations))) => {
+                            tracing::debug!(%subject, %reply_to, request_id = ?annotations.request_id, "publishing service request reply");
+                            if let Err(error) = publish_response(client, reply_to.clone(), response, &annotations).await {
+                                tracing::warn!(%subject, %reply_to, request_id = ?annotations.request_id, %error, "service request reply publish failed");
+                                return Err(error);
+                            }
+                        }
                         Ok(None) => {}
                         Err(_) => {}
                     }
