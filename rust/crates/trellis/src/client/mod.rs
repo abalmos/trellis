@@ -37,11 +37,10 @@ pub use authorization::{RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrus
 pub use crate::generated::{EventDescriptor, FeedDescriptor, RpcDescriptor};
 pub(crate) use connection::fetch_device_activation;
 pub(crate) use connection::DeviceEnrollmentResponse;
-pub(crate) use connection::ServiceConnectWithContractOptions;
-pub(crate) use connection::TrellisClient;
 pub use connection::{
     DeviceConnectOptions, EventMessage, EventReplayPolicy, EventSubscribeOptions,
-    EventSubscriptionMode, UserConnectOptions, UserSessionCredentials,
+    EventSubscriptionMode, ServiceConnectWithContractOptions, TrellisClient, UserConnectOptions,
+    UserSessionCredentials,
 };
 pub use error::{
     AuthenticationError, CallError, ProtocolError, RemoteErrorPayload, RpcErrorPayload,

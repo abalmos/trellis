@@ -30,6 +30,26 @@ incomplete. On the repeated TypeScript run, one local Operation completed and
 the other lost its fence while the active gauge returned to zero; the manifest
 records that observed mix, not a fixed outcome expectation.
 
+[`collected-obs02-owners.json`](./collected-obs02-owners.json) is the
+source-pinned manifest for this candidate (`94caa7ee`, the same `rs`
+`aae0b66dd43990924395c4483d4ac5c904c67645`). It adds the TypeScript owners that
+the previous two captures could not claim: the service connection
+`usable`→terminal transition case with `coverage_lost`, the outer request and
+event verifier outcomes, Feed `active`/`ends` for normal and early client close,
+and the real-NATS connection and refresh cases. It also records the new
+attempt-context trace evidence: `trellis.job.attempt.start`/`finish` spans in
+distinct per-attempt traces whose finish links target the same exported
+producer, the downstream RPC as a child of its own attempt's start span, and the
+receiver as a child of the caller's client span. The checker additionally
+rejects any lifetime `trellis.job.attempt` span, so the old long-lived-span
+evidence cannot reappear unnoticed. The `rustDelivery` rows come from the
+`integration/fixtures/runtime` Events binary after it started initializing
+process telemetry as `events-rust`; they show the durable Consumer recording
+actual `ok`/`retry`/`exhausted` processing outcomes and `ack`/`nak` Event
+dispositions at the language owner, plus the new short
+`trellis.event.attempt.start` context whose producer link is added only after
+proof verification.
+
 The native and browser export flows used a case-owned `otelcol-contrib:0.160.0`
 at `127.0.0.1:4318`; its Prometheus endpoint was `127.0.0.1:9464`, with traces
 forwarded to a second case-owned Collector's file exporter at `127.0.0.1:4322`.
@@ -72,6 +92,10 @@ deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \
   --filter 'collector enabled'
 deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \
   --filter 'durable attempt links'
+deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \
+  --filter 'TS service connection observes'
+deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \
+  --filter 'TS Feed active'
 deno test -A -c ts/integration/deno.json ts/integration/runtime_test.ts \
   --filter 'surviving replica reclaims an expired operation lease'
 deno test -A -c ts/integration/deno.json ts/integration/kv_telemetry_test.ts \
@@ -89,12 +113,14 @@ jq -s -f docs/observability/verify-capture.jq "$CAPTURE_DIR/traces.json"
 
 The `jq` command fails unless the exported span IDs prove both caller
 directions, the Rust and TypeScript Operation links target exported creators,
-and retry/completion Job attempts link to the same exported RPC producer. It
-also rejects any exported span attribute key denoting a credential, token,
-cookie, proof, payload, body, authorization header, or raw NATS subject. It
-checks attribute **names**, not the semantic safety of arbitrary values; inspect
-the local capture before publishing any further data. It prints booleans only,
-and the shell exits on failure while its trap removes the raw capture.
+retry/completion Job attempts link to the same exported RPC producer, each
+attempt's downstream RPC is a child of its own attempt-start span, and no
+lifetime `trellis.job.attempt` span exists. It also rejects any exported span
+attribute key denoting a credential, token, cookie, proof, payload, body,
+authorization header, or raw NATS subject. It checks attribute **names**, not
+the semantic safety of arbitrary values; inspect the local capture before
+publishing any further data. It prints booleans only, and the shell exits on
+failure while its trap removes the raw capture.
 
 The enabled integration test executes real authenticated generated Jobs to
 terminal completion, including a retrying Job created by an RPC handler and a
@@ -111,8 +137,20 @@ capture Collector without changing the business transport. Exported spans prove
 browser-to-Rust and Rust-to-TypeScript parentage by matching `traceId` and
 `parentSpanId` to the caller's actual `spanId`, including the Events query after
 browser navigation. Persisted Operation executions link to exported creator
-spans; retrying Job attempts link to the same exported RPC producer. No raw
-exported request payload is attached.
+spans; retrying Job attempts link to the same exported RPC producer, each in its
+own attempt context. No raw exported request payload is attached.
+
+The deterministic owner proof lives with each production owner rather than in
+the capture pipeline: `ts/packages/trellis/connection_test.ts` drives the real
+`observeTrellisConnection` handle through `connecting`→`usable`→`suspended`→
+`resumed`→terminal for both `service` and `device`, asserts a same-context
+`refreshed` transition leaves the active count at one, and asserts final cleanup
+clears every previously represented aggregate to zero.
+`authorization_context_test.ts` wraps the real `verifyLocalAuthorization`
+boundary for a valid request, a valid Event, an invalid proof (with telemetry
+disabled and installed), and a missing cache, checking the bounded
+`request:*`/`event:*` outcomes; it also drives the provider cache's own/peer
+coverage gauge through unavailable and restored states.
 
 Default `observability_test.ts` runs separately with isolated server OTEL
 environment variables: no endpoint, `OTEL_SDK_DISABLED=true`, traces-only (an
@@ -172,6 +210,17 @@ Collector:
   sampler task and stop aborts a running sampler promptly.
 - `rust/crates/trellis/src/service/operations.rs` — the diagnostic trace carrier
   is excluded from the invocation identity digest.
+- `ts/packages/trellis/connection_test.ts` — process-local connection and
+  coverage sources survive the first collection, export live counts, and clear
+  to zero after the last owner disposes, through a collecting metric reader.
+- `ts/packages/trellis/auth/authorization_context_test.ts` — the provider
+  cache's own/peer coverage gauge reflects a retained own installation, a
+  resolved peer, connection-generation suspension, and same-generation
+  restoration through a collecting reader.
+- `ts/integration/observability_test.ts` — the capture-enabled cases exercise a
+  real service connection through usable, suspended, and terminal states, a real
+  Feed across normal and early client cancellation with balanced active counts,
+  and the outer TypeScript verifier's bounded outcomes.
 
 ## Candidate
 

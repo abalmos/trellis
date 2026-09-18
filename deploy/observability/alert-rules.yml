@@ -51,8 +51,7 @@ groups:
       description: 'Cluster {{ $labels.trellis_cluster }}. Current value: {{ $value }}. Check telemetry freshness before interpreting last-known gauges.'
       runbook: docs/observability/runbooks.md#auth-refresh
   - alert: TrellisAuthDeliveryStalled
-    expr: (max by (trellis_cluster) (trellis_auth_post_commit_oldest_age{telemetry_pipeline="native"}) > 120) and on (trellis_cluster) (max by (trellis_cluster)
-      (trellis_auth_post_commit_pending{telemetry_pipeline="native"}) > 0) and on (trellis_cluster) (trellis:snapshot_fresh{trellis_source="auth"} == 1)
+    expr: (trellis:auth_post_commit_oldest_age > 120) and on (trellis_cluster) (trellis:auth_post_commit_pending > 0)
     for: 1m
     labels:
       severity: critical
@@ -61,8 +60,7 @@ groups:
       description: 'Cluster {{ $labels.trellis_cluster }}. Current value: {{ $value }}. Check telemetry freshness before interpreting last-known gauges.'
       runbook: docs/observability/runbooks.md#auth-delivery
   - alert: TrellisJobsBacklogOld
-    expr: (max by (trellis_cluster) (trellis_jobs_oldest_ready_age{telemetry_pipeline="native"}) > 300) and on (trellis_cluster) (max by (trellis_cluster)
-      (trellis_jobs_ready{telemetry_pipeline="native"}) > 0) and on (trellis_cluster) (trellis:snapshot_fresh{trellis_source="jobs"} == 1)
+    expr: (trellis:jobs_oldest_ready_age > 300) and on (trellis_cluster) (trellis:jobs_ready > 0)
     for: 10m
     labels:
       severity: warning
@@ -71,8 +69,7 @@ groups:
       description: 'Cluster {{ $labels.trellis_cluster }}. Current value: {{ $value }}. Check telemetry freshness before interpreting last-known gauges.'
       runbook: docs/observability/runbooks.md#jobs-backlog
   - alert: TrellisJobsNoWorkers
-    expr: (max by (trellis_cluster) (trellis_jobs_ready{telemetry_pipeline="native"}) > 0) and on (trellis_cluster) (max by (trellis_cluster) (trellis_jobs_worker_registrations{telemetry_pipeline="native"})
-      == 0) and on (trellis_cluster) (trellis:snapshot_fresh{trellis_source="jobs"} == 1)
+    expr: (trellis:jobs_ready > 0) and on (trellis_cluster) (trellis:jobs_worker_registrations == 0)
     for: 3m
     labels:
       severity: critical
@@ -81,9 +78,7 @@ groups:
       description: 'Cluster {{ $labels.trellis_cluster }}. Current value: {{ $value }}. Check telemetry freshness before interpreting last-known gauges.'
       runbook: docs/observability/runbooks.md#jobs-workers
   - alert: TrellisConsumerStalled
-    expr: (max by (trellis_cluster) (trellis_consumer_progress_age{telemetry_pipeline="native"}) > 300) and on (trellis_cluster) ((max by (trellis_cluster)
-      (trellis_consumer_pending{telemetry_pipeline="native"})) + (max by (trellis_cluster) (trellis_consumer_ack_pending{telemetry_pipeline="native"}))
-      > 0) and on (trellis_cluster) (trellis:snapshot_fresh{trellis_source="events"} == 1)
+    expr: (trellis:consumer_progress_age > 300) and on (trellis_cluster) ((trellis:consumer_pending + trellis:consumer_ack_pending) > 0)
     for: 5m
     labels:
       severity: warning
@@ -92,8 +87,7 @@ groups:
       description: 'Cluster {{ $labels.trellis_cluster }}. Current value: {{ $value }}. Check telemetry freshness before interpreting last-known gauges.'
       runbook: docs/observability/runbooks.md#consumer-stalled
   - alert: TrellisConsumerMissing
-    expr: (max by (trellis_cluster) (trellis_consumer_missing{telemetry_pipeline="native"}) > 0) and on (trellis_cluster) (trellis:snapshot_fresh{trellis_source="events"}
-      == 1)
+    expr: trellis:consumer_missing > 0
     for: 3m
     labels:
       severity: critical
@@ -102,8 +96,7 @@ groups:
       description: 'Cluster {{ $labels.trellis_cluster }}. Current value: {{ $value }}. Check telemetry freshness before interpreting last-known gauges.'
       runbook: docs/observability/runbooks.md#consumer-missing
   - alert: TrellisDeadLettersOpen
-    expr: (sum by (trellis_cluster) (trellis_dlq_entries{telemetry_pipeline="native"})) > 0 and on (trellis_cluster) (trellis:snapshot_fresh{trellis_source="events_dlq"}
-      == 1)
+    expr: trellis:dlq_entries > 0
     for: 10m
     labels:
       severity: warning
@@ -112,8 +105,7 @@ groups:
       description: 'Cluster {{ $labels.trellis_cluster }}. Current value: {{ $value }}. Check telemetry freshness before interpreting last-known gauges.'
       runbook: docs/observability/runbooks.md#dead-letters
   - alert: TrellisJobsDead
-    expr: (max by (trellis_cluster) (trellis_jobs_dead{telemetry_pipeline="native"})) > 0 and on (trellis_cluster) (trellis:snapshot_fresh{trellis_source="jobs"}
-      == 1)
+    expr: trellis:jobs_dead > 0
     for: 10m
     labels:
       severity: warning
@@ -122,9 +114,7 @@ groups:
       description: 'Cluster {{ $labels.trellis_cluster }}. Current value: {{ $value }}. Check telemetry freshness before interpreting last-known gauges.'
       runbook: docs/observability/runbooks.md#dead-letters
   - alert: TrellisProjectionStalled
-    expr: (max by (trellis_cluster, trellis_component) (trellis_projection_progress_age{telemetry_pipeline="native"})) > 120 and on (trellis_cluster, trellis_component)
-      (max by (trellis_cluster, trellis_component) (trellis_projection_pending{telemetry_pipeline="native"})) > 0 and on (trellis_cluster, trellis_component)
-      (trellis:projection_snapshot_fresh == 1)
+    expr: (trellis:projection_progress_age > 120) and on (trellis_cluster, trellis_component) (trellis:projection_pending > 0)
     for: 3m
     labels:
       severity: warning

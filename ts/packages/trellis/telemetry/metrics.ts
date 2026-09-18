@@ -2,6 +2,7 @@ import {
   type Counter,
   type Histogram,
   type Meter,
+  type MeterProvider,
   metrics,
   type UpDownCounter,
 } from "@opentelemetry/api";
@@ -329,6 +330,7 @@ export function recordTrellisDuration(
     return;
   }
 
+  bindInstrumentProvider();
   const histogram = getDurationHistogram(name);
   const metricAttributes = buildTrellisDurationMetricAttributes(attributes);
 
@@ -570,6 +572,7 @@ const CATALOG_ATTRIBUTE_KEYS = new Set([
   "trellis.purpose",
   "trellis.state",
   "trellis.kind",
+  "trellis.side",
   "trellis.app",
   "trellis.command",
   "trellis.reason",
@@ -586,6 +589,26 @@ const CATALOG_ATTRIBUTE_KEYS = new Set([
 const CATALOG_HISTOGRAM_CACHE = new Map<string, Histogram>();
 const CATALOG_COUNTER_CACHE = new Map<string, Counter>();
 const CATALOG_UPDOWN_CACHE = new Map<string, UpDownCounter>();
+let instrumentProvider: MeterProvider | undefined;
+
+/**
+ * Drops cached instrument handles when the global meter provider changed.
+ *
+ * A process normally keeps one provider for its lifetime. A host that installs
+ * providers later, or a focused test that collects through its own reader,
+ * must still observe instruments created after the previous provider, so
+ * cached handles follow the current provider generation instead of staying
+ * bound to whichever provider existed first.
+ */
+function bindInstrumentProvider(): void {
+  const current = metrics.getMeterProvider();
+  if (instrumentProvider === current) return;
+  instrumentProvider = current;
+  DURATION_HISTOGRAM_CACHE.clear();
+  CATALOG_HISTOGRAM_CACHE.clear();
+  CATALOG_COUNTER_CACHE.clear();
+  CATALOG_UPDOWN_CACHE.clear();
+}
 
 /** Default catalog duration boundaries in seconds. */
 const CATALOG_DURATION_BOUNDARIES = [
@@ -680,6 +703,7 @@ export function recordCatalogDuration(
   attributes: Record<string, string | number> = {},
 ): void {
   if (!Number.isFinite(durationMs) || durationMs < 0) return;
+  bindInstrumentProvider();
   let histogram = CATALOG_HISTOGRAM_CACHE.get(name);
   if (!histogram) {
     histogram = getTrellisMeter().createHistogram(
@@ -701,6 +725,7 @@ export function recordCatalogCounter(
   attributes: Record<string, string | number> = {},
 ): void {
   if (!Number.isFinite(value) || value < 0) return;
+  bindInstrumentProvider();
   let counter = CATALOG_COUNTER_CACHE.get(name);
   if (!counter) {
     counter = getTrellisMeter().createCounter(name);
@@ -716,6 +741,7 @@ export function recordCatalogUpDown(
   attributes: Record<string, string | number> = {},
 ): void {
   if (!Number.isFinite(delta) || delta === 0) return;
+  bindInstrumentProvider();
   let updown = CATALOG_UPDOWN_CACHE.get(name);
   if (!updown) {
     updown = getTrellisMeter().createUpDownCounter(name);

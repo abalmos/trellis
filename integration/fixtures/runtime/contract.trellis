@@ -57,6 +57,7 @@ api device_child@v1 {
 
 service Provider {
   implements runtime;
+  use runtime { rpc Echo; }
   job work {
     title "Work";
     description "Runtime fixture work.";

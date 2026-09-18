@@ -166,6 +166,8 @@ import {
 } from "./internal_jobs/types.ts";
 import {
   observeNatsTrellisConnection,
+  startConnectionTelemetry,
+  transitionConnectionAvailability,
   type TrellisConnection,
 } from "../../connection.ts";
 import { recordTrellisDuration } from "../../telemetry/mod.ts";
@@ -1180,6 +1182,8 @@ export async function createConnectedService<
     deploymentId: string;
   };
   authorizationProviderCache?: AuthorizationProviderCache;
+  /** Process-local connection handle started before the transport connected. @internal */
+  telemetry?: ReturnType<typeof startConnectionTelemetry>;
 }): Promise<TrellisServiceSession<TOwnedApi, TTrellisApi, TJobs, TKv>> {
   const resolvedLog = resolveServiceLogger(args.runtime.log);
   const connection = observeNatsTrellisConnection({
@@ -1193,6 +1197,7 @@ export async function createConnectedService<
       log: resolvedLog,
       context: { service: args.name },
     },
+    ...(args.telemetry ? { telemetry: args.telemetry } : {}),
   });
   if (args.authorizationProviderCache) {
     connection.subscribe((status) =>
@@ -2713,6 +2718,7 @@ export function connectTrellisServiceWithRuntimeDeps<
       let nc: NatsConnection | undefined;
       let authorizationProviderCache: AuthorizationProviderCache | undefined;
       let stopContextRefresh: (() => void) | undefined;
+      const connectionTelemetry = startConnectionTelemetry("service");
       try {
         const natsStartedAt = performance.now();
         nc = await runtimeDeps.connect({
@@ -2755,6 +2761,7 @@ export function connectTrellisServiceWithRuntimeDeps<
           },
         );
       } catch (cause) {
+        connectionTelemetry.dispose();
         authorizationProviderCache?.stop();
         stopContextRefresh?.();
         if (nc && !nc.isClosed()) await nc.close();
@@ -2807,6 +2814,7 @@ export function connectTrellisServiceWithRuntimeDeps<
           name: serviceName,
           auth: serviceAuth,
           nc,
+          telemetry: connectionTelemetry,
           inboxPrefix,
           contextDigest: () => authorizationContexts.current().contextDigest,
           operationConnectionId: verifiedContext.context.connectionId,
@@ -2839,18 +2847,40 @@ export function connectTrellisServiceWithRuntimeDeps<
           bootstrap.binding.apiBindings,
           bootstrap.binding.resources,
         );
-        authorizationProviderCache.onOwnInvalidated(() =>
+        authorizationProviderCache.onOwnInvalidated(() => {
+          transitionConnectionAvailability(
+            service.connection,
+            false,
+            "coverage_lost",
+          );
           installConnectionAvailability(
             service.connection,
             participantAvailability(args.participant, {}, {}, []),
-          )
-        );
+          );
+        });
         authorizationProviderCache.onOwnResumed(() => {
+          if (service.connection.status.phase === "connected") {
+            transitionConnectionAvailability(
+              service.connection,
+              true,
+              "resumed",
+            );
+          }
           installConnectionAvailability(
             service.connection,
             installedAvailability,
           );
         });
+        if (
+          authorizationProviderCache.ownUsable() &&
+          service.connection.status.phase === "connected"
+        ) {
+          transitionConnectionAvailability(
+            service.connection,
+            true,
+            "connected",
+          );
+        }
         stopContextRefresh = startAuthorizationContextRefresh({
           trellisUrl: args.trellisUrl,
           sessionId: bootstrap.connectInfo.connectionId,

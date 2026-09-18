@@ -7,7 +7,8 @@ import {
   assertRejects,
 } from "@std/assert";
 import { AsyncResult } from "@qlever-llc/result";
-import { metrics, propagation, trace } from "@opentelemetry/api";
+import { context, metrics, propagation, trace } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import {
   AggregationTemporality,
@@ -78,6 +79,7 @@ Deno.test("JobManager creates and publishes job context", async () => {
     }),
   );
   propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager());
   const published: PublishedMessage[] = [];
   const manager = new JobManager<{ siteId: string }, { ok: boolean }>({
     nc: {
@@ -130,15 +132,34 @@ Deno.test("JobManager creates and publishes job context", async () => {
     job.context.traceparent,
   );
 
-  const outcome = await manager.processWithHeartbeat(
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let entered!: () => void;
+  const running = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const processing = manager.processWithHeartbeat(
     job,
     new JobCancellationToken(),
     async () => {},
     async (activeJob) => {
+      entered();
+      await waiting;
       assertEquals(activeJob.context(), job.context);
+      const child = trace.getTracer("test").startSpan("job-child");
+      child.end();
       return { ok: true };
     },
   );
+  await running;
+  const [earlyStart] = spanExporter.getFinishedSpans().filter((span) =>
+    span.name === "trellis.job.attempt.start"
+  );
+  assertExists(earlyStart);
+  release();
+  const outcome = await processing;
 
   assertEquals(outcome.outcome, "completed");
   await reader.forceFlush();
@@ -152,15 +173,26 @@ Deno.test("JobManager creates and publishes job context", async () => {
     "trellis.route": "refresh",
     "trellis.outcome": "completed",
   });
-  const [span] = spanExporter.getFinishedSpans().filter((span) =>
-    span.name === "trellis.job.attempt"
+  const [start] = spanExporter.getFinishedSpans().filter((span) =>
+    span.name === "trellis.job.attempt.start"
   );
-  assertExists(span);
-  assertEquals(span.parentSpanContext, undefined);
-  assertEquals(span.links[0]?.context.traceId, job.context.traceId);
+  const [finish] = spanExporter.getFinishedSpans().filter((span) =>
+    span.name === "trellis.job.attempt.finish"
+  );
+  assertExists(start);
+  assertExists(finish);
+  assertEquals(start.parentSpanContext, undefined);
+  assertEquals(start.links[0]?.context.traceId, job.context.traceId);
+  assertEquals(finish.parentSpanContext?.spanId, start.spanContext().spanId);
+  assertEquals(finish.links[0]?.context.traceId, job.context.traceId);
+  const [child] = spanExporter.getFinishedSpans().filter((span) =>
+    span.name === "job-child"
+  );
+  assertEquals(child?.parentSpanContext?.spanId, start.spanContext().spanId);
   metrics.disable();
   trace.disable();
   propagation.disable();
+  context.disable();
   assertEquals(published.length, 3);
   for (const message of published) {
     const event = JSON.parse(new TextDecoder().decode(message.payload)) as {

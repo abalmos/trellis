@@ -67,6 +67,12 @@ fn subject_token(value: &str) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.as_bytes())
 }
 
+/// Encode one UTF-8 logical identity as its canonical unpadded base64url subject token.
+#[must_use]
+pub fn encode_subject_token(value: &str) -> String {
+    subject_token(value)
+}
+
 /// Encode one event descriptor identity into its canonical opaque wire form.
 ///
 /// # Errors

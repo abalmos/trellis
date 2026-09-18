@@ -6,8 +6,10 @@ use runtime_trellis::apis::runtime_trellis_events_v1::events::{Alpha, Beta};
 use runtime_trellis::apis::runtime_trellis_events_v1::rpc::ObservedOutput;
 use runtime_trellis::participants::runtime_trellis_event_service::{Participant, Provider};
 use runtime_trellis::types::{Empty, Sample};
+use tracing_subscriber::prelude::*;
 use trellis_rs::generated::EventDescriptor;
 use trellis_rs::service::{ServerError, ServiceConnectOptions, ServiceEventListenOptions};
+use trellis_rs::telemetry::{init_from_env, TelemetryIdentity, TelemetryRole};
 
 #[derive(Default)]
 struct DeliveryStats {
@@ -20,6 +22,18 @@ struct DeliveryStats {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let telemetry = init_from_env(TelemetryIdentity::new(
+        "events-rust",
+        TelemetryRole::Service,
+        env!("CARGO_PKG_VERSION"),
+    ));
+    tracing_subscriber::registry()
+        .with(
+            telemetry
+                .tracer()
+                .map(|tracer| tracing_opentelemetry::layer().with_tracer(tracer)),
+        )
+        .init();
     assert_eq!(
         Beta::publish_subject(&Sample {
             site: "rust".to_owned(),
@@ -122,5 +136,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             async { Ok(ObservedOutput { values }) }
         });
     service.run().await?;
+    telemetry.shutdown().await;
     Ok(())
 }

@@ -1,6 +1,6 @@
 import type { NatsConnection } from "@nats-io/nats-core";
 import { logger as noopLogger, type LoggerLike } from "./globals.ts";
-import { recordCatalogCounter } from "./telemetry/metrics.ts";
+import { trackConnection } from "./telemetry/lifecycle.ts";
 
 /** Identifies the Trellis runtime that owns a connection. */
 export type TrellisConnectionKind = "client" | "device" | "service";
@@ -63,6 +63,8 @@ export type ObserveTrellisConnectionOptions = {
   lifecycleLog?: TrellisConnectionLifecycleLogOptions;
   availability?: TrellisAvailability;
   onTransportEvent?: (event: unknown) => void;
+  /** Process-local handle started before the transport connected. @internal */
+  telemetry?: ConnectionTelemetryHandle;
 };
 
 /** Options for observing a NATS-backed Trellis connection lifecycle. */
@@ -73,6 +75,8 @@ export type ObserveNatsTrellisConnectionOptions = {
   lifecycleLog?: TrellisConnectionLifecycleLogOptions;
   availability?: TrellisAvailability;
   onTransportEvent?: (event: unknown) => void;
+  /** Process-local handle started before the transport connected. @internal */
+  telemetry?: ConnectionTelemetryHandle;
 };
 
 /** Options for logging transport lifecycle events with Trellis runtime context. */
@@ -92,6 +96,33 @@ const EMPTY_AVAILABILITY: TrellisAvailability = Object.freeze({
   resources: Object.freeze({}),
 });
 const installAvailability = Symbol("installAvailability");
+const attachTelemetry = Symbol("attachTelemetry");
+const transitionTelemetry = Symbol("transitionTelemetry");
+const disposeTelemetry = Symbol("disposeTelemetry");
+
+type ConnectionTelemetryHandle = ReturnType<typeof trackConnection>;
+
+function telemetryKind(kind: TrellisConnectionKind):
+  | "user"
+  | "service"
+  | "device" {
+  return kind === "client" ? "user" : kind;
+}
+
+/**
+ * Starts the one process-local numeric handle for a connection attempt.
+ *
+ * The handle exists from before the transport connects so the process-local
+ * registry observes the `connecting` state. The attempt owner adopts it into
+ * its `TrellisConnection`, which owns disposal.
+ *
+ * @internal
+ */
+export function startConnectionTelemetry(
+  kind: TrellisConnectionKind,
+): ConnectionTelemetryHandle {
+  return trackConnection(telemetryKind(kind));
+}
 
 function immutableAvailability(
   availability: TrellisAvailability,
@@ -122,6 +153,8 @@ export class TrellisConnection {
   #observationFailure: unknown;
   #log: LoggerLike;
   #stopped = false;
+  #telemetry?: ReturnType<typeof trackConnection>;
+  #telemetryUsable = false;
 
   /** Creates a Trellis connection lifecycle handle. */
   constructor(options: TrellisConnectionOptions) {
@@ -184,6 +217,21 @@ export class TrellisConnection {
     }
   }
 
+  [attachTelemetry](telemetry?: ConnectionTelemetryHandle): void {
+    this.#telemetry = telemetry ??
+      trackConnection(telemetryKind(this.#status.kind));
+  }
+
+  [transitionTelemetry](state: "usable" | "suspended", reason: string): void {
+    this.#telemetryUsable = state === "usable";
+    this.#telemetry?.transition(state, reason);
+  }
+
+  [disposeTelemetry](): void {
+    this.#telemetry?.dispose();
+    this.#telemetry = undefined;
+  }
+
   /**
    * Subscribes to status changes and immediately delivers the current status.
    *
@@ -226,6 +274,8 @@ export class TrellisConnection {
     } catch (error) {
       this.setStatus(createStatus(this.#status.kind, "error", { error }));
       throw error;
+    } finally {
+      this[disposeTelemetry]();
     }
   }
 
@@ -237,16 +287,12 @@ export class TrellisConnection {
       return;
     }
 
-    // Completed state changes are observed from the real authority transition
-    // owner; transport polls and retry logs never create samples. The live
-    // connection count is an observable gauge owned by each process registry.
-    recordCatalogCounter("trellis.connection.transitions", 1, {
-      "trellis.participant.kind": status.kind,
-      "trellis.reason": connectionTransitionReason(
-        status.phase,
-        this.#status.phase,
-      ),
-    });
+    if (status.phase === "closed" || status.phase === "error") {
+      this.#telemetry?.transition("terminal", "terminal");
+    } else if (status.phase !== "connected" && this.#telemetryUsable) {
+      this.#telemetryUsable = false;
+      this.#telemetry?.transition("suspended", "disconnect");
+    }
 
     this.#status = status;
     this.#log.debug(
@@ -270,6 +316,15 @@ export function installConnectionAvailability(
   availability: TrellisAvailability,
 ): void {
   connection[installAvailability](availability);
+}
+
+/** @internal Records final own-authorization publication or withdrawal. */
+export function transitionConnectionAvailability(
+  connection: TrellisConnection,
+  usable: boolean,
+  reason: "connected" | "coverage_lost" | "resumed" | "refreshed" | "revoked",
+): void {
+  connection[transitionTelemetry](usable ? "usable" : "suspended", reason);
 }
 
 /** Observes a narrow transport status stream as a Trellis connection lifecycle. */
@@ -300,6 +355,7 @@ export function observeTrellisConnection(
     },
     log: options.log,
   });
+  connection[attachTelemetry](options.telemetry);
 
   const baseTransport = createTransportMetadata(
     options.transport,
@@ -373,7 +429,7 @@ export function observeTrellisConnection(
 export function observeNatsTrellisConnection(
   options: ObserveNatsTrellisConnectionOptions,
 ): TrellisConnection {
-  return observeTrellisConnection({
+  const connection = observeTrellisConnection({
     kind: options.kind,
     transport: options.nc,
     transportName: "nats",
@@ -382,6 +438,12 @@ export function observeNatsTrellisConnection(
     availability: options.availability,
     onTransportEvent: options.onTransportEvent,
   });
+  connection[attachTelemetry](options.telemetry);
+  void options.nc.closed().then(
+    () => connection[disposeTelemetry](),
+    () => connection[disposeTelemetry](),
+  );
+  return connection;
 }
 
 function lifecycleLabel(kind: TrellisConnectionKind): string {
@@ -598,27 +660,4 @@ function normalizeTransportEvent(event: unknown): {
     ...("data" in record ? { data: record.data } : {}),
     ...("error" in record ? { error: record.error } : {}),
   };
-}
-
-/** Catalog transition reason for one completed phase change. */
-function connectionTransitionReason(
-  next: TrellisConnectionPhase,
-  previous: TrellisConnectionPhase,
-):
-  | "connected"
-  | "disconnect"
-  | "coverage_lost"
-  | "revoked"
-  | "refreshed"
-  | "resumed"
-  | "terminal"
-  | "closed" {
-  if (next === "closed") return "closed";
-  if (next === "error") return "terminal";
-  if (next === "connected") {
-    return previous === "disconnected" || previous === "reconnecting"
-      ? "resumed"
-      : "connected";
-  }
-  return "disconnect";
 }

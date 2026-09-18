@@ -1032,7 +1032,7 @@ impl<'a> UserConnectOptions<'a> {
 }
 
 /// Internal authenticated Trellis transport.
-pub(crate) struct TrellisClient {
+pub struct TrellisClient {
     nats: async_nats::Client,
     inbox_prefix: String,
     authorization_provider: AuthorizationProviderCache,
@@ -1093,6 +1093,22 @@ impl TrellisClient {
 
     pub(crate) fn nats(&self) -> async_nats::Client {
         self.nats.clone()
+    }
+
+    /// Return the deployment id of this connection's installed signed context.
+    pub fn runtime_deployment_id(&self) -> Result<String, TrellisClientError> {
+        let bundle = self
+            .authorization_contexts
+            .as_ref()
+            .ok_or_else(|| {
+                TrellisClientError::Bootstrap("authorization context unavailable".into())
+            })?
+            .bundle()?;
+        let context = trellis_protocol::parse_authorization_context(&bundle.context)
+            .map_err(|error| TrellisClientError::Bootstrap(error.to_string()))?;
+        context.unsigned.deployment_id.ok_or_else(|| {
+            TrellisClientError::Bootstrap("installed context carries no deployment identity".into())
+        })
     }
 
     pub(crate) fn participant_id(&self) -> Result<String, TrellisClientError> {

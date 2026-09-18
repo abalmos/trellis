@@ -76,8 +76,8 @@
       "instrument": "Histogram<f64>",
       "unit": "s",
       "attributes": { "existing_contract": "retain existing static operation/phase/outcome keys; source ledger S02" },
-      "owner": "Existing TypeScript instrumentation",
-      "observation": "Retain existing duration meaning; no duplicate new family.",
+      "owner": "TypeScript helper/reserved declaration",
+      "observation": "Declared helper instrument with no production emitting call; reserved for an approval lifecycle that does not exist yet. Not a production SLI and no samples are fabricated for it.",
       "boundaries": [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
     },
     {
@@ -85,8 +85,8 @@
       "instrument": "Histogram<f64>",
       "unit": "s",
       "attributes": { "existing_contract": "retain existing static operation/phase/outcome keys; source ledger S02" },
-      "owner": "Existing TypeScript instrumentation",
-      "observation": "Retain existing duration meaning; no duplicate new family.",
+      "owner": "TypeScript test-utility instrumentation",
+      "observation": "Emitted only by trellis-test administration automation; production administrative requests use their actual request/CLI observation boundaries. Retained as helper coverage, not a production SLI.",
       "boundaries": [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
     },
     {

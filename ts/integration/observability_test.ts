@@ -1,4 +1,5 @@
 import { Result } from "@qlever-llc/trellis";
+import { ensureTelemetryRuntime } from "@qlever-llc/trellis/telemetry";
 import { RetryJobError, TrellisService } from "@qlever-llc/trellis/service";
 import { assert, assertEquals } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
@@ -114,15 +115,42 @@ for (
           }).orThrow();
           let serviceExit: Promise<unknown> | undefined;
           try {
+            const gateArrived = new Set<string>();
+            const gateArrivals = new Map<string, () => void>();
+            const gateReleased = new Set<string>();
+            const gateReleases = new Map<string, () => void>();
+            const arriveAtGate = (key: string) => {
+              gateArrived.add(key);
+              gateArrivals.get(key)?.();
+              gateArrivals.delete(key);
+            };
+            const waitForGateArrival = (key: string) =>
+              gateArrived.has(key)
+                ? Promise.resolve()
+                : new Promise<void>((resolve) =>
+                  gateArrivals.set(key, resolve)
+                );
+            const holdAtGate = (key: string) =>
+              gateReleased.has(key)
+                ? Promise.resolve()
+                : new Promise<void>((resolve) =>
+                  gateReleases.set(key, resolve)
+                );
+            const releaseGate = (key: string) => {
+              gateReleased.add(key);
+              gateReleases.get(key)?.();
+              gateReleases.delete(key);
+            };
+            const downstreamEchoes: string[] = [];
             if (scenario.name === "collector enabled") {
               await service.handleEcho(async ({ input }) => {
                 if (input.value === "linked-job") {
-                  const job = await service.jobs.work.create({
+                  // Create the retrying Job under this Echo handler's span so
+                  // both attempts link to the same exported producer. The
+                  // attempts themselves are observed by the outer test.
+                  await service.jobs.work.create({
                     value: input.value,
                   }).orThrow();
-                  const terminal = await job.wait().orThrow();
-                  assertEquals(terminal.state, "completed");
-                  assertEquals(terminal.result, { value: input.value });
                 }
                 return Result.ok({ value: `Rust received ${input.value}` });
               });
@@ -132,6 +160,14 @@ for (
                   const signal = await op.nextSignal("Continue").orThrow();
                   await op.acknowledgeSignal(signal.sequence).orThrow();
                   return await op.complete({ value: "completed" }).orThrow();
+                }
+                if (input.value === "downstream-operation") {
+                  arriveAtGate("operation");
+                  await holdAtGate("operation");
+                  downstreamEchoes.push(
+                    (await service.echo({ value: "operation-downstream" })
+                      .orThrow()).value,
+                  );
                 }
                 return await op.complete({ value: `completed ${input.value}` })
                   .orThrow();
@@ -144,13 +180,23 @@ for (
               );
             }
             let linkedAttempts = 0;
-            service.jobs.work.handle(({ job }) =>
-              Promise.resolve(
-                job.payload.value === "linked-job" && ++linkedAttempts === 1
-                  ? Result.err(new RetryJobError())
-                  : Result.ok(job.payload),
-              )
-            );
+            service.jobs.work.handle(async ({ job }) => {
+              if (job.payload.value !== "linked-job") {
+                return Result.ok(job.payload);
+              }
+              const attempt = ++linkedAttempts;
+              // A controlled business wait before the downstream RPC keeps the
+              // attempt open long enough for its start span to be exportable.
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              downstreamEchoes.push(
+                (await service.echo({
+                  value: `linked-downstream-${attempt}`,
+                }).orThrow()).value,
+              );
+              return attempt === 1
+                ? Result.err(new RetryJobError())
+                : Result.ok(job.payload);
+            });
             let received: string | undefined;
             await service.onChanged(({ event }) => {
               received = event.value;
@@ -180,16 +226,40 @@ for (
                 (await client.echo({ value: "observed" }).orThrow()).value,
                 "Rust received observed",
               );
+              const linkedEcho = client.echo({ value: "linked-job" })
+                .orThrow();
               assertEquals(
-                (await client.echo({ value: "linked-job" }).orThrow()).value,
+                (await linkedEcho).value,
                 "Rust received linked-job",
               );
+              await runtime.waitFor(() =>
+                downstreamEchoes.includes(
+                  "Rust received linked-downstream-1",
+                ) && downstreamEchoes.includes(
+                  "Rust received linked-downstream-2",
+                ), { timeoutMs: 60_000 });
               assertEquals(linkedAttempts, 2);
               const operation = await client.work({ value: "observed" })
                 .start().orThrow();
               const finished = await operation.wait().orThrow();
               assertEquals(finished.state, "completed");
               assertEquals(finished.output?.value, "completed observed");
+              const downstreamOperation = await client.work({
+                value: "downstream-operation",
+              }).start().orThrow();
+              await waitForGateArrival("operation");
+              releaseGate("operation");
+              const downstreamFinished = await downstreamOperation.wait()
+                .orThrow();
+              assertEquals(downstreamFinished.state, "completed");
+              assertEquals(
+                downstreamFinished.output?.value,
+                "completed downstream-operation",
+              );
+              await runtime.waitFor(() =>
+                downstreamEchoes.includes(
+                  "Rust received operation-downstream",
+                ), { timeoutMs: 60_000 });
               const child = new Deno.Command("cargo", {
                 args: [
                   "run",
@@ -249,6 +319,12 @@ for (
           } finally {
             await service.stop();
             if (serviceExit) assertEquals(await serviceExit, undefined);
+            // The case-owned Collector must observe every span before the test
+            // process exits; a batch exporter otherwise drops the tail.
+            await ensureTelemetryRuntime({
+              serviceName: "observability_test",
+              role: "service",
+            }).then((handle) => handle.forceFlush());
           }
         }, {
           trellis: {
@@ -364,6 +440,192 @@ if (captureEndpoint && prometheusUrl) {
       } finally {
         Deno.kill(-provider.pid, "SIGTERM");
         await status;
+      }
+    }, {
+      trellis: {
+        command: {
+          cmd: serverBinary(),
+          args: ["--config", "{config}", "all"],
+        },
+      },
+    });
+  });
+}
+
+if (captureEndpoint && prometheusUrl) {
+  /** Sums one counter family across matching label pairs from a scrape. */
+  function scrapeTotal(
+    metrics: string,
+    family: string,
+    subset: Record<string, string> = {},
+  ): number {
+    let total = 0;
+    for (const line of metrics.split("\n")) {
+      if (!line.startsWith(`${family}{`)) continue;
+      const labels = line.slice(line.indexOf("{") + 1, line.lastIndexOf("}"));
+      if (
+        Object.entries(subset).every(([key, value]) =>
+          labels.includes(`${key}="${value}"`)
+        )
+      ) {
+        total += Number(line.slice(line.lastIndexOf("}") + 1).trim());
+      }
+    }
+    return total;
+  }
+
+  Deno.test("TS service connection observes usable, suspended, resumed, and disposal against real NATS", async () => {
+    await withTrellisRuntime(async (runtime) => {
+      const serviceName = `connection-owner-${Date.now()}`;
+      const identity = await runtime.registerService({
+        name: serviceName,
+        contract: participants.Provider.participant,
+      });
+      const service = await TrellisService.connect({
+        trellisUrl: runtime.trellisUrl,
+        participant: participants.Provider.participant,
+        name: serviceName,
+        seed: identity.seed,
+      }).orThrow();
+      const serviceExit = service.wait().catch((error: unknown) => error);
+      try {
+        const initial = async () => await (await fetch(prometheusUrl)).text();
+        // A service suspended by an authoritative instance disable keeps
+        // refreshing until it is terminal; the transition is observed at the
+        // real TypeScript owner rather than inferred from Rust samples.
+        await runtime.waitFor(async () => {
+          const metrics = await initial();
+          return scrapeTotal(metrics, "trellis_connection_count", {
+            job: `trellis/${serviceName}`,
+            trellis_participant_kind: "service",
+            trellis_state: "usable",
+          }) >= 1;
+        }, { timeoutMs: 30_000 });
+        await runtime.services.disableInstance({
+          instanceId: identity.instanceId,
+          expectedVersion: 1n,
+          idempotencyKey: crypto.randomUUID(),
+          reason: "connection owner observability",
+        });
+        await runtime.waitFor(async () => {
+          const metrics = await initial();
+          return scrapeTotal(metrics, "trellis_auth_refresh_attempts", {
+            job: `trellis/${serviceName}`,
+            trellis_participant_kind: "service",
+          }) >= 1;
+        }, { timeoutMs: 30_000 });
+      } finally {
+        await service.stop();
+        // A deliberately suspended service settles with the terminal
+        // authorization outcome instead of a clean stop; the telemetry
+        // transition is the assertion here, not the exit value.
+        await serviceExit;
+      }
+      await runtime.waitFor(async () => {
+        const metrics = await (await fetch(prometheusUrl)).text();
+        return scrapeTotal(metrics, "trellis_connection_count", {
+          job: `trellis/${serviceName}`,
+          trellis_participant_kind: "service",
+          trellis_state: "usable",
+        }) === 0;
+      }, { timeoutMs: 30_000 });
+      const metrics = await (await fetch(prometheusUrl)).text();
+      assertEquals(
+        scrapeTotal(metrics, "trellis_connection_transitions", {
+          job: `trellis/${serviceName}`,
+          trellis_participant_kind: "service",
+        }) >= 1,
+        true,
+      );
+      assertEquals(
+        scrapeTotal(metrics, "trellis_connection_transitions", {
+          job: `trellis/${serviceName}`,
+          trellis_participant_kind: "service",
+          trellis_reason: "terminal",
+        }) >= 1,
+        true,
+      );
+    }, {
+      trellis: {
+        command: {
+          cmd: serverBinary(),
+          args: ["--config", "{config}", "all"],
+        },
+      },
+    });
+  });
+
+  Deno.test("TS Feed active and end observations balance across normal and early close", async () => {
+    await withTrellisRuntime(async (runtime) => {
+      const identity = await runtime.registerService({
+        name: "feed-owner-observability",
+        contract: participants.Provider.participant,
+      });
+      const service = await TrellisService.connect({
+        trellisUrl: runtime.trellisUrl,
+        participant: participants.Provider.participant,
+        name: "feed-owner-observability",
+        seed: identity.seed,
+      }).orThrow();
+      const serviceExit = service.wait().catch((error: unknown) => error);
+      let closed = 0;
+      await service.handleWatch(async ({ emit, signal }) => {
+        let frame = 0;
+        while (!signal.aborted) {
+          await emit({ value: `owner-feed-${++frame}` }).orThrow();
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        closed += 1;
+      });
+      const client = await runtime.connectClient({
+        name: "feed-owner-caller",
+        contract: participants.Caller.participant,
+      });
+      try {
+        const before = scrapeTotal(
+          await (await fetch(prometheusUrl)).text(),
+          "trellis_feed_ends",
+        );
+        const natural = await client.watch({}).orThrow();
+        const iterator = natural[Symbol.asyncIterator]();
+        await iterator.next();
+        await iterator.return?.();
+        await runtime.waitFor(() => closed >= 1);
+        const earlyAbort = new AbortController();
+        const early = await client.watch({}, { signal: earlyAbort.signal })
+          .orThrow();
+        await early[Symbol.asyncIterator]().next();
+        earlyAbort.abort();
+        await runtime.waitFor(() => closed >= 2);
+        await runtime.waitFor(async () => {
+          const metrics = await (await fetch(prometheusUrl)).text();
+          return scrapeTotal(metrics, "trellis_feed_ends") >= before + 2;
+        }, { timeoutMs: 30_000 });
+        const metrics = await (await fetch(prometheusUrl)).text();
+        assertEquals(
+          scrapeTotal(metrics, "trellis_feed_ends", {
+            trellis_side: "client",
+          }) >=
+            2,
+          true,
+        );
+        assertEquals(
+          scrapeTotal(metrics, "trellis_feed_ends", {
+            trellis_side: "server",
+          }) >=
+            2,
+          true,
+        );
+        assertEquals(
+          scrapeTotal(metrics, "trellis_feed_active", {
+            trellis_side: "client",
+          }) > 0,
+          false,
+        );
+      } finally {
+        await client.connection.close();
+        await service.stop();
+        assertEquals(await serviceExit, undefined);
       }
     }, {
       trellis: {

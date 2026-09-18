@@ -31,6 +31,7 @@ pub fn trellis_runtime_config(options: &TrellisBootstrapOptions) -> RuntimeConfi
         instance_name: Some(options.runtime.name.clone()),
         event_session_seed_file: Some(PathBuf::from("./session.seed")),
         event_context_digest_file: None,
+        live_provider_seed_files: None,
         paths: None,
         http: Some(HttpConfig {
             port: Some(options.runtime.trellis_port),

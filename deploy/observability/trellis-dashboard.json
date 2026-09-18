@@ -24,7 +24,13 @@
       "type": "state-timeline",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis:component_present", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:component_present",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -34,7 +40,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis:rpc_requests:5m", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:rpc_requests:5m",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -44,7 +56,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis:rpc_error_ratio:5m", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:rpc_error_ratio:5m",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -54,7 +72,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis:auth_refresh:p95", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:auth_refresh:p95",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -64,7 +88,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
-      "targets": [{ "expr": "(sum by (trellis_cluster) (rate(trellis_auth_flow_duration_sum{telemetry_pipeline=\"native\",trellis_operation=\"context_refresh\",trellis_phase=\"total\"}[5m])) / sum by (trellis_cluster) (rate(trellis_auth_flow_duration_count{telemetry_pipeline=\"native\",trellis_operation=\"context_refresh\",trellis_phase=\"total\"}[5m]))) and on (trellis_cluster) (sum by (trellis_cluster) (rate(trellis_auth_flow_duration_count{telemetry_pipeline=\"native\",trellis_operation=\"context_refresh\",trellis_phase=\"total\"}[5m])) > 0)", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "(sum by (trellis_cluster) (rate(trellis_auth_flow_duration_sum{telemetry_pipeline=\"native\",trellis_operation=\"context_refresh\",trellis_phase=\"total\"}[5m])) / sum by (trellis_cluster) (rate(trellis_auth_flow_duration_count{telemetry_pipeline=\"native\",trellis_operation=\"context_refresh\",trellis_phase=\"total\"}[5m]))) and on (trellis_cluster) (sum by (trellis_cluster) (rate(trellis_auth_flow_duration_count{telemetry_pipeline=\"native\",trellis_operation=\"context_refresh\",trellis_phase=\"total\"}[5m])) > 0)",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -74,7 +104,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_auth_post_commit_pending{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:auth_post_commit_pending",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -84,7 +120,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_auth_post_commit_oldest_age{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:auth_post_commit_oldest_age",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -95,9 +137,21 @@
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
       "targets": [
-        { "expr": "trellis_jobs_ready{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" },
-        { "expr": "trellis_jobs_worker_registrations{telemetry_pipeline=\"native\"}", "refId": "B", "legendFormat": "workers {{trellis_cluster}}" },
-        { "expr": "trellis_jobs_waiting_retry{telemetry_pipeline=\"native\"}", "refId": "C", "legendFormat": "waiting retry {{trellis_cluster}}" }
+        {
+          "expr": "trellis:jobs_ready",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        },
+        {
+          "expr": "trellis:jobs_worker_registrations",
+          "refId": "B",
+          "legendFormat": "workers {{trellis_cluster}}"
+        },
+        {
+          "expr": "trellis:jobs_waiting_retry",
+          "refId": "C",
+          "legendFormat": "waiting retry {{trellis_cluster}}"
+        }
       ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
@@ -108,7 +162,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_jobs_oldest_ready_age{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:jobs_oldest_ready_age",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -118,7 +178,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_consumer_pending{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:consumer_pending",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -128,7 +194,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 40, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_consumer_ack_pending{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:consumer_ack_pending",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -138,7 +210,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 40, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_consumer_progress_age{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:consumer_progress_age",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -148,7 +226,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 48, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_dlq_entries{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:dlq_entries",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -158,7 +242,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 48, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_projection_pending{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:projection_pending",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -168,7 +258,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 56, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_projection_progress_age{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis:projection_progress_age",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -178,7 +274,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 56, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_connection_count{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis_connection_count{telemetry_pipeline=\"native\"}",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -188,7 +290,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 64, "w": 12, "h": 8 },
-      "targets": [{ "expr": "trellis_operation_active{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "trellis_operation_active{telemetry_pipeline=\"native\"}",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -198,7 +306,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 64, "w": 12, "h": 8 },
-      "targets": [{ "expr": "time() - trellis_snapshot_observed_time{telemetry_pipeline=\"native\"}", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "time() - trellis_snapshot_observed_time{telemetry_pipeline=\"native\"}",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -208,7 +322,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 72, "w": 12, "h": 8 },
-      "targets": [{ "expr": "sum by (trellis_cache_kind, trellis_cache_result) (rate(trellis_contract_cache_requests{telemetry_pipeline=\"native\"}[5m]))", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "sum by (trellis_cache_kind, trellis_cache_result) (rate(trellis_contract_cache_requests{telemetry_pipeline=\"native\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -218,7 +338,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 72, "w": 12, "h": 8 },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, trellis_backend) (rate(trellis_storage_duration_bucket{telemetry_pipeline=\"native\",trellis_phase=\"total\"}[5m])))", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, trellis_backend) (rate(trellis_storage_duration_bucket{telemetry_pipeline=\"native\",trellis_phase=\"total\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -228,7 +354,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 80, "w": 12, "h": 8 },
-      "targets": [{ "expr": "otelcol_exporter_queue_size / clamp_min(otelcol_exporter_queue_capacity, 1)", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "otelcol_exporter_queue_size / clamp_min(otelcol_exporter_queue_capacity, 1)",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -238,7 +370,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 12, "y": 80, "w": 12, "h": 8 },
-      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, trellis_app) (rate(trellis_browser_navigation_duration_bucket{telemetry_pipeline=\"browser\",trellis_phase=\"ready\"}[5m])))", "refId": "A", "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}" }],
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, trellis_app) (rate(trellis_browser_navigation_duration_bucket{telemetry_pipeline=\"browser\",trellis_phase=\"ready\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "{{trellis_cluster}} {{trellis_component}} {{trellis_state}} {{trellis_source}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     },
@@ -248,7 +386,13 @@
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "gridPos": { "x": 0, "y": 88, "w": 12, "h": 8 },
-      "targets": [{ "expr": "count by (trellis_cluster, job, instance) ({__name__=~\"trellis_.*\", telemetry_pipeline=\"native\", otel_metric_overflow=\"true\"}) > 0", "refId": "A", "legendFormat": "{{job}} {{instance}}" }],
+      "targets": [
+        {
+          "expr": "count by (trellis_cluster, job, instance) ({__name__=~\"trellis_.*\", telemetry_pipeline=\"native\", otel_metric_overflow=\"true\"}) > 0",
+          "refId": "A",
+          "legendFormat": "{{job}} {{instance}}"
+        }
+      ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
     }

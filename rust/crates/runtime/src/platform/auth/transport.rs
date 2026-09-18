@@ -110,8 +110,12 @@ pub(crate) fn compile_transport_permissions(
             let name = key.split_once(':').map_or(key.as_str(), |(_, name)| name);
             compile_provider_action(
                 api_id,
-                (deployment_id, instance_id),
-                session_prefix,
+                ProviderActionIdentity {
+                    deployment_id,
+                    instance_id,
+                    session_prefix,
+                    connection_id: &context.connection_id,
+                },
                 name,
                 action,
                 &mut publish,
@@ -126,7 +130,14 @@ pub(crate) fn compile_transport_permissions(
                 .referenced_apis
                 .get(api_id)
                 .ok_or_else(|| invalid_error(format!("grant references unknown API {api_id}")))?;
-            compile_api_surface(api, api_bindings, atom, &mut publish, &mut subscribe)?;
+            compile_api_surface(
+                api,
+                api_bindings,
+                &context.connection_id,
+                atom,
+                &mut publish,
+                &mut subscribe,
+            )?;
         } else if let Some((api_id, operation, _signal)) = atom.target().as_operation_signal() {
             let api = resolved
                 .referenced_apis
@@ -209,16 +220,28 @@ pub(crate) fn compile_transport_permissions(
     })
 }
 
+struct ProviderActionIdentity<'a> {
+    deployment_id: &'a str,
+    instance_id: &'a str,
+    session_prefix: &'a str,
+    connection_id: &'a str,
+}
+
 fn compile_provider_action(
     api_id: &str,
-    provider: (&str, &str),
-    session_prefix: &str,
+    provider: ProviderActionIdentity<'_>,
     name: &str,
     action: &super::evidence::ActionRuntimeProjection,
     publish: &mut BTreeSet<String>,
     subscribe: &mut BTreeSet<String>,
 ) -> Result<(), AuthorizationStateError> {
-    let (deployment_id, instance_id) = provider;
+    let ProviderActionIdentity {
+        deployment_id,
+        instance_id,
+        session_prefix,
+        connection_id,
+    } = provider;
+    let own_token = URL_SAFE_NO_PAD.encode(connection_id.as_bytes());
     match action.kind {
         RuntimeActionKind::Rpc => {
             subscribe.insert(
@@ -237,6 +260,10 @@ fn compile_provider_action(
             subscribe.insert(format!("{subject}.control"));
             subscribe.insert(format!("{subject}.updates.*"));
             publish.insert(format!("{subject}.updates.*"));
+            // The observer replica answers owner-directed live controls and
+            // publishes its signed frames over the live delivery family.
+            subscribe.insert(format!("{subject}.observe.{own_token}.*"));
+            publish.insert(format!("live.v1.data.{own_token}.*.*"));
             if action.upload {
                 subscribe.insert(format!("transfer.v1.upload.{session_prefix}.*"));
             }
@@ -249,6 +276,11 @@ fn compile_provider_action(
                 &subject,
                 instance_id,
             ));
+            // Live sessions replace the retained-reply model: the provider
+            // owns exact nonqueued controls for this connection and publishes
+            // signed frames only to its own connection-scoped data prefix.
+            subscribe.insert(format!("{subject}.observe.{own_token}.*"));
+            publish.insert(format!("live.v1.data.{own_token}.*.*"));
         }
         RuntimeActionKind::Event => {}
     }
@@ -279,6 +311,7 @@ fn compile_authorization_registry_transport(
 fn compile_api_surface(
     api: &ApiRuntimeProjection,
     api_bindings: &std::collections::BTreeMap<String, AuthorizationApiBinding>,
+    connection_id: &str,
     permission: &PermissionAtom,
     publish: &mut BTreeSet<String>,
     subscribe: &mut BTreeSet<String>,
@@ -328,6 +361,10 @@ fn compile_api_surface(
                 trellis_protocol::derive_bound_operation_subject(api_id, deployment_id, name)
                     .map_err(|error| invalid_error(error.to_string()))?;
             publish.insert(format!("{subject}.control"));
+            // Exact Observe authority is what allows this caller to own live
+            // observations of the bound route and receive its own delivery.
+            publish.insert(format!("{subject}.observe.*.*"));
+            subscribe.insert(consumer_live_data_subscription(connection_id));
         }
         (ApiSurfaceKind::Operation, PermissionAction::Cancel | PermissionAction::Control) => {
             let deployment_id = &api_bindings
@@ -368,10 +405,21 @@ fn compile_api_surface(
                 .map_err(|error| invalid_error(error.to_string()))?;
             publish.insert(subject.clone());
             publish.insert(format!("{subject}.control.*.*"));
+            // The exact Feed Subscribe grant also authorizes this caller's own
+            // live observation controls and connection-scoped delivery.
+            publish.insert(format!("{subject}.observe.*.*"));
+            subscribe.insert(consumer_live_data_subscription(connection_id));
         }
         _ => return invalid("grant action does not match API surface"),
     }
     Ok(())
+}
+
+fn consumer_live_data_subscription(connection_id: &str) -> String {
+    format!(
+        "live.v1.data.*.{}.*",
+        URL_SAFE_NO_PAD.encode(connection_id.as_bytes())
+    )
 }
 
 fn surface_name(surface: ApiSurfaceKind) -> &'static str {
@@ -548,12 +596,14 @@ fn invalid_error(message: impl Into<String>) -> AuthorizationStateError {
 mod tests {
     use super::{
         compile_api_surface, compile_authorization_registry_transport, compile_provider_action,
-        compile_resource, resource_binding,
+        compile_resource, resource_binding, ProviderActionIdentity,
     };
     use crate::platform::auth::{
         evidence::{ActionRuntimeProjection, ApiRuntimeProjection, RuntimeActionKind},
         ResourceBindingEvidence, ResourceBindingState, ResourceProviderIdentity,
     };
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
     use std::collections::{BTreeMap, BTreeSet};
     use trellis_protocol::{ApiSurfaceKind, PermissionAction, PermissionAtom, PermissionTarget};
     use trellis_rs::client::AuthorizationApiBinding;
@@ -609,8 +659,12 @@ mod tests {
 
         compile_provider_action(
             "fieldops.sites@v1",
-            ("sites-deployment", "sites-instance"),
-            "session-prefix",
+            ProviderActionIdentity {
+                deployment_id: "sites-deployment",
+                instance_id: "sites-instance",
+                session_prefix: "session-prefix",
+                connection_id: "sites-connection",
+            },
             "Refresh",
             &action,
             &mut publish,
@@ -624,18 +678,26 @@ mod tests {
             "Refresh",
         )
         .unwrap();
+        let own_token = URL_SAFE_NO_PAD.encode(b"sites-connection");
         assert_eq!(
             subscribe,
             BTreeSet::from([
                 subject.clone(),
                 format!("{subject}.control"),
                 format!("{subject}.updates.*"),
+                format!("{subject}.observe.{own_token}.*"),
                 "transfer.v1.upload.session-prefix.*".to_owned(),
             ])
         );
         assert!(!subscribe.contains(&format!("{subject}.>")));
         assert!(!subscribe.contains("operations.>"));
-        assert_eq!(publish, BTreeSet::from([format!("{subject}.updates.*")]));
+        assert_eq!(
+            publish,
+            BTreeSet::from([
+                format!("{subject}.updates.*"),
+                format!("live.v1.data.{own_token}.*.*"),
+            ])
+        );
     }
 
     #[test]
@@ -667,6 +729,7 @@ mod tests {
         compile_api_surface(
             &api,
             &bindings,
+            "caller-connection",
             &api_permission(
                 api_id,
                 ApiSurfaceKind::Operation,
@@ -754,6 +817,7 @@ mod tests {
             compile_api_surface(
                 &api,
                 &bindings,
+                "state-connection",
                 &api_permission(api_id, ApiSurfaceKind::Rpc, name, PermissionAction::Call),
                 &mut publish,
                 &mut subscribe,
@@ -787,8 +851,12 @@ mod tests {
 
         compile_provider_action(
             "fieldops.sites@v1",
-            ("sites-deployment", "sites-instance"),
-            "session-prefix",
+            ProviderActionIdentity {
+                deployment_id: "sites-deployment",
+                instance_id: "sites-instance",
+                session_prefix: "session-prefix",
+                connection_id: "sites-connection",
+            },
             "Watch",
             &action,
             &mut publish,
@@ -804,9 +872,18 @@ mod tests {
         .unwrap();
         let emitted_subscription_subject =
             trellis_protocol::derive_feed_control_subject(&subject, "sites-instance");
+        let own_token = URL_SAFE_NO_PAD.encode(b"sites-connection");
         assert_eq!(
             subscribe,
-            BTreeSet::from([subject.clone(), emitted_subscription_subject.clone()])
+            BTreeSet::from([
+                subject.clone(),
+                emitted_subscription_subject.clone(),
+                format!("{subject}.observe.{own_token}.*"),
+            ])
+        );
+        assert_eq!(
+            publish,
+            BTreeSet::from([format!("live.v1.data.{own_token}.*.*")])
         );
         assert!(subscribe.contains(&emitted_subscription_subject));
         assert!(
@@ -848,6 +925,7 @@ mod tests {
         compile_api_surface(
             &api,
             &bindings,
+            "caller-connection",
             &api_permission(
                 api_id,
                 ApiSurfaceKind::Feed,
@@ -862,11 +940,19 @@ mod tests {
         let subject =
             trellis_protocol::derive_bound_feed_subject(api_id, "sites-deployment", "Watch")
                 .unwrap();
+        let own_token = URL_SAFE_NO_PAD.encode(b"caller-connection");
         assert_eq!(
             publish,
-            BTreeSet::from([subject.clone(), format!("{subject}.control.*.*")])
+            BTreeSet::from([
+                subject.clone(),
+                format!("{subject}.control.*.*"),
+                format!("{subject}.observe.*.*"),
+            ])
         );
-        assert!(subscribe.is_empty());
+        assert_eq!(
+            subscribe,
+            BTreeSet::from([format!("live.v1.data.*.{own_token}.*")])
+        );
         assert!(!publish.contains("feed.v1.Watch"));
         assert!(!publish.contains(&format!("{subject}.control.>")));
     }

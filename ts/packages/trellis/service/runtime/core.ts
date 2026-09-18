@@ -53,7 +53,13 @@ import {
   validateTracestate,
 } from "../../telemetry/carrier.ts";
 import { getTrellisTracer } from "../../telemetry/trace.ts";
-import { ROOT_CONTEXT, SpanKind, trace } from "@opentelemetry/api";
+import {
+  type Context,
+  context as otelContext,
+  ROOT_CONTEXT,
+  SpanKind,
+  trace,
+} from "@opentelemetry/api";
 import {
   annotateHandlerBoundaryError,
   buildRuntimeOperationSnapshot,
@@ -292,6 +298,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     RuntimeOperationRecord,
     {
       fence: RuntimeOperationFence;
+      attemptContext: Context;
       finish: (
         outcome:
           | "completed"
@@ -1941,8 +1948,23 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
           const links = producer ? [{ context: producer }] : [];
           const startedAt = performance.now();
           const existingObservation = this.#executionObservations.get(runtime);
+          const startSpan = existingObservation
+            ? undefined
+            : getTrellisTracer().startSpan(
+              "trellis.operation.execute.start",
+              {
+                kind: SpanKind.CONSUMER,
+                attributes: { "trellis.route": route },
+                links,
+              },
+              ROOT_CONTEXT,
+            );
           const observation = existingObservation ?? {
             fence,
+            attemptContext: trace.setSpanContext(
+              ROOT_CONTEXT,
+              startSpan!.spanContext(),
+            ),
             finish: (
               outcome:
                 | "completed"
@@ -1965,19 +1987,20 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               recordCatalogUpDown("trellis.operation.active", -1, {
                 "trellis.route": route,
               });
-              const finishSpan = getTrellisTracer().startSpan(
-                "trellis.operation.execute.finish",
-                {
-                  kind: SpanKind.CONSUMER,
-                  attributes: {
-                    "trellis.route": route,
-                    "trellis.outcome": outcome,
+              otelContext.with(observation.attemptContext, () => {
+                getTrellisTracer().startSpan(
+                  "trellis.operation.execute.finish",
+                  {
+                    kind: SpanKind.CONSUMER,
+                    attributes: {
+                      "trellis.route": route,
+                      "trellis.outcome": outcome,
+                    },
+                    links,
                   },
-                  links,
-                },
-                ROOT_CONTEXT,
-              );
-              finishSpan.end();
+                  observation.attemptContext,
+                ).end();
+              });
             },
           };
           const onAbort = () => observation.finish("lease_lost");
@@ -1989,74 +2012,74 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
             runtime.cancellation.signal.addEventListener("abort", onAbort, {
               once: true,
             });
-            const startSpan = getTrellisTracer().startSpan(
-              "trellis.operation.execute.start",
-              {
-                kind: SpanKind.CONSUMER,
-                attributes: { "trellis.route": route },
-                links,
-              },
-              ROOT_CONTEXT,
-            );
-            startSpan.end();
             if (runtime.cancellation.signal.aborted) onAbort();
           }
           const op = makeOperation(runtime, fence, operationContext);
           let deferred = false;
           let unfinishedOutcome: "interrupted" | "error" = "interrupted";
           try {
-            const handlerResult: unknown = await handler(
-              transferSession
-                ? {
-                  input: runtime.input,
-                  op,
-                  caller,
-                  signal: runtime.cancellation.signal,
-                  resuming,
-                  ...(runtime.snapshot.progress !== undefined
-                    ? { progress: runtime.snapshot.progress }
-                    : {}),
-                  transfer: transferSession.transfer,
+            const execution = otelContext.with(
+              observation.attemptContext,
+              async () => {
+                const handlerResult: unknown = await handler(
+                  transferSession
+                    ? {
+                      input: runtime.input,
+                      op,
+                      caller,
+                      signal: runtime.cancellation.signal,
+                      resuming,
+                      ...(runtime.snapshot.progress !== undefined
+                        ? { progress: runtime.snapshot.progress }
+                        : {}),
+                      transfer: transferSession.transfer,
+                    }
+                    : {
+                      input: runtime.input,
+                      op,
+                      caller,
+                      signal: runtime.cancellation.signal,
+                      resuming,
+                      ...(runtime.snapshot.progress !== undefined
+                        ? { progress: runtime.snapshot.progress }
+                        : {}),
+                    },
+                );
+                const handlerOutcome = isResultLike(handlerResult)
+                  ? handlerResult.take()
+                  : handlerResult;
+                if (isErr(handlerOutcome)) {
+                  unfinishedOutcome = "error";
+                  const error = annotateHandlerBoundaryError(
+                    handlerOutcome.error,
+                    {
+                      operation: String(operation),
+                      requestId: operationContext.requestId,
+                      service: this.name,
+                      contractId: this.contractId,
+                      contractDigest: this.contractDigest,
+                      traceId: operationContext.traceId,
+                    },
+                  );
+                  recordOperationServiceError(error, {
+                    operation: String(operation),
+                    phase: "handler_result",
+                  });
+                  await op.fail(error);
+                  return;
                 }
-                : {
-                  input: runtime.input,
-                  op,
-                  caller,
-                  signal: runtime.cancellation.signal,
-                  resuming,
-                  ...(runtime.snapshot.progress !== undefined
-                    ? { progress: runtime.snapshot.progress }
-                    : {}),
-                },
+                if (isOperationDeferred(handlerOutcome)) {
+                  deferred = true;
+                  return;
+                }
+                if (isTerminalRuntimeOperationSnapshot(handlerOutcome)) {
+                  return;
+                }
+                if (!runtime.terminal) await op.complete(handlerOutcome);
+              },
             );
-            const handlerOutcome = isResultLike(handlerResult)
-              ? handlerResult.take()
-              : handlerResult;
-            if (isErr(handlerOutcome)) {
-              unfinishedOutcome = "error";
-              const error = annotateHandlerBoundaryError(handlerOutcome.error, {
-                operation: String(operation),
-                requestId: operationContext.requestId,
-                service: this.name,
-                contractId: this.contractId,
-                contractDigest: this.contractDigest,
-                traceId: operationContext.traceId,
-              });
-              recordOperationServiceError(error, {
-                operation: String(operation),
-                phase: "handler_result",
-              });
-              await op.fail(error);
-              return;
-            }
-            if (isOperationDeferred(handlerOutcome)) {
-              deferred = true;
-              return;
-            }
-            if (isTerminalRuntimeOperationSnapshot(handlerOutcome)) {
-              return;
-            }
-            if (!runtime.terminal) await op.complete(handlerOutcome);
+            startSpan?.end();
+            await execution;
           } catch (cause) {
             if (runtime.cancellation.signal.aborted) return;
             unfinishedOutcome = "error";
@@ -2081,6 +2104,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               });
             }
           } finally {
+            startSpan?.end();
             if (!deferred) {
               observation.finish(
                 runtime.cancellation.signal.aborted

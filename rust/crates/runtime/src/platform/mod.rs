@@ -9,6 +9,8 @@ pub mod auth_callout;
 mod auth_operation;
 mod auth_post_commit;
 pub mod bootstrap;
+mod builtin_live_provider;
+mod live_provider;
 mod state;
 
 use auth::{
@@ -33,6 +35,9 @@ use auth::rpc::{AuthRpcProcessor, AuthRpcRuntime};
 use auth_callout::{AuthCallout, CalloutKeys};
 use auth_operation::AuthOperationRuntime;
 use auth_post_commit::{AuthEventPublisher, AuthPostCommitRuntime};
+pub(crate) use live_provider::{
+    ensure_live_provider_resources, ensure_live_provider_seed, LiveProviderRole,
+};
 
 /// Browser-flow records are retained for one day, so a configured pending-auth
 /// TTL beyond that would advertise flows after their record has expired.
@@ -230,6 +235,13 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     .map_err(|error| RuntimeError::Platform(error.to_string()))?;
     let (auth_event_session, auth_operation_session, event_identity_key_id, event_connection_id) =
         ensure_auth_event_session(&auth_service, &auth_participant, now).await?;
+    // Built-in live providers need normal authenticated identities before any
+    // live-capable router registers. The platform owner is the only writer, so
+    // both reserved roles are provisioned here under their fixed deployments.
+    for role in [LiveProviderRole::Platform, LiveProviderRole::Health] {
+        let provider = ensure_live_provider_seed(&auth_service, &context.config, role, now).await?;
+        ensure_live_provider_resources(&auth_service, &provider).await?;
+    }
     let event_context = authorization_contexts
         .issue(
             auth::context::AuthorizationContextIssueRequest {

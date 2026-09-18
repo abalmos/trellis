@@ -8,6 +8,7 @@ import type {
   VerifiedAuthorizationEventPublisher,
 } from "../protocol_wasm.ts";
 import { canonicalizeJsonValue } from "../utils.ts";
+import { trackCoverage } from "../../telemetry/lifecycle.ts";
 import type { AuthorizationContextCache } from "./client_context.ts";
 import {
   type AuthorizationRegistryIoCounters,
@@ -121,6 +122,7 @@ export class AuthorizationProviderCache {
   #onOwnResumed?: () => void;
   #ownRevokedDigest?: string;
   #ownUsable = true;
+  #stopCoverage?: () => void;
   readonly #connectedWaiters = new Set<() => void>();
 
   private constructor(
@@ -165,10 +167,37 @@ export class AuthorizationProviderCache {
     this.#generation += 1;
     this.#stopped = false;
     this.#started = true;
+    this.#stopCoverage = trackCoverage(() => {
+      const healthy = this.#started && !this.#stopped && this.#connected;
+      const now = this.#now();
+      const current = (entry: ProviderContextEntry) =>
+        healthy && entry.generation === this.#generation && entry.covered &&
+        !entry.disposed && entry.revokedAt === undefined &&
+        this.#contexts.get(entry.contextDigest) === entry &&
+        typeof entry.context.notBefore === "number" &&
+        entry.context.notBefore <= now &&
+        typeof entry.context.expiresAt === "number" &&
+        entry.context.expiresAt > now && entry.issuer.state !== "revoked";
+      const installedDigest = this.#cache.storedContextDigest();
+      const own = installedDigest === undefined
+        ? undefined
+        : this.#contexts.get(installedDigest);
+      const ownCovered = !!own && this.#ownUsable && current(own) &&
+        (this.#ownEntry === own || this.#cache.hasCandidate());
+      let peer = 0;
+      for (const entry of this.#contexts.values()) {
+        if (entry !== own && entry !== this.#ownEntry && current(entry)) {
+          peer += 1;
+        }
+      }
+      return { own: ownCovered, peer };
+    });
   }
 
   /** Stop verification without closing the caller-owned NATS connection. */
   stop(): void {
+    this.#stopCoverage?.();
+    this.#stopCoverage = undefined;
     this.#generation += 1;
     this.#stopped = true;
     for (const entry of this.#contexts.values()) this.#invalidate(entry);
@@ -255,7 +284,7 @@ export class AuthorizationProviderCache {
       this.#cache.promote(digest);
     }
     this.#ownUsable = true;
-    if (mode === "resume") this.#onOwnResumed?.();
+    this.#onOwnResumed?.();
     return true;
   }
 

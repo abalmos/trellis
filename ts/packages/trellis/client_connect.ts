@@ -43,6 +43,8 @@ import type { ClientOpts } from "./client.ts";
 import {
   installConnectionAvailability,
   observeNatsTrellisConnection,
+  startConnectionTelemetry,
+  transitionConnectionAvailability,
   type TrellisConnection,
 } from "./connection.ts";
 import {
@@ -1296,6 +1298,7 @@ export async function connectClientWithDeps<
   });
   let nc: NatsConnection | undefined;
   let authorizationProviderCache: AuthorizationProviderCache | undefined;
+  const connectionTelemetry = startConnectionTelemetry("client");
   try {
     const natsStartedAt = performance.now();
     nc = await transport.connect({
@@ -1332,6 +1335,7 @@ export async function connectClientWithDeps<
       },
     );
   } catch (error) {
+    connectionTelemetry.dispose();
     authorizationProviderCache?.stop();
     if (nc && !nc.isClosed()) await nc.close();
     runtimeAuth.stop();
@@ -1362,6 +1366,7 @@ export async function connectClientWithDeps<
     kind: "client",
     nc,
     log: false,
+    telemetry: connectionTelemetry,
     availability: participantAvailability(
       args.participant,
       bootstrap.apiBindings,
@@ -1403,6 +1408,7 @@ export async function connectClientWithDeps<
     authorizationContexts.current().context.grants.permissions,
   );
   authorizationProviderCache.onOwnInvalidated(() => {
+    transitionConnectionAvailability(connection, false, "coverage_lost");
     resourceState.current.active.value = false;
     installConnectionAvailability(
       connection,
@@ -1410,9 +1416,18 @@ export async function connectClientWithDeps<
     );
   });
   authorizationProviderCache.onOwnResumed(() => {
+    if (connection.status.phase === "connected") {
+      transitionConnectionAvailability(connection, true, "resumed");
+    }
     resourceState.current.active.value = true;
     installConnectionAvailability(connection, installedAvailability);
   });
+  if (
+    authorizationProviderCache.ownUsable() &&
+    connection.status.phase === "connected"
+  ) {
+    transitionConnectionAvailability(connection, true, "connected");
+  }
   const stopContextRefresh = startAuthorizationContextRefresh({
     trellisUrl: args.trellisUrl,
     sessionId: runtimeState.sessionId,

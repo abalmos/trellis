@@ -11,8 +11,10 @@ use async_nats::header::HeaderMap;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use futures_util::{Stream, StreamExt};
+use opentelemetry::trace::{FutureExt as _, TraceContextExt as _};
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
+use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use trellis_protocol::event_patterns_overlap;
 
 pub use super::core_bootstrap::CoreBootstrapBinding;
@@ -1417,6 +1419,10 @@ where
         .to_owned();
     let descriptor_identity = D::descriptor_identity()
         .map_err(|error| ServiceRuntimeError::Client(TrellisClientError::Subject(error)))?;
+    let route = crate::telemetry::instruments::route_token(
+        crate::telemetry::instruments::RouteFamily::Consumer,
+        &event_name,
+    );
     if options.mode == ServiceEventListenerMode::Ephemeral {
         let mut events = client
             .nats()
@@ -1433,6 +1439,11 @@ where
         let task = tokio::spawn(async move {
             let result = async {
                 while let Some(message) = events.next().await {
+                    let observation = crate::telemetry::lifecycle::Observation::start(
+                        crate::telemetry::instruments::DurationFamily::EventProcess,
+                        vec![crate::telemetry::KeyValue::new("trellis.route", route)],
+                        "cancelled",
+                    );
                     let publisher = match event_auth
                         .verify_event(
                             message.subject.as_ref(),
@@ -1444,6 +1455,10 @@ where
                     {
                         Ok(publisher) => publisher,
                         Err(error) => {
+                            observation.finish(match &error {
+                                super::EventVerificationFailure::Retryable(_) => "unavailable",
+                                super::EventVerificationFailure::Rejected(_) => "invalid",
+                            });
                             tracing::warn!(
                                 subject = %message.subject,
                                 error = %error.message(),
@@ -1459,13 +1474,39 @@ where
                         Some(publisher),
                     );
                     let event = serde_json::from_slice::<D::Event>(&message.payload)
-                        .map_err(TrellisClientError::from)?;
-                    if let Err(source) = handler(event, context.clone()).await {
+                        .map_err(TrellisClientError::from);
+                    let event = match event {
+                        Ok(event) => event,
+                        Err(error) => {
+                            observation.finish("invalid");
+                            return Err(error.into());
+                        }
+                    };
+                    let attempt_span = tracing::info_span!(parent: None, "trellis.event.attempt.start", "trellis.route" = route);
+                    if let Some(headers) = message.headers.as_ref() {
+                        let pairs: Vec<_> = headers.iter().flat_map(|(name, values)| {
+                            values.iter().map(move |value| (name.to_string(), value.as_str().to_owned()))
+                        }).collect();
+                        let carrier = crate::telemetry::propagation::extract_context(&pairs);
+                        let linked = carrier.span().span_context().clone();
+                        if linked.is_valid() {
+                            attempt_span.add_link(linked);
+                        }
+                    }
+                    let attempt_context = opentelemetry::Context::new()
+                        .with_remote_span_context(attempt_span.context().span().span_context().clone());
+                    drop(attempt_span);
+                    if let Err(source) = async { handler(event, context.clone()).await }
+                        .with_context(attempt_context)
+                        .await
+                    {
+                        observation.finish("error");
                         return Err(ServiceRuntimeError::EventHandler {
                             source: Box::new(source),
                             context: Box::new(context),
                         });
                     }
+                    observation.finish("ok");
                 }
                 Ok::<(), ServiceRuntimeError>(())
             }
@@ -1839,6 +1880,21 @@ async fn run_durable_event_pull_loop(
             let effective_headers = replay_envelope
                 .as_ref()
                 .map_or_else(|| message.headers(), |_| Some(&replay_headers));
+            let route = crate::telemetry::instruments::route_token(
+                crate::telemetry::instruments::RouteFamily::Consumer,
+                &registration.event_name,
+            );
+            let mut observations: Vec<_> = registration
+                .handlers
+                .values()
+                .map(|_| {
+                    crate::telemetry::lifecycle::Observation::start(
+                        crate::telemetry::instruments::DurationFamily::EventProcess,
+                        vec![crate::telemetry::KeyValue::new("trellis.route", route)],
+                        "cancelled",
+                    )
+                })
+                .collect();
             let publisher = match auth
                 .verify_event(
                     effective_subject,
@@ -1864,7 +1920,14 @@ async fn run_durable_event_pull_loop(
                                 .or_else(|| config.backoff.last())
                                 .copied()
                                 .unwrap_or(config.ack_wait);
-                            let _ = message.nak_after(delay).await;
+                            let result = message.nak_after(delay).await;
+                            for observation in observations.drain(..) {
+                                observation.finish(if result.is_ok() {
+                                    "unavailable"
+                                } else {
+                                    "error"
+                                });
+                            }
                         }
                         super::EventVerificationFailure::Rejected(_) => {
                             if let Some(envelope) = &replay_envelope {
@@ -1889,17 +1952,54 @@ async fn run_durable_event_pull_loop(
                                         .await
                                 {
                                     tracing::warn!(%error, consumer = %config.key.durable_name, "Replay delivery report unavailable");
+                                    for observation in observations.drain(..) {
+                                        observation.finish("error");
+                                    }
                                     continue;
                                 }
-                                message.term().await?;
+                                let result = message.term().await;
+                                for observation in observations.drain(..) {
+                                    observation.finish(if result.is_ok() {
+                                        "invalid"
+                                    } else {
+                                        "error"
+                                    });
+                                }
+                                result?;
                             } else {
-                                let _ = message.term().await;
+                                let result = message.term().await;
+                                for observation in observations.drain(..) {
+                                    observation.finish(if result.is_ok() {
+                                        "invalid"
+                                    } else {
+                                        "error"
+                                    });
+                                }
                             }
                         }
                     }
                     continue;
                 }
             };
+            let attempt_span = tracing::info_span!(parent: None, "trellis.event.attempt.start", "trellis.route" = route);
+            if let Some(headers) = effective_headers {
+                let pairs: Vec<_> = headers
+                    .iter()
+                    .flat_map(|(name, values)| {
+                        values
+                            .iter()
+                            .map(move |value| (name.to_string(), value.as_str().to_owned()))
+                    })
+                    .collect();
+                let carrier = crate::telemetry::propagation::extract_context(&pairs);
+                let linked = carrier.span().span_context().clone();
+                if linked.is_valid() {
+                    attempt_span.add_link(linked);
+                }
+            }
+            let attempt_context = opentelemetry::Context::new()
+                .with_remote_span_context(attempt_span.context().span().span_context().clone());
+            drop(attempt_span);
             let mut handled = true;
             let delivery = message.delivery_count();
             let effective_wait = config
@@ -1909,14 +2009,19 @@ async fn run_durable_event_pull_loop(
                 .copied()
                 .unwrap_or(config.ack_wait);
             let progress_interval = durable_event_progress_interval(effective_wait);
+            let mut completed: Vec<crate::telemetry::lifecycle::Observation> = Vec::new();
+            let mut observations = observations.into_iter();
             for handler in registration.handlers.values() {
+                let observation = observations.next().expect("one observation per handler");
                 let context = service_event_context_from_headers(
                     config.context.mode,
                     config.context.group.clone(),
                     effective_headers,
                     Some(publisher.clone()),
                 );
-                let future = handler(Bytes::copy_from_slice(effective_payload), context);
+                let future =
+                    async { handler(Bytes::copy_from_slice(effective_payload), context).await }
+                        .with_context(attempt_context.clone());
                 tokio::pin!(future);
                 let mut progress = tokio::time::interval(progress_interval);
                 progress.tick().await;
@@ -1954,11 +2059,22 @@ async fn run_durable_event_pull_loop(
                             crate::generated::Client::from_client(Arc::clone(&client))
                                 .call::<ConsumerReportDelivery>(&report)
                                 .await;
-                        if report_result.is_ok() {
-                            message.ack().await?;
+                        let reported = report_result.is_ok();
+                        if reported {
+                            if let Err(error) = message.ack().await {
+                                for earlier in completed.drain(..) {
+                                    earlier.finish("ok");
+                                }
+                                observation.finish("error");
+                                return Err(error.into());
+                            }
                         } else if let Err(error) = report_result {
                             tracing::warn!(%error, group = ?config.context.group, "Delivery report unavailable");
                         }
+                        for earlier in completed.drain(..) {
+                            earlier.finish("ok");
+                        }
+                        observation.finish(if reported { "exhausted" } else { "error" });
                         handled = false;
                         break;
                     }
@@ -1968,10 +2084,18 @@ async fn run_durable_event_pull_loop(
                         .or_else(|| config.backoff.last())
                         .copied()
                         .unwrap_or(Duration::ZERO);
-                    let _ = message.nak_after(delay).await;
+                    let result = message.nak_after(delay).await;
+                    for earlier in completed.drain(..) {
+                        earlier.finish("ok");
+                    }
+                    observation.finish(if result.is_ok() { "retry" } else { "error" });
                     handled = false;
                     break;
                 }
+                completed.push(observation);
+            }
+            for uncalled in observations {
+                uncalled.discard();
             }
             if !handled {
                 continue;
@@ -1997,10 +2121,17 @@ async fn run_durable_event_pull_loop(
                     .await
                 {
                     tracing::warn!(%error, consumer = %config.key.durable_name, "Replay delivery report unavailable");
+                    for observation in completed {
+                        observation.finish("error");
+                    }
                     continue;
                 }
             }
-            message.ack().await?;
+            let ack = message.ack().await;
+            for observation in completed {
+                observation.finish(if ack.is_ok() { "ok" } else { "error" });
+            }
+            ack?;
         }
     }
 }

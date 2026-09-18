@@ -1,6 +1,6 @@
 import { headers as natsHeaders, type MsgHdrs } from "@nats-io/nats-core";
 import { ulid } from "ulid";
-import { ROOT_CONTEXT, SpanKind, trace } from "@opentelemetry/api";
+import { context, ROOT_CONTEXT, SpanKind, trace } from "@opentelemetry/api";
 
 import {
   getActiveJobSnapshot,
@@ -595,7 +595,7 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
     }
     const producer = trace.getSpanContext(extractTraceContext(carrier));
     const span = getTrellisTracer().startSpan(
-      "trellis.job.attempt",
+      "trellis.job.attempt.start",
       {
         kind: SpanKind.CONSUMER,
         attributes: { "trellis.route": route },
@@ -603,16 +603,26 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
       },
       ROOT_CONTEXT,
     );
+    const attemptContext = trace.setSpanContext(
+      ROOT_CONTEXT,
+      span.spanContext(),
+    );
     let outcome = "error";
     try {
-      const result = await this.#processWithHeartbeat(
-        job,
-        cancellation,
-        heartbeat,
-        handler,
-        metadata,
-        validation,
+      const pending = context.with(
+        attemptContext,
+        () =>
+          this.#processWithHeartbeat(
+            job,
+            cancellation,
+            heartbeat,
+            handler,
+            metadata,
+            validation,
+          ),
       );
+      span.end();
+      const result = await pending;
       outcome = result.outcome === "stale_completion_ignored"
         ? "lease_lost"
         : result.outcome === "interrupted" && cancellation.isLeaseLost()
@@ -620,8 +630,18 @@ export class JobManager<TPayload = unknown, TResult = unknown> {
         : result.outcome;
       return result;
     } finally {
-      span.setAttribute("trellis.outcome", outcome);
       span.end();
+      context.with(attemptContext, () => {
+        getTrellisTracer().startSpan(
+          "trellis.job.attempt.finish",
+          {
+            kind: SpanKind.CONSUMER,
+            attributes: { "trellis.route": route, "trellis.outcome": outcome },
+            links: producer ? [{ context: producer }] : [],
+          },
+          attemptContext,
+        ).end();
+      });
       recordCatalogDuration(
         "trellis.job.attempt.duration",
         performance.now() - startedAt,
