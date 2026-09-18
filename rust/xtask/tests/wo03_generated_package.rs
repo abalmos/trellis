@@ -308,11 +308,18 @@ fn codecs_errors_and_generated_surfaces_compile() {
         .join("ts/packages/trellis/errors/index.ts")
         .canonicalize()
         .unwrap();
+    // A local `imports` map replaces the extended map rather than merging with
+    // it, so every workspace package the fixture imports must be listed.
+    let result_package = repo
+        .join("ts/packages/result/mod.ts")
+        .canonicalize()
+        .unwrap();
     fs::write(
         temp.path().join("deno.json"),
         serde_json::to_string_pretty(&serde_json::json!({
             "extends": repo.join("ts/deno.json"),
             "imports": {
+                "@qlever-llc/result": format!("file://{}", result_package.display()),
                 "@qlever-llc/trellis/generated": format!("file://{}", generated_support.display()),
                 "@fixture/caller": format!("file://{}", caller_runtime.display()),
                 "@fixture/connection": format!("file://{}", connection_runtime.display()),

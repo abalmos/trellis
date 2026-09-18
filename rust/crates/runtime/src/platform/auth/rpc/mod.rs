@@ -39,8 +39,8 @@ use super::{
     PrincipalKind, PrincipalState, ProviderIdentityUnlink, ProvisionDeviceInput,
     ProvisionServiceIdentityInput, ProvisionedIdentityKind, ProvisionedIdentityRecord,
     ProvisionedIdentityState, ProvisionedInstanceMutation, ProvisioningRepository,
-    RuntimeInstanceState, SessionRecord, SessionRepository, SessionState, SqliteAuthorizationStore,
-    UpdateUserInput, UserAccount,
+    ResourceBindingEvidence, RuntimeInstanceState, SessionRecord, SessionRepository, SessionState,
+    SqliteAuthorizationStore, UpdateUserInput, UserAccount,
 };
 use crate::shutdown::StopHandle;
 use crate::supervisor::RuntimeError;
@@ -50,6 +50,7 @@ const MAX_CONCURRENT_REQUESTS: usize = 64;
 pub(crate) struct AuthRpcRuntime {
     subscriber: futures_util::stream::SelectAll<async_nats::Subscriber>,
     processor: AuthRpcProcessor,
+    core_subject_prefix: String,
 }
 
 #[derive(Clone)]
@@ -88,34 +89,24 @@ impl AuthRpcRuntime {
     pub(crate) async fn start(
         processor: AuthRpcProcessor,
     ) -> Result<Self, AuthorizationStateError> {
-        let auth_subject = trellis_protocol::derive_bound_rpc_subject(
-            trellis_runtime_apis::apis::trellis_auth_v1::API_ID,
-            "dep_trellis_auth_runtime",
-            "Route",
-        )
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
-        .strip_suffix("Route")
-        .expect("derived subject contains action")
-        .to_owned()
-            + ">";
-        let core_subject = trellis_protocol::derive_bound_rpc_subject(
-            trellis_runtime_apis::apis::trellis_core_v1::API_ID,
-            "dep_trellis_auth_runtime",
-            "Route",
-        )
-        .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
-        .strip_suffix("Route")
-        .expect("derived subject contains action")
-        .to_owned()
-            + ">";
+        let auth_subject_prefix =
+            rpc_subject_prefix(trellis_runtime_apis::apis::trellis_auth_v1::API_ID)?;
+        let core_subject_prefix =
+            rpc_subject_prefix(trellis_runtime_apis::apis::trellis_core_v1::API_ID)?;
         let auth = processor
             .client
-            .queue_subscribe(auth_subject, "trellis-auth-rpc".to_owned())
+            .queue_subscribe(
+                format!("{auth_subject_prefix}>"),
+                "trellis-auth-rpc".to_owned(),
+            )
             .await
             .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
         let resources = processor
             .client
-            .queue_subscribe(core_subject, "trellis-resource-rpc".to_owned())
+            .queue_subscribe(
+                format!("{core_subject_prefix}>"),
+                "trellis-resource-rpc".to_owned(),
+            )
             .await
             .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
         let mut subscriber = futures_util::stream::SelectAll::new();
@@ -124,7 +115,16 @@ impl AuthRpcRuntime {
         Ok(Self {
             subscriber,
             processor,
+            core_subject_prefix,
         })
+    }
+
+    fn api_domain(&self, subject: &str) -> error::ApiDomain {
+        if subject.starts_with(&self.core_subject_prefix) {
+            error::ApiDomain::Core
+        } else {
+            error::ApiDomain::Auth
+        }
     }
 
     pub(crate) async fn run(mut self, stop: StopHandle) -> Result<(), RuntimeError> {
@@ -142,7 +142,8 @@ impl AuthRpcRuntime {
                         return Err(RuntimeError::Platform("Auth RPC subscription closed".to_owned()));
                     };
                     let processor = self.processor.clone();
-                    requests.spawn(async move { processor.process(message).await });
+                    let domain = self.api_domain(&message.subject);
+                    requests.spawn(async move { processor.process(message, domain).await });
                 }
             }
         }
@@ -152,7 +153,11 @@ impl AuthRpcRuntime {
 }
 
 impl AuthRpcProcessor {
-    async fn process(&self, message: async_nats::Message) -> Result<(), RuntimeError> {
+    async fn process(
+        &self,
+        message: async_nats::Message,
+        domain: error::ApiDomain,
+    ) -> Result<(), RuntimeError> {
         tracing::debug!(subject = %message.subject, reply = ?message.reply, "processing Auth RPC request");
         let Some(reply) = message.reply.clone() else {
             return Ok(());
@@ -182,7 +187,7 @@ impl AuthRpcProcessor {
                 tracing::warn!(subject, %error, "Auth RPC request failed");
                 let mut headers = HeaderMap::new();
                 headers.insert("status", "error");
-                let mut error = public_rpc_error(subject, &error);
+                let mut error = public_rpc_error(domain, &error);
                 encode_generated_scalars(&mut error);
                 (headers, serde_json::to_vec(&error))
             }
@@ -268,13 +273,24 @@ impl AuthRpcProcessor {
             portal_id: nullable_string(&input, "portalId")?,
             review_mode,
             requires_device_delegation: required_bool(&input, "requiresDeviceDelegation")?,
-            expires_at: input.get("expiresAt").and_then(Value::as_i64),
+            expires_at: required_nullable_i64(&input, "expiresAt")?,
             state: DeploymentProfileState::Active,
             created_at: now,
             updated_at: now,
             version: 1,
         };
-        self.service
+        let mut idempotency = rpc_idempotency(
+            "Auth.Deployments.Create",
+            &caller.principal_id,
+            required_string(&input, "idempotencyKey")?,
+            &input,
+            now,
+        )?;
+        let result =
+            json!({ "deployment": self.deployment_value_with_times(profile.clone(), None, None) });
+        idempotency.result = result.clone();
+        let outcome = self
+            .service
             .repository()
             .create_deployment_profile(DeploymentProfileCreation {
                 principal: super::PrincipalRecord {
@@ -288,17 +304,14 @@ impl AuthRpcProcessor {
                     revoked_at: None,
                 },
                 profile: profile.clone(),
-                idempotency: rpc_idempotency(
-                    "Auth.Deployments.Create",
-                    &caller.principal_id,
-                    required_string(&input, "idempotencyKey")?,
-                    &input,
-                    now,
-                )?,
+                idempotency,
                 actions: Vec::new(),
             })
             .await?;
-        Ok(json!({ "deployment": self.deployment_value(profile).await? }))
+        match outcome {
+            IdempotentOutcome::Applied(_) => Ok(result),
+            IdempotentOutcome::Replayed(replay) => Ok(replay),
+        }
     }
 
     async fn deployments_list(&self, payload: &[u8]) -> Result<Value, AuthorizationStateError> {
@@ -323,6 +336,7 @@ impl AuthRpcProcessor {
         payload: &[u8],
         caller: &ValidatedRequest,
     ) -> Result<Value, AuthorizationStateError> {
+        require_admin(caller)?;
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let deployment_id = required_string(&input, "deploymentId")?;
@@ -346,26 +360,22 @@ impl AuthRpcProcessor {
             }
             None => None,
         };
-        if binding.is_some()
-            && !(caller.context.owner_kind() == GrantOwnerKind::Deployment
-                && caller.context.owner_id() == deployment_id)
-        {
-            require_admin(caller)?;
-        }
-        let resources =
-            if let (Some(binding), Some(participant_id)) = (&binding, participant_id.clone()) {
-                self.service
-                    .repository()
-                    .get_resource_bindings(
-                        GrantOwnerKind::Deployment,
-                        deployment_id.to_owned(),
-                        participant_id,
-                        binding.installed_revision,
-                    )
-                    .await?
-            } else {
-                Vec::new()
-            };
+        let resources = match (&binding, participant_id) {
+            (Some(binding), Some(participant_id)) => self
+                .service
+                .repository()
+                .get_resource_bindings(
+                    GrantOwnerKind::Deployment,
+                    deployment_id.to_owned(),
+                    participant_id,
+                    binding.installed_revision,
+                )
+                .await?
+                .into_iter()
+                .map(resource_binding_value)
+                .collect::<Result<Vec<_>, _>>()?,
+            _ => Vec::new(),
+        };
         Ok(json!({
             "deployment": self.deployment_value(profile).await?,
             "binding": binding,
@@ -391,9 +401,6 @@ impl AuthRpcProcessor {
             .ok_or_else(|| {
                 AuthorizationStateError::InvalidRecord("deployment not found".to_owned())
             })?;
-        if profile.version != expected_version {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
         let now = now_millis()?;
         profile.state = state;
         profile.updated_at = now;
@@ -416,30 +423,41 @@ impl AuthRpcProcessor {
             })
             .into_iter()
             .collect();
-        self.service
-            .repository()
-            .put_deployment_profile(DeploymentProfileMutation {
-                profile: profile.clone(),
-                expected_version,
-                idempotency: rpc_idempotency(
-                    "Auth.Deployments.State",
-                    &caller.principal_id,
-                    idempotency_key,
-                    &input,
-                    now,
-                )?,
-                actions,
-            })
-            .await?;
-        Ok(json!({
-            "deployment": self.deployment_value(profile.clone()).await?,
+        let mut idempotency = rpc_idempotency(
+            "Auth.Deployments.State",
+            &caller.principal_id,
+            idempotency_key,
+            &input,
+            now,
+        )?;
+        let result = json!({
+            "deployment": self.deployment_value_with_times(
+                profile.clone(),
+                (state == DeploymentProfileState::Disabled).then_some(now),
+                (state == DeploymentProfileState::Removed).then_some(now),
+            ),
             "mutation": {
                 "resourceId": deployment_id,
                 "state": deployment_state_wire(state),
                 "version": profile.version,
                 "changed": true,
             }
-        }))
+        });
+        idempotency.result = result.clone();
+        let outcome = self
+            .service
+            .repository()
+            .put_deployment_profile(DeploymentProfileMutation {
+                profile: profile.clone(),
+                expected_version,
+                idempotency,
+                actions,
+            })
+            .await?;
+        match outcome {
+            IdempotentOutcome::Applied(_) => Ok(result),
+            IdempotentOutcome::Replayed(replay) => Ok(replay),
+        }
     }
 
     async fn deployment_value(
@@ -452,6 +470,15 @@ impl AuthRpcProcessor {
             .get_principal(&profile.deployment_id)
             .await?
             .ok_or(AuthorizationStateError::StorageConflict)?;
+        Ok(self.deployment_value_with_times(profile, principal.disabled_at, principal.revoked_at))
+    }
+
+    fn deployment_value_with_times(
+        &self,
+        profile: DeploymentProfileRecord,
+        disabled_at: Option<i64>,
+        revoked_at: Option<i64>,
+    ) -> Value {
         let mut value = json!({
             "deploymentId": profile.deployment_id,
             "kind": profile.kind,
@@ -464,15 +491,15 @@ impl AuthRpcProcessor {
             "portalId": profile.portal_id,
             "createdAt": profile.created_at.to_string(),
             "updatedAt": profile.updated_at.to_string(),
-            "disabledAt": principal.disabled_at.map(|value| value.to_string()),
-            "revokedAt": principal.revoked_at.map(|value| value.to_string()),
+            "disabledAt": disabled_at.map(|value| value.to_string()),
+            "revokedAt": revoked_at.map(|value| value.to_string()),
             "version": profile.version.to_string(),
             "disabled": profile.state != DeploymentProfileState::Active,
         });
         if profile.kind == PrincipalKind::Service {
             value["namespaces"] = json!([]);
         }
-        Ok(value)
+        value
     }
 
     async fn bind_deployment_participant(
@@ -516,21 +543,24 @@ impl AuthRpcProcessor {
                 .checked_add(1)
                 .ok_or_else(|| AuthorizationStateError::Storage("version overflow".to_owned()))?;
             profile.updated_at = now;
+            let mut idempotency = rpc_idempotency(
+                "Auth.Deployments.BindParticipant",
+                &caller.principal_id,
+                input
+                    .get("idempotencyKey")
+                    .and_then(Value::as_str)
+                    .unwrap_or(deployment_id),
+                input,
+                now,
+            )?;
+            idempotency.result = serde_json::to_value(&profile)
+                .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
             self.service
                 .repository()
                 .put_deployment_profile(DeploymentProfileMutation {
                     profile: profile.clone(),
                     expected_version,
-                    idempotency: rpc_idempotency(
-                        "Auth.Deployments.BindParticipant",
-                        &caller.principal_id,
-                        input
-                            .get("idempotencyKey")
-                            .and_then(Value::as_str)
-                            .unwrap_or(deployment_id),
-                        input,
-                        now,
-                    )?,
+                    idempotency,
                     actions: Vec::new(),
                 })
                 .await?;
@@ -804,7 +834,7 @@ impl AuthRpcProcessor {
                 RuntimeInstanceState::Revoked => crate::platform::auth::DeviceState::Revoked,
             };
             device.updated_at = now;
-            device.version += 1;
+            device.version = next_version(device.version)?;
             Some(device)
         } else {
             if instance.version != expected_version {
@@ -814,7 +844,7 @@ impl AuthRpcProcessor {
         };
         instance.state = target;
         instance.updated_at = now;
-        instance.version += 1;
+        instance.version = next_version(instance.version)?;
         if let Some(identity) = identity.as_mut() {
             identity.state = match target {
                 RuntimeInstanceState::Active => ProvisionedIdentityState::Active,
@@ -1033,7 +1063,7 @@ impl AuthRpcProcessor {
         let companion_session_id = delegation.user_login_session_id.clone();
         let now = now_millis()?;
         device.updated_at = now;
-        device.version += 1;
+        device.version = next_version(device.version)?;
         delegation.state = DeviceDelegationState::Revoked;
         let identity = self
             .service
@@ -1363,7 +1393,7 @@ impl AuthRpcProcessor {
         let key = required_string(&input, "groupKey")?;
         let now = now_millis()?;
         let current = self.service.repository().get_capability_group(key).await?;
-        let expected_version = input.get("expectedVersion").and_then(Value::as_u64);
+        let expected_version = required_nullable_u64(&input, "expectedVersion")?;
         let mut capabilities = optional_string_array(&input, "capabilities")?.unwrap_or_default();
         capabilities.sort();
         capabilities.dedup();
@@ -1396,7 +1426,7 @@ impl AuthRpcProcessor {
             included_groups,
             created_at: current.as_ref().map_or(now, |group| group.created_at),
             updated_at: now,
-            version: expected_version.map_or(1, |version| version + 1),
+            version: expected_version.map_or(Ok(1), next_version)?,
         };
         let outcome = self
             .service
@@ -1493,7 +1523,7 @@ impl AuthRpcProcessor {
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let portal_id = required_string(&input, "portalId")?;
         let participant_id = required_string(&input, "participantId")?;
-        let expected_version = input.get("expectedVersion").and_then(Value::as_u64);
+        let expected_version = required_nullable_u64(&input, "expectedVersion")?;
         let current = self
             .service
             .repository()
@@ -1530,7 +1560,7 @@ impl AuthRpcProcessor {
             role_mappings,
             created_at: current.as_ref().map_or(now, |policy| policy.created_at),
             updated_at: now,
-            version: expected_version.map_or(1, |version| version + 1),
+            version: expected_version.map_or(Ok(1), next_version)?,
         };
         let outcome = self
             .service
@@ -1763,10 +1793,7 @@ impl AuthRpcProcessor {
             .repository()
             .get_login_portal(portal_id)
             .await?;
-        let expected_version = input.get("expectedVersion").and_then(Value::as_u64);
-        if current.as_ref().map(|value| value.0.version) != expected_version {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
+        let expected_version = required_nullable_u64(&input, "expectedVersion")?;
         let now = now_millis()?;
         let settings_value = input.get("loginSettings").ok_or_else(|| {
             AuthorizationStateError::InvalidRecord("loginSettings is required".to_owned())
@@ -1777,7 +1804,7 @@ impl AuthRpcProcessor {
                     .as_ref()
                     .map_or_else(Vec::new, |value| value.0.provider_ids.clone())
             });
-        let version = expected_version.map_or(1, |version| version + 1);
+        let version = expected_version.map_or(Ok(1), next_version)?;
         let portal = LoginPortalRecord {
             portal_id: portal_id.to_owned(),
             display_name: required_string(&input, "displayName")?.to_owned(),
@@ -1793,30 +1820,31 @@ impl AuthRpcProcessor {
         };
         let settings =
             login_settings_from_value(portal_id, settings_value, provider_ids, now, version)?;
-        self.service
+        let result = json!({ "portal": portal_value(portal.clone(), settings.clone()) });
+        let mut idempotency = rpc_idempotency(
+            "Auth.Portals.Put",
+            &caller.principal_id,
+            idempotency_key,
+            &input,
+            now,
+        )?;
+        idempotency.result = result.clone();
+        let outcome = self
+            .service
             .repository()
             .put_login_portal(LoginPortalMutation {
                 portal,
                 settings,
                 expected_version,
-                idempotency: rpc_idempotency(
-                    "Auth.Portals.Put",
-                    &caller.principal_id,
-                    idempotency_key,
-                    &input,
-                    now,
-                )?,
+                idempotency,
                 actions: Vec::new(),
             })
             .await?;
         self.portal_reconciliation.notify_portal(portal_id).await;
-        let (portal, settings) = self
-            .service
-            .repository()
-            .get_login_portal(portal_id)
-            .await?
-            .ok_or(AuthorizationStateError::StorageConflict)?;
-        Ok(json!({ "portal": portal_value(portal, settings) }))
+        Ok(match outcome {
+            IdempotentOutcome::Applied(_) => result,
+            IdempotentOutcome::Replayed(value) => value,
+        })
     }
 
     async fn portals_remove(
@@ -1827,7 +1855,7 @@ impl AuthRpcProcessor {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let portal_id = required_string(&input, "portalId")?;
-        let (mut portal, settings) = self
+        let (mut portal, mut settings) = self
             .service
             .repository()
             .get_login_portal(portal_id)
@@ -1839,31 +1867,37 @@ impl AuthRpcProcessor {
             ));
         }
         let expected_version = required_u64(&input, "expectedVersion")?;
-        if portal.version != expected_version {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
         let now = now_millis()?;
         portal.removed = true;
         portal.updated_at = now;
-        portal.version += 1;
-        self.service
+        portal.version = next_version(portal.version)?;
+        settings.updated_at = now;
+        settings.version = portal.version;
+        let result = json!({ "removed": true });
+        let mut idempotency = rpc_idempotency(
+            "Auth.Portals.Remove",
+            &caller.principal_id,
+            required_string(&input, "idempotencyKey")?,
+            &input,
+            now,
+        )?;
+        idempotency.result = result.clone();
+        let outcome = self
+            .service
             .repository()
             .put_login_portal(LoginPortalMutation {
                 portal,
                 expected_version: Some(expected_version),
                 settings,
-                idempotency: rpc_idempotency(
-                    "Auth.Portals.Remove",
-                    &caller.principal_id,
-                    required_string(&input, "idempotencyKey")?,
-                    &input,
-                    now,
-                )?,
+                idempotency,
                 actions: Vec::new(),
             })
             .await?;
         self.portal_reconciliation.notify_portal(portal_id).await;
-        Ok(json!({ "removed": true }))
+        Ok(match outcome {
+            IdempotentOutcome::Applied(_) => result,
+            IdempotentOutcome::Replayed(value) => value,
+        })
     }
 
     async fn capabilities_list(&self, payload: &[u8]) -> Result<Value, AuthorizationStateError> {
@@ -1924,27 +1958,15 @@ impl AuthRpcProcessor {
             .get_login_portal(portal_id)
             .await?
             .ok_or_else(|| AuthorizationStateError::InvalidRecord("portal not found".to_owned()))?;
+        if portal.removed {
+            return Err(AuthorizationStateError::InvalidRecord(
+                "portal not found".to_owned(),
+            ));
+        }
         Ok(json!({
-            "portal": {
-                "portalId": portal.portal_id,
-                "displayName": portal.display_name,
-                "entryUrl": portal.entry_url,
-                "builtIn": portal.builtin,
-                "disabled": portal.disabled,
-                "createdAt": millis_rfc3339(portal.created_at)?,
-                "updatedAt": millis_rfc3339(portal.updated_at)?,
-            },
-            "settings": {
-                "portalId": portal_id,
-                "localRegistrationEnabled": portal.local_registration_enabled,
-                "federatedRegistrationEnabled": settings.federated_registration_enabled,
-                "allowedFederatedProviders": portal.provider_ids,
-                "selfRegisteredAccountActive": true,
-                "updatedAt": millis_rfc3339(settings.updated_at)?,
-            },
-            "defaultCapabilities": [],
-            "defaultCapabilityGroups": [],
-            "federatedProviders": [],
+            "portalId": portal_id,
+            "settings": login_settings_value(&portal, &settings),
+            "version": settings.version,
         }))
     }
 
@@ -1958,56 +1980,54 @@ impl AuthRpcProcessor {
         let portal_id = required_string(&input, "portalId")?;
         let expected_version = required_u64(&input, "expectedVersion")?;
         let idempotency_key = required_string(&input, "idempotencyKey")?;
-        let (mut portal, current_settings) = self
+        let (mut portal, _) = self
             .service
             .repository()
             .get_login_portal(portal_id)
             .await?
             .ok_or_else(|| AuthorizationStateError::InvalidRecord("portal not found".to_owned()))?;
-        if portal.version != expected_version || current_settings.version != expected_version {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
         let settings_value = input.get("settings").ok_or_else(|| {
             AuthorizationStateError::InvalidRecord("settings is required".to_owned())
         })?;
         let provider_ids = optional_string_array(settings_value, "providers")?
             .unwrap_or_else(|| portal.provider_ids.clone());
         let now = now_millis()?;
-        let version = expected_version + 1;
+        let version = next_version(expected_version)?;
         portal.provider_ids = provider_ids.clone();
         portal.local_registration_enabled = required_bool(settings_value, "localRegistration")?;
         portal.updated_at = now;
         portal.version = version;
         let settings =
             login_settings_from_value(portal_id, settings_value, provider_ids, now, version)?;
-        self.service
+        let result = json!({
+            "portalId": portal_id,
+            "settings": login_settings_value(&portal, &settings),
+            "version": settings.version,
+        });
+        let mut idempotency = rpc_idempotency(
+            "Auth.Portals.LoginSettings.Update",
+            &caller.principal_id,
+            idempotency_key,
+            &input,
+            now,
+        )?;
+        idempotency.result = result.clone();
+        let outcome = self
+            .service
             .repository()
             .put_login_portal(LoginPortalMutation {
                 portal,
                 settings,
                 expected_version: Some(expected_version),
-                idempotency: rpc_idempotency(
-                    "Auth.Portals.LoginSettings.Update",
-                    &caller.principal_id,
-                    idempotency_key,
-                    &input,
-                    now,
-                )?,
+                idempotency,
                 actions: Vec::new(),
             })
             .await?;
         self.portal_reconciliation.notify_portal(portal_id).await;
-        let (portal, settings) = self
-            .service
-            .repository()
-            .get_login_portal(portal_id)
-            .await?
-            .ok_or(AuthorizationStateError::StorageConflict)?;
-        Ok(json!({
-            "portalId": portal_id,
-            "settings": login_settings_value(&portal, &settings),
-            "version": settings.version,
-        }))
+        Ok(match outcome {
+            IdempotentOutcome::Applied(_) => result,
+            IdempotentOutcome::Replayed(value) => value,
+        })
     }
 
     async fn portal_route_put(
@@ -2017,7 +2037,7 @@ impl AuthRpcProcessor {
     ) -> Result<Value, AuthorizationStateError> {
         let input: Value = serde_json::from_slice(payload)
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
-        let expected_version = input.get("expectedVersion").and_then(Value::as_u64);
+        let expected_version = required_nullable_u64(&input, "expectedVersion")?;
         let route_id = input
             .get("routeId")
             .and_then(Value::as_str)
@@ -2027,9 +2047,6 @@ impl AuthRpcProcessor {
             .iter()
             .find(|route| route.route_id == route_id)
             .cloned();
-        if current.as_ref().map(|route| route.version) != expected_version {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
         let now = now_millis()?;
         let route = PortalRouteRecord {
             route_id: route_id.clone(),
@@ -2040,33 +2057,31 @@ impl AuthRpcProcessor {
             priority: required_i64(&input, "priority")?,
             created_at: current.as_ref().map_or(now, |route| route.created_at),
             updated_at: now,
-            version: expected_version.map_or(1, |version| version + 1),
+            version: expected_version.map_or(Ok(1), next_version)?,
         };
-        if routes.iter().any(|existing| {
-            existing.route_id != route.route_id
-                && existing.participant_id == route.participant_id
-                && existing.origin == route.origin
-                && existing.deployment_id == route.deployment_id
-                && existing.priority == route.priority
-        }) {
-            return Err(AuthorizationStateError::StorageConflict);
-        }
-        self.service
+        let result = json!({ "route": route });
+        let mut idempotency = rpc_idempotency(
+            "Auth.Portals.Routes.Put",
+            &caller.principal_id,
+            required_string(&input, "idempotencyKey")?,
+            &input,
+            now,
+        )?;
+        idempotency.result = result.clone();
+        let outcome = self
+            .service
             .repository()
             .put_portal_route(PortalRouteMutation {
-                route: route.clone(),
+                route,
                 expected_version,
-                idempotency: rpc_idempotency(
-                    "Auth.Portals.Routes.Put",
-                    &caller.principal_id,
-                    required_string(&input, "idempotencyKey")?,
-                    &input,
-                    now,
-                )?,
+                idempotency,
                 actions: Vec::new(),
             })
             .await?;
-        Ok(json!({ "route": route }))
+        Ok(match outcome {
+            IdempotentOutcome::Applied(_) => result,
+            IdempotentOutcome::Replayed(value) => value,
+        })
     }
 
     async fn portal_route_remove(
@@ -2078,22 +2093,29 @@ impl AuthRpcProcessor {
             .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?;
         let route_id = required_string(&input, "routeId")?;
         let now = now_millis()?;
-        self.service
+        let result = json!({ "routeId": route_id, "removed": true });
+        let mut idempotency = rpc_idempotency(
+            "Auth.Portals.Routes.Remove",
+            &caller.principal_id,
+            required_string(&input, "idempotencyKey")?,
+            &input,
+            now,
+        )?;
+        idempotency.result = result.clone();
+        let outcome = self
+            .service
             .repository()
             .remove_portal_route(PortalRouteRemoval {
                 route_id: route_id.to_owned(),
                 expected_version: required_u64(&input, "expectedVersion")?,
-                idempotency: rpc_idempotency(
-                    "Auth.Portals.Routes.Remove",
-                    &caller.principal_id,
-                    required_string(&input, "idempotencyKey")?,
-                    &input,
-                    now,
-                )?,
+                idempotency,
                 actions: Vec::new(),
             })
             .await?;
-        Ok(json!({ "routeId": route_id, "removed": true }))
+        Ok(match outcome {
+            IdempotentOutcome::Applied(_) => result,
+            IdempotentOutcome::Replayed(value) => value,
+        })
     }
 
     async fn sessions_list(
@@ -2165,9 +2187,15 @@ impl AuthRpcProcessor {
             .context
             .login_session_id()
             .ok_or(AuthorizationStateError::WrongPrincipalKind)?;
+        let session = self
+            .service
+            .repository()
+            .get_session(login_session_id)
+            .await?
+            .ok_or(AuthorizationStateError::SessionMissing)?;
         let input = json!({
             "sessionId": login_session_id,
-            "expectedVersion": null,
+            "expectedVersion": session.version.to_string(),
             "idempotencyKey": "logout",
             "reason": null,
         });
@@ -2194,13 +2222,7 @@ impl AuthRpcProcessor {
             .get_session(session_id)
             .await?
             .ok_or(AuthorizationStateError::SessionMissing)?;
-        let expected_version = input
-            .get("expectedVersion")
-            .and_then(Value::as_i64)
-            .map(u64::try_from)
-            .transpose()
-            .map_err(|_| AuthorizationStateError::StorageConflict)?
-            .unwrap_or(session.version);
+        let expected_version = required_u64(&input, "expectedVersion")?;
         let now = now_millis()?;
         let connections = self
             .ephemeral
@@ -2808,6 +2830,28 @@ fn encode_generated_scalars(value: &mut Value) {
     }
 }
 
+fn rpc_subject_prefix(api_id: &str) -> Result<String, AuthorizationStateError> {
+    Ok(
+        trellis_protocol::derive_bound_rpc_subject(api_id, "dep_trellis_auth_runtime", "Route")
+            .map_err(|error| AuthorizationStateError::InvalidRecord(error.to_string()))?
+            .strip_suffix("Route")
+            .expect("derived subject contains action")
+            .to_owned(),
+    )
+}
+
+fn resource_binding_value(
+    evidence: ResourceBindingEvidence,
+) -> Result<Value, AuthorizationStateError> {
+    let mut value = serde_json::to_value(&evidence)
+        .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?;
+    let provider = value.get_mut("providerIdentity").ok_or_else(|| {
+        AuthorizationStateError::Storage("resource binding lacks providerIdentity".to_owned())
+    })?;
+    encode_generated_bytes(provider);
+    Ok(value)
+}
+
 fn encode_generated_bytes(value: &mut Value) {
     use base64::Engine as _;
 
@@ -2993,13 +3037,6 @@ fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str, Authoriza
         .ok_or_else(|| AuthorizationStateError::InvalidRecord(format!("{key} is required")))
 }
 
-fn millis_rfc3339(value: i64) -> Result<String, AuthorizationStateError> {
-    time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(value) * 1_000_000)
-        .map_err(|error| AuthorizationStateError::Storage(error.to_string()))?
-        .format(&time::format_description::well_known::Rfc3339)
-        .map_err(|error| AuthorizationStateError::Storage(error.to_string()))
-}
-
 fn nullable_string(value: &Value, key: &str) -> Result<Option<String>, AuthorizationStateError> {
     match value.get(key) {
         None | Some(Value::Null) => Ok(None),
@@ -3024,6 +3061,44 @@ fn required_i64(value: &Value, key: &str) -> Result<i64, AuthorizationStateError
         .and_then(Value::as_str)
         .and_then(|value| value.parse().ok())
         .ok_or_else(|| AuthorizationStateError::InvalidRecord(format!("{key} is required")))
+}
+
+fn required_nullable_u64(value: &Value, key: &str) -> Result<Option<u64>, AuthorizationStateError> {
+    match value.get(key) {
+        None => Err(AuthorizationStateError::InvalidRecord(format!(
+            "{key} is required"
+        ))),
+        Some(Value::Null) => Ok(None),
+        Some(Value::String(_)) => required_u64(value, key).map(Some),
+        Some(_) => Err(AuthorizationStateError::InvalidRecord(format!(
+            "{key} must be a decimal string or null"
+        ))),
+    }
+}
+
+fn required_nullable_i64(value: &Value, key: &str) -> Result<Option<i64>, AuthorizationStateError> {
+    match value.get(key) {
+        None => Err(AuthorizationStateError::InvalidRecord(format!(
+            "{key} is required"
+        ))),
+        Some(Value::Null) => Ok(None),
+        Some(Value::String(_)) => required_i64(value, key).map(Some),
+        Some(_) => Err(AuthorizationStateError::InvalidRecord(format!(
+            "{key} must be a decimal string or null"
+        ))),
+    }
+}
+
+fn next_version(version: u64) -> Result<u64, AuthorizationStateError> {
+    let next = version
+        .checked_add(1)
+        .ok_or_else(|| AuthorizationStateError::Storage("version overflow".to_owned()))?;
+    if next == 0 {
+        return Err(AuthorizationStateError::Storage(
+            "version overflow".to_owned(),
+        ));
+    }
+    Ok(next)
 }
 
 fn required_bool(value: &Value, key: &str) -> Result<bool, AuthorizationStateError> {
@@ -3290,22 +3365,64 @@ mod tests {
     }
 
     #[test]
+    fn api_domain_classifies_bound_auth_and_core_subjects() {
+        let auth_prefix =
+            super::rpc_subject_prefix(trellis_runtime_apis::apis::trellis_auth_v1::API_ID)
+                .expect("auth prefix");
+        let core_prefix =
+            super::rpc_subject_prefix(trellis_runtime_apis::apis::trellis_core_v1::API_ID)
+                .expect("core prefix");
+        assert_ne!(auth_prefix, core_prefix);
+        assert!(auth_prefix.starts_with("rpc.v1."));
+        assert!(core_prefix.starts_with("rpc.v1."));
+
+        // Mirror the production rule exactly: only the Core prefix selects
+        // Core, everything else is Auth.
+        let classify = |subject: &str| {
+            if subject.starts_with(&core_prefix) {
+                error::ApiDomain::Core
+            } else {
+                error::ApiDomain::Auth
+            }
+        };
+        for action in [
+            "Users.Create",
+            "Users.PasswordReset.Create",
+            "Grants.Set",
+            "Sessions.Revoke",
+            "Portals.Put",
+            "CapabilityGroups.Put",
+        ] {
+            let subject = format!("{auth_prefix}{action}");
+            assert_eq!(classify(&subject), error::ApiDomain::Auth, "{subject}");
+        }
+        for action in ["Resources.Inspect", "Resources.Query", "Delete"] {
+            let subject = format!("{core_prefix}{action}");
+            assert_eq!(classify(&subject), error::ApiDomain::Core, "{subject}");
+        }
+        assert_eq!(
+            classify("rpc.v1.unknown.other.Action"),
+            error::ApiDomain::Auth
+        );
+    }
+
+    #[test]
     fn public_rpc_errors_never_serialize_internal_causes() {
         let secret = "postgres://admin:secret@internal/auth";
         let payload = public_rpc_error(
-            "rpc.v1.auth.Users.List",
+            error::ApiDomain::Auth,
             &AuthorizationStateError::Storage(secret.to_owned()),
         );
         let encoded = serde_json::to_string(&payload).unwrap();
         assert!(!encoded.contains(secret));
         assert_eq!(payload["type"], "trellis.auth@v1::UnexpectedError");
-        assert_eq!(payload["context"]["code"], "internal_error");
+        assert_eq!(payload["code"], "internal_error");
         let invalid = public_rpc_error(
-            "rpc.v1.auth.Grants.Set",
+            error::ApiDomain::Auth,
             &AuthorizationStateError::InvalidRecord(secret.to_owned()),
         );
-        assert_eq!(invalid["type"], "trellis.auth@v1::AuthError");
-        assert_eq!(invalid["reason"], "invalid_request");
+        assert_eq!(invalid["type"], "trellis.auth@v1::ValidationError");
+        assert_eq!(invalid["code"], "invalid_request");
         assert!(!serde_json::to_string(&invalid).unwrap().contains(secret));
     }
 
@@ -3321,5 +3438,89 @@ mod tests {
 
         assert_eq!(value["target"], "eyJraW5kIjoiYXBpU3VyZmFjZSJ9");
         assert_eq!(value["reviewMode"], "InJlcXVpcmVkIg==");
+    }
+
+    #[test]
+    fn resource_binding_provider_identity_is_encoded_once_as_bytes() {
+        let evidence = ResourceBindingEvidence {
+            resource_kind: "kv".to_owned(),
+            local_name: "records".to_owned(),
+            binding_id: "binding-records".to_owned(),
+            owner_participant_id: "example.Provider".to_owned(),
+            provider_identity: super::super::ResourceProviderIdentity::Kv {
+                bucket: "bucket-records".to_owned(),
+            },
+            actual: None,
+            state: super::super::ResourceBindingState::Available,
+            materialized_at: 1,
+            error: None,
+        };
+
+        let mut encoded = super::resource_binding_value(evidence).unwrap();
+        assert_eq!(encoded["state"], "available");
+        assert_eq!(encoded["localName"], "records");
+        let bytes = encoded["providerIdentity"]
+            .as_str()
+            .expect("bytes string")
+            .to_owned();
+        let decoded: Value = serde_json::from_slice(
+            &base64::engine::general_purpose::STANDARD
+                .decode(&bytes)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(decoded["kind"], "kv");
+        assert_eq!(decoded["bucket"], "bucket-records");
+
+        super::encode_generated_scalars(&mut encoded);
+        assert_eq!(encoded["providerIdentity"], bytes);
+        assert_eq!(encoded["materializedAt"], "1");
+    }
+
+    #[test]
+    fn nullable_version_helpers_distinguish_missing_null_and_malformed() {
+        assert_eq!(
+            super::required_nullable_u64(&serde_json::json!({}), "expectedVersion"),
+            Err(AuthorizationStateError::InvalidRecord(
+                "expectedVersion is required".to_owned()
+            ))
+        );
+        assert_eq!(
+            super::required_nullable_u64(
+                &serde_json::json!({ "expectedVersion": null }),
+                "expectedVersion"
+            ),
+            Ok(None)
+        );
+        assert_eq!(
+            super::required_nullable_u64(
+                &serde_json::json!({ "expectedVersion": "7" }),
+                "expectedVersion"
+            ),
+            Ok(Some(7))
+        );
+        for malformed in [
+            serde_json::json!(7),
+            serde_json::json!("seven"),
+            serde_json::json!("7.5"),
+        ] {
+            assert!(matches!(
+                super::required_nullable_u64(
+                    &serde_json::json!({ "expectedVersion": malformed }),
+                    "expectedVersion"
+                ),
+                Err(AuthorizationStateError::InvalidRecord(_))
+            ));
+        }
+        assert_eq!(
+            super::required_nullable_i64(&serde_json::json!({ "expiresAt": "-1" }), "expiresAt"),
+            Ok(Some(-1))
+        );
+        assert!(matches!(
+            super::required_nullable_i64(&serde_json::json!({ "expiresAt": 1 }), "expiresAt"),
+            Err(AuthorizationStateError::InvalidRecord(_))
+        ));
+        assert!(super::next_version(u64::MAX).is_err());
+        assert_eq!(super::next_version(u64::MAX - 1).unwrap(), u64::MAX);
     }
 }

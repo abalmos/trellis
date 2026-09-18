@@ -1255,6 +1255,24 @@ impl PortalRepository for SqliteAuthorizationStore {
                     ));
                 }
             }
+            let duplicate: bool = transaction
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM auth_portal_routes
+                     WHERE route_id <> ?1 AND participant_id IS ?2 AND origin IS ?3
+                       AND deployment_id IS ?4 AND priority = ?5)",
+                    params![
+                        command.route.route_id,
+                        command.route.participant_id,
+                        command.route.origin,
+                        command.route.deployment_id,
+                        command.route.priority
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if duplicate {
+                return Err(AuthorizationStateError::StorageConflict);
+            }
             let current = load_portal_route(&transaction, &command.route.route_id)?;
             match (current, command.expected_version) {
                 (None, None) if command.route.version == 1 => {

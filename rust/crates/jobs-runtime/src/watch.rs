@@ -127,20 +127,23 @@ fn watch_frame_for_event(input: &JobsWatchInput, event: &JobEvent) -> Option<Job
         })));
     }
 
-    input.query.as_ref().and_then(|query| {
-        match query_invalidation_reason(query, event) {
-            QueryInvalidation::No => None,
-            QueryInvalidation::Matched => Some("matchedJobChanged"),
-            QueryInvalidation::Unknown => Some("unknownMatch"),
-        }
-        .map(|reason| {
-            watch_frame(serde_json::json!({
-                "kind": "queryInvalidated",
-                "reason": reason,
-                "timestamp": event.timestamp,
-            }))
-        })
-    })
+    if input.job_id.is_some() {
+        return None;
+    }
+    let reason = match input
+        .query
+        .as_ref()
+        .map(|query| query_invalidation_reason(query, event))
+    {
+        Some(QueryInvalidation::No) => return None,
+        Some(QueryInvalidation::Unknown) => "unknownMatch",
+        Some(QueryInvalidation::Matched) | None => "matchedJobChanged",
+    };
+    Some(watch_frame(serde_json::json!({
+        "kind": "queryInvalidated",
+        "reason": reason,
+        "timestamp": event.timestamp,
+    })))
 }
 
 fn watch_frame(value: serde_json::Value) -> JobsWatchEvent {
@@ -259,6 +262,18 @@ mod tests {
             context,
             timestamp: "2026-03-28T12:00:00.000Z",
         }
+    }
+
+    #[test]
+    fn unfiltered_watch_invalidates_for_created_job() {
+        let event = created(meta(&context()), json!({ "documentId": "doc-1" }), 3, None);
+        let input = JobsWatchInput::decode(json!({ "includeInitial": false })).unwrap();
+
+        let frame = watch_frame_for_event(&input, &event).expect("unfiltered watch must refresh");
+        let JobsWatchEvent(Bytes(payload)) = frame;
+        let payload: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(payload["kind"], "queryInvalidated");
+        assert_eq!(payload["reason"], "matchedJobChanged");
     }
 
     #[test]

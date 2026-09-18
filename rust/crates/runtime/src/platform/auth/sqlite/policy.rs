@@ -804,6 +804,18 @@ mod tests {
                 .unwrap(),
             IdempotentOutcome::Applied(Some(_))
         ));
+        // Replaying the same removal after the row is gone returns the
+        // originally committed record instead of an empty result.
+        let replayed = store
+            .remove_portal_grant_override("portal", "app", 1, idempotency("policy-remove"))
+            .await
+            .unwrap();
+        let IdempotentOutcome::Replayed(value) = replayed else {
+            panic!("expected the committed removal result to replay");
+        };
+        let replayed: PortalGrantOverrideRecord = serde_json::from_value(value).unwrap();
+        assert_eq!(replayed.participant_id, "app");
+        assert_eq!(replayed.version, 1);
         assert!(matches!(
             store
                 .delete_capability_group("operators", 2, idempotency("operators-delete"))

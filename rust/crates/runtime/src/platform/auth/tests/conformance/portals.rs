@@ -113,6 +113,19 @@ pub(super) async fn exercise_portals(
         })
         .await?;
     assert_eq!(store.list_portal_routes().await?, vec![route.clone()]);
+    let mut duplicate = route.clone();
+    duplicate.route_id = "route_2".to_owned();
+    assert_eq!(
+        store
+            .put_portal_route(PortalRouteMutation {
+                route: duplicate,
+                expected_version: None,
+                idempotency: proof(31, "portal-route.put"),
+                actions: Vec::new(),
+            })
+            .await,
+        Err(AuthorizationStateError::StorageConflict)
+    );
     let route_removal = PortalRouteRemoval {
         route_id: route.route_id.clone(),
         expected_version: 1,

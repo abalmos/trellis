@@ -131,8 +131,11 @@ fn watch_frame(
     ) {
         return Ok(None);
     }
-    let headers = serde_json::from_str::<BTreeMap<String, String>>(&event.headers_json)
-        .map_err(|error| ServerError::Nats(format!("Events.Watch headers failed: {error}")))?;
+    let headers = serde_json::from_str::<BTreeMap<String, Vec<String>>>(&event.headers_json)
+        .map_err(|error| ServerError::Nats(format!("Events.Watch headers failed: {error}")))?
+        .into_iter()
+        .map(|(name, values)| (name, values.join(",")))
+        .collect::<BTreeMap<_, _>>();
     generated_output(
         json!({
             "events": [{

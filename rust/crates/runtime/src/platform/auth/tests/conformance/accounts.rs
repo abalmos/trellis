@@ -80,20 +80,52 @@ pub(super) async fn exercise_accounts(
     deployment_profile.state = DeploymentProfileState::Disabled;
     deployment_profile.updated_at += 1;
     deployment_profile.version += 1;
-    store
-        .put_deployment_profile(DeploymentProfileMutation {
-            profile: deployment_profile.clone(),
-            expected_version: 1,
-            idempotency: proof(92, "deployment.disable"),
-            actions: Vec::new(),
-        })
-        .await?;
+    let mut disable_proof = proof(92, "deployment.disable");
+    disable_proof.result = serde_json::to_value(&deployment_profile)?;
+    let disable = DeploymentProfileMutation {
+        profile: deployment_profile.clone(),
+        expected_version: 1,
+        idempotency: disable_proof,
+        actions: Vec::new(),
+    };
+    assert_eq!(
+        store.put_deployment_profile(disable.clone()).await?,
+        IdempotentOutcome::Applied(deployment_profile.clone())
+    );
+    assert_eq!(
+        store.put_deployment_profile(disable.clone()).await?,
+        IdempotentOutcome::Replayed(serde_json::to_value(&deployment_profile)?)
+    );
     assert_eq!(
         store
             .get_deployment_profile("dep_profile")
             .await?
             .map(|value| value.state),
         Some(DeploymentProfileState::Disabled)
+    );
+    let mut enabled_profile = deployment_profile.clone();
+    enabled_profile.state = DeploymentProfileState::Active;
+    enabled_profile.updated_at += 1;
+    enabled_profile.version += 1;
+    enabled_profile.display_name = "Updated Service".to_owned();
+    assert_eq!(
+        store
+            .put_deployment_profile(DeploymentProfileMutation {
+                profile: enabled_profile.clone(),
+                expected_version: deployment_profile.version,
+                idempotency: proof(93, "deployment.enable"),
+                actions: Vec::new(),
+            })
+            .await?,
+        IdempotentOutcome::Applied(enabled_profile.clone())
+    );
+    assert_eq!(
+        store.put_deployment_profile(disable).await?,
+        IdempotentOutcome::Replayed(serde_json::to_value(&deployment_profile)?)
+    );
+    assert_eq!(
+        store.get_deployment_profile("dep_profile").await?,
+        Some(enabled_profile)
     );
     let user = PrincipalRecord {
         principal_id: "usr_companion".to_owned(),
