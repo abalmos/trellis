@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use time::format_description::well_known::Rfc3339;
@@ -48,7 +48,6 @@ use crate::service::{BootstrapBinding, CoreBootstrapBinding, ServiceResourceBind
 const HEALTH_HEARTBEAT_SUBJECT_PREFIX: &str = "health.v1.heartbeat";
 const HEALTH_HEARTBEAT_INTERVAL_MS: u64 = 30_000;
 const DEFAULT_EVENT_STREAM: &str = "trellis";
-static FEED_INBOX_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct AppliedNativeAuthorization {
@@ -77,72 +76,6 @@ impl AppliedNativeAuthorization {
         result?;
         *self = refreshed;
         Ok(())
-    }
-}
-
-struct FeedCancelGuard {
-    runtime: tokio::runtime::Handle,
-    nats: async_nats::Client,
-    auth: Arc<SessionAuth>,
-    context_digest: String,
-    subject: String,
-    reply: String,
-    payload: Bytes,
-}
-
-/// Owns one client feed's active count and end reason.
-struct FeedRuntimeGuard {
-    #[allow(dead_code)]
-    cancel: FeedCancelGuard,
-    _inflight: crate::telemetry::lifecycle::InflightGuard,
-    ended: bool,
-}
-
-impl FeedRuntimeGuard {
-    /// Records the stream end once with a bounded reason.
-    fn finish(&mut self, reason: &'static str) {
-        if self.ended {
-            return;
-        }
-        self.ended = true;
-        crate::telemetry::instruments::add_counter(
-            CounterFamily::FeedEnds,
-            1,
-            &[
-                KeyValue::new("trellis.side", "client"),
-                KeyValue::new("trellis.reason", reason),
-            ],
-        );
-    }
-}
-
-impl Drop for FeedRuntimeGuard {
-    fn drop(&mut self) {
-        // Dropping an unfinished stream is an expected cancellation.
-        self.finish("cancelled");
-    }
-}
-
-impl Drop for FeedCancelGuard {
-    fn drop(&mut self) {
-        let nats = self.nats.clone();
-        let subject = self.subject.clone();
-        let reply = self.reply.clone();
-        let payload = self.payload.clone();
-        let context_digest = self.context_digest.clone();
-        let headers = signed_headers(&self.auth, &context_digest, &subject, &reply, &payload);
-        self.runtime.spawn(async move {
-            let headers = match headers {
-                Ok(headers) => headers,
-                Err(error) => {
-                    tracing::warn!(%error, "feed cancel signing failed");
-                    return;
-                }
-            };
-            let _ = nats
-                .publish_with_reply_and_headers(subject, reply, headers, payload)
-                .await;
-        });
     }
 }
 
@@ -1048,6 +981,8 @@ pub struct TrellisClient {
     companion: Option<Arc<TrellisClient>>,
     /// Process-local connection state registration for telemetry gauges.
     connection: std::sync::Arc<crate::telemetry::lifecycle::ConnectionRegistration>,
+    /// One live-observation manager for this authenticated connection owner.
+    live: Option<std::sync::Arc<crate::live::manager::LiveSessionManager>>,
 }
 
 impl TrellisClient {
@@ -1093,6 +1028,54 @@ impl TrellisClient {
 
     pub(crate) fn nats(&self) -> async_nats::Client {
         self.nats.clone()
+    }
+
+    pub(crate) fn inbox_prefix(&self) -> &str {
+        &self.inbox_prefix
+    }
+
+    /// Return the cloneable session signer for owned live controls.
+    pub(crate) fn auth_handle(&self) -> std::sync::Arc<crate::client::SessionAuth> {
+        self.auth.clone()
+    }
+
+    /// Return the cloneable authorization-context owner for live controls.
+    pub(crate) fn authorization_contexts_handle(
+        &self,
+    ) -> Result<std::sync::Arc<crate::client::AuthorizationContextCache>, TrellisClientError> {
+        self.authorization_contexts.clone().ok_or_else(|| {
+            TrellisClientError::AuthorizationUnavailable(
+                "authorization context cache unavailable".to_owned(),
+            )
+        })
+    }
+
+    /// Return the live-observation manager for this connection owner.
+    pub(crate) fn live_manager(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::live::manager::LiveSessionManager>> {
+        self.live.as_ref()
+    }
+
+    /// Return the retained provider cache that owns local verification state.
+    pub(crate) fn authorization_provider(&self) -> &AuthorizationProviderCache {
+        &self.authorization_provider
+    }
+
+    /// Return this connection owner's pinned identity from its signed context.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no installed context exists.
+    pub(crate) fn own_pinned_identity(
+        &self,
+    ) -> Result<crate::live::authority::PinnedPeerIdentity, TrellisClientError> {
+        let contexts = self.authorization_contexts.as_ref().ok_or_else(|| {
+            TrellisClientError::AuthorizationUnavailable(
+                "authorization context cache unavailable".to_owned(),
+            )
+        })?;
+        contexts.pinned_identity()
     }
 
     /// Return the deployment id of this connection's installed signed context.
@@ -1424,6 +1407,12 @@ impl TrellisClient {
         )
         .await?;
 
+        let live = crate::live::manager::LiveSessionManager::new(
+            nats.clone(),
+            auth.clone(),
+            authorization_contexts.clone(),
+            authorization_contexts.runtime_binding()?.connection_id,
+        );
         let provider =
             attach_authorization_provider(nats.clone(), authorization_contexts.clone()).await?;
         let applied_native_authorization =
@@ -1453,6 +1442,7 @@ impl TrellisClient {
             applied_native_authorization,
             authorization_context_refresh_task,
             companion: None,
+            live: Some(live),
         })
     }
 
@@ -1935,115 +1925,49 @@ impl TrellisClient {
     }
 
     /// Subscribe to one descriptor-backed feed and decode event payloads.
+    /// Subscribe to one generated Feed through the connection's live manager.
+    ///
+    /// Returns a prepared, owned handle. The first `poll_next` installs the
+    /// exact data subscription and activates the session; an uniterated handle
+    /// expires without starting the provider's domain source.
+    ///
+    /// # Errors
+    ///
+    /// Returns a setup error for an invalid input, a missing live manager, an
+    /// incompatible peer, or a lost/invalid offer.
     pub async fn feed<D>(
         &self,
         input: &D::Input,
-    ) -> Result<BoxStream<'static, Result<D::Event, TrellisClientError>>, TrellisClientError>
+    ) -> Result<crate::live::subscription::LiveSubscription<D::Event>, TrellisClientError>
     where
         D: FeedDescriptor,
         D::Event: Send + 'static,
     {
-        let input = input
+        let encoded = input
             .encode()
             .map_err(|error| TrellisClientError::Codec(error.to_string()))?;
-        let payload = Bytes::from(serde_json::to_vec(&input)?);
-        let subject = self.bound_key_subject("feed", D::API_ID, D::KEY)?;
-        let context_digest = self.authorization_context_digest()?;
-        let inbox = format!(
-            "{}.{}",
-            self.inbox_prefix,
-            FEED_INBOX_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
-        );
-        let headers = signed_headers(&self.auth, &context_digest, &subject, &inbox, &payload)?;
-        let mut subscriber = timeout(
-            std::time::Duration::from_millis(self.timeout_ms),
-            self.nats().subscribe(inbox.clone()),
-        )
-        .await
-        .map_err(|_| TrellisClientError::Timeout)?
-        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-
-        timeout(
-            std::time::Duration::from_millis(self.timeout_ms),
-            self.nats()
-                .publish_with_reply_and_headers(subject, inbox.clone(), headers, payload),
-        )
-        .await
-        .map_err(|_| TrellisClientError::Timeout)?
-        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-
-        let first = timeout(
-            std::time::Duration::from_millis(self.timeout_ms),
-            subscriber.next(),
-        )
-        .await
-        .map_err(|_| TrellisClientError::Timeout)?
-        .ok_or(TrellisClientError::Timeout)?;
-
-        let control_subject = first
-            .headers
-            .as_ref()
-            .and_then(|headers| headers.get("feed-control-subject"))
-            .map(ToString::to_string)
-            .ok_or_else(|| {
-                TrellisClientError::NatsRequest(
-                    "feed acknowledgement omitted owner control subject".to_owned(),
-                )
-            })?;
-        let feed_id = first
-            .headers
-            .as_ref()
-            .and_then(|headers| headers.get("feed-id"))
-            .map(ToString::to_string)
-            .ok_or_else(|| {
-                TrellisClientError::NatsRequest("feed acknowledgement omitted feed id".to_owned())
-            })?;
-        let first_event = decode_feed_message::<D>(first)?;
-        let cancel = FeedCancelGuard {
-            runtime: tokio::runtime::Handle::current(),
-            nats: self.nats(),
-            auth: Arc::clone(&self.auth),
-            context_digest,
-            subject: control_subject,
-            reply: inbox.clone(),
-            payload: Bytes::from(serde_json::to_vec(&serde_json::json!({
-                "_trellisFeedCancel": inbox.clone(),
-                "feedId": feed_id,
-            }))?),
+        let base_subject = self.bound_key_subject("feed", D::API_ID, D::KEY)?;
+        let open_id = trellis_protocol::generate_nonce()
+            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+        let body = serde_json::json!({
+            "format": trellis_protocol::LIVE_VERSION,
+            "type": "open",
+            "openId": open_id,
+            "receiveMaxPayloadBytes": self.nats.max_payload() as u64,
+            "input": encoded,
+        });
+        let open = crate::live::client_open::ClientOpen {
+            kind: trellis_protocol::LiveSessionKind::Feed,
+            api_id: D::API_ID,
+            base_subject: &base_subject,
+            body: Bytes::from(serde_json::to_vec(&body)?),
+            open_id,
+            receive_max_payload_bytes: self.nats.max_payload() as u64,
         };
-        let guard = FeedRuntimeGuard {
-            cancel,
-            _inflight: crate::telemetry::lifecycle::InflightGuard::acquire(
-                crate::telemetry::instruments::UpDownFamily::FeedActive,
-                vec![crate::telemetry::KeyValue::new("trellis.side", "client")],
-            ),
-            ended: false,
-        };
-        let stream = stream::try_unfold(
-            (subscriber, first_event, guard),
-            |(mut subscriber, first_event, mut guard)| async move {
-                if let Some(event) = first_event {
-                    return Ok(Some((event, (subscriber, None, guard))));
-                }
-
-                match subscriber.next().await {
-                    Some(message) => {
-                        let event = decode_feed_message::<D>(message)?.ok_or_else(|| {
-                            TrellisClientError::NatsRequest(
-                                "feed emitted duplicate ready acknowledgement".to_string(),
-                            )
-                        })?;
-                        Ok(Some((event, (subscriber, None, guard))))
-                    }
-                    None => {
-                        guard.finish("complete");
-                        Ok(None)
-                    }
-                }
-            },
-        );
-
-        Ok(Box::pin(stream) as BoxStream<'static, Result<D::Event, TrellisClientError>>)
+        let prepared =
+            crate::live::client_open::open_client_session(self, &self.authorization_provider, open)
+                .await?;
+        crate::live::client_open::install_feed_handle::<D>(self, prepared)
     }
 
     /// Download the bytes exposed by a receive transfer grant.
@@ -2112,6 +2036,9 @@ impl Drop for TrellisClient {
         }
         if let Some(task) = self.authorization_context_refresh_task.take() {
             task.abort();
+        }
+        if let Some(live) = self.live.as_ref() {
+            live.stop();
         }
         let _ = self.authorization_provider_stop.send(());
         self.authorization_provider_task.abort();
@@ -2253,50 +2180,6 @@ fn decode_json_message(message: async_nats::Message) -> Result<Value, TrellisCli
 
 fn decode_watch_message(message: async_nats::Message) -> Result<Value, TrellisClientError> {
     decode_json_message(message)
-}
-
-fn decode_feed_message<D>(
-    message: async_nats::Message,
-) -> Result<Option<D::Event>, TrellisClientError>
-where
-    D: FeedDescriptor,
-{
-    if message.status == Some(async_nats::StatusCode::NO_RESPONDERS) {
-        return Err(TrellisClientError::NatsRequest(
-            "no responders for feed request".to_string(),
-        ));
-    }
-    decode_feed_frame::<D>(message.headers.as_ref(), &message.payload)
-}
-
-fn decode_feed_frame<D>(
-    headers: Option<&HeaderMap>,
-    payload: &[u8],
-) -> Result<Option<D::Event>, TrellisClientError>
-where
-    D: FeedDescriptor,
-{
-    if let Some(headers) = headers {
-        if headers
-            .get("status")
-            .is_some_and(|status| status.as_str() == "error")
-        {
-            return Err(TrellisClientError::RpcError(
-                RpcErrorPayload::from_json_slice(payload)?,
-            ));
-        }
-        if headers
-            .get("feed-status")
-            .is_some_and(|status| status.as_str() == "ready")
-        {
-            return Ok(None);
-        }
-    }
-
-    let value: Value = serde_json::from_slice(payload)?;
-    Ok(Some(D::Event::decode(value).map_err(|error| {
-        TrellisClientError::Codec(error.to_string())
-    })?))
 }
 
 fn is_terminal_event(event: &Value) -> bool {

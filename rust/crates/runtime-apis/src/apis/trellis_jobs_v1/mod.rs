@@ -1134,10 +1134,7 @@ impl Client {
         &self,
         input: &feeds::WatchInput,
     ) -> Result<
-        futures_util::stream::BoxStream<
-            'static,
-            Result<feeds::WatchEvent, trellis_rs::client::TrellisClientError>,
-        >,
+        trellis_rs::LiveSubscription<feeds::WatchEvent>,
         trellis_rs::client::TrellisClientError,
     > {
         self.inner.feed::<feeds::Watch>(input).await
@@ -1286,7 +1283,7 @@ impl<'a, P: trellis_rs::generated::ParticipantDescriptor> Provider<'a, P> {
     }
     pub fn register_watch<F, S>(&mut self, handler: F)
     where
-        F: Fn(trellis_rs::service::ServiceHandlerContext, feeds::WatchInput) -> S
+        F: Fn(trellis_rs::service::ServiceFeedHandlerContext, feeds::WatchInput) -> S
             + Send
             + Sync
             + 'static,

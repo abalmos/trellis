@@ -736,6 +736,19 @@ impl ServiceHandle {
     }
 }
 
+/// High-level context for one verified live Feed handler invocation.
+///
+/// Embeds the ordinary [`ServiceHandlerContext`] unchanged and adds the source
+/// scope's cancellation token. The token has no authority constructor exposed
+/// to applications.
+#[derive(Debug, Clone)]
+pub struct ServiceFeedHandlerContext {
+    /// Ordinary service handler context for this invocation.
+    pub context: ServiceHandlerContext,
+    /// Cancellation for this Feed source scope.
+    pub cancellation: crate::live::LiveCancellation,
+}
+
 /// Per-request handler context with request metadata and a cloneable service handle.
 #[derive(Debug, Clone)]
 pub struct ServiceHandlerContext {
@@ -818,7 +831,6 @@ pub struct ConnectedServiceRuntime<C> {
     _event_listener_cleanup: ServiceEventListenerRegistryCleanup,
     router: Router,
     provider_deployment_id: String,
-    provider_instance_id: String,
     operation_executor_id: String,
     operation_connection_id: String,
     operation_repository: Option<super::KvOperationRepository>,
@@ -877,7 +889,6 @@ impl<C> ConnectedServiceRuntime<C> {
             _event_listener_cleanup: ServiceEventListenerRegistryCleanup::new(event_listeners),
             router,
             provider_deployment_id,
-            provider_instance_id: provider_instance_id.clone(),
             operation_executor_id: ulid::Ulid::new().to_string(),
             operation_connection_id,
             operation_repository: None,
@@ -1196,23 +1207,32 @@ impl<C> ConnectedServiceRuntime<C> {
             .insert(self.descriptor_subject("rpc", D::API_ID, D::KEY));
     }
 
-    /// Register one descriptor-backed feed handler and record its subject.
+    /// Register one descriptor-backed live Feed handler and record its subject.
+    ///
+    /// The high-level handler receives the embedded ordinary
+    /// [`ServiceHandlerContext`] plus this source scope's cancellation token.
     pub fn register_feed<D, F, S>(&mut self, handler: F)
     where
         D: FeedDescriptor + 'static,
-        F: Fn(ServiceHandlerContext, D::Input) -> S + Send + Sync + 'static,
+        D::Input: Send + 'static,
+        F: Fn(ServiceFeedHandlerContext, D::Input) -> S + Send + Sync + 'static,
         S: Stream<Item = Result<D::Event, ServerError>> + Send + 'static,
     {
         let handle = self.generated_handle();
         self.router.register_feed::<D, _, _>(move |request, input| {
-            handler(ServiceHandlerContext::new(request, handle.clone()), input)
+            handler(
+                ServiceFeedHandlerContext {
+                    context: ServiceHandlerContext::new(request.request, handle.clone()),
+                    cancellation: request.cancellation,
+                },
+                input,
+            )
         });
         let subject = self.descriptor_subject("feed", D::API_ID, D::KEY);
         self.registered_subjects.insert(subject.clone());
-        self.registered_subjects
-            .insert(trellis_protocol::derive_feed_control_subject(
-                &subject,
-                &self.provider_instance_id,
+        self.router
+            .set_live_owner(super::live_router::LiveProviderOwner::new(
+                std::sync::Arc::clone(&self.client),
             ));
     }
 

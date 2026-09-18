@@ -317,6 +317,10 @@ pub enum TrellisClientError {
 
     #[error("feed protocol error: {0}")]
     FeedProtocol(String),
+
+    /// A live observation failed after setup with a bounded public envelope.
+    #[error(transparent)]
+    Live(crate::live::LiveStreamError),
 }
 
 #[cfg(test)]

@@ -444,8 +444,8 @@ pub fn live_parse_u64s(value: &str) -> Result<f64, JsError> {
 /// Compute the canonical logical-open hash from its JSON identity projection.
 #[wasm_bindgen]
 pub fn live_logical_open_hash(identity_json: &str) -> Result<String, JsError> {
-    let wire: WireLogicalOpenIdentity = serde_json::from_str(identity_json)
-        .map_err(|error| JsError::new(&error.to_string()))?;
+    let wire: WireLogicalOpenIdentity =
+        serde_json::from_str(identity_json).map_err(|error| JsError::new(&error.to_string()))?;
     let identity = trellis_protocol::LogicalOpenIdentity {
         kind: wire.kind,
         base_subject: wire.base_subject,
@@ -459,8 +459,7 @@ pub fn live_logical_open_hash(identity_json: &str) -> Result<String, JsError> {
         operation_id: wire.operation_id,
         include_updates: wire.include_updates,
     };
-    trellis_protocol::logical_open_hash(&identity)
-        .map_err(|error| JsError::new(&error.to_string()))
+    trellis_protocol::logical_open_hash(&identity).map_err(|error| JsError::new(&error.to_string()))
 }
 
 /// Compute the canonical logical-control hash from its raw JSON body.

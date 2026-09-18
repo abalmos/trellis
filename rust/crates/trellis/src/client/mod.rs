@@ -18,6 +18,7 @@ mod subject;
 mod transfer;
 
 pub use auth::SessionAuth;
+pub(crate) use authorization::AuthorizationContextLease;
 #[cfg(any(test, feature = "runtime-internals"))]
 pub use authorization::AuthorizationRegistryBinding;
 pub use authorization::{
@@ -62,6 +63,7 @@ pub use operations::{
     OperationTransferStartError, OperationTransport, OperationUpdateEvent, OperationUpdateEvidence,
     StartedOperationTransfer, TransferOperationDescriptor,
 };
+pub(crate) use proof::{new_request_id, now_iat_seconds};
 pub use proof::{verify_event_proof, VerifyEventProofInput};
 #[doc(hidden)]
 pub use resources::{BoundStateResourceClient, ConnectedStateHandle};

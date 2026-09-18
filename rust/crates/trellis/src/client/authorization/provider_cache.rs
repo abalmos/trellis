@@ -188,6 +188,75 @@ impl AuthorizationProviderCache {
             && self.revocation_time(digest).ok().flatten().is_none()
     }
 
+    /// Retain one live-authority lease for an exact digest and epoch.
+    ///
+    /// Resolves the digest through the ordinary single-flight cache when it is
+    /// not already retained, then returns a lease only when the exact entry is
+    /// covered on the expected local transport epoch. The caller keeps the
+    /// lease for the session lifetime, so the cache's ordinary cleanup retains
+    /// the revocation watch and coverage evidence.
+    pub(crate) async fn retain_live_guard_lease(
+        &self,
+        digest: &str,
+        expected_epoch: u64,
+    ) -> Result<AuthorizationContextLease, TrellisClientError> {
+        if self.epoch() != expected_epoch || !self.health()?.healthy {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "transport epoch changed before live retention".into(),
+            ));
+        }
+        let lease = self
+            .resolve_context(digest, self.now_seconds()?)
+            .await
+            .or_else(|error| match error {
+                // A retained covered entry is already sufficient; a resolution
+                // failure for a second copy must not drop usable retention.
+                TrellisClientError::AuthorizationUnavailable(_) => {
+                    self.lease_cached_context(digest, false)?.ok_or(error)
+                }
+                other => Err(other),
+            })?;
+        if lease.context_digest() != digest
+            || lease.epoch() != expected_epoch
+            || self.epoch() != expected_epoch
+            || !self.health()?.healthy
+            || !self.live_guard_entry_is_covered(&lease)
+        {
+            return Err(TrellisClientError::AuthorizationUnavailable(
+                "live authority coverage changed before retention".into(),
+            ));
+        }
+        Ok(lease)
+    }
+
+    /// Return the consumer's selected provider deployment for one API.
+    pub(crate) fn provider_deployment_id(
+        &self,
+        api_id: &str,
+    ) -> Result<String, TrellisClientError> {
+        let own = self.own.as_ref().ok_or_else(|| {
+            TrellisClientError::AuthorizationUnavailable(
+                "selected deployment requires an installed own context".into(),
+            )
+        })?;
+        own.provider_deployment_id(api_id)
+    }
+
+    /// Return whether one lease still points at the current covered entry.
+    pub(crate) fn live_guard_entry_is_covered(&self, lease: &AuthorizationContextLease) -> bool {
+        let Ok(state) = self.read_state() else {
+            return false;
+        };
+        state
+            .contexts
+            .get(lease.context_digest())
+            .is_some_and(|entry| {
+                Arc::ptr_eq(entry, lease.entry())
+                    && entry.covered.load(Ordering::Acquire)
+                    && entry.epoch == lease.epoch()
+            })
+    }
+
     pub(crate) async fn attach(
         nats: async_nats::Client,
         binding: &AuthorizationRegistryBinding,

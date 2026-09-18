@@ -596,7 +596,7 @@ fn render_api_facades(graph: &PackageGraph, api: &ApiDefinition) -> String {
             }
             ActionDefinition::Feed { .. } => {
                 out.push_str(&format!(
-                    "pub async fn {method}(&self, input: &feeds::{name}Input) -> Result<futures_util::stream::BoxStream<'static, Result<feeds::{name}Event, trellis_rs::client::TrellisClientError>>, trellis_rs::client::TrellisClientError> {{ self.inner.feed::<feeds::{name}>(input).await }}\n"
+                    "pub async fn {method}(&self, input: &feeds::{name}Input) -> Result<trellis_rs::LiveSubscription<feeds::{name}Event>, trellis_rs::client::TrellisClientError> {{ self.inner.feed::<feeds::{name}>(input).await }}\n"
                 ));
             }
             ActionDefinition::Operation { .. } => out.push_str(&format!(
@@ -622,7 +622,7 @@ fn render_api_facades(graph: &PackageGraph, api: &ApiDefinition) -> String {
                     "pub fn register_{method}<F, Fut>(&mut self, handler: F) where F: Fn(trellis_rs::service::ServiceHandlerContext, rpc::{name}Input) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = trellis_rs::service::HandlerResult<rpc::{name}Output>> + Send + 'static {{ self.runtime.register_rpc::<rpc::{name}, _, _>(handler); }}\n"
                 )),
                 ActionDefinition::Feed { .. } => out.push_str(&format!(
-                    "pub fn register_{method}<F, S>(&mut self, handler: F) where F: Fn(trellis_rs::service::ServiceHandlerContext, feeds::{name}Input) -> S + Send + Sync + 'static, S: futures_util::Stream<Item = Result<feeds::{name}Event, trellis_rs::service::ServerError>> + Send + 'static {{ self.runtime.register_feed::<feeds::{name}, _, _>(handler); }}\n"
+                    "pub fn register_{method}<F, S>(&mut self, handler: F) where F: Fn(trellis_rs::service::ServiceFeedHandlerContext, feeds::{name}Input) -> S + Send + Sync + 'static, S: futures_util::Stream<Item = Result<feeds::{name}Event, trellis_rs::service::ServerError>> + Send + 'static {{ self.runtime.register_feed::<feeds::{name}, _, _>(handler); }}\n"
                 )),
                 ActionDefinition::Operation { .. } => out.push_str(&format!(
                     "pub fn register_{method}<F, Fut>(&mut self, handler: F) where F: Fn(trellis_rs::service::RequestContext, operations::{name}Input, trellis_rs::service::OperationControl<trellis_rs::generated::OperationAdapter<operations::{name}>>) -> Fut + Send + Sync + 'static, Fut: std::future::Future<Output = Result<(), trellis_rs::service::ServerError>> + Send + 'static {{ self.runtime.register_operation_handler::<trellis_rs::generated::OperationAdapter<operations::{name}>, F, Fut>(handler); }}\n"

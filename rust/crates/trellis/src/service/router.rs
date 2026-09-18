@@ -1,14 +1,11 @@
 use std::collections::HashMap;
 use std::future::Future;
-use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use futures_util::{Stream, StreamExt};
 use serde::Deserialize;
-use tokio::sync::oneshot;
 
 use serde_json::Value;
 use trellis_protocol::{
@@ -24,6 +21,19 @@ use super::{
     OperationLiveEvent, OperationLiveWatch, OperationSignalAccepted, OperationSnapshot,
     OperationSnapshotFrame, RpcDescriptor, ServerError,
 };
+
+/// Low-level context for one verified live Feed invocation.
+///
+/// Supplied only after the router verified the opening request and reserved the
+/// session. The cancellation token is cloneable and exposes no authority
+/// constructor to applications.
+#[derive(Clone)]
+pub struct FeedRequestContext {
+    /// Request metadata, unchanged from ordinary handlers.
+    pub request: RequestContext,
+    /// Cancellation for this source scope.
+    pub cancellation: crate::live::LiveCancellation,
+}
 
 /// Request metadata forwarded to mounted RPC handlers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -197,48 +207,15 @@ impl RouteCapabilities {
     }
 }
 
-enum FeedCancellationState {
-    Active {
-        cancel: oneshot::Sender<()>,
-        reply_to: String,
-        principal_id: String,
-        participant_id: String,
-    },
-}
-
-type FeedCancellations = Arc<Mutex<HashMap<(String, String), FeedCancellationState>>>;
-
-struct FeedCancellation {
-    receiver: oneshot::Receiver<()>,
-    key: (String, String),
-    cancellations: FeedCancellations,
-}
-
-impl Future for FeedCancellation {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.receiver).poll(context).map(|_| ())
-    }
-}
-
-impl Drop for FeedCancellation {
-    fn drop(&mut self) {
-        self.cancellations
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&self.key);
-    }
-}
-
 /// An in-memory subject router for descriptor-backed RPC handlers.
 #[derive(Default)]
 pub struct Router {
     handlers: HashMap<String, Route>,
-    feed_cancellations: FeedCancellations,
     provider_deployment_id: Option<String>,
     provider_instance_id: Option<String>,
     operation_recoveries: Vec<OperationRecovery>,
+    /// Live owner for Feed/Operation observation routes on this connection.
+    live_owner: Option<super::live_router::LiveProviderOwner>,
 }
 
 type OperationRecovery = Box<dyn Fn() -> BoxFuture<'static, Result<(), ServerError>> + Send + Sync>;
@@ -264,6 +241,11 @@ impl Router {
     /// Bind Feed control routes to this service instance.
     pub fn set_provider_instance_id(&mut self, instance_id: impl Into<String>) {
         self.provider_instance_id = Some(instance_id.into());
+    }
+
+    /// Bind live Feed/Operation observation routes to one connected owner.
+    pub fn set_live_owner(&mut self, owner: super::live_router::LiveProviderOwner) {
+        self.live_owner = Some(owner);
     }
 
     fn descriptor_subject(
@@ -463,110 +445,34 @@ impl Router {
         );
     }
 
-    /// Register one descriptor-backed feed handler.
+    /// Register one descriptor-backed live Feed handler.
+    ///
+    /// The opening request is verified and the session reserved before the
+    /// handler runs; handler output starts only after the delivery-path
+    /// challenge is answered. The response is one signed offer, never an
+    /// infinite reply loop.
     pub fn register_feed<D, F, S>(&mut self, handler: F)
     where
         D: FeedDescriptor + 'static,
-        F: Fn(RequestContext, D::Input) -> S + Send + Sync + 'static,
+        D::Input: Send + 'static,
+        F: Fn(FeedRequestContext, D::Input) -> S + Send + Sync + 'static,
         S: Stream<Item = Result<D::Event, ServerError>> + Send + 'static,
     {
         let handler = Arc::new(handler);
-        let cancellations = Arc::clone(&self.feed_cancellations);
+        let live_owner = self.live_owner.clone();
         let subject = self.descriptor_subject("feed", D::API_ID, D::KEY, D::SUBJECT);
-        let control_subject = trellis_protocol::derive_feed_control_subject(
-            &subject,
-            self.provider_instance_id
-                .as_deref()
-                .unwrap_or("unbound-instance"),
-        );
-        let handler_subject = subject.clone();
-        let owner_instance_id = self
+        let provider_deployment_id = self
+            .provider_deployment_id
+            .clone()
+            .unwrap_or_else(|| "unbound-deployment".to_owned());
+        let provider_instance_id = self
             .provider_instance_id
             .clone()
             .unwrap_or_else(|| "unbound-instance".to_owned());
         let capabilities = self.descriptor_capabilities(D::SUBSCRIBE_CAPABILITIES);
+        let handler_subject = subject.clone();
         self.handlers.insert(
-            subject.clone(),
-            Route {
-                capabilities: RouteCapabilities::Static(capabilities.clone()),
-                permission: RoutePermissionSpec::Static(
-                    D::API_ID.to_owned(),
-                    ApiSurfaceKind::Feed,
-                    self.descriptor_name(D::KEY),
-                    PermissionAction::Subscribe,
-                ),
-                route_token: self.intern_route(D::API_ID, D::KEY),
-                unary_rpc: false,
-                handler: Box::new(
-                move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
-                    let handler = Arc::clone(&handler);
-                    let cancellations = Arc::clone(&cancellations);
-                    let handler_subject = handler_subject.clone();
-                    let owner_instance_id = owner_instance_id.clone();
-                    Box::pin(async move {
-                        let input = decode_generated_input::<D::Input>(&payload)?;
-                        let reply_to = ctx.reply_to.clone().ok_or_else(|| {
-                            ServerError::Nats("feed request is missing a reply inbox".to_string())
-                        })?;
-                        let caller = ctx.caller.as_ref().ok_or_else(|| ServerError::RequestDenied {
-                            subject: handler_subject.clone(),
-                            session_key: ctx.session_key.clone().unwrap_or_default(),
-                        })?;
-                        let feed_id = ctx.request_id.clone().ok_or_else(|| ServerError::Nats(
-                            "feed request is missing a request id".to_owned(),
-                        ))?;
-                        let key = (handler_subject.clone(), feed_id.clone());
-                        let (cancel, receiver) = oneshot::channel();
-                        let mut states = cancellations
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        match states.remove(&key) {
-                            Some(FeedCancellationState::Active { cancel: previous, .. }) => {
-                                let _ = previous.send(());
-                                states.insert(key.clone(), FeedCancellationState::Active {
-                                    cancel,
-                                    reply_to: reply_to.clone(),
-                                    principal_id: caller.principal_id.clone(),
-                                    participant_id: caller.participant_id.clone(),
-                                });
-                            }
-                            None => {
-                                states.insert(key.clone(), FeedCancellationState::Active {
-                                    cancel,
-                                    reply_to: reply_to.clone(),
-                                    principal_id: caller.principal_id.clone(),
-                                    participant_id: caller.participant_id.clone(),
-                                });
-                            }
-                        }
-                        drop(states);
-                        let cancellation = FeedCancellation {
-                            receiver,
-                            key,
-                            cancellations,
-                        };
-                        Ok(HandlerResponse::FeedStream {
-                            stream: feed_response_stream(handler(ctx, input).take_until(cancellation)),
-                            control_subject: trellis_protocol::derive_feed_instance_control_subject(
-                                &handler_subject,
-                                &owner_instance_id,
-                                &feed_id,
-                            ),
-                            feed_id,
-                        })
-                    })
-                },
-            ),
-            },
-        );
-        let cancellation_subject = subject;
-        let cancellations = Arc::clone(&self.feed_cancellations);
-        let owner_instance_id = self
-            .provider_instance_id
-            .clone()
-            .unwrap_or_else(|| "unbound-instance".to_owned());
-        self.handlers.insert(
-            control_subject,
+            subject,
             Route {
                 capabilities: RouteCapabilities::Static(capabilities),
                 permission: RoutePermissionSpec::Static(
@@ -577,68 +483,69 @@ impl Router {
                 ),
                 route_token: self.intern_route(D::API_ID, D::KEY),
                 unary_rpc: false,
-                handler: Box::new(move |ctx, payload| {
-                    let cancellations = Arc::clone(&cancellations);
-                    let cancellation_subject = cancellation_subject.clone();
-                    let owner_instance_id = owner_instance_id.clone();
-                    Box::pin(async move {
-                        let (feed_id, reply_to) =
-                            feed_cancel_metadata(&payload).ok_or_else(|| {
-                                ServerError::Nats("invalid feed cancellation payload".to_owned())
+                handler: Box::new(
+                    move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
+                        let handler = Arc::clone(&handler);
+                        let live_owner = live_owner.clone();
+                        let provider_deployment_id = provider_deployment_id.clone();
+                        let provider_instance_id = provider_instance_id.clone();
+                        let handler_subject = handler_subject.clone();
+                        Box::pin(async move {
+                            let owner = live_owner.ok_or_else(|| {
+                                ServerError::Nats(format!(
+                                    "feed route '{handler_subject}' has no live provider owner"
+                                ))
                             })?;
-                        if ctx.reply_to.as_deref() != Some(reply_to.as_str()) {
-                            return Err(ServerError::Nats(
-                                "feed cancellation reply inbox does not match".to_owned(),
-                            ));
-                        }
-                        if ctx.subject
-                            != trellis_protocol::derive_feed_instance_control_subject(
-                                &cancellation_subject,
-                                &owner_instance_id,
-                                &feed_id,
-                            )
-                        {
-                            return Err(ServerError::RequestDenied {
-                                subject: ctx.subject,
-                                session_key: ctx.session_key.unwrap_or_default(),
-                            });
-                        }
-                        let key = (cancellation_subject, feed_id);
-                        let mut states = cancellations
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        let allowed = states.get(&key).is_some_and(|state| {
-                            match (state, ctx.caller.as_ref()) {
-                                (
-                                    FeedCancellationState::Active {
-                                        reply_to: active_reply,
-                                        principal_id,
-                                        participant_id,
-                                        ..
-                                    },
-                                    Some(caller),
-                                ) => {
-                                    active_reply == &reply_to
-                                        && principal_id == &caller.principal_id
-                                        && participant_id == &caller.participant_id
+                            let opening = crate::service::live_router::parse_feed_open::<D::Input>(
+                                &payload,
+                            )?;
+                            let encoded_input = crate::generated::Codec::encode(&opening.input)
+                                .map_err(|error| ServerError::Nats(error.to_string()))?;
+                            let input = opening.input;
+                            let meta = crate::service::live_router::FeedOpeningMeta {
+                                open_id: opening.open_id.clone(),
+                                receive_max_payload_bytes: opening.receive_max_payload_bytes,
+                            };
+                            let cancellation = crate::live::LiveCancellation::new();
+                            let factory_cancellation = cancellation.clone();
+                            let source_factory = {
+                                let handler = Arc::clone(&handler);
+                                let request = ctx.clone();
+                                move || {
+                                    let stream = handler(
+                                        FeedRequestContext {
+                                            request,
+                                            cancellation: factory_cancellation.clone(),
+                                        },
+                                        input,
+                                    );
+                                    crate::service::live_router::source_from_handler::<D::Event, S>(
+                                        stream,
+                                    )
                                 }
-                                _ => false,
-                            }
-                        });
-                        if !allowed {
-                            return Err(ServerError::RequestDenied {
-                                subject: ctx.subject,
-                                session_key: ctx.session_key.unwrap_or_default(),
-                            });
-                        }
-                        if let Some(FeedCancellationState::Active { cancel, .. }) =
-                            states.remove(&key)
-                        {
-                            let _ = cancel.send(());
-                        }
-                        Ok(HandlerResponse::Frames(Vec::new()))
-                    })
-                }),
+                            };
+                            let reserved = crate::service::live_router::reserve_feed::<D, _>(
+                                owner.client(),
+                                owner.manager()?,
+                                &crate::service::live_router::FeedOpenRequest {
+                                    request: ctx,
+                                    inputs: crate::service::live_router::FeedOpenInputs {
+                                        api_id: D::API_ID.to_owned(),
+                                        base_subject: handler_subject,
+                                        provider_instance_id,
+                                        provider_deployment_id,
+                                    },
+                                    opening: meta,
+                                    encoded_input,
+                                    cancellation,
+                                },
+                                source_factory,
+                            )
+                            .await?;
+                            Ok(HandlerResponse::LivePrepared(Box::new(reserved.prepared)))
+                        })
+                    },
+                ),
             },
         );
     }
@@ -904,6 +811,9 @@ impl Router {
                 }
                 Ok(frames)
             }
+            HandlerResponse::LivePrepared(_) => Err(ServerError::Nats(
+                "a live response requires a live owner and cannot be collected".to_owned(),
+            )),
         }
     }
 
@@ -919,20 +829,6 @@ impl Router {
             .ok_or_else(|| ServerError::MissingHandler(subject.to_string()))?;
         (route.handler)(context, payload).await
     }
-}
-
-fn feed_cancel_metadata(payload: &[u8]) -> Option<(String, String)> {
-    let value = serde_json::from_slice::<Value>(payload).ok()?;
-    let object = value.as_object()?;
-    if object.len() != 2 {
-        return None;
-    }
-    let reply = object
-        .get("_trellisFeedCancel")
-        .and_then(Value::as_str)
-        .map(ToString::to_string)?;
-    let feed_id = object.get("feedId").and_then(Value::as_str)?.to_owned();
-    Some((feed_id, reply))
 }
 
 fn decode_generated_input<T>(payload: &[u8]) -> Result<T, ServerError>
@@ -967,21 +863,6 @@ where
         })?;
     validate_input_schema(schema_json, &value)?;
     serde_json::from_value(value).map_err(ServerError::from)
-}
-
-fn feed_response_stream<TEvent>(
-    events: impl Stream<Item = Result<TEvent, ServerError>> + Send + 'static,
-) -> ResponseStream
-where
-    TEvent: crate::generated::Codec + 'static,
-{
-    Box::pin(events.map(|event| {
-        event.and_then(|event| {
-            let event = crate::generated::Codec::encode(&event)
-                .map_err(|error| ServerError::Nats(error.to_string()))?;
-            Ok(Bytes::from(serde_json::to_vec(&event)?))
-        })
-    }))
 }
 
 fn validate_provider_value(
@@ -1143,7 +1024,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
 
     use futures_util::{stream, StreamExt};
 
@@ -1282,172 +1162,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn feed_cancel_frame_stops_the_active_response_stream() {
+    async fn feed_routes_require_a_live_provider_owner() {
         let mut router = Router::new();
         router.set_provider_instance_id("provider-instance");
         router.register_feed::<TestFeed, _, _>(|_, _| {
             stream::pending::<Result<Value, ServerError>>()
         });
-        let reply_to = "_INBOX.test.feed";
-        let caller = crate::service::VerifiedCaller {
-            session_key: "caller-session".to_owned(),
-            inbox_prefix: "_INBOX.test".to_owned(),
-            context_digest: "context".to_owned(),
-            connection_id: "connection".to_owned(),
-            login_session_id: Some("login".to_owned()),
-            principal_id: "creator".to_owned(),
-            principal_kind: trellis_protocol::AuthorizationPrincipalKind::User,
-            participant_id: "caller-participant".to_owned(),
-            platform_privileges: Vec::new(),
-            deployment_id: None,
-            instance_id: None,
-        };
-        let context = || RequestContext {
-            subject: TestFeed::SUBJECT.to_string(),
-            reply_to: Some(reply_to.to_string()),
-            session_key: Some(caller.session_key.clone()),
-            request_id: Some("feed-id".to_owned()),
-            caller: Some(caller.clone()),
-            ..Default::default()
-        };
         let response = router
-            .handle_request_response(TestFeed::SUBJECT, Bytes::from_static(b"{}"), context())
-            .await
-            .expect("open feed");
-        let HandlerResponse::FeedStream {
-            mut stream,
-            control_subject,
-            ..
-        } = response
-        else {
-            panic!("feed registration should return a response stream");
-        };
-
-        let second_reply = "_INBOX.test.feed.second";
-        let mut second_context = context();
-        second_context.reply_to = Some(second_reply.to_owned());
-        second_context.request_id = Some("feed-id-2".to_owned());
-        let second_response = router
-            .handle_request_response(TestFeed::SUBJECT, Bytes::from_static(b"{}"), second_context)
-            .await
-            .expect("open second feed");
-        let HandlerResponse::FeedStream {
-            stream: mut second_stream,
-            control_subject: second_control_subject,
-            ..
-        } = second_response
-        else {
-            panic!("second feed registration should return a response stream");
-        };
-
-        let forged = router
             .handle_request_response(
-                &control_subject,
-                Bytes::from(
-                    serde_json::to_vec(&serde_json::json!({
-                        "_trellisFeedCancel": reply_to,
-                        "feedId": "feed-id-2",
-                    }))
-                    .expect("serialize forged cancellation"),
-                ),
+                TestFeed::SUBJECT,
+                Bytes::from_static(b"{}"),
                 RequestContext {
-                    subject: control_subject.clone(),
-                    reply_to: Some(reply_to.to_string()),
-                    session_key: Some(caller.session_key.clone()),
-                    caller: Some(caller.clone()),
+                    subject: TestFeed::SUBJECT.to_owned(),
                     ..Default::default()
                 },
             )
             .await;
-        assert!(matches!(forged, Err(ServerError::RequestDenied { .. })));
-        let mut intruder = caller.clone();
-        intruder.principal_id = "different-principal".to_owned();
-        let denied = router
+        assert!(
+            matches!(response, Err(ServerError::Nats(message)) if message.contains("live provider owner")),
+            "a Feed route without a live owner must fail closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn live_open_rejects_a_non_live_envelope_before_reserving() {
+        let mut router = Router::new();
+        router.set_provider_instance_id("provider-instance");
+        router.register_feed::<TestFeed, _, _>(|_, _| {
+            stream::pending::<Result<Value, ServerError>>()
+        });
+        // A legacy finite request body is an explicit incompatible-protocol
+        // error, never a silent fallback to an old transport.
+        let response = router
             .handle_request_response(
-                &control_subject,
-                Bytes::from(
-                    serde_json::to_vec(&serde_json::json!({
-                        "_trellisFeedCancel": reply_to,
-                        "feedId": "feed-id",
-                    }))
-                    .expect("serialize unauthorized cancellation"),
-                ),
+                TestFeed::SUBJECT,
+                Bytes::from_static(b"{}"),
                 RequestContext {
-                    subject: control_subject.clone(),
-                    reply_to: Some(reply_to.to_string()),
-                    session_key: Some(intruder.session_key.clone()),
-                    caller: Some(intruder),
+                    subject: TestFeed::SUBJECT.to_owned(),
                     ..Default::default()
                 },
             )
             .await;
-        assert!(matches!(denied, Err(ServerError::RequestDenied { .. })));
-        assert!(
-            tokio::time::timeout(Duration::from_millis(10), stream.next())
-                .await
-                .is_err()
-        );
-        assert!(
-            tokio::time::timeout(Duration::from_millis(10), second_stream.next())
-                .await
-                .is_err()
-        );
-
-        let mut reconnected_caller = caller.clone();
-        reconnected_caller.session_key = "reconnected-session".to_owned();
-        router
-            .handle_request_response(
-                &control_subject,
-                Bytes::from(
-                    serde_json::to_vec(&serde_json::json!({
-                        "_trellisFeedCancel": reply_to,
-                        "feedId": "feed-id",
-                    }))
-                    .expect("serialize cancellation"),
-                ),
-                RequestContext {
-                    subject: control_subject.clone(),
-                    reply_to: Some(reply_to.to_string()),
-                    session_key: Some(reconnected_caller.session_key.clone()),
-                    caller: Some(reconnected_caller),
-                    ..Default::default()
-                },
-            )
-            .await
-            .expect("cancel feed");
-
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), stream.next())
-                .await
-                .expect("feed should stop promptly")
-                .is_none()
-        );
-
-        router
-            .handle_request_response(
-                &second_control_subject,
-                Bytes::from(
-                    serde_json::to_vec(&serde_json::json!({
-                        "_trellisFeedCancel": second_reply,
-                        "feedId": "feed-id-2",
-                    }))
-                    .expect("serialize second cancellation"),
-                ),
-                RequestContext {
-                    subject: second_control_subject.clone(),
-                    reply_to: Some(second_reply.to_owned()),
-                    session_key: Some(caller.session_key.clone()),
-                    caller: Some(caller),
-                    ..Default::default()
-                },
-            )
-            .await
-            .expect("cancel second feed");
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), second_stream.next())
-                .await
-                .expect("second feed should stop promptly")
-                .is_none()
-        );
+        assert!(response.is_err());
     }
 }

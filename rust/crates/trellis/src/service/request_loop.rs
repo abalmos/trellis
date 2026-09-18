@@ -61,6 +61,25 @@ pub enum HandlerResponse {
         control_subject: String,
         feed_id: String,
     },
+    /// One verified live reservation ready to hand to the connection manager.
+    ///
+    /// The request loop publishes exactly one signed offer for this response;
+    /// it never enters an infinite reply loop. A finite-dispatch handler that
+    /// cannot hand ownership to a live manager fails closed instead of
+    /// collecting an endless stream into a vector.
+    LivePrepared(Box<LivePreparedResponse>),
+}
+
+/// One prepared live reservation produced by a live-capable route.
+pub struct LivePreparedResponse {
+    /// Signed offer body published as the one finite opening reply.
+    pub offer: Bytes,
+    /// Provider proof headers that authenticate the offer's exact bytes.
+    pub headers: async_nats::HeaderMap,
+    /// The connection's live manager that now owns the reservation.
+    pub manager: std::sync::Arc<crate::live::manager::LiveSessionManager>,
+    /// The exact accepted opening request this offer answers.
+    pub request_id: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -195,6 +214,9 @@ pub trait RequestHandler: Send + Sync {
                     }
                     Ok(frames)
                 }
+                HandlerResponse::LivePrepared(_) => Err(ServerError::Nats(
+                    "a live response requires a live owner and cannot be collected".to_owned(),
+                )),
             }
         })
     }
@@ -789,8 +811,8 @@ pub(crate) enum DispatchResponse {
 impl HandlerResponse {
     /// Whether this response is a unary RPC for the server duration family.
     ///
-    /// Stream and Feed responses have their own lifetimes and must never be
-    /// counted as unary RPC successes.
+    /// Stream, Feed and live responses have their own lifetimes and must never
+    /// be counted as unary RPC successes.
     pub(crate) fn is_unary(&self) -> bool {
         matches!(self, Self::Frames(_) | Self::Error(_))
     }
@@ -1010,6 +1032,16 @@ async fn publish_handler_response(
                 }
             }
         },
+        HandlerResponse::LivePrepared(prepared) => {
+            // One signed offer, no infinite reply loop. Ownership of the
+            // reservation already moved to the connection's live manager.
+            let _ = prepared.manager;
+            let _ = prepared.request_id;
+            client
+                .publish_with_headers(reply_to, prepared.headers, prepared.offer)
+                .await
+                .map_err(|error| ServerError::Nats(error.to_string()))?;
+        }
         HandlerResponse::FeedStream {
             mut stream,
             control_subject,

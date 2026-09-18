@@ -712,15 +712,12 @@ impl Client {
         &self,
         input: &D::Input,
     ) -> Result<
-        futures_util::stream::BoxStream<
-            'static,
-            Result<D::Event, crate::client::TrellisClientError>,
-        >,
+        crate::live::subscription::LiveSubscription<D::Event>,
         crate::client::TrellisClientError,
     >
     where
         D: FeedDescriptor,
-        D::Event: Send + 'static,
+        D::Event: Codec + Send + 'static,
     {
         self.ensure_available(OptionalAction::feed(
             D::API_ID,

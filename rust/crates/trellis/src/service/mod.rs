@@ -18,6 +18,7 @@ mod bootstrap_ports;
 mod core_bootstrap;
 mod error;
 mod events_runtime;
+mod live_router;
 mod local_validator;
 mod operation_repository;
 mod operations;
@@ -85,7 +86,7 @@ pub use runtime_facade::{ConnectedServiceRuntime, CoreBootstrapBinding, ServiceH
 pub use runtime_facade::{
     ServiceConnectOptions, ServiceEventListenOptions, ServiceEventListenerContext,
     ServiceEventListenerHandle, ServiceEventListenerMode, ServiceEventPublisherContext,
-    ServiceHandlerContext, ServiceRuntimeError, DEFAULT_TIMEOUT_MS,
+    ServiceFeedHandlerContext, ServiceHandlerContext, ServiceRuntimeError, DEFAULT_TIMEOUT_MS,
 };
 #[doc(hidden)]
 pub use schema_validation::validate_input_schema;

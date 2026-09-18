@@ -44,6 +44,15 @@
 #[doc(hidden)]
 pub mod client;
 
+pub(crate) mod live;
+
+pub use live::subscription::LiveSubscription;
+pub use live::LiveSessionManager;
+pub use live::{
+    CloseCleanupState, CloseRemoteState, LiveCancellation, LiveCloseReceipt, LiveEnd,
+    LiveEndReason, LiveErrorCode, LiveStreamError,
+};
+
 #[doc(hidden)]
 pub mod generated;
 
