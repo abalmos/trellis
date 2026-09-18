@@ -16,31 +16,43 @@
   import Panel from "$lib/components/Panel.svelte";
   import { errorMessage, formatDate } from "$lib/format";
   import { bulkExpectedCount, bulkTargetDetails, runBulk, toggleAll, toggleId } from "$lib/bulk.ts";
+  import { catalogPage, traverseAll } from "$lib/console/paging.ts";
+  import { captureIntent, classifyMutationError, isIntentCurrent, MutationController } from "$lib/console/mutation.ts";
+  import { getConsoleAuthority } from "$lib/console/authority.svelte.ts";
+  import { displayJson } from "$lib/console/display_value.ts";
   import { getTrellis } from "$lib/trellis";
 
   type Policy = apis.auth.PortalsGrantOverridesListOutput["items"][number];
   type Group = apis.auth.CapabilityGroupsListOutput["items"][number];
 
   const trellis = getTrellis();
+  const authority = getConsoleAuthority();
+  const removal = new MutationController<apis.auth.PortalsGrantOverridesRemoveInput, apis.auth.PortalsGrantOverridesRemoveOutput>();
   let loading = $state(true);
+  let incomplete = $state(true);
   let removing = $state<string | null>(null);
+  let uncertain = $state(false);
+  let unknownPolicies = $state<string[]>([]);
+  let disposed = false;
   let error = $state<string | null>(null);
   let saved = $state<string | null>(null);
   let search = $state("");
   let policies = $state.raw<Policy[]>([]);
   let groups = $state.raw<Group[]>([]);
   let confirmationModal: ConfirmationModal | undefined = $state();
-  let selectedPolicies = $state(new Set<string>());
+  const selectedPolicies = new SvelteSet<string>();
   let bulkBusy = $state(false);
   let bulkResult = $state<{ succeeded: number; failed: string[] } | null>(null);
-  let failedPolicies = $state.raw<Policy[]>([]);
 
-  const busy = $derived(loading || removing !== null || bulkBusy);
+  const busy = $derived(loading || removing !== null || bulkBusy || uncertain || incomplete);
   const groupMap = $derived(new Map(groups.map((group) => [group.groupKey, group])));
   const filteredPolicies = $derived.by(() => {
     const term = search.trim().toLowerCase();
     if (!term) return policies;
-    return policies.filter((policy) => JSON.stringify(policy).toLowerCase().includes(term));
+    // Lossless display search: exact bigint revisions stay comparable.
+    return policies.filter((policy) =>
+      displayJson(policy).toLowerCase().includes(term)
+    );
   });
   const selectablePolicyKeys = $derived(filteredPolicies.map((policy) => key(policy)));
 
@@ -80,17 +92,34 @@
 
   async function load(preserveSaved = false): Promise<void> {
     loading = true;
+    incomplete = true;
     error = null;
     if (!preserveSaved) saved = null;
     try {
-      const [policyResponse, groupResponse] = await Promise.all([
-        trellis.portalsGrantOverridesList({ limit: 500, offset: 0 }).take(),
-        trellis.capabilityGroupsList({ limit: 500, offset: 0 }).take(),
+      const [policyResult, groupResult] = await Promise.all([
+        traverseAll<Policy>(async (pageRequest) => {
+          const response = await trellis.portalsGrantOverridesList({
+            page: catalogPage(pageRequest.cursor),
+          }).take();
+          if (isErr(response)) throw response;
+          return { items: response.items, cursor: response.page.nextCursor };
+        }),
+        traverseAll<Group>(async (pageRequest) => {
+          const response = await trellis.capabilityGroupsList({
+            page: catalogPage(pageRequest.cursor),
+          }).take();
+          if (isErr(response)) throw response;
+          return { items: response.items, cursor: response.page.nextCursor };
+        }),
       ]);
-      if (isErr(policyResponse)) throw new Error(errorMessage(policyResponse));
-      if (isErr(groupResponse)) throw new Error(errorMessage(groupResponse));
-      policies = policyResponse.items.toSorted((left, right) => key(left).localeCompare(key(right)));
-      groups = groupResponse.items;
+      if (!policyResult.complete) throw new Error(errorMessage(policyResult.error));
+      if (!groupResult.complete) throw new Error(errorMessage(groupResult.error));
+      selectedPolicies.clear();
+      policies = [...policyResult.items].toSorted((left, right) =>
+        key(left).localeCompare(key(right))
+      );
+      groups = [...groupResult.items];
+      incomplete = false;
     } catch (cause) {
       error = caughtMessage(cause);
     } finally {
@@ -99,26 +128,50 @@
   }
 
   async function requestRemove(policy: Policy): Promise<void> {
+    if (busy) return;
+    const policyKey = key(policy);
+    const idempotencyKey = ulid();
+    const intent = captureIntent<apis.auth.PortalsGrantOverridesRemoveInput>({
+      operation: "portalsGrantOverridesRemove",
+      input: {
+        portalId: policy.portalId,
+        participantId: policy.participantId,
+        expectedVersion: policy.version,
+        idempotencyKey,
+      },
+      label: `${policy.portalId} / ${policy.participantId}`,
+      targetId: policyKey,
+      expectedValue: policy.participantId,
+      scope: { routeKey: "/admin/grants" },
+      idempotencyKey,
+    });
+    if (!removal.begin(intent)) return;
     const confirmed = await confirmationModal?.confirm({
       title: "Remove portal grant policy?",
       message: "Affected portal-managed identity authorities are revoked immediately.",
       confirmLabel: "Remove policy",
       targetLabel: "Portal / app",
-      targetName: `${policy.portalId} / ${policy.participantId}`,
-      expectedValue: policy.participantId,
+      targetName: intent.label,
+      expectedValue: intent.expectedValue,
     });
-    if (!confirmed) return;
-    removing = key(policy);
+    if (!confirmed) { removal.cancel(); return; }
+    removing = policyKey;
     error = null;
     saved = null;
     try {
-      const response = await trellis.portalsGrantOverridesRemove({
-        portalId: policy.portalId,
-        participantId: policy.participantId,
-        expectedVersion: policy.version,
-        idempotencyKey: ulid(),
-      }).take();
-      if (isErr(response)) throw new Error(errorMessage(response));
+      const outcome = await removal.send({
+        isStillValid: () => !disposed && !incomplete && isIntentCurrent(intent, { routeKey: "/admin/grants" }) &&
+
+          policies.some((current) => key(current) === policyKey && current.version === intent.input.expectedVersion),
+        dispatch: (captured) => trellis.portalsGrantOverridesRemove(captured.input).orThrow(),
+      });
+      if (!outcome || disposed) return;
+      if (outcome.kind === "unknown") {
+        uncertain = true;
+        unknownPolicies = [intent.label];
+        return;
+      }
+      if (outcome.kind !== "succeeded") throw outcome.error;
       saved = "Portal grant policy removed.";
       await load(true);
     } catch (cause) {
@@ -128,31 +181,51 @@
     }
   }
 
-  async function removePolicies(targets: Policy[]) {
+  async function removePolicies(intents: ReturnType<typeof captureIntent<apis.auth.PortalsGrantOverridesRemoveInput>>[]) {
     bulkBusy = true;
     bulkResult = null;
-    const outcome = await runBulk(targets, async (policy) => {
-      const response = await trellis.portalsGrantOverridesRemove({
-        portalId: policy.portalId,
-        participantId: policy.participantId,
-        expectedVersion: policy.version,
-        idempotencyKey: ulid(),
-      }).take();
-      if (isErr(response)) throw new Error(errorMessage(response));
-    });
-    failedPolicies = outcome.failed.map((failure) => failure.target);
-    for (const policy of targets) selectedPolicies.delete(key(policy));
+    const outcome = await runBulk(intents, async (intent) => {
+      if (disposed || incomplete || !isIntentCurrent(intent, { routeKey: "/admin/grants" }) ||
+
+        !policies.some((current) => key(current) === intent.targetId && current.version === intent.input.expectedVersion)) {
+        throw new Error("Target or authority changed before dispatch; no removal sent.");
+      }
+      await trellis.portalsGrantOverridesRemove(intent.input).orThrow();
+    }, (cause) => classifyMutationError(cause).kind === "unknown" ? "unknown" : "failed");
+    if (disposed) return;
+    for (const intent of intents) selectedPolicies.delete(intent.targetId);
     bulkResult = {
       succeeded: outcome.succeeded,
-      failed: outcome.failed.map((failure) => `${failure.target.portalId} / ${failure.target.participantId}: ${failure.reason}`),
+      failed: outcome.failed.map((failure) => `${failure.target.label}: ${failure.reason}`),
     };
+    if (outcome.unknown.length > 0) {
+      uncertain = true;
+      unknownPolicies = outcome.unknown.map((item) => item.target.label);
+    }
     bulkBusy = false;
     void load(true);
   }
 
   async function requestBulkRemove() {
+    if (busy) return;
     const targets = filteredPolicies.filter((policy) => selectedPolicies.has(key(policy)));
     if (targets.length === 0) return;
+    const intents = targets.map((policy) => {
+      const idempotencyKey = ulid();
+      return captureIntent<apis.auth.PortalsGrantOverridesRemoveInput>({
+        operation: "portalsGrantOverridesRemove",
+        input: {
+          portalId: policy.portalId,
+          participantId: policy.participantId,
+          expectedVersion: policy.version,
+          idempotencyKey,
+        },
+        label: `${policy.portalId} / ${policy.participantId}`,
+        targetId: key(policy),
+        scope: { routeKey: "/admin/grants" },
+        idempotencyKey,
+      });
+    });
     const confirmed = await confirmationModal?.confirm({
       title: `Remove ${targets.length} portal grant polic${targets.length === 1 ? "y" : "ies"}?`,
       message: "Affected portal-managed identity authorities are revoked immediately.",
@@ -160,13 +233,17 @@
       targetLabel: "Portal policies",
       targetName: `${targets.length} policies`,
       expectedValue: bulkExpectedCount(targets.length),
-      details: bulkTargetDetails(targets.map((policy) => `${policy.portalId} / ${policy.participantId}`)),
+      details: bulkTargetDetails(intents.map((intent) => intent.label)),
     });
-    if (!confirmed) return;
-    await removePolicies(targets);
+    if (!confirmed || disposed || incomplete || intents.some((intent) => !isIntentCurrent(intent, { routeKey: "/admin/grants" }))) return;
+
+    await removePolicies(intents);
   }
 
-  onMount(() => void load());
+  onMount(() => {
+    void load();
+    return () => { disposed = true; };
+  });
 </script>
 
 <section class="space-y-4">
@@ -175,12 +252,18 @@
       <label class="sr-only" for="grant-search">Search portal grant policies</label>
       <input id="grant-search" class="input input-bordered input-sm w-72" placeholder="Search portal or app" bind:value={search} />
       <a class="btn btn-outline btn-sm" href={resolve("/admin/grants/new")}>New policy</a>
-      <button class="btn btn-ghost btn-sm" onclick={() => void load()} disabled={busy}>Refresh</button>
+      <button class="btn btn-ghost btn-sm" onclick={() => void load()} disabled={loading || removing !== null || bulkBusy || uncertain}>Refresh</button>
     {/snippet}
   </PageToolbar>
 
   {#if error}<Notice variant="error">{error}</Notice>{/if}
   {#if saved}<Notice variant="success">{saved}</Notice>{/if}
+  {#if incomplete && !loading}<Notice variant="warning">Portal grant catalog incomplete. Refresh before removing a listed policy.</Notice>{/if}
+  {#if unknownPolicies.length > 0}
+    <Notice variant="warning">
+      Removal outcome unknown for {unknownPolicies.join(", ")}. Inspect the policies and reload before any further removal.
+    </Notice>
+  {/if}
 
   {#if loading}
     <Panel><LoadingState label="Loading portal grant policies" /></Panel>
@@ -188,11 +271,10 @@
     <Panel title="Portal grant policies" eyebrow="Trusted browser authority">
       {#if bulkResult}
         <BulkResult
-          succeeded={bulkResult.succeeded}
-          failed={bulkResult.failed}
-          pastTense="policies removed"
-          onRetry={failedPolicies.length > 0 ? () => void removePolicies(failedPolicies) : undefined}
-          onDismiss={() => { bulkResult = null; }}
+            succeeded={bulkResult.succeeded}
+            failed={bulkResult.failed}
+            pastTense="policies removed"
+            onDismiss={() => { bulkResult = null; }}
         />
       {:else if selectedPolicies.size > 0}
         <BulkActionBar count={selectedPolicies.size} noun="policy" onClear={() => selectedPolicies.clear()}>
@@ -203,7 +285,9 @@
           {/snippet}
         </BulkActionBar>
       {/if}
-      {#if policies.length === 0}
+      {#if incomplete && policies.length === 0}
+        <EmptyState title="Portal grant catalog unavailable" description="Refresh to load the complete catalog before taking actions." />
+      {:else if policies.length === 0}
         <EmptyState title="No portal grant policies" description="Browser logins continue through ordinary per-user consent." />
       {:else}
         <DataTable size="xs" fixed class="min-w-[980px] border-b border-base-300 bg-base-100/30">
@@ -234,7 +318,7 @@
                   <input
                     type="checkbox"
                     class="checkbox checkbox-xs"
-                    aria-label={`Select {policy.portalId} {policy.participantId}`}
+                    aria-label={`Select ${policy.portalId} ${policy.participantId}`}
                     disabled={busy}
                     checked={selectedPolicies.has(key(policy))}
                     onchange={() => toggleId(selectedPolicies, key(policy))}

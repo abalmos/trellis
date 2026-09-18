@@ -34,6 +34,7 @@ export const routeTitles = {
   "/admin": "Overview",
   "/admin/users": "Users",
   "/admin/users/edit": "Edit User",
+  "/admin/users/new": "Create User",
   "/admin/sessions": "Sessions",
   "/admin/services": "Services",
   "/admin/devices": "Devices",
@@ -50,10 +51,15 @@ export const routeTitles = {
   "/admin/events": "Events",
   "/admin/jobs": "Jobs",
   "/admin/grants": "Grants",
+  "/admin/grants/new": "Edit Portal Grant Policy",
+  "/admin/apps": "User Grants",
+  "/admin/apps/revoke": "Revoke User Grant",
   "/admin/capability-groups": "Capability Groups",
   "/admin/capability-groups/edit": "Edit Capability Group",
   "/admin/capability-groups/new": "New Capability Group",
   "/admin/portals": "Portals",
+  "/admin/portals/new": "Create Portal",
+  "/admin/portals/edit": "Edit Portal",
   "/admin/portals/login": "Portal Policy",
   "/admin/portals/login/default": "Built-In Login Portal",
   "/admin/portals/login/selection": "Portal Routes",
@@ -61,6 +67,18 @@ export const routeTitles = {
   "/admin/portals/devices/default": "Default Device Portal",
   "/admin/portals/devices/selection": "Device Portal Selection",
 } as const;
+
+/**
+ * Titles for routes whose last path segment is an opaque target ID. The title
+ * depends only on the current path, so a target change replaces it immediately
+ * and no previous target's name can linger.
+ */
+const detailRouteTitles: ReadonlyArray<
+  readonly [prefix: string, title: string]
+> = [
+  ["/admin/services/", "Service Deployment"],
+  ["/admin/jobs/", "Job"],
+];
 
 type AppPathname = keyof typeof routeTitles;
 
@@ -285,7 +303,11 @@ function hasRouteTitle(pathname: string): pathname is keyof typeof routeTitles {
 }
 
 export function getPageTitle(pathname: string): string {
-  return hasRouteTitle(pathname) ? routeTitles[pathname] : "Trellis";
+  if (hasRouteTitle(pathname)) return routeTitles[pathname];
+  const detail = detailRouteTitles.find(([prefix]) =>
+    pathname.startsWith(prefix) && pathname.length > prefix.length
+  );
+  return detail?.[1] ?? "Trellis";
 }
 
 export function getRoleLabel(

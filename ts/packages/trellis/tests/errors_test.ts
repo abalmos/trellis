@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import {
   AuthError,
+  machineErrorCode,
   OperationAlreadyTerminalError,
   OperationMismatchError,
   OperationNotFoundError,
@@ -239,4 +240,45 @@ Deno.test("Error - instance properties appear in serialization", () => {
   assertEquals(serialized.message, "Auth failed: invalid_request");
   assertEquals(serialized.reason, "invalid_request");
   assertEquals(serialized.context, { userId: "123" });
+});
+
+Deno.test("machineErrorCode reads every Trellis error shape", async (t) => {
+  await t.step("generated declared error carries its code under data", () => {
+    assertEquals(
+      machineErrorCode({
+        name: "AuthError",
+        data: { code: "approval_required", message: "approve" },
+      }),
+      "approval_required",
+    );
+  });
+
+  await t.step("built-in error carries its code as reason", () => {
+    assertEquals(
+      machineErrorCode({ reason: "session_not_found" }),
+      "session_not_found",
+    );
+  });
+
+  await t.step("undecoded remote error carries its code on remoteError", () => {
+    assertEquals(
+      machineErrorCode({
+        remoteError: { type: "trellis.auth@v1::AuthError", code: "conflict" },
+      }),
+      "conflict",
+    );
+  });
+
+  await t.step("a top-level code wins over nested shapes", () => {
+    assertEquals(
+      machineErrorCode({ code: "revision_conflict", data: { code: "other" } }),
+      "revision_conflict",
+    );
+  });
+
+  await t.step("unrecognized values have no code", () => {
+    assertEquals(machineErrorCode(undefined), undefined);
+    assertEquals(machineErrorCode("boom"), undefined);
+    assertEquals(machineErrorCode({ message: "no code here" }), undefined);
+  });
 });

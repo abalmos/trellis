@@ -1,8 +1,12 @@
 <script lang="ts">
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
-  import { resolve } from "$lib/console_paths";
+  import { type apis } from "trellis-web-generated";
+  import { resolve, consoleUrl } from "$lib/console_paths";
   import { onMount } from "svelte";
+  import { tablePage } from "$lib/console/paging.ts";
+  import { getConsoleAuthority } from "$lib/console/authority.svelte.ts";
+  import { captureIntent, MutationController, type MutationIntent } from "$lib/console/mutation.ts";
   import ActionMenu from "$lib/components/ActionMenu.svelte";
   import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";
   import DataTable from "$lib/components/DataTable.svelte";
@@ -28,15 +32,19 @@
   };
 
   const trellis = getTrellis();
+  const authority = getConsoleAuthority();
+  const removal = new MutationController<apis.auth.PortalsRemoveInput, apis.auth.PortalsRemoveOutput>();
+  let disposed = false;
   let loading = $state(true);
   let removingPortalId = $state<string | null>(null);
   let error = $state<string | null>(null);
   let saved = $state<string | null>(null);
+  let uncertain = $state(false);
   let portals = $state.raw<Portal[]>([]);
   let confirmationModal: ConfirmationModal | undefined = $state();
 
   const activePortalCount = $derived(portals.filter((portal) => !portal.disabled).length);
-  const busy = $derived(loading || removingPortalId !== null);
+  const busy = $derived(loading || removingPortalId !== null || uncertain);
 
   function closeActionMenus(event: MouseEvent): void {
     if (event.target instanceof Element && event.target.closest("[data-action-menu]")) return;
@@ -50,12 +58,19 @@
     loading = true;
     error = null;
     try {
-      const portalsResponse = await trellis.portalsList({ limit: 100 }).take();
+      const portalsResponse = await trellis.portalsList({
+        page: tablePage(),
+      }).take();
       if (isErr(portalsResponse)) {
         error = errorMessage(portalsResponse);
         return;
       }
-      portals = portalsResponse.items.map((portal) => ({ ...portal, routeCount: 0, activeRouteCount: 0 }));
+      // Built-in state comes from the record, never from display text.
+      portals = portalsResponse.items.map((portal) => ({
+        ...portal,
+        routeCount: 0,
+        activeRouteCount: 0,
+      }));
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -63,21 +78,30 @@
     }
   }
 
-  async function removePortal(portal: Portal) {
-    if (portal.builtIn || portal.routeCount > 0) return;
-    removingPortalId = portal.portalId;
+  async function removePortal(intent: MutationIntent<apis.auth.PortalsRemoveInput>) {
     error = null;
     saved = null;
     try {
-      const response = await trellis.portalsRemove({
-        portalId: portal.portalId,
-        expectedVersion: portal.version,
-        idempotencyKey: ulid(),
-      }).take();
-      if (isErr(response)) {
-        error = errorMessage(response);
+      const outcome = await removal.send({
+        isStillValid: () => !disposed && portals.some((portal) => portal.portalId === intent.targetId && !portal.builtIn &&
+
+            portal.routeCount === 0 && portal.version === intent.input.expectedVersion),
+        dispatch: async ({ input }) => await trellis.portalsRemove(input).orThrow(),
+      });
+      if (!outcome) return;
+      if (disposed) {
+        uncertain = true;
+        error = "Authorization changed during removal. Inspect the portal list and reload before another change.";
         return;
       }
+      if (outcome.kind !== "succeeded") {
+        if (outcome.kind === "unknown") {
+          uncertain = true;
+          error = "Portal removal outcome unknown. Inspect the portal list and reload before another change.";
+        } else error = errorMessage(outcome.error);
+        return;
+      }
+      const response = outcome.value;
       saved = response.removed ? "Portal removed." : "Portal was already absent.";
       await load();
     } catch (e) {
@@ -88,7 +112,17 @@
   }
 
   async function requestRemovePortal(portal: Portal) {
-    if (portal.builtIn || portal.routeCount > 0) return;
+    if (busy || portal.builtIn || portal.routeCount > 0 || false) return;
+
+    const key = ulid();
+    const intent = captureIntent<apis.auth.PortalsRemoveInput>({
+      operation: "portalsRemove", targetId: portal.portalId, label: portal.displayName,
+      expectedValue: portal.portalId, idempotencyKey: key,
+      input: { portalId: portal.portalId, expectedVersion: portal.version, idempotencyKey: key },
+      scope: { routeKey: "portal-list" },
+    });
+    if (!removal.begin(intent)) return;
+    removingPortalId = portal.portalId;
     const confirmed = await confirmationModal?.confirm({
       title: "Delete portal?",
       message: "This removes the portal record. Portal routes must be removed first.",
@@ -97,10 +131,17 @@
       targetName: portal.portalId,
       expectedValue: portal.portalId,
     });
-    if (confirmed) await removePortal(portal);
+    if (confirmed) await removePortal(intent);
+    else {
+      removal.cancel();
+      removingPortalId = null;
+    }
   }
 
-  onMount(() => { void load(); });
+  onMount(() => {
+    void load();
+    return () => { disposed = true; };
+  });
 </script>
 
 <svelte:document onclick={closeActionMenus} />
@@ -122,7 +163,7 @@
   {#if loading}
     <Panel><LoadingState label="Loading portals" /></Panel>
   {:else}
-    <Panel title="Portals" eyebrow={`${activePortalCount} active / ${portals.length} visible`}>
+    <Panel title="Portals" eyebrow={`${activePortalCount} active / ${portals.length} on this page`}>
       {#snippet actions()}
         <a class="btn btn-outline btn-xs" href={resolve("/admin/portals/new")}>New portal</a>
       {/snippet}
@@ -156,7 +197,7 @@
                   <td class="hidden text-xs text-base-content/60 lg:table-cell">{formatDate(portal.updatedAt)}</td>
                   <td class="text-right">
                     <ActionMenu widthClass="w-44" dataActionMenu>
-                        <li><a href={resolve(`/admin/portals/edit?portalId=${encodeURIComponent(portal.portalId)}`)}>Edit</a></li>
+                        <li><a href={consoleUrl("/admin/portals/edit", { query: { portalId: portal.portalId } })}>Edit</a></li>
                         {#if !portal.builtIn}
                           <li>
                             <button class="text-error" onclick={() => requestRemovePortal(portal)} disabled={busy || portal.routeCount > 0} title={portal.routeCount > 0 ? "Remove routes first" : "Delete portal"}>{removingPortalId === portal.portalId ? "Deleting" : "Delete"}</button>

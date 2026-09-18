@@ -1,7 +1,7 @@
 <script lang="ts">
   import { isErr } from "@qlever-llc/result";
   import { type apis } from "trellis-web-generated";
-  import { onMount } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import DataTable from "$lib/components/DataTable.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import InlineMetricsStrip from "$lib/components/InlineMetricsStrip.svelte";
@@ -11,13 +11,18 @@
   import Panel from "$lib/components/Panel.svelte";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
   import Term from "$lib/components/Term.svelte";
+  import { displayJson } from "$lib/console/display_value.ts";
   import { errorMessage, formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
   import { nextCursorPage, previousCursorPage } from "$lib/cursor_history.ts";
+  import { TABLE_PAGE_LIMIT } from "$lib/console/paging.ts";
+  import { getConsoleAuthority } from "$lib/console/authority.svelte.ts";
+  import { LiveSubscription, RefreshScheduler } from "$lib/console/live_refresh.ts";
 
   type Participant = apis.health.QueryOutput["items"][number];
 
   const trellis = getTrellis();
+  const authority = getConsoleAuthority();
   const RPC_TIMEOUT_MS = 10_000;
 
   let snapshot = $state.raw<apis.health.QueryOutput | null>(null);
@@ -28,6 +33,19 @@
   let detailLoading = $state(false);
   let error = $state<string | null>(null);
   let watchError = $state<string | null>(null);
+  let summaryError = $state<string | null>(null);
+  let metricsError = $state<string | null>(null);
+  let detailSequence = 0;
+  let loadSequence = 0;
+  let disposed = false;
+  let watchController: AbortController | null = null;
+  let subscription: LiveSubscription | null = null;
+  const refreshScheduler = new RefreshScheduler({
+    delayMs: 250,
+    canRefresh: () => !disposed && document.visibilityState === "visible",
+    onRefresh: refresh,
+    onRefreshError: (cause) => { watchError = errorMessage(cause); },
+  });
   let selectedKey = $state<string | null>(null);
   let cursor = $state<string | undefined>();
   let cursorBackStack = $state<string[]>([]);
@@ -51,10 +69,10 @@
     ),
   );
   const metrics = $derived([
-    { label: "Participants", value: summary?.count.toString() ?? "0", detail: "Service and device groups" },
-    { label: "Instances", value: instanceCount, detail: "Retained runtime identities" },
-    { label: "Offline", value: offlineCount, detail: "Past heartbeat deadline" },
-    { label: "Revision", value: summary?.projection.revision.toString() ?? "0", detail: "Committed projection state" },
+    { label: "Participants", value: summary?.count.toString() ?? "Unavailable", detail: "Service and device groups" },
+    { label: "Instances", value: instanceCount, detail: "On this page" },
+    { label: "Offline", value: offlineCount, detail: "On this page, past heartbeat deadline" },
+    { label: "Revision", value: summary?.projection.revision.toString() ?? "Unavailable", detail: "Committed projection state" },
   ]);
 
   function participantKey(participant: Participant): string {
@@ -85,76 +103,113 @@
   }
 
   function formatJson(value: unknown): string {
-    return JSON.stringify(value, null, 2);
+    return displayJson(value);
   }
 
   async function loadParticipants(): Promise<void> {
-    const [result, summaryResult] = await Promise.all([
-      trellis.healthQuery({ page: { cursor, limit: 200 } }, { timeout: RPC_TIMEOUT_MS }).take(),
+    const sequence = ++loadSequence;
+    summaryError = null;
+    // Query is primary; Summary is an independent panel.
+    const [result, summaryResult] = await Promise.allSettled([
+      trellis.healthQuery(
+        { page: { ...(cursor === undefined ? {} : { cursor }), limit: TABLE_PAGE_LIMIT } },
+        { timeout: RPC_TIMEOUT_MS },
+      ).take(),
       trellis.healthSummary({}, { timeout: RPC_TIMEOUT_MS }).take(),
     ]);
-    if (isErr(result)) throw result;
-    if (isErr(summaryResult)) throw summaryResult;
-    snapshot = result;
-    nextCursor = result.page.nextCursor;
-    summary = summaryResult;
-    if (!selectedKey && result.items[0]) {
-      selectedKey = participantKey(result.items[0]);
+    if (sequence !== loadSequence || disposed) return;
+    if (result.status === "rejected") throw result.reason;
+    if (isErr(result.value)) throw result.value;
+    snapshot = result.value;
+    nextCursor = result.value.page.nextCursor;
+    if (!selectedKey && result.value.items[0]) {
+      selectedKey = participantKey(result.value.items[0]);
+    }
+    if (summaryResult.status === "fulfilled" && summaryResult.value !== null && !isErr(summaryResult.value)) {
+      summary = summaryResult.value;
+    } else {
+      summary = null;
+      summaryError = summaryResult.status === "rejected" ? errorMessage(summaryResult.reason) : summaryResult.value === null ? "Health summary is not permitted." : errorMessage(summaryResult.value);
     }
   }
 
   function goPrevious() {
-    ({ cursor, back: cursorBackStack } = previousCursorPage({ cursor, back: cursorBackStack }));
+    const previous = { cursor, back: cursorBackStack };
+    ({ cursor, back: cursorBackStack } = previousCursorPage(previous));
     selectedKey = null;
-    void refresh();
+    void refresh().then(() => {
+      // A failed page retains the last valid cursor and page data.
+      if (error !== null) {
+        cursor = previous.cursor;
+        cursorBackStack = previous.back;
+      }
+    });
   }
 
   function goNext() {
     if (!nextCursor) return;
-    ({ cursor, back: cursorBackStack } = nextCursorPage({ cursor, back: cursorBackStack }, nextCursor));
+    const previous = { cursor, back: cursorBackStack };
+    ({ cursor, back: cursorBackStack } = nextCursorPage(previous, nextCursor));
     selectedKey = null;
-    void refresh();
+    void refresh().then(() => {
+      if (error !== null) {
+        cursor = previous.cursor;
+        cursorBackStack = previous.back;
+      }
+    });
   }
 
   async function loadDetail(participant: Participant | null): Promise<void> {
+    const sequence = ++detailSequence;
+    metricsError = null;
     if (!participant) {
       inspection = null;
       healthMetrics = null;
       return;
     }
+    // Capture the exact identity before awaiting so a fast selection change
+    // cannot show A's metrics under B's title.
+    const participantKind = participant.participantKind;
+    const contractId = participant.contractId;
     detailLoading = true;
     const end = new Date();
     const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+    const [inspectResult, metricsResult] = await Promise.allSettled([
+      trellis.healthInspect(
+        { participantKind, contractId, historyLimit: 100n },
+        { timeout: RPC_TIMEOUT_MS },
+      ).take(),
+      trellis.healthMetrics({
+        participantKind,
+        contractId,
+        start: start.toISOString(),
+        end: end.toISOString(),
+        stepMs: 60n * 60n * 1000n,
+      }, { timeout: RPC_TIMEOUT_MS }).take(),
+    ]);
+    if (sequence !== detailSequence || disposed) return;
     try {
-      const [inspectResult, metricsResult] = await Promise.all([
-        trellis.healthInspect({
-            participantKind: participant.participantKind,
-            contractId: participant.contractId,
-            historyLimit: 100n,
-          },
-          { timeout: RPC_TIMEOUT_MS },
-        ).take(),
-        trellis.healthMetrics({
-            participantKind: participant.participantKind,
-            contractId: participant.contractId,
-            start: start.toISOString(),
-            end: end.toISOString(),
-            stepMs: 60n * 60n * 1000n,
-          },
-          { timeout: RPC_TIMEOUT_MS },
-        ).take(),
-      ]);
-      if (isErr(inspectResult)) throw inspectResult;
-      if (isErr(metricsResult)) throw metricsResult;
-      inspection = inspectResult;
-      healthMetrics = metricsResult;
+      if (inspectResult.status === "fulfilled" && inspectResult.value !== null && !isErr(inspectResult.value)) {
+        inspection = inspectResult.value;
+      } else {
+        inspection = null;
+        error = inspectResult.status === "rejected" ? errorMessage(inspectResult.reason) : inspectResult.value === null ? "Health inspection is not permitted." : errorMessage(inspectResult.value);
+      }
+      // A valid inspection is retained when only metrics fail.
+      if (metricsResult.status === "fulfilled" && metricsResult.value !== null && !isErr(metricsResult.value)) {
+        healthMetrics = metricsResult.value;
+      } else {
+        healthMetrics = null;
+        metricsError = metricsResult.status === "rejected" ? errorMessage(metricsResult.reason) : metricsResult.value === null ? "Health metrics are not permitted." : errorMessage(metricsResult.value);
+      }
     } finally {
-      detailLoading = false;
+      if (sequence === detailSequence && !disposed) detailLoading = false;
     }
   }
 
   async function refresh(): Promise<void> {
     await loadParticipants();
+    if (disposed) return;
     await loadDetail(selectedParticipant);
   }
 
@@ -168,44 +223,63 @@
     }
   }
 
-  onMount(() => {
-    const controller = new AbortController();
-    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-    void (async () => {
-      try {
-        await refresh();
-      } catch (cause) {
-        error = errorMessage(cause);
-      } finally {
-        loading = false;
-      }
+  function stopWatch() {
+    watchController?.abort();
+    watchController = null;
+    void subscription?.dispose();
+    subscription = null;
+  }
 
-      try {
-        const result = await trellis.healthWatch(
-          {},
-          { signal: controller.signal },
-        ).take();
-        if (isErr(result)) {
-          watchError = errorMessage(result);
-          return;
-        }
-        for await (const _event of result) {
-          if (refreshTimer !== undefined) clearTimeout(refreshTimer);
-          refreshTimer = setTimeout(() => {
-            void refresh().catch((cause) => {
-              watchError = errorMessage(cause);
-            });
-          }, 250);
-        }
-      } catch (cause) {
-        if (!controller.signal.aborted) watchError = errorMessage(cause);
-      }
-    })();
+  function startWatch() {
+    stopWatch();
+    const live = new LiveSubscription({
+      subscribe: async () => {
+        const controller = new AbortController();
+        watchController = controller;
+        const result = await trellis.healthWatch({}, { signal: controller.signal }).take();
+        if (isErr(result)) throw result;
+        void (async () => {
+          try {
+            for await (const _event of result) {
+              if (controller.signal.aborted || disposed) return;
+              refreshScheduler.notify();
+            }
+            if (!controller.signal.aborted) live.closed();
+          } catch (cause) {
+            if (!controller.signal.aborted) live.closed(cause);
+          }
+        })();
+      },
+      unsubscribe: () => watchController?.abort(),
+      onStatus: (status, detail) => {
+        if (disposed) return;
+        watchError = status === "reconnecting"
+          ? `Health watch disconnected; retry ${detail?.attempt ?? 1} in ${((detail?.retryInMs ?? 1_000) / 1_000).toFixed(0)}s. Manual refresh remains available.`
+          : null;
+      },
+    });
+    subscription = live;
+    void live.start();
+  }
 
+  $effect(() => {
+untrack(() => {
+      void refresh().catch((cause) => { if (!disposed) error = errorMessage(cause); }).finally(() => { if (!disposed) loading = false; });
+      startWatch();
+    });
     return () => {
-      controller.abort();
-      if (refreshTimer !== undefined) clearTimeout(refreshTimer);
+      ++loadSequence;
+      ++detailSequence;
+      stopWatch();
     };
+  });
+
+  onDestroy(() => {
+    disposed = true;
+    ++loadSequence;
+    ++detailSequence;
+    stopWatch();
+    refreshScheduler.dispose();
   });
 </script>
 
@@ -219,6 +293,16 @@
 
   {#if error}<Notice variant="error">{error}</Notice>{/if}
   {#if watchError}<Notice variant="warning">Live refresh unavailable: {watchError}</Notice>{/if}
+  {#if summaryError}
+    <Notice variant="warning" role="status">
+      Participant summary unavailable: {summaryError} Participant rows are unaffected.
+    </Notice>
+  {/if}
+  {#if metricsError}
+    <Notice variant="warning" role="status">
+      Metrics unavailable for the selected participant: {metricsError}
+    </Notice>
+  {/if}
   {#if summary?.projection.gapDetected}
     <Notice variant="warning">Projection history contains a transport retention gap. Current participant state may be incomplete.</Notice>
   {/if}

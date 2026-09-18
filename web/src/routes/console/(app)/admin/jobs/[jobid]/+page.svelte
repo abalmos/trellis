@@ -3,6 +3,7 @@
   import { afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { onDestroy, onMount } from "svelte";
+  import { RefreshScheduler } from "$lib/console/live_refresh.ts";
   import DataTable from "$lib/components/DataTable.svelte";
   import ConfirmationModal from "$lib/components/ConfirmationModal.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
@@ -33,8 +34,11 @@
   } from "$lib/jobs_page.ts";
   import { loadJobsMetrics, type JobsMetrics } from "$lib/jobs_metrics.ts";
   import { getTrellis } from "$lib/trellis";
+  import { getConsoleAuthority } from "$lib/console/authority.svelte.ts";
+  import { classifyMutationError } from "$lib/console/mutation.ts";
 
   const trellis = getTrellis();
+  const authority = getConsoleAuthority();
   type Inspection = JobInspection;
   type Job = Inspection["job"];
   type WaitEdge = NonNullable<Job["waitingOn"]>[number];
@@ -53,7 +57,11 @@
   let copyFlash = $state<string | null>(null);
   let copyFlashTimer: ReturnType<typeof setTimeout> | undefined;
   let watchController: AbortController | undefined;
-  let watchReloadTimer: ReturnType<typeof setTimeout> | undefined;
+  let watchedJobId: string | null = null;
+  /** True only while a usable watch is actually established. */
+  let watchLive = $state(false);
+  /** Set on disposal so no read, timer, or feed work runs afterwards. */
+  let disposed = false;
   let loadSequence = 0;
   let activeAttemptIndex = $state(0);
   let confirmationModal: ConfirmationModal | undefined = $state();
@@ -148,8 +156,8 @@
     if (!job) return UNSET;
     const start = job.startedAt ?? job.createdAt;
     if (!start) return UNSET;
-    const isTerminal = job.state === "completed" || job.state === "failed" || job.state === "dead" ||
-      job.state === "cancelled" || job.state === "dismissed" || job.state === "skipped" || job.state === "expired";
+    const isTerminal = job.state === "completed" || job.state === "failed" || job.state === "dead" || job.state === "cancelled" || job.state === "dismissed" || job.state === "skipped" || job.state === "expired";
+
     const end = isTerminal
       ? (job.completedAt ?? job.updatedAt ?? new Date().toISOString())
       : new Date().toISOString();
@@ -192,7 +200,7 @@
   async function load(id = currentJobId, showLoading = true) {
     const sequence = ++loadSequence;
     loadedJobId = id;
-    stopJobsWatch();
+    if (watchedJobId !== id) stopJobsWatch();
     if (showLoading) loading = true;
     error = null;
     unavailableMessage = null;
@@ -201,20 +209,20 @@
       const data = await loadJobDetailData({
         inspect: (input) => trellis.jobsInspect(input),
       }, id);
-      if (sequence !== loadSequence) return;
+      if (sequence !== loadSequence || disposed) return;
       unavailableMessage = data.available ? null : data.message ?? "Jobs admin runtime is unavailable.";
       inspection = data.inspection;
       const attemptCount = data.inspection?.attempts.length ?? 0;
       activeAttemptIndex = attemptCount > 0 ? attemptCount - 1 : 0;
-      if (data.available) startJobsWatch(id);
+      if (data.available) ensureJobsWatch(id);
       void loadJobMetrics();
     } catch (e) {
-      if (sequence !== loadSequence) return;
+      if (sequence !== loadSequence || disposed) return;
       error = errorMessage(e);
       unavailableMessage = null;
       inspection = undefined;
     } finally {
-      if (showLoading && sequence === loadSequence) loading = false;
+      if (showLoading && sequence === loadSequence && !disposed) loading = false;
     }
   }
 
@@ -226,6 +234,7 @@
 
   async function runAction(name: "cancel" | "retry" | "replay" | "dismiss") {
     const actionJobId = job?.id ?? currentJobId;
+    if (disposed || actionJobId !== currentJobId) return;
     actionBusy = name;
     error = null;
     try {
@@ -238,11 +247,13 @@
       } else {
         await dismissDlqJob({ action: (input) => trellis.dismissDlq(input) }, actionJobId);
       }
-      await load(actionJobId);
+      if (!disposed && currentJobId === actionJobId) await load(actionJobId);
     } catch (e) {
-      error = errorMessage(e);
+      if (!disposed && currentJobId === actionJobId) error = classifyMutationError(e).kind === "unknown"
+        ? "Job action outcome unknown. Inspect this job before attempting another action."
+        : errorMessage(e);
     } finally {
-      actionBusy = null;
+      if (!disposed) actionBusy = null;
     }
   }
 
@@ -266,28 +277,26 @@
             targetName: actionJobId,
           },
     );
-    if (!confirmed) return;
+    if (!confirmed || disposed || actionJobId !== currentJobId || job?.id !== actionJobId) return;
     await runAction(name);
   }
 
-  function clearWatchReload() {
-    if (!watchReloadTimer) return;
-    clearTimeout(watchReloadTimer);
-    watchReloadTimer = undefined;
-  }
-
-  function scheduleWatchReload(id: string) {
-    clearWatchReload();
-    watchReloadTimer = setTimeout(() => {
-      watchReloadTimer = undefined;
-      void load(id, false);
-    }, 350);
-  }
+  const watchScheduler = new RefreshScheduler({
+    onRefresh: () => {
+      const id = watchedJobId;
+      if (id === null || disposed) return Promise.resolve();
+      return load(id, false);
+    },
+    onRefreshError: (cause) => {
+      error = errorMessage(cause);
+    },
+  });
 
   function stopJobsWatch() {
     watchController?.abort();
     watchController = undefined;
-    clearWatchReload();
+    watchedJobId = null;
+    watchLive = false;
   }
 
   async function loadJobMetrics() {
@@ -304,7 +313,7 @@
           window: "1h",
         },
       );
-      if (sequence !== metricsSequence) return;
+      if (sequence !== metricsSequence || disposed) return;
       if (payload.available && payload.metrics) {
         metrics = payload.metrics;
         metricsUnavailable = false;
@@ -313,7 +322,7 @@
         metricsUnavailable = true;
       }
     } catch {
-      if (sequence !== metricsSequence) return;
+      if (sequence !== metricsSequence || disposed) return;
       metrics = null;
       metricsUnavailable = false;
     }
@@ -347,8 +356,8 @@
     if (!job) return null;
     const start = job.startedAt ?? job.createdAt;
     if (!start) return null;
-    const isTerminal = job.state === "completed" || job.state === "failed" || job.state === "dead" ||
-      job.state === "cancelled" || job.state === "dismissed" || job.state === "skipped" || job.state === "expired";
+    const isTerminal = job.state === "completed" || job.state === "failed" || job.state === "dead" || job.state === "cancelled" || job.state === "dismissed" || job.state === "skipped" || job.state === "expired";
+
     const end = isTerminal
       ? (job.completedAt ?? job.updatedAt ?? null)
       : new Date().toISOString();
@@ -385,20 +394,39 @@
     return Math.min(1, Math.max(0, baseline.p50 / baseline.p95));
   }
 
-  function startJobsWatch(id: string) {
+  /**
+   * One watch per semantic scope. `load()` must not call this on a refresh, or
+   * every data read would replace the subscription.
+   */
+  function ensureJobsWatch(id: string) {
+    if (false) return;
+    if (watchedJobId === id && watchController !== undefined) return;
     stopJobsWatch();
+    watchedJobId = id;
     const controller = new AbortController();
     watchController = controller;
 
     void (async () => {
       try {
-        const stream = await trellis.jobsWatch({ includeInitial: false, jobId: id }, { signal: controller.signal }).orThrow();
+        const stream = await trellis.jobsWatch(
+          { includeInitial: false, jobId: id },
+          { signal: controller.signal },
+        ).orThrow();
+        if (controller.signal.aborted || disposed) return;
+        watchLive = true;
         for await (const _event of stream) {
-          if (controller.signal.aborted) return;
-          scheduleWatchReload(id);
+          if (controller.signal.aborted || disposed) return;
+          watchScheduler.notify();
         }
+        // A completed stream means the watch is no longer established; the
+        // page keeps its last snapshot and manual refresh stays available.
+        watchLive = false;
+        if (watchController === controller) watchController = undefined;
       } catch {
-        // Jobs.Watch is optional; manual refresh remains available.
+        if (!controller.signal.aborted) {
+          watchLive = false;
+          if (watchController === controller) watchController = undefined;
+        }
       }
     })();
   }
@@ -412,7 +440,11 @@
   });
 
   onDestroy(() => {
+    disposed = true;
+    ++loadSequence;
+    ++metricsSequence;
     stopJobsWatch();
+    watchScheduler.dispose();
     if (copyFlashTimer) clearTimeout(copyFlashTimer);
   });
 </script>
@@ -448,6 +480,11 @@
             </button>
           {/if}
           <a class="btn btn-ghost btn-sm" href={resolve("/admin/jobs")}>Back</a>
+          {#if watchLive}
+            <span class="badge badge-success badge-sm" title="A live job watch is established">Live</span>
+          {:else}
+            <span class="badge badge-neutral badge-sm" title="No live watch; use Refresh">Not live</span>
+          {/if}
           <button class="btn btn-ghost btn-sm" onclick={() => load()} disabled={loading || actionBusy !== null}>Refresh</button>
         </div>
       {/snippet}

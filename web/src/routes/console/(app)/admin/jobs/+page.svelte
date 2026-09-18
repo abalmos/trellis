@@ -2,7 +2,10 @@
   import { resolve } from "$lib/console_paths";
   import { afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
-  import { onMount } from "svelte";
+  import { onDestroy, untrack } from "svelte";
+  import { getConsoleAuthority } from "$lib/console/authority.svelte.ts";
+  import { LiveSubscription, RefreshScheduler } from "$lib/console/live_refresh.ts";
+  import { classifyMutationError } from "$lib/console/mutation.ts";
   import { type apis } from "trellis-web-generated";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import BulkActionBar from "$lib/components/BulkActionBar.svelte";
@@ -19,10 +22,16 @@
   import Term from "$lib/components/Term.svelte";
   import { boundedNumber, compactDuration, errorMessage } from "$lib/format";
   import { loadJobsMetrics } from "$lib/jobs_metrics.ts";
-  import { cancelJob, loadJobsPageData } from "$lib/jobs_page.ts";
+  import {
+    cancelJob,
+    loadJobsQueryPage,
+    loadJobsServices,
+    loadJobsSummary,
+  } from "$lib/jobs_page.ts";
   import { bulkExpectedCount, bulkTargetDetails, runBulk, toggleAll, toggleId } from "$lib/bulk.ts";
   import { getTrellis } from "$lib/trellis";
   import { nextCursorPage, previousCursorPage, resetCursorHistory } from "$lib/cursor_history.ts";
+  import { SvelteSet } from "svelte/reactivity";
 
   type Job = apis.jobs.QueryOutput["items"][number];
   type JobState = Job["state"];
@@ -32,6 +41,7 @@
   type JobPathname = `/admin/jobs/${string}` & {};
 
   const trellis = getTrellis();
+  const authority = getConsoleAuthority();
   const rpcTimeout = 10_000;
   const windows: Array<{ value: MetricsWindow; label: string; title: string }> = [
     { value: "15m", label: "15m", title: "Last 15 minutes" },
@@ -46,12 +56,14 @@
   let refreshing = $state(false);
   let error = $state<string | null>(null);
   let metricsError = $state<string | null>(null);
+  let summaryError = $state<string | null>(null);
+  let servicesError = $state<string | null>(null);
   let unavailableMessage = $state<string | null>(null);
   let services = $state.raw<ServiceInfo[]>([]);
   let jobs = $state.raw<Job[]>([]);
   let groups = $state.raw<apis.jobs.SummaryOutput["groups"]>([]);
   let stats = $state.raw<apis.jobs.SummaryOutput["stats"]>({ byState: {}, total: 0n });
-  let jobCount = $state(0n);
+  let jobCount = $state<bigint | null>(null);
   let cursor = $state<string | undefined>();
   let cursorBackStack = $state<string[]>([]);
   let nextCursor = $state<string | undefined>();
@@ -75,12 +87,21 @@
     }
   });
   let lastUpdated = $state<Date | null>(null);
+  let watchStatus = $state("Unavailable");
   let jobsSequence = 0;
   let metricsSequence = 0;
-  let selectedJobs = $state(new Set<string>());
+  let disposed = false;
+  let watchController: AbortController | null = null;
+  let subscription: LiveSubscription | null = null;
+  const refreshScheduler = new RefreshScheduler({
+    canRefresh: () => !disposed && document.visibilityState === "visible",
+    onRefresh: () => refresh(false),
+    onRefreshError: (cause) => { error = errorMessage(cause); },
+  });
+  const selectedJobs = new SvelteSet<string>();
   let bulkBusy = $state(false);
   let bulkResult = $state<{ succeeded: number; failed: string[] } | null>(null);
-  let failedJobs = $state.raw<Job[]>([]);
+  let bulkUnknown = $state<string[]>([]);
   let confirmationModal: ConfirmationModal | undefined = $state();
 
   const workerCount = $derived(services.reduce((sum, service) => sum + service.workers.length, 0));
@@ -125,23 +146,30 @@
     return "1h";
   }
 
-  async function cancelJobs(targets: Job[]) {
+  async function cancelJobs(targets: Job[], query: apis.jobs.QueryInput) {
     bulkBusy = true;
     bulkResult = null;
     const outcome = await runBulk(targets, async (job) => {
+      if (disposed || JSON.stringify(buildQuery()) !== JSON.stringify(query) ||
+
+        !cancellableJobs.some((current) => current.id === job.id && current.state === job.state)) {
+        throw new Error("Target or authority changed before dispatch; no cancellation sent.");
+      }
       await cancelJob({ action: (input) => trellis.cancel(input) }, job.id);
-    });
-    failedJobs = outcome.failed.map((failure) => failure.target);
+    }, (cause) => classifyMutationError(cause).kind === "unknown" ? "unknown" : "failed");
     for (const job of targets) selectedJobs.delete(job.id);
     bulkResult = {
       succeeded: outcome.succeeded,
       failed: outcome.failed.map((failure) => `${failure.target.id}: ${failure.reason}`),
     };
+    bulkUnknown = [...new Set([...bulkUnknown, ...outcome.unknown.map((item) => item.target.id)])];
     bulkBusy = false;
     void loadJobs();
   }
 
   async function requestBulkCancel() {
+    if (false) return;
+    const query = buildQuery();
     const targets = cancellableJobs.filter((job) => selectedJobs.has(job.id));
     if (targets.length === 0) return;
     const confirmed = await confirmationModal?.confirm({
@@ -153,8 +181,10 @@
       expectedValue: bulkExpectedCount(targets.length),
       details: bulkTargetDetails(targets.map((job) => `${job.type} ${job.id}`)),
     });
-    if (!confirmed) return;
-    await cancelJobs(targets);
+    if (!confirmed || disposed || targets.some((target) => !cancellableJobs.some((current) => current.id === target.id && current.state === target.state)) ||
+
+      JSON.stringify(buildQuery()) !== JSON.stringify(query)) return;
+    await cancelJobs(targets, query);
   }
 
   function focusStates(value: Focus): JobState[] {
@@ -206,31 +236,71 @@
     if (showLoading) loading = true;
     error = null;
     unavailableMessage = null;
-    try {
-      const data = await loadJobsPageData({
+    const query = buildQuery();
+    // The job query is the primary result; service discovery and summary are
+    // independent panels whose failure must not discard it.
+    const [queryResult, servicesResult, summaryResult] = await Promise.allSettled([
+      loadJobsQueryPage(
+        { queryJobs: (input) => trellis.jobsQuery(input, { timeout: rpcTimeout }) },
+        query,
+      ),
+      loadJobsServices({
         listServices: (input) => trellis.listServices(input, { timeout: rpcTimeout }),
-        queryJobs: (input) => trellis.jobsQuery(input, { timeout: rpcTimeout }),
-        summarizeJobs: (input) => trellis.jobsSummary(input, { timeout: rpcTimeout }),
-      }, buildQuery());
-      if (sequence !== jobsSequence) return;
-      unavailableMessage = data.available ? null : data.message ?? "Jobs admin runtime is unavailable.";
-      services = data.services;
-      jobs = data.jobs;
-      groups = data.groups;
-      stats = data.stats;
-      jobCount = data.count;
-      nextCursor = data.nextCursor;
+      }),
+      loadJobsSummary(
+        { summarizeJobs: (input) => trellis.jobsSummary(input, { timeout: rpcTimeout }) },
+        summaryScope(query),
+      ),
+    ]);
+    if (sequence !== jobsSequence || disposed) return;
+    try {
+      if (queryResult.status === "fulfilled") {
+        if (queryResult.value.available) {
+          jobs = queryResult.value.jobs;
+          nextCursor = queryResult.value.nextCursor;
+        } else {
+          unavailableMessage = queryResult.value.message;
+          jobs = [];
+          nextCursor = undefined;
+        }
+      } else {
+        throw queryResult.reason;
+      }
+      if (servicesResult.status === "fulfilled" && servicesResult.value.available) {
+        services = servicesResult.value.services;
+        servicesError = null;
+      } else {
+        services = [];
+        servicesError = servicesResult.status === "rejected"
+          ? errorMessage(servicesResult.reason)
+          : (servicesResult.value as { message: string }).message;
+      }
+      if (summaryResult.status === "fulfilled" && summaryResult.value.available) {
+        groups = summaryResult.value.groups;
+        stats = summaryResult.value.stats;
+        jobCount = summaryResult.value.count;
+        summaryError = null;
+      } else {
+        groups = [];
+        stats = { byState: {}, total: 0n };
+        jobCount = null;
+        summaryError = summaryResult.status === "rejected"
+          ? errorMessage(summaryResult.reason)
+          : (summaryResult.value as { message: string }).message;
+      }
     } catch (cause) {
-      if (sequence !== jobsSequence) return;
       error = errorMessage(cause);
       jobs = [];
-      groups = [];
-      stats = { byState: {}, total: 0n };
-      jobCount = 0n;
-      services = [];
+      nextCursor = undefined;
     } finally {
-      if (sequence === jobsSequence) loading = false;
+      loading = false;
     }
+  }
+
+  /** Common summary scope: supported filters without the focused state tab. */
+  function summaryScope(query: apis.jobs.QueryInput): apis.jobs.QueryInput {
+    const { page: _page, state: _state, sort: _sort, ...scope } = query;
+    return scope;
   }
 
   async function loadMetrics() {
@@ -242,7 +312,7 @@
         { metrics: (input) => trellis.jobsMetrics(input, { timeout: rpcTimeout }) },
         { groupBy: "type", step: resolveMetricsStep(metricsWindow), window: metricsWindow },
       );
-      if (sequence !== metricsSequence) return;
+      if (sequence !== metricsSequence || disposed) return;
       if (!payload.available) {
         metrics = null;
         metricsError = payload.message ?? "Jobs metrics are unavailable.";
@@ -250,11 +320,11 @@
       }
       metrics = payload.metrics ?? null;
     } catch (cause) {
-      if (sequence !== metricsSequence) return;
+      if (sequence !== metricsSequence || disposed) return;
       metrics = null;
       metricsError = errorMessage(cause);
     } finally {
-      if (sequence === metricsSequence) metricsLoading = false;
+      if (sequence === metricsSequence && !disposed) metricsLoading = false;
     }
   }
 
@@ -284,14 +354,27 @@
   }
 
   function goPrevious() {
-    ({ cursor, back: cursorBackStack } = previousCursorPage({ cursor, back: cursorBackStack }));
-    void loadJobs();
+    const previous = { cursor, back: cursorBackStack };
+    ({ cursor, back: cursorBackStack } = previousCursorPage(previous));
+    void loadJobs().then(() => {
+      // A failed page restores the previous cursor and keeps its data visible.
+      if (error !== null || unavailableMessage !== null) {
+        cursor = previous.cursor;
+        cursorBackStack = previous.back;
+      }
+    });
   }
 
   function goNext() {
     if (!nextCursor) return;
-    ({ cursor, back: cursorBackStack } = nextCursorPage({ cursor, back: cursorBackStack }, nextCursor));
-    void loadJobs();
+    const previous = { cursor, back: cursorBackStack };
+    ({ cursor, back: cursorBackStack } = nextCursorPage(previous, nextCursor));
+    void loadJobs().then(() => {
+      if (error !== null || unavailableMessage !== null) {
+        cursor = previous.cursor;
+        cursorBackStack = previous.back;
+      }
+    });
   }
 
   function selectWindow(value: MetricsWindow) {
@@ -356,8 +439,60 @@
     else if (id === "action" || id === "completed" || id === "failed" || id === "dead" || id === "backlog") selectFocus(id);
   }
 
-  onMount(() => {
-    void refresh(true);
+  function stopWatch() {
+    watchController?.abort();
+    watchController = null;
+    void subscription?.dispose();
+    subscription = null;
+    watchStatus = "Unavailable";
+  }
+
+  function startWatch() {
+    stopWatch();
+    const live = new LiveSubscription({
+      subscribe: async () => {
+        const controller = new AbortController();
+        watchController = controller;
+        const stream = await trellis.jobsWatch({ includeInitial: false }, { signal: controller.signal }).orThrow();
+        void (async () => {
+          try {
+            for await (const _event of stream) {
+              if (controller.signal.aborted || disposed) return;
+              refreshScheduler.notify();
+            }
+            if (!controller.signal.aborted) live.closed();
+          } catch (cause) {
+            if (!controller.signal.aborted) live.closed(cause);
+          }
+        })();
+      },
+      unsubscribe: () => watchController?.abort(),
+      onStatus: (status) => {
+        if (!disposed) watchStatus = status === "live" ? "Live" : status === "reconnecting" ? "Reconnecting" : status === "connecting" ? "Connecting" : "Offline";
+      },
+    });
+    subscription = live;
+    void live.start();
+  }
+
+  $effect(() => {
+untrack(() => {
+      void refresh(true);
+      startWatch();
+    });
+    return () => {
+      ++jobsSequence;
+      ++metricsSequence;
+      stopWatch();
+    };
+  });
+
+  onDestroy(() => {
+    disposed = true;
+    ++jobsSequence;
+    ++metricsSequence;
+    stopWatch();
+    refreshScheduler.dispose();
   });
 </script>
 
@@ -384,7 +519,7 @@
   </PageToolbar>
 
   {#if lastUpdated}
-    <p class="jobs-updated">Updated {lastUpdated.toLocaleTimeString()}</p>
+    <p class="jobs-updated">Updated {lastUpdated.toLocaleTimeString()} · Live updates: <span aria-live="polite">{watchStatus}</span></p>
   {/if}
 
   {#if error}
@@ -393,14 +528,36 @@
     <Notice variant="info" role="status">{unavailableMessage} Job processing can continue while visibility is unavailable.</Notice>
   {/if}
 
+  {#if servicesError}
+    <Notice variant="warning" role="status">
+      Service discovery is unavailable: {servicesError} Job results are unaffected.
+    </Notice>
+  {/if}
+
+  {#if summaryError}
+    <Notice variant="warning" role="status">
+      The job summary is unavailable: {summaryError} Job results are unaffected.
+    </Notice>
+  {/if}
+
+  {#if bulkUnknown.length > 0}
+    <Notice variant="warning" role="status">
+      Cancellation outcome unknown for {bulkUnknown.join(", ")}. Inspect each job before any further action.
+      <button class="btn btn-ghost btn-xs" type="button" onclick={() => bulkUnknown = []}>Dismiss after inspection</button>
+    </Notice>
+  {/if}
+
   {#if metricsError}
     <Notice variant="info" role="status">{metricsError}</Notice>
   {/if}
 
   {#if !loading && !unavailableMessage}
-    <MetricsLedger ariaLabel="Jobs status summary" items={ledgerItems} onSelect={handleLedgerSelect} />
+    {#if !summaryError}
+      <MetricsLedger ariaLabel="Jobs status summary" items={ledgerItems} onSelect={handleLedgerSelect} />
+    {/if}
 
     <div class="jobs-overview">
+      {#if !summaryError}
       <Panel eyebrow="Secondary" title="Job-type health">
         {#snippet actions()}<span class="text-sm text-base-content/70">{groups.length} matching types</span>{/snippet}
         <p class="text-sm text-base-content/70">Complete retained totals by execution contract. Select a type to scope live work.</p>
@@ -421,6 +578,7 @@
           </tbody>
         </DataTable>
       </Panel>
+      {/if}
       {#if metricsLoading && !metrics}
         <LoadingState label="Loading job trends" />
       {:else if metrics}
@@ -433,7 +591,7 @@
     <Panel eyebrow="Primary" title={focusTitle()}>
       {#snippet actions()}
         <div class="flex items-center gap-3">
-          <span class="text-sm text-base-content/70">{jobCount} matching</span>
+          <span class="text-sm text-base-content/70">{jobCount === null ? "Count unavailable" : `${jobCount} in scope (all states)`}</span>
           {#if selectedJobType}
             <button type="button" class="btn btn-ghost btn-sm" onclick={() => selectJobType(null)}>Clear type</button>
           {/if}
@@ -448,7 +606,6 @@
           succeeded={bulkResult.succeeded}
           failed={bulkResult.failed}
           pastTense="jobs cancelled"
-          onRetry={failedJobs.length > 0 ? () => void cancelJobs(failedJobs) : undefined}
           onDismiss={() => { bulkResult = null; }}
         />
       {:else if selectedJobs.size > 0}

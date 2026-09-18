@@ -11,47 +11,62 @@
 </script>
 
 <script lang="ts">
-  import { tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
 
   let dialog: HTMLDialogElement | undefined = $state();
   let request = $state<ConfirmationRequest | null>(null);
   let typedValue = $state("");
   let resolver: ((confirmed: boolean) => void) | null = null;
+  // Monotonic confirmation generation: a teardown or a newer confirmation can
+  // only resolve the request it owns, never a replacement's resolver.
+  let generation = 0;
 
   const requiredValue = $derived(request?.expectedValue?.trim() ?? "");
   const canConfirm = $derived(!requiredValue || typedValue.trim() === requiredValue);
+
+  function resolvePending(confirmed: boolean): void {
+    const resolve = resolver;
+    resolver = null;
+    generation += 1;
+    resolve?.(confirmed);
+  }
 
   /**
    * Opens a destructive-action confirmation modal and resolves with the operator's decision.
    */
   export async function confirm(nextRequest: ConfirmationRequest): Promise<boolean> {
-    if (resolver) {
-      const resolve = resolver;
-      resolver = null;
-      resolve(false);
-    }
+    // Supersede any outstanding confirmation before opening the next one.
+    resolvePending(false);
     if (dialog?.open) dialog.close();
 
+    const owned = ++generation;
     request = nextRequest;
     typedValue = "";
     await tick();
 
-    if (!dialog) return false;
+    if (!dialog || owned !== generation) return false;
     dialog.showModal();
 
     return new Promise<boolean>((resolve) => {
+      if (owned !== generation) {
+        resolve(false);
+        return;
+      }
       resolver = resolve;
     });
   }
 
+  /** Cancels an outstanding confirmation when its target or authority changes. */
+  export function cancel(): void {
+    if (resolver || request) finish(false);
+  }
+
   function finish(confirmed: boolean) {
     if (confirmed && !canConfirm) return;
-    const resolve = resolver;
-    resolver = null;
     request = null;
     typedValue = "";
     if (dialog?.open) dialog.close();
-    resolve?.(confirmed);
+    resolvePending(confirmed);
   }
 
   function handleCancel(event: Event) {
@@ -62,6 +77,11 @@
   function handleClose() {
     if (resolver) finish(false);
   }
+
+  onDestroy(() => {
+    // Teardown must resolve, not strand, an awaited confirmation.
+    resolvePending(false);
+  });
 </script>
 
 <dialog bind:this={dialog} class="modal modal-bottom sm:modal-middle" oncancel={handleCancel} onclose={handleClose}>

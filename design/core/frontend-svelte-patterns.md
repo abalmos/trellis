@@ -51,6 +51,50 @@ Patterns:
 - methods own mutations
 - static factory methods handle async initialization when needed
 
+## Console Read and Mutation Pattern
+
+Trellis-owned console pages follow four stable conventions. They apply to
+operator surfaces under the console app; consuming applications choose their
+own.
+
+### Page reads use a request scope
+
+Every asynchronous page read belongs to a request scope keyed by the page's
+semantic target and filter values. Capture those values before awaiting, and
+commit data, errors, and pagination cursors only while the token is current. A
+target change clears the previous target's data; a same-target refresh may keep
+a labelled snapshot. Component disposal invalidates outstanding reads so no late
+response mutates a page that has gone away. Do not make the initiating `$effect`
+itself async.
+
+### Lists use cursor pagination
+
+Tables advance one server page at a time with an opaque cursor history and reset
+that history when a server filter changes. Selectors and catalogs that need
+completeness traverse pages with a bounded limit and a cursor-cycle guard, and a
+failed later page is reported as an incomplete catalog rather than a complete
+one. Exact-target pages resolve through the resource's `Get` where the contract
+offers one, and otherwise through correctly filtered complete traversal; a
+missing target renders an unavailable state and never falls back to the first
+loaded record.
+
+### Mutations use an immutable intent
+
+Capture the exact endpoint, target identifiers, displayed label, expected
+version, editable values, and one idempotency key when the operator confirms.
+Confirmation and the request both use that frozen intent, never a mutable
+selection reread after an `await`. Update the local record from the returned
+result or a documented exact refresh. Preserve the draft on a conflict; treat an
+uncertain transport outcome as unknown rather than successful or failed.
+
+### Live views schedule coalesced refreshes
+
+A watch is established once per semantic scope and tied to component disposal,
+not restarted on every data refresh. Change events schedule a non-resetting
+coalesced refresh with at most one read in flight and one trailing refresh, so
+continuous events cannot starve the view. A live indicator reflects the actual
+feed lifecycle; the general connection badge does not.
+
 ## Browser App Runtime Pattern
 
 Svelte browser apps should split responsibilities between one app-local module

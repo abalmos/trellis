@@ -1,20 +1,18 @@
 <script lang="ts">
-  import { goto, afterNavigate } from "$app/navigation";
-  import { base, resolve } from "$lib/console_paths";
   import { page } from "$app/state";
-  import { type apis } from "trellis-web-generated";
   import type { Snippet } from "svelte";
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy } from "svelte";
   import { buildConsoleLoginUrl } from "../auth";
   import {
-    canAccessRoute,
     getVisibleNavSections,
-    type Authority,
     type NavSection,
   } from "../control-panel.ts";
-  import { errorMessage } from "../format";
+  import {
+    ConsoleAuthority,
+    provideConsoleAuthority,
+  } from "../console/authority.svelte";
   import { NotificationsController, setNotifications } from "../notifications.svelte";
-  import { getAuthenticatedUser, getConnection, getTrellis, type ConnectionStatus } from "../trellis";
+  import { getConnection, getTrellis, type ConnectionStatus } from "../trellis";
   import AppShell from "./AppShell.svelte";
 
   type Props = {
@@ -27,96 +25,81 @@
   const trellis = getTrellis();
   const notifications = setNotifications(new NotificationsController());
 
-  let authFailure = $state<string | null>(null);
+  // One authority object for the whole shell, published to context during
+  // component initialization. It carries advisory identity/navigation metadata
+  // and detects definitive session loss; it never decides whether a route
+  // mounts or whether a request may be sent.
+  const authority = new ConsoleAuthority(trellis);
+  provideConsoleAuthority(authority);
+
   const connectionStatus = $derived<ConnectionStatus["phase"]>(connection.status.phase);
-  let authority = $state<Authority | null>(null);
-  let navSections = $state<NavSection[]>(getVisibleNavSections(null));
-  let profile = $state<apis.auth.SessionsMeOutput["user"] | null>(null);
-  let profileLoaded = $state(false);
+  const snapshot = $derived(authority.snapshot);
+  const navSections = $derived<NavSection[]>(
+    getVisibleNavSections(snapshot.authority),
+  );
 
-  function toRoutePath(pathname: string): string {
-    if (base && pathname === base) {
-      return "/";
-    }
-
-    if (base && pathname.startsWith(`${base}/`)) {
-      return pathname.slice(base.length);
-    }
-
-    return pathname;
-  }
-
-  function enforceAuthorityAccess(pathname: string): void {
-    if (!profileLoaded || canAccessRoute(pathname, authority)) {
-      return;
-    }
-
-    authFailure = "Your account does not have access to this operations page.";
-    void goto(resolve("/profile"));
-  }
-
-  async function authMe() {
-    return await getAuthenticatedUser(trellis);
+  // A login redirect preserves the full current URL, including its query, so a
+  // deep link such as a target action page survives sign-in.
+  function redirectToLogin(): void {
+    window.location.href = buildConsoleLoginUrl({
+      redirectTo: `${page.url.pathname}${page.url.search}`,
+      location: window.location,
+    });
   }
 
   async function signOut(): Promise<void> {
     try {
       await trellis.logout();
     } finally {
+      authority.clear();
       window.location.href = buildConsoleLoginUrl({ redirectTo: "/profile" });
     }
   }
 
-  afterNavigate(({ to }) => {
-    if (!to) return;
-    enforceAuthorityAccess(toRoutePath(to.url.pathname));
+  // Exactly one initial Me request per usable connection, plus one after each
+  // reconnection. Only a definitive expired/revoked/missing session redirects;
+  // a recoverable failure stays a shell status with Retry.
+  let wasConnected = false;
+
+  $effect(() => {
+    const connected = connectionStatus === "connected";
+    if (!connected) {
+      wasConnected = false;
+      return;
+    }
+    if (wasConnected) return;
+    wasConnected = true;
+    void authority.reload().then((result) => {
+      if (result.state === "auth-required") redirectToLogin();
+    });
   });
 
-  onMount(() => {
-    let active = true;
-
-    void (async () => {
-      try {
-        const me = await authMe();
-        if (!active) return;
-
-        authority = {
-          platformPrivileges: me.connection.platformPrivileges,
-          grants: me.connection.grants,
-        };
-        navSections = getVisibleNavSections(authority);
-        if (me.user) {
-          profile = me.user;
-        }
-      } catch (error) {
-        if (!active) return;
-        authFailure = errorMessage(error);
-      } finally {
-        if (active) {
-          profileLoaded = true;
-          enforceAuthorityAccess(toRoutePath(page.url.pathname));
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  });
+  function retryAuthority(): void {
+    void authority.reload().then((result) => {
+      if (result.state === "auth-required") redirectToLogin();
+    });
+  }
 
   onDestroy(() => {
+    // Ends pending validations without dispatching more RPCs or redirects.
+    authority.dispose();
     notifications.clear();
   });
 </script>
 
 <AppShell
-  {profile}
-  {authority}
-  {profileLoaded}
+  profile={snapshot.profile}
+  authority={snapshot.authority}
+  profileLoaded={snapshot.state !== "checking"}
   {navSections}
   {connectionStatus}
-  {authFailure}
+  authFailure={snapshot.state === "error"
+    ? snapshot.failure?.message ?? "Could not verify your session."
+    : null}
   onSignOut={signOut}
+  onRetryAuthority={retryAuthority}
 >
-  {@render children()}
+  <div data-testid="console-ready" class="contents">
+    {@render children()}
+  </div>
 </AppShell>

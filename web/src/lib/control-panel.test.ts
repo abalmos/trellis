@@ -145,3 +145,19 @@ Deno.test("control panel titles cover new admin routes", () => {
   deepEqual(getPageTitle("/admin/devices"), "Devices");
   deepEqual(getPageTitle("/admin/jobs"), "Jobs");
 });
+
+Deno.test("control panel titles cover every current route", () => {
+  deepEqual(getPageTitle("/admin/users/new"), "Create User");
+  deepEqual(getPageTitle("/admin/apps"), "User Grants");
+  deepEqual(getPageTitle("/admin/apps/revoke"), "Revoke User Grant");
+  deepEqual(getPageTitle("/admin/grants/new"), "Edit Portal Grant Policy");
+  deepEqual(getPageTitle("/admin/portals/new"), "Create Portal");
+  deepEqual(getPageTitle("/admin/portals/edit"), "Edit Portal");
+});
+
+Deno.test("control panel detail titles never leak a previous target", () => {
+  deepEqual(getPageTitle("/admin/services/dep_1"), "Service Deployment");
+  deepEqual(getPageTitle("/admin/services/dep_2"), "Service Deployment");
+  deepEqual(getPageTitle("/admin/jobs/job_1"), "Job");
+  deepEqual(getPageTitle("/admin/unknown-route"), "Trellis");
+});

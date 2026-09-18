@@ -5,13 +5,23 @@
 </script>
 
 <section class="space-y-4">
-  <PageToolbar title="Default device portal" description="Default device portal configuration moved to deployment metadata.">
+  <PageToolbar title="Default device portal" description="Device onboarding is configured on device deployments and portal records.">
     {#snippet actions()}
       <a class="btn btn-ghost btn-sm" href={resolve("/admin/portals/devices")}>Back to device guidance</a>
     {/snippet}
   </PageToolbar>
 
   <Panel title="No standalone default" eyebrow="Operator guidance">
-    <p class="text-sm text-base-content/70">The standalone default device portal API has been removed. Inspect deployments and deployment authority for effective device onboarding routes.</p>
+    <div class="space-y-3 px-4 py-3 text-sm text-base-content/70">
+      <p>
+        There is no standalone default-device-portal setting. Device onboarding is
+        expressed by device deployments and by the route selectors on portal records;
+        this stabilization does not add a separate deployment-portal policy API.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <a class="btn btn-outline btn-sm" href={resolve("/admin/devices")}>Device deployments</a>
+        <a class="btn btn-ghost btn-sm" href={resolve("/admin/portals")}>Portal records</a>
+      </div>
+    </div>
   </Panel>
 </section>

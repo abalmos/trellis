@@ -13,9 +13,11 @@
   import Notice from "$lib/components/Notice.svelte";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
   import { errorMessage } from "$lib/format";
-  import { loadJobsPageData } from "$lib/jobs_page.ts";
+  import { loadJobsSummary } from "$lib/jobs_page.ts";
+  import { IntervalTimer } from "$lib/console/live_refresh.ts";
+  import { formatDate } from "$lib/format";
   import { getTrellis } from "$lib/trellis";
-  
+
 
   type ServiceInstance = apis.auth.ServiceInstancesListOutput["items"][number];
   type JobGroup = apis.jobs.SummaryOutput["groups"][number];
@@ -45,6 +47,16 @@
   let sessionCount = $state(0);
   let connectionCount = $state(0);
   let jobsUnavailableMessage = $state<string | null>(null);
+  let sessionsPanelError = $state<string | null>(null);
+  let connectionsPanelError = $state<string | null>(null);
+  let instancesPanelError = $state<string | null>(null);
+  let reviewsPanelError = $state<string | null>(null);
+  let sessionsTruncated = $state(false);
+  let connectionsTruncated = $state(false);
+  let instancesTruncated = $state(false);
+  let lastLoaded = $state<Date | null>(null);
+  const OVERVIEW_PAGE_LIMIT = 100;
+  const OVERVIEW_REFRESH_MS = 15_000;
   let jobGroups = $state.raw<JobGroup[]>([]);
   let jobStats = $state.raw<JobStats>({ byState: {}, total: 0n });
   let pendingDeviceReviews = $state.raw<DeviceReview[]>([]);
@@ -132,42 +144,74 @@
     }[type];
   }
 
-  async function load() {
-    loading = true;
+  async function load(showLoading = true) {
+    if (showLoading) loading = true;
     error = null;
     jobsUnavailableMessage = null;
     try {
-      const [sessionsRes, connectionsRes, instancesRes, deviceReviewsRes] = await Promise.all([
-        trellis.sessionsList({ limit: 100 }).take(),
-        trellis.connectionsList({ limit: 100 }).take(),
-        trellis.serviceInstancesList({ limit: 100 }).take(),
-        trellis.deviceUserAuthoritiesReviewsList({ state: "pending", limit: 100 }).take(),
+      // Each registry snapshot is independent: one failure must not hide the
+      // other summaries. Counts are "N loaded" from this page, not instance-wide
+      // totals; crawling every registry to invent a total is out of scope.
+      error = null;
+      const [sessionsRes, connectionsRes, instancesRes, deviceReviewsRes] = await Promise.allSettled([
+        trellis.sessionsList({ page: { limit: OVERVIEW_PAGE_LIMIT } }).take(),
+        trellis.connectionsList({ page: { limit: OVERVIEW_PAGE_LIMIT } }).take(),
+        trellis.serviceInstancesList({ page: { limit: OVERVIEW_PAGE_LIMIT } }).take(),
+        trellis.deviceUserAuthoritiesReviewsList({
+          state: "pending",
+          page: { limit: OVERVIEW_PAGE_LIMIT },
+        }).take(),
       ]);
-      if (isErr(sessionsRes)) { error = errorMessage(sessionsRes); return; }
-      if (isErr(connectionsRes)) { error = errorMessage(connectionsRes); return; }
-      if (isErr(instancesRes)) { error = errorMessage(instancesRes); return; }
-      if (isErr(deviceReviewsRes)) { error = errorMessage(deviceReviewsRes); return; }
-      sessionCount = sessionsRes.items?.length ?? 0;
-      connectionCount = connectionsRes.items?.length ?? 0;
-      instances = instancesRes.items ?? [];
-      pendingDeviceReviews = deviceReviewsRes.items ?? [];
+      if (sessionsRes.status === "fulfilled" && !isErr(sessionsRes.value)) {
+        sessionCount = sessionsRes.value.items?.length ?? 0;
+        sessionsTruncated = sessionsRes.value.page.nextCursor !== undefined;
+        sessionsPanelError = null;
+      } else {
+        sessionsPanelError = errorMessage(
+          sessionsRes.status === "rejected" ? sessionsRes.reason : sessionsRes.value,
+        );
+      }
+      if (connectionsRes.status === "fulfilled" && !isErr(connectionsRes.value)) {
+        connectionCount = connectionsRes.value.items?.length ?? 0;
+        connectionsTruncated = connectionsRes.value.page.nextCursor !== undefined;
+        connectionsPanelError = null;
+      } else {
+        connectionsPanelError = errorMessage(
+          connectionsRes.status === "rejected" ? connectionsRes.reason : connectionsRes.value,
+        );
+      }
+      if (instancesRes.status === "fulfilled" && !isErr(instancesRes.value)) {
+        instances = instancesRes.value.items ?? [];
+        instancesTruncated = instancesRes.value.page.nextCursor !== undefined;
+        instancesPanelError = null;
+      } else {
+        instancesPanelError = errorMessage(
+          instancesRes.status === "rejected" ? instancesRes.reason : instancesRes.value,
+        );
+      }
+      if (deviceReviewsRes.status === "fulfilled" && !isErr(deviceReviewsRes.value)) {
+        pendingDeviceReviews = deviceReviewsRes.value.items ?? [];
+        reviewsPanelError = null;
+      } else {
+        reviewsPanelError = errorMessage(
+          deviceReviewsRes.status === "rejected" ? deviceReviewsRes.reason : deviceReviewsRes.value,
+        );
+      }
 
-      const jobsData = await loadJobsPageData({
-        listServices: (input) => trellis.listServices(input),
-        queryJobs: (filter) => trellis.jobsQuery(filter),
-        summarizeJobs: (filter) => trellis.jobsSummary(filter),
-      }, { groupBy: "type", page: { limit: 50 } }).catch((jobsError: unknown) => ({
-        available: false,
-        message: `Jobs admin runtime is unavailable: ${errorMessage(jobsError)}`,
-        services: [],
-        jobs: [],
-        groups: [],
-        stats: { byState: {}, total: 0n },
-        count: 0n,
+      // Jobs summary uses the real Jobs.Summary RPC, not a synthetic aggregate.
+      const jobsData = await loadJobsSummary(
+        { summarizeJobs: (filter) => trellis.jobsSummary(filter) },
+        { groupBy: "type" },
+      ).catch((jobsError: unknown) => ({
+        available: false as const,
+        message: `Jobs summary is unavailable: ${errorMessage(jobsError)}`,
       }));
       jobGroups = jobsData.available ? jobsData.groups : [];
       jobStats = jobsData.available ? jobsData.stats : { byState: {}, total: 0n };
-      jobsUnavailableMessage = jobsData.available ? null : jobsData.message ?? "Jobs admin runtime is unavailable.";
+      jobsUnavailableMessage = jobsData.available
+        ? null
+        : jobsData.message ?? "Jobs summary is unavailable.";
+      lastLoaded = new Date();
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -175,8 +219,27 @@
     }
   }
 
+  // Periodically refresh while this route is visible and connected, one read
+  // per panel at a time; suspend while the document is hidden.
+  const overviewTimer = new IntervalTimer({
+    intervalMs: OVERVIEW_REFRESH_MS,
+    canRun: () => !document.hidden,
+    tick: () => load(false),
+  });
+
   onMount(() => {
     void load();
+    overviewTimer.start();
+    const onVisibility = () => {
+      // The timer stays alive and simply skips ticks while hidden; refresh
+      // immediately on visibility return instead of waiting a full interval.
+      if (!document.hidden) void overviewTimer.refreshNow();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      overviewTimer.dispose();
+    };
   });
 </script>
 
@@ -186,9 +249,13 @@
   <section>
     <PageToolbar title="Overview" description="Real-time summary of your Trellis runtime">
       {#snippet actions()}
-      <div class="join">
-        <button class="btn btn-outline join-item btn-sm">Last 5 minutes <Icon name="chevronDown" size={16} /></button>
-        <button class="btn btn-outline join-item btn-sm" aria-label="Refresh" onclick={load}><Icon name="refresh" size={16} /></button>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-base-content/50">
+          {lastLoaded ? `Snapshot ${lastLoaded.toLocaleTimeString()}` : "Not loaded yet"}
+        </span>
+        <button class="btn btn-outline btn-sm" aria-label="Refresh" onclick={() => load()}>
+          <Icon name="refresh" size={16} />
+        </button>
       </div>
       {/snippet}
     </PageToolbar>

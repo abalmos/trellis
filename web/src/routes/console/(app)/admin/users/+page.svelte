@@ -2,11 +2,16 @@
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import { type apis } from "trellis-web-generated";
-  import { resolve } from "$lib/console_paths";
+  import { resolve, consoleUrl } from "$lib/console_paths";
   import { onMount } from "svelte";
+  import { getConsoleAuthority } from "$lib/console/authority.svelte.ts";
+  import { captureIntent, MutationController } from "$lib/console/mutation.ts";
+  import { TABLE_PAGE_LIMIT } from "$lib/console/paging.ts";
+  import { nextCursorPage, previousCursorPage, resetCursorHistory } from "$lib/cursor_history.ts";
   import ActionMenu from "$lib/components/ActionMenu.svelte";
   import DataTable from "$lib/components/DataTable.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
+  import Icon from "$lib/components/Icon.svelte";
   import LoadingState from "$lib/components/LoadingState.svelte";
   import Notice from "$lib/components/Notice.svelte";
   import PageToolbar from "$lib/components/PageToolbar.svelte";
@@ -17,66 +22,32 @@
 
   const trellis = getTrellis();
   const notifications = getNotifications();
+  const authority = getConsoleAuthority();
+  type ResetInput = Parameters<typeof trellis.usersPasswordResetCreate>[0];
+  const resetMutation = new MutationController<ResetInput, apis.auth.UsersPasswordResetCreateOutput>();
 
   type UserView = apis.auth.UsersListOutput["items"][number];
-  type IdentityView = { provider: string; subject: string; displayName?: string | null; email?: string | null };
   type PasswordResetResult = {
-    name: string | null;
-    username: string | null;
-    email: string | null;
+    userId: string;
+    label: string;
     resetUrl: string;
-    expiresAt: string;
+    expiresAt: bigint;
   };
 
-  function identityLabel(user: UserView) {
-    return userDisplayName(user) ?? userDisplayEmail(user) ?? userDisplayUsername(user) ?? "Unnamed user";
-  }
-
-  function userKey(user: Pick<UserView, "userId">) {
-    return user.userId;
-  }
-
-  function primaryIdentity(user: UserView): IdentityView | null {
-    return null;
-  }
-
-  function localIdentity(user: UserView): IdentityView | null {
-    return null;
-  }
-
-  function userDisplayName(user: UserView): string | null {
-    return user.name?.trim() || primaryIdentity(user)?.displayName?.trim() || null;
-  }
-
-  function userDisplayEmail(user: UserView): string | null {
-    return user.email?.trim() || primaryIdentity(user)?.email?.trim() || null;
-  }
-
-  function userDisplayUsername(user: UserView): string | null {
-    return localIdentity(user)?.subject.trim() || null;
-  }
-
-  function identitySummary(user: UserView): string {
-    const identity = primaryIdentity(user);
-    if (!identity) return "No linked identity";
-    return `${identity.provider}:${identity.subject}`;
-  }
-
-  function identityCountLabel(count: number): string {
-    return `${count} ${count === 1 ? "identity" : "identities"}`;
-  }
-
-  function identityProvidersLabel(user: UserView): string {
-    const providers: string[] = [];
-    if (providers.length === 0) return "No providers";
-    return providers.join(", ");
+  // Identity details belong to the current user's own profile: the current
+  // self-identity API cannot inspect another user, so this list does not
+  // fabricate counts, providers, or usernames.
+  function identityLabel(user: UserView): string {
+    return user.name?.trim() || user.email?.trim() || user.userId;
   }
 
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let sessionsWarning = $state<string | null>(null);
-  let users = $state<UserView[]>([]);
-  let userLastAuth = $state<Record<string, string>>({});
+  let users = $state.raw<UserView[]>([]);
+  let nextCursor = $state<string | undefined>(undefined);
+  let cursorHistory = $state<{ cursor?: string; back: string[] }>({ back: [] });
+  let search = $state("");
+  let stateFilter = $state<"" | "active" | "disabled" | "revoked">("");
   let resetPendingUserId = $state<string | null>(null);
   let resetResult = $state<PasswordResetResult | null>(null);
   let resetDialog = $state<HTMLDialogElement | null>(null);
@@ -87,58 +58,70 @@
   async function load() {
     loading = true;
     error = null;
-    sessionsWarning = null;
     try {
-      const usersResponse = await trellis.usersList({ limit: 100 }).take();
+      const usersResponse = await trellis.usersList({
+        ...(search.trim() === "" ? {} : { search: search.trim() }),
+        ...(stateFilter === "" ? {} : { state: stateFilter }),
+        page: {
+          limit: TABLE_PAGE_LIMIT,
+          ...(cursorHistory.cursor === undefined ? {} : { cursor: cursorHistory.cursor }),
+        },
+      }).take();
       if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
       users = usersResponse.items ?? [];
-
-      const sessionsResponse = await trellis.sessionsList({ limit: 100 }).take();
-      if (isErr(sessionsResponse)) {
-        sessionsWarning = `Last-auth metadata unavailable: ${errorMessage(sessionsResponse)}`;
-        userLastAuth = {};
-        return;
-      }
-
-      const lastAuthByUser: Record<string, string> = {};
-      for (const session of sessionsResponse.items ?? []) {
-        const key = session.principalId;
-        if (!lastAuthByUser[key] || session.lastAuthenticatedAt > Number(lastAuthByUser[key])) {
-          lastAuthByUser[key] = String(session.lastAuthenticatedAt);
-        }
-      }
-      userLastAuth = lastAuthByUser;
+      nextCursor = usersResponse.page.nextCursor;
     } catch (e) { error = errorMessage(e); }
     finally { loading = false; }
   }
 
+  function applyFilters(): void {
+    cursorHistory = resetCursorHistory();
+    void load();
+  }
+
+  function goNext(): void {
+    if (nextCursor === undefined) return;
+    cursorHistory = nextCursorPage(cursorHistory, nextCursor);
+    void load();
+  }
+
+  function goPrevious(): void {
+    cursorHistory = previousCursorPage(cursorHistory);
+    void load();
+  }
+
   async function createPasswordReset(user: UserView) {
     if (resetPendingUserId) return;
+    const key = ulid();
+    const intent = captureIntent<ResetInput>({
+      operation: "usersPasswordResetCreate", targetId: user.userId, label: identityLabel(user),
+      idempotencyKey: key,
+      input: { idempotencyKey: key, returnTarget: null, userId: user.userId },
+      scope: { routeKey: "users-list" },
+    });
+    if (!resetMutation.begin(intent)) return;
     resetPendingUserId = user.userId;
-    try {
-      const response = await trellis.usersPasswordResetCreate({
-        idempotencyKey: ulid(),
-        returnTarget: null,
-        userId: user.userId,
-      }).take();
-      if (isErr(response)) {
-        notifications.error(errorMessage(response), "Password reset failed");
-        return;
-      }
-
+    resetResult = null;
+    const outcome = await resetMutation.send({
+      isStillValid: () =>
+        resetPendingUserId === intent.targetId,
+      dispatch: async ({ input }) => await trellis.usersPasswordResetCreate(input).orThrow(),
+    });
+    resetPendingUserId = null;
+    if (!outcome) return;
+    if (outcome.kind === "succeeded") {
       resetResult = {
-        name: userDisplayName(user),
-        username: userDisplayUsername(user),
-        email: userDisplayEmail(user),
-        resetUrl: response.flow.completionUrl,
-        expiresAt: String(response.flow.expiresAt),
+        userId: intent.targetId,
+        label: intent.label,
+        resetUrl: outcome.value.flow.completionUrl,
+        expiresAt: outcome.value.flow.expiresAt,
       };
       resetDialog?.showModal();
-      notifications.success(`Created password reset link for ${identityLabel(user)}.`, "Password reset ready");
-    } catch (e) {
-      notifications.error(errorMessage(e), "Password reset failed");
-    } finally {
-      resetPendingUserId = null;
+      notifications.success(`Created password reset link for ${intent.label}.`, "Password reset ready");
+    } else if (outcome.kind === "unknown") {
+      notifications.error("Password reset outcome unknown; the one-time URL may not be recoverable. Check this user before trying again.", "Check outcome");
+    } else {
+      notifications.error(errorMessage(outcome.error), "Password reset failed");
     }
   }
 
@@ -178,14 +161,11 @@
   {#if error}
     <Notice variant="error">{error}</Notice>
   {/if}
-  {#if sessionsWarning}
-    <Notice variant="info">{sessionsWarning}</Notice>
-  {/if}
 
-  {#if loading}
+  {#if loading && users.length === 0}
     <Panel><LoadingState label="Loading users" /></Panel>
   {:else if users.length === 0}
-    <EmptyState title="No users" description="No users have been registered yet." />
+    <EmptyState title="No users" description="No users match the current filters." />
   {:else}
     <div class="space-y-2">
       <div class="flex flex-col gap-3 border-y border-base-300 bg-base-100/45 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
@@ -194,10 +174,36 @@
           <p class="mt-1 text-sm text-base-content/60">Account identity, activity, and activation state.</p>
         </div>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
-          <span class="badge badge-success badge-sm">{activeUserCount} active</span>
+          <label class="input input-bordered input-sm flex items-center gap-2">
+            <Icon name="search" size={14} class="text-base-content/50" />
+            <input
+              bind:value={search}
+              class="grow"
+              placeholder="Search users"
+              aria-label="Search users"
+              onkeydown={(event) => { if (event.key === "Enter") applyFilters(); }}
+            />
+          </label>
+          <label class="select select-bordered select-sm">
+            <select
+              aria-label="Filter by state"
+              value={stateFilter}
+              onchange={(event) => {
+                stateFilter = event.currentTarget.value as "" | "active" | "disabled" | "revoked";
+                applyFilters();
+              }}
+            >
+              <option value="">All states</option>
+              <option value="active">Active</option>
+              <option value="disabled">Disabled</option>
+              <option value="revoked">Revoked</option>
+            </select>
+          </label>
+          <span class="badge badge-success badge-sm">{activeUserCount} active on this page</span>
           {#if inactiveUserCount > 0}
-            <span class="badge badge-neutral badge-sm">{inactiveUserCount} inactive</span>
+            <span class="badge badge-neutral badge-sm">{inactiveUserCount} not active on this page</span>
           {/if}
+          <span class="text-xs text-base-content/50">{users.length} on this page</span>
         </div>
       </div>
 
@@ -205,10 +211,9 @@
         <thead>
           <tr>
             <th class="w-[28%]">Name</th>
-            <th class="hidden w-[18%] sm:table-cell">Username</th>
             <th class="hidden w-[30%] md:table-cell">Email</th>
-            <th class="hidden w-[14%] lg:table-cell">Last active</th>
-            <th class="w-[6rem]">Status</th>
+            <th class="hidden w-[16%] lg:table-cell">Updated</th>
+            <th class="w-[8rem]">Status</th>
             <th class="w-[5rem] text-right">Actions</th>
           </tr>
         </thead>
@@ -225,19 +230,12 @@
                   </div>
                 </div>
               </td>
-              <td class="hidden max-w-0 align-top sm:table-cell">
-                <span class="trellis-identifier block truncate text-xs text-base-content/70" title={userDisplayUsername(user) ?? identitySummary(user)}>{userDisplayUsername(user) ?? "Not set"}</span>
-              </td>
               <td class="hidden max-w-0 align-top md:table-cell">
-                <span class="block truncate text-xs text-base-content/70" title={userDisplayEmail(user) ?? "Not set"}>{userDisplayEmail(user) ?? "Not set"}</span>
-                <span class="mt-1 block truncate text-[0.68rem] uppercase tracking-[0.08em] text-base-content/40" title={identityProvidersLabel(user)}>{identityCountLabel(0)} · {identityProvidersLabel(user)}</span>
+                <span class="block truncate text-xs text-base-content/70" title={user.email ?? "Not set"}>{user.email ?? "Not set"}</span>
+                <span class="trellis-identifier mt-1 block truncate text-[0.68rem] text-base-content/40" title={user.userId}>{user.userId}</span>
               </td>
               <td class="hidden w-36 align-top text-xs text-base-content/60 lg:table-cell">
-                {#if userLastAuth[userKey(user)]}
-                  <span title={userLastAuth[userKey(user)]}>{formatDate(userLastAuth[userKey(user)])}</span>
-                {:else}
-                  <span>Not active</span>
-                {/if}
+                {formatDate(user.updatedAt)}
               </td>
               <td class="w-28 align-top">
                 {#if user.state === "active"}
@@ -248,8 +246,8 @@
               </td>
               <td class="w-24 whitespace-nowrap text-right align-top">
                 <ActionMenu widthClass="w-44">
-                    <li><a href={resolve(`/admin/users/edit?userId=${encodeURIComponent(user.userId)}`)}>Edit</a></li>
-                    <li><button type="button" onclick={() => void createPasswordReset(user)} disabled={resetPendingUserId !== null}>{resetPendingUserId === user.userId ? "Creating reset..." : "Create reset link"}</button></li>
+                    <li><a href={consoleUrl("/admin/users/edit", { query: { userId: user.userId } })}>Edit</a></li>
+                     <li><button type="button" onclick={() => void createPasswordReset(user)} disabled={resetPendingUserId !== null}>{resetPendingUserId === user.userId ? "Creating reset..." : "Create reset link"}</button></li>
                 </ActionMenu>
               </td>
             </tr>
@@ -261,7 +259,7 @@
   {/if}
 </section>
 
-<dialog class="modal" {@attach resetDialogAttachment}>
+<dialog class="modal" {@attach resetDialogAttachment} onclose={() => { resetResult = null; resetMutation.reset(); }}>
   <div class="modal-box max-w-2xl border border-base-300 bg-base-100 p-0">
     {#if resetResult}
       <form method="dialog" class="absolute right-3 top-3">
@@ -269,18 +267,14 @@
       </form>
       <div class="border-b border-base-300 px-5 py-4">
         <p class="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-base-content/45">Password reset link</p>
-        <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-3">
+        <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
           <div class="min-w-0">
-            <dt class="text-xs font-medium uppercase tracking-wide text-base-content/50">Name</dt>
-            <dd class="truncate font-medium" title={resetResult.name ?? "Not set"}>{resetResult.name ?? "Not set"}</dd>
+            <dt class="text-xs font-medium uppercase tracking-wide text-base-content/50">User</dt>
+            <dd class="truncate font-medium" title={resetResult.label}>{resetResult.label}</dd>
           </div>
           <div class="min-w-0">
-            <dt class="text-xs font-medium uppercase tracking-wide text-base-content/50">Username</dt>
-            <dd class="trellis-identifier truncate" title={resetResult.username ?? "Not set"}>{resetResult.username ?? "Not set"}</dd>
-          </div>
-          <div class="min-w-0">
-            <dt class="text-xs font-medium uppercase tracking-wide text-base-content/50">Email</dt>
-            <dd class="truncate" title={resetResult.email ?? "Not set"}>{resetResult.email ?? "Not set"}</dd>
+            <dt class="text-xs font-medium uppercase tracking-wide text-base-content/50">User ID</dt>
+            <dd class="trellis-identifier truncate" title={resetResult.userId}>{resetResult.userId}</dd>
           </div>
         </dl>
         <p class="trellis-field-help mt-1">Expires {formatDate(resetResult.expiresAt)}.</p>

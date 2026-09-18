@@ -2,298 +2,194 @@
   import { ulid } from "ulid";
   import { isErr } from "@qlever-llc/result";
   import { type apis } from "trellis-web-generated";
-  import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
-  import { onMount } from "svelte";
-  import ChoiceRow from "$lib/components/ChoiceRow.svelte";
-  import DataTable from "$lib/components/DataTable.svelte";
+  import { resolve, consoleUrl } from "$lib/console_paths";
+  import { onDestroy, untrack } from "svelte";
+  import { RequestScope } from "$lib/console/request_scope.ts";
+  import { getConsoleAuthority } from "$lib/console/authority.svelte.ts";
+  import { captureIntent, MutationController } from "$lib/console/mutation.ts";
+  import { projectConsoleError } from "$lib/console/display_value.ts";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import LoadingState from "$lib/components/LoadingState.svelte";
   import Notice from "$lib/components/Notice.svelte";
   import PageToolbar from "$lib/components/PageToolbar.svelte";
-  import SelectionGroup from "$lib/components/SelectionGroup.svelte";
-  import SelectionSectionHeader from "$lib/components/SelectionSectionHeader.svelte";
-  import { errorMessage, formatDate } from "$lib/format";
   import { getNotifications } from "$lib/notifications.svelte";
   import { getTrellis } from "$lib/trellis";
 
-  type UserView = apis.auth.UsersListOutput["items"][number];
-  type IdentityView = { provider: string; subject: string };
-  type CapabilityView = apis.auth.CapabilitiesListOutput["items"][number] & {
-    key: string;
-    source: "platform" | "contract";
-    contractId: string | null;
-    contractDisplayName: string | null;
-    consequence: string | null;
-  };
-  type AssignableCapabilityGroup = { groupKey: string; displayName: string; capabilities: string[]; includedGroups: string[] };
-  type CapabilitySection = {
-    key: string;
-    title: string;
-    subtitle: string | null;
-    capabilities: CapabilityView[];
-  };
-  type CapabilityProviderIndex = Record<string, string[]>;
+  type UserView = apis.auth.UsersGetOutput["user"];
 
   const trellis = getTrellis();
   const notifications = getNotifications();
-
-  let loading = $state(true);
-  let error = $state<string | null>(null);
-  let targetUser = $state<UserView | null>(null);
-  let capabilities = $state<CapabilityView[]>([]);
-  let assignableCapabilityGroups = $state<AssignableCapabilityGroup[]>([]);
-  let selectedCapabilities = $state<string[]>([]);
-  let selectedCapabilityGroups = $state<string[]>([]);
-  let active = $state(true);
-  let savePending = $state(false);
-  const targetIdentities: Array<IdentityView & { identityId: string; displayName?: string | null; email?: string | null; linkedAt?: number; lastLoginAt?: number | null }> = [];
+  const authority = getConsoleAuthority();
+  const scope = new RequestScope("user-edit");
+  type UpdateInput = Parameters<typeof trellis.usersUpdate>[0];
+  const mutation = new MutationController<UpdateInput, apis.auth.UsersUpdateOutput>((state) => savePending = state.busy);
 
   const requestedUserId = $derived(page.url.searchParams.get("userId") ?? "");
-  const hasTargetParams = $derived(requestedUserId.length > 0);
-  const unavailableSelectedCapabilities = $derived(selectedCapabilities.filter((key) => !hasCapability(key)).sort());
-  const sortedAssignableCapabilityGroups = $derived(assignableCapabilityGroups.slice().sort((left, right) => {
-    if ((left.groupKey === "admin") !== (right.groupKey === "admin")) return left.groupKey === "admin" ? -1 : 1;
-    return left.groupKey.localeCompare(right.groupKey);
-  }));
-  const groupProvidedCapabilityProviders = $derived.by(() => {
-    const providers: CapabilityProviderIndex = {};
 
-    for (const selectedGroupKey of selectedCapabilityGroups) {
-      collectGroupCapabilities(selectedGroupKey, assignableCapabilityGroups, new Set(), (capabilityKey) => {
-        providers[capabilityKey] = uniqueCapabilities([...(providers[capabilityKey] ?? []), selectedGroupKey]).sort();
-      });
-    }
+  let loading = $state(true);
+  let error = $state<{ message: string; code?: string; id?: string } | null>(null);
+  /** True when the requested user is genuinely absent. */
+  let notFound = $state(false);
+  let targetUser = $state.raw<UserView | null>(null);
+  let savePending = $state(false);
 
-    return providers;
-  });
-  const groupProvidedCapabilities = $derived(Object.keys(groupProvidedCapabilityProviders));
-  const capabilitySections = $derived.by(() => {
-    const sections: CapabilitySection[] = [];
+  // Editable fields are a copy of the loaded record, never a live view of it.
+  let name = $state<string | null>(null);
+  let email = $state<string | null>(null);
+  let image = $state<string | null>(null);
+  let active = $state(true);
+  let revoked = $state(false);
 
-    for (const capability of capabilities) {
-      const sectionKey = capabilitySectionKey(capability);
-      const existing = sections.find((section) => section.key === sectionKey);
-      if (existing) {
-        existing.capabilities.push(capability);
-        continue;
-      }
+  /** A revoked account is retained read-only and cannot be reactivated here. */
+  const readOnly = $derived(revoked);
 
-      sections.push({
-        key: sectionKey,
-        title: capabilitySectionTitle(capability),
-        subtitle: capabilitySectionSubtitle(capability),
-        capabilities: [capability],
-      });
-    }
-
-    return sections
-      .map((section) => ({
-        ...section,
-        capabilities: section.capabilities.slice().sort((left, right) =>
-          localCapabilityKey(left.key).localeCompare(localCapabilityKey(right.key))
-        ),
-      }))
-      .sort((left, right) => {
-        if (left.key === "platform") return -1;
-        if (right.key === "platform") return 1;
-        return left.title.localeCompare(right.title) || left.key.localeCompare(right.key);
-      });
-  });
-
-  function capabilitySectionKey(capability: CapabilityView): string {
-    if (capability.source === "platform") return "platform";
-    return capability.contractId ?? capability.contractDisplayName ?? "contract";
+  function failureFrom(cause: unknown): { message: string; code?: string; id?: string } {
+    const projected = projectConsoleError(cause);
+    return {
+      message: projected.message,
+      ...(projected.code === undefined ? {} : { code: projected.code }),
+      ...(projected.id === undefined ? {} : { id: projected.id }),
+    };
   }
 
-  function capabilitySectionTitle(capability: CapabilityView): string {
-    if (capability.source === "platform") return "Platform";
-    return capability.contractDisplayName ?? capability.contractId ?? "Contract";
-  }
-
-  function capabilitySectionSubtitle(capability: CapabilityView): string | null {
-    if (capability.source === "platform") return null;
-    return capability.contractId ?? null;
-  }
-
-  function hasCapability(capabilityKey: string): boolean {
-    return capabilities.some((capability) => capability.key === capabilityKey);
-  }
-
-  function uniqueCapabilities(values: string[]): string[] {
-    return Array.from(new Set(values));
-  }
-
-  function collectGroupCapabilities(
-    groupKey: string,
-    groups: AssignableCapabilityGroup[],
-    visitedGroupKeys: Set<string>,
-    visitCapability: (capabilityKey: string) => void,
-  ) {
-    if (visitedGroupKeys.has(groupKey)) return;
-    visitedGroupKeys.add(groupKey);
-
-    const group = groups.find((item) => item.groupKey === groupKey);
-    if (!group) return;
-
-    for (const capabilityKey of group.capabilities) visitCapability(capabilityKey);
-    for (const includedGroupKey of group.includedGroups) {
-      collectGroupCapabilities(includedGroupKey, groups, visitedGroupKeys, visitCapability);
-    }
-  }
-
-  function resolveGroupProvidedCapabilities(groupKeys: string[]): string[] {
-    const provided: string[] = [];
-    for (const groupKey of groupKeys) {
-      collectGroupCapabilities(groupKey, assignableCapabilityGroups, new Set(), (capabilityKey) => {
-        if (!provided.includes(capabilityKey)) provided.push(capabilityKey);
-      });
-    }
-    return provided;
-  }
-
-  function pruneGroupProvidedDirectCapabilities(groupKeys: string[], capabilityKeys: string[]): string[] {
-    const provided = resolveGroupProvidedCapabilities(groupKeys);
-    return capabilityKeys.filter((capabilityKey) => !provided.includes(capabilityKey));
-  }
-
-  function groupProvidedCapabilityLabel(capabilityKey: string): string {
-    return (groupProvidedCapabilityProviders[capabilityKey] ?? []).join(", ");
-  }
-
-  function setCapabilityGroupSelected(groupKey: string, selected: boolean) {
-    const nextGroups = selected
-      ? uniqueCapabilities([...selectedCapabilityGroups, groupKey])
-      : selectedCapabilityGroups.filter((selectedGroupKey) => selectedGroupKey !== groupKey);
-    selectedCapabilityGroups = nextGroups;
-    selectedCapabilities = pruneGroupProvidedDirectCapabilities(nextGroups, selectedCapabilities);
-  }
-
-  function setDirectCapabilitySelected(capabilityKey: string, selected: boolean) {
-    if (groupProvidedCapabilities.includes(capabilityKey)) return;
-
-    selectedCapabilities = selected
-      ? uniqueCapabilities([...selectedCapabilities, capabilityKey])
-      : selectedCapabilities.filter((selectedCapabilityKey) => selectedCapabilityKey !== capabilityKey);
-  }
-
-  function handleCapabilityGroupChange(groupKey: string, event: Event) {
-    setCapabilityGroupSelected(groupKey, (event.currentTarget as HTMLInputElement).checked);
-  }
-
-  function handleDirectCapabilityChange(capabilityKey: string, event: Event) {
-    setDirectCapabilitySelected(capabilityKey, (event.currentTarget as HTMLInputElement).checked);
-  }
-
-  function localCapabilityKey(key: string): string {
-    return key.includes("::") ? key.split("::").slice(1).join("::") : key;
-  }
-
-  function providerSubject(identity: IdentityView): string {
-    return `${identity.provider}:${identity.subject}`;
-  }
-
-  function loadUserIntoForm(user: UserView | null) {
-    if (!user) return;
-    const loadedCapabilityGroups: string[] = [];
-    selectedCapabilityGroups = loadedCapabilityGroups;
-    selectedCapabilities = [];
+  function applyUser(user: UserView): void {
+    targetUser = user;
+    name = user.name;
+    email = user.email;
+    image = user.image;
     active = user.state === "active";
+    revoked = user.state === "revoked";
   }
 
-  async function load() {
+  async function load(userId: string, preserveDraft = false): Promise<void> {
+    const token = scope.begin();
+    const keepDraft = preserveDraft && targetUser?.userId === userId;
     loading = true;
     error = null;
+    notFound = false;
+    if (!keepDraft) targetUser = null;
     try {
-      targetUser = null;
-      if (!hasTargetParams) return;
-
-      const [usersResponse, capabilitiesResponse] = await Promise.all([
-        trellis.usersList({ limit: 100 }).take(),
-        trellis.capabilitiesList({ limit: 100 }).take(),
-      ]);
-      if (isErr(usersResponse)) { error = errorMessage(usersResponse); return; }
-      if (isErr(capabilitiesResponse)) { error = errorMessage(capabilitiesResponse); return; }
-      capabilities = (capabilitiesResponse.items ?? []).map((capability) => ({
-        ...capability,
-        key: capability.capability,
-        source: capability.sourceApi ? "contract" as const : "platform" as const,
-        contractId: capability.sourceApi,
-        contractDisplayName: null,
-        consequence: null,
-      })).sort((left, right) => left.key.localeCompare(right.key));
-      assignableCapabilityGroups = [];
-      const users = usersResponse.items ?? [];
-      const match = users.find((user) => user.userId === requestedUserId) ?? null;
-      targetUser = match;
-      loadUserIntoForm(match);
-    } catch (e) {
-      error = errorMessage(e);
+      if (userId === "") return;
+      // Exact target through Users.Get, never a first-page list scan.
+      const response = await trellis.usersGet({ userId }).take();
+      if (!scope.isCurrent(token)) return;
+      if (isErr(response)) {
+        error = failureFrom(response);
+        notFound = error.code === "not_found";
+        targetUser = null;
+        return;
+      }
+      if (response.user.userId !== userId) {
+        error = { message: "User lookup returned a different identity." };
+        return;
+      }
+      if (keepDraft) {
+        targetUser = response.user;
+        revoked = response.user.state === "revoked";
+      } else {
+        applyUser(response.user);
+      }
+    } catch (cause) {
+      if (!scope.isCurrent(token)) return;
+      error = failureFrom(cause);
     } finally {
-      loading = false;
+      if (scope.settle(token)) loading = false;
     }
   }
 
-  async function saveUser() {
-    if (!targetUser) return;
-    savePending = true;
-    error = null;
-    try {
-      const response = await trellis.usersUpdate({
+  async function saveUser(): Promise<void> {
+    if (targetUser === null || readOnly || loading || savePending || error) return;
+    if (targetUser.userId !== requestedUserId) return;
+    const key = ulid();
+    const intent = captureIntent<UpdateInput>({
+      operation: "usersUpdate", targetId: targetUser.userId, label: targetUser.name ?? targetUser.userId,
+      idempotencyKey: key,
+      input: {
         userId: targetUser.userId,
-        email: targetUser.email,
+        email: email?.trim() ? email.trim() : null,
         expectedVersion: targetUser.version,
-        idempotencyKey: ulid(),
-        image: targetUser.image,
-        name: targetUser.name,
+        idempotencyKey: key,
+        image: image?.trim() ? image.trim() : null,
+        name: name?.trim() ? name.trim() : null,
         state: active ? "active" : "disabled",
-      } satisfies apis.auth.UsersUpdateInput).take();
-      if (isErr(response)) { error = errorMessage(response); return; }
-      notifications.success(`Updated ${targetUser.name ?? targetUser.userId}.`, "Updated");
-      await load();
-    } catch (e) {
-      error = errorMessage(e);
-    } finally {
-      savePending = false;
+      },
+      scope: { routeKey: scope.key },
+    });
+    if (!mutation.begin(intent)) return;
+    error = null;
+    const outcome = await mutation.send({
+      isStillValid: () => scope.key === intent.scope.routeKey && !loading && !readOnly &&
+
+        targetUser?.userId === intent.targetId && targetUser.version === intent.input.expectedVersion && requestedUserId === intent.targetId,
+
+      dispatch: async ({ input }) => await trellis.usersUpdate(input).orThrow(),
+    });
+    if (!outcome || scope.key !== intent.scope.routeKey) return;
+    if (outcome.kind === "succeeded") {
+      // Apply the returned record/version so a second save uses it.
+      applyUser(outcome.value.user);
+      notifications.success(`Updated ${outcome.value.user.name ?? outcome.value.user.userId}.`, "Updated");
+    } else if (outcome.kind === "unknown") {
+      error = { message: "Outcome unknown; the update may have completed. Reload this user before submitting another change." };
+    } else {
+      error = failureFrom(outcome.error);
     }
   }
 
-  onMount(() => {
-    void load();
+  $effect(() => {
+    const userId = requestedUserId;
+    scope.setKey(JSON.stringify([userId]));
+    mutation.cancel();
+    untrack(() => void load(userId));
+    return () => scope.invalidate();
   });
+  onDestroy(() => scope.dispose());
 </script>
 
 <section class="space-y-4">
-  <PageToolbar title="Edit user" description="Update activation and capabilities for a user.">
+  <PageToolbar title="Edit user" description="Update a user's supported profile fields and activation state.">
     {#snippet actions()}
       <a class="btn btn-ghost btn-sm" href={resolve("/admin/users")}>Back to users</a>
     {/snippet}
   </PageToolbar>
 
   {#if error}
-    <Notice variant="error">{error}</Notice>
+    <Notice variant="error">
+      {error.message}
+      {#if error.id}<span class="ml-1 text-xs opacity-70">Reference: {error.id}</span>{/if}
+      {#if !notFound}
+        <button class="btn btn-ghost btn-xs ml-2" type="button" onclick={() => void load(requestedUserId, targetUser !== null)}>{targetUser ? "Refresh version (keep draft)" : "Retry"}</button>
+      {/if}
+    </Notice>
   {/if}
 
   {#if loading}
     <div class="border-y border-base-300 bg-base-100 px-4 py-5">
-      <LoadingState label="Loading users" />
+      <LoadingState label="Loading user" />
     </div>
-  {:else if !hasTargetParams}
+  {:else if error && targetUser === null && !notFound}
+    <div class="border-y border-base-300 bg-base-100 px-4 py-5">User lookup did not complete. Retry before editing.</div>
+  {:else if requestedUserId === ""}
     <EmptyState title="Choose a user" description="Open the Users table and choose Edit from the user's row actions.">
       {#snippet actions()}
         <a class="btn btn-outline btn-sm" href={resolve("/admin/users")}>Back to users</a>
       {/snippet}
     </EmptyState>
-  {:else if !targetUser}
-    <EmptyState title="User not found" description="The selected user no longer exists or the edit link is stale.">
+  {:else if targetUser === null}
+    <EmptyState
+      title="User unavailable"
+      description={`No user matches '${requestedUserId}'. It may have been removed, access may be denied, or the link may be stale.`}
+    >
       {#snippet actions()}
         <a class="btn btn-outline btn-sm" href={resolve("/admin/users")}>Back to users</a>
+        <button class="btn btn-ghost btn-sm" type="button" onclick={() => void load(requestedUserId)}>Retry</button>
       {/snippet}
     </EmptyState>
   {:else}
     <form class="divide-y divide-base-300 border-y border-base-300 bg-base-100" onsubmit={(event) => { event.preventDefault(); void saveUser(); }}>
       <section class="px-5 py-3">
-        <p class="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-base-content/45">Workflow</p>
+        <p class="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-base-content/45">User</p>
         <div class="mt-1 flex min-w-0 flex-wrap items-end justify-between gap-3">
           <div class="min-w-0">
             <h2 class="truncate text-base font-bold leading-tight">{targetUser.name ?? targetUser.userId}</h2>
@@ -304,159 +200,72 @@
         </div>
       </section>
 
+      {#if revoked}
+        <section class="px-5 py-3">
+          <Notice variant="warning">
+            This account is revoked. Its profile is retained read-only; a revoked account
+            cannot be made active again from this form.
+          </Notice>
+        </section>
+      {/if}
+
       <label class="flex items-center justify-between gap-4 px-5 py-3">
         <span class="min-w-0">
           <span class="block text-sm font-medium">Active</span>
-          <span class="trellis-field-help block">Controls whether this user can authenticate and use assigned capabilities.</span>
+          <span class="trellis-field-help block">Controls whether this user can authenticate.</span>
         </span>
-        <input class="toggle toggle-sm" type="checkbox" bind:checked={active} />
+        <input class="toggle toggle-sm" type="checkbox" bind:checked={active} disabled={savePending || readOnly} />
       </label>
 
       <section class="px-5 py-3">
-        <div class="flex min-w-0 flex-wrap items-baseline justify-between gap-3">
-          <div>
-            <h3 class="trellis-field-label">Linked identities</h3>
-            <p class="trellis-field-help mt-1">Users add identities from Profile after proving control of an enabled provider.</p>
-          </div>
-          <span class="trellis-metadata text-xs">0 linked</span>
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="form-control">
+            <span class="trellis-field-label">Name</span>
+            <input class="input input-bordered input-sm mt-1" bind:value={name} disabled={savePending || readOnly} />
+          </label>
+          <label class="form-control">
+            <span class="trellis-field-label">Email</span>
+            <input class="input input-bordered input-sm mt-1" type="email" bind:value={email} disabled={savePending || readOnly} />
+          </label>
+          <label class="form-control md:col-span-2">
+            <span class="trellis-field-label">Image URL</span>
+            <input class="input input-bordered input-sm mt-1 font-mono" bind:value={image} disabled={savePending || readOnly} />
+          </label>
         </div>
-
-        <DataTable wrapperClass="mt-3 border-y border-base-300">
-            <thead>
-              <tr>
-                <th>Provider subject</th>
-                <th>Identity ID</th>
-                <th>Email / display</th>
-                <th>Activity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each targetIdentities as identity (identity.identityId)}
-                <tr>
-                  <td class="align-top"><span class="trellis-identifier break-all">{providerSubject(identity)}</span></td>
-                  <td class="align-top"><span class="trellis-identifier break-all text-base-content/60">{identity.identityId}</span></td>
-                  <td class="align-top text-xs text-base-content/60">
-                    <div>{identity.email ?? "No email"}</div>
-                    <div>{identity.displayName ?? "No display name"}</div>
-                  </td>
-                  <td class="align-top text-xs text-base-content/60">
-                    <div>Last {identity.lastLoginAt ? formatDate(identity.lastLoginAt) : "—"}</div>
-                    <div>Linked {identity.linkedAt ? formatDate(identity.linkedAt) : "—"}</div>
-                  </td>
-                </tr>
-              {:else}
-                <tr><td colspan="4" class="trellis-metadata py-4 text-xs">No linked identities.</td></tr>
-              {/each}
-            </tbody>
-        </DataTable>
-      </section>
-
-      <section class="px-5 py-3">
-        <div class="flex min-w-0 flex-wrap items-baseline justify-between gap-3">
+        <dl class="mt-3 grid grid-cols-2 gap-3 text-xs text-base-content/60">
           <div>
-            <h3 class="trellis-field-label">Capability Groups</h3>
-            <p class="trellis-field-help mt-1">Group assignments are submitted separately from direct capabilities. Built-in groups are assignable.</p>
-          </div>
-          <span class="trellis-metadata text-xs">{selectedCapabilityGroups.length} selected</span>
-        </div>
-
-        <SelectionGroup title="Capability Groups" count={selectedCapabilityGroups.length} bodyClass="mt-4 grid grid-cols-1 gap-x-6 gap-y-2 xl:grid-cols-2">
-          {#each sortedAssignableCapabilityGroups as group (group.groupKey)}
-            <ChoiceRow compact class="border-y py-2">
-              {#snippet input()}
-                <input
-                  class="checkbox checkbox-sm mt-0.5"
-                  type="checkbox"
-                  checked={selectedCapabilityGroups.includes(group.groupKey)}
-                  onchange={(event) => handleCapabilityGroupChange(group.groupKey, event)}
-                />
-              {/snippet}
-              <span class="min-w-0 pr-2">
-                <span class="flex min-w-0 items-center gap-2">
-                  <span class="trellis-identifier truncate font-medium text-base-content">{group.groupKey}</span>
-                  {#if group.groupKey === "admin"}<span class="badge badge-neutral badge-xs shrink-0">built-in/read-only</span>{/if}
-                </span>
-                <span class="mt-0.5 block truncate text-base-content/60" title={group.displayName}>{group.displayName}</span>
-                <span class="trellis-field-help block">{group.capabilities.length} capabilities, {group.includedGroups.length} included groups</span>
+            <dt class="uppercase tracking-wide">State</dt>
+            <dd>
+              <span class="badge badge-sm {targetUser.state === "active" ? "badge-success" : "badge-neutral"}">
+                {targetUser.state}
               </span>
-            </ChoiceRow>
-          {:else}
-            <div class="border-y border-base-300 py-4 trellis-metadata text-xs">No capability groups were returned.</div>
-          {/each}
-        </SelectionGroup>
+            </dd>
+          </div>
+          <div>
+            <dt class="uppercase tracking-wide">Version</dt>
+            <dd class="trellis-identifier">{targetUser.version}</dd>
+          </div>
+        </dl>
       </section>
 
       <section class="px-5 py-3">
-        <div class="flex min-w-0 flex-wrap items-baseline justify-between gap-3">
-          <div>
-            <h3 class="trellis-field-label">Capabilities</h3>
-            <p class="trellis-field-help mt-1">Checked capabilities are submitted as exact capability keys.</p>
-          </div>
-          <span class="trellis-metadata text-xs">{selectedCapabilities.length} selected</span>
-        </div>
-
-        <SelectionGroup title="Capabilities" count={selectedCapabilities.length} bodyClass="mt-4 max-h-72 overflow-y-auto rounded border border-base-300 bg-base-100/40">
-          {#each capabilitySections as section (section.key)}
-            <SelectionSectionHeader title={section.title} subtitle={section.subtitle ?? undefined} count={section.capabilities.length} />
-            {#each section.capabilities as capability (capability.key)}
-              {@const providedByGroup = groupProvidedCapabilities.includes(capability.key)}
-              <ChoiceRow>
-                {#snippet input()}
-                  <input
-                    class="checkbox checkbox-sm mt-0.5"
-                    type="checkbox"
-                    checked={selectedCapabilities.includes(capability.key) || providedByGroup}
-                    disabled={providedByGroup}
-                    onchange={(event) => handleDirectCapabilityChange(capability.key, event)}
-                  />
-                {/snippet}
-                <span class="min-w-0">
-                  <span class="flex min-w-0 items-center gap-2">
-                    <span class="block truncate font-medium text-base-content" title={capability.description}>{capability.description}</span>
-                    {#if providedByGroup}<span class="badge badge-ghost badge-xs shrink-0" title={groupProvidedCapabilityLabel(capability.key)}>from group</span>{/if}
-                  </span>
-                  <span class="trellis-identifier mt-0.5 block break-all text-base-content/50">{localCapabilityKey(capability.key)}</span>
-                  {#if capability.consequence}
-                    <span class="trellis-field-help block">Consequence: {capability.consequence}</span>
-                  {/if}
-                </span>
-              </ChoiceRow>
-            {/each}
-          {:else}
-            <div class="px-2 py-3 trellis-metadata text-xs">No capabilities returned.</div>
-          {/each}
-        </SelectionGroup>
-
-        {#if unavailableSelectedCapabilities.length > 0}
-          <div class="mt-4 border-t border-base-300 pt-3">
-            <div class="mb-1 text-[0.68rem] font-semibold uppercase text-base-content/50">Assigned but unavailable</div>
-            <div class="divide-y divide-base-300/70">
-              {#each unavailableSelectedCapabilities as capabilityKey (capabilityKey)}
-                <ChoiceRow compact>
-                  {#snippet input()}
-                    <input
-                      class="checkbox checkbox-sm mt-0.5"
-                      type="checkbox"
-                      checked={selectedCapabilities.includes(capabilityKey)}
-                      onchange={(event) => handleDirectCapabilityChange(capabilityKey, event)}
-                    />
-                  {/snippet}
-                  <span class="min-w-0 pr-2">
-                    <span class="block font-medium text-base-content">Existing assignment not returned by available capabilities.</span>
-                    <span class="trellis-identifier mt-0.5 block break-all text-base-content/50">{localCapabilityKey(capabilityKey)}</span>
-                  </span>
-                </ChoiceRow>
-              {/each}
-            </div>
-          </div>
-        {/if}
-
+        <p class="text-sm font-medium">Participant-owned grants</p>
+        <p class="trellis-field-help mt-1">
+          This account's effective participant authority is not a user-wide capability list.
+          Inspect the exact owner and participant bindings in User grants.
+        </p>
+        <a
+          class="btn btn-outline btn-sm mt-2"
+          href={consoleUrl("/admin/apps", { query: { ownerKind: "user", ownerId: targetUser.userId } })}
+        >Inspect user grants</a>
       </section>
 
-      <section class="flex flex-wrap justify-end gap-2 px-5 py-3">
+      <div class="flex justify-end gap-2 px-5 py-3">
         <a class="btn btn-ghost btn-sm" href={resolve("/admin/users")}>Cancel</a>
-        <button class="btn btn-primary btn-sm" type="submit" disabled={savePending}>{savePending ? "Saving..." : "Save user"}</button>
-      </section>
+        <button class="btn btn-outline btn-sm" type="submit" disabled={savePending || readOnly || !!error}>
+          {savePending ? "Saving…" : "Save user"}
+        </button>
+      </div>
     </form>
   {/if}
 </section>

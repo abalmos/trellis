@@ -79,6 +79,7 @@ import {
   AuthError,
   BUILTIN_RPC_ERRORS,
   getBuiltinRpcError,
+  machineErrorCode,
   SchemaValidationError,
   type StoreError,
   TransferError,
@@ -2272,22 +2273,7 @@ const EMPTY_TRELLIS_API: RuntimeApi = {
 };
 
 function isBrowserAuthRequiredError(error: unknown): boolean {
-  const isAuthRequiredReason = (reason: unknown): boolean =>
-    reason === "session_not_found";
-
-  if (error instanceof AuthError) {
-    return isAuthRequiredReason(error.reason);
-  }
-
-  if (
-    error instanceof RemoteError &&
-    error.remoteError.type === "AuthError"
-  ) {
-    const reason = Reflect.get(error.remoteError, "reason");
-    return isAuthRequiredReason(reason);
-  }
-
-  return false;
+  return machineErrorCode(error) === "session_not_found";
 }
 
 function isDeclaredRpcError(

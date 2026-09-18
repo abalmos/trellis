@@ -5,6 +5,7 @@
   import { resolve } from "$lib/console_paths";
   import { page } from "$app/state";
   import { onMount } from "svelte";
+  import { catalogPage, traverseAll } from "$lib/console/paging.ts";
   import { getInitials, getRoleLabel } from "$lib/control-panel.ts";
   import {
     formatIdentityProviderLabel,
@@ -12,6 +13,7 @@
     type ParticipantKind,
   } from "$lib/auth_display.ts";
   import { errorMessage, formatDate } from "$lib/format";
+  import { classifyMutationError } from "$lib/console/mutation.ts";
   import { getNotifications } from "$lib/notifications.svelte";
   import EmptyState from "$lib/components/EmptyState.svelte";
   import LoadingState from "$lib/components/LoadingState.svelte";
@@ -30,11 +32,14 @@
   let user = $state<apis.auth.SessionsMeOutput["user"] | null>(null);
   let participantKind = $state<ParticipantKind | null>(null);
   let platformPrivileges = $state<string[]>([]);
-  let identities = $state<IdentityRecord[]>([]);
+  let identities = $state.raw<IdentityRecord[]>([]);
+  let identitiesPanelError = $state<string | null>(null);
   let linkPending = $state(false);
   let linkError = $state<string | null>(null);
+  let linkUncertain = $state(false);
   let passwordChangePending = $state(false);
   let passwordChangeError = $state<string | null>(null);
+  let passwordChangeUncertain = $state(false);
   let passwordChangeModalOpen = $state(false);
   let currentPassword = $state("");
   let newPassword = $state("");
@@ -92,21 +97,23 @@
   }
 
   async function createIdentityLink() {
+    if (linkPending) return;
     linkPending = true;
     linkError = null;
+    linkUncertain = false;
     try {
       const response = await trellis.usersIdentityLinkCreate({
         allowedProviders: [],
         idempotencyKey: ulid(),
         returnTarget: currentReturnTarget(),
-      }).take();
-      if (isErr(response)) {
-        linkError = errorMessage(response);
-        notifications.error(linkError, "Connect login failed");
-        return;
-      }
+      }).orThrow();
       window.location.assign(response.flow.completionUrl);
     } catch (e) {
+      if (classifyMutationError(e).kind === "unknown") {
+        linkUncertain = true;
+        linkError = "The link flow outcome is unknown. Reload and check before starting another.";
+        return;
+      }
       linkError = errorMessage(e);
       notifications.error(linkError, "Connect login failed");
     } finally {
@@ -118,6 +125,7 @@
     if (passwordChangePending) return;
     passwordChangePending = true;
     passwordChangeError = null;
+    passwordChangeUncertain = false;
     try {
       if (!currentPassword || !newPassword) {
         passwordChangeError = "Enter your current password and a new password.";
@@ -128,22 +136,22 @@
         return;
       }
 
-      const response = await trellis.usersPasswordChange({
+      await trellis.usersPasswordChange({
         currentPassword,
         idempotencyKey: ulid(),
         newPassword,
-      }).take();
-      if (isErr(response)) {
-        passwordChangeError = errorMessage(response);
-        notifications.error(passwordChangeError, "Password change failed");
-        return;
-      }
+      }).orThrow();
       currentPassword = "";
       newPassword = "";
       confirmNewPassword = "";
       passwordChangeModalOpen = false;
       notifications.success("Password changed. Other sessions may need to sign in again.", "Password changed");
     } catch (e) {
+      if (classifyMutationError(e).kind === "unknown") {
+        passwordChangeUncertain = true;
+        passwordChangeError = "The password change outcome is unknown. Other sessions may already be signed out. Try signing in with the new password before attempting another change.";
+        return;
+      }
       passwordChangeError = errorMessage(e);
       notifications.error(passwordChangeError, "Password change failed");
     } finally {
@@ -169,12 +177,27 @@
         return;
       }
 
-      const identitiesResponse = await trellis.userIdentitiesList({ limit: 100 }).take();
-      if (isErr(identitiesResponse)) {
-        error = errorMessage(identitiesResponse);
-        return;
+      // The identity panel loads independently: a failure here must not erase
+      // the account information that already loaded.
+      identitiesPanelError = null;
+      try {
+        const identitiesResult = await traverseAll<IdentityRecord>(
+          async (pageRequest) => {
+            const response = await trellis.userIdentitiesList({
+              page: catalogPage(pageRequest.cursor),
+            }).take();
+            if (isErr(response)) throw response;
+            return { items: response.items, cursor: response.page.nextCursor };
+          },
+        );
+        if (!identitiesResult.complete) {
+          identitiesPanelError = errorMessage(identitiesResult.error);
+          return;
+        }
+        identities = [...identitiesResult.items];
+      } catch (cause) {
+        identitiesPanelError = errorMessage(cause);
       }
-      identities = identitiesResponse.items ?? [];
     } catch (e) {
       error = errorMessage(e);
     } finally {
@@ -246,7 +269,13 @@
                 <p class="text-sm text-base-content/70">Connected logins unlock the same Trellis account.</p>
                 <button class="btn btn-outline btn-sm" type="button" onclick={createIdentityLink} disabled={linkPending}>{linkPending ? "Opening..." : "Connect another login"}</button>
               </div>
-              {#if linkError}<Notice variant="error" class="text-sm" role="alert">{linkError}</Notice>{/if}
+              {#if linkError}<Notice variant={linkUncertain ? "warning" : "error"} class="text-sm" role="alert">{linkError}</Notice>{/if}
+              {#if identitiesPanelError}
+                <Notice variant="warning" class="text-sm">
+                  Identities could not be loaded: {identitiesPanelError}
+                  <button class="btn btn-ghost btn-xs ml-2" type="button" onclick={loadProfile}>Retry</button>
+                </Notice>
+              {/if}
 
               <div class="divide-y divide-base-300 rounded-box border border-base-300">
                 {#each identities as identity (`${identity.providerId}:${identity.subject}`)}
@@ -325,7 +354,7 @@
           <span class="label py-1"><span class="label-text text-xs">Confirm new password</span></span>
           <input class="input input-bordered input-sm" type="password" bind:value={confirmNewPassword} autocomplete="new-password" required />
         </label>
-        {#if passwordChangeError}<Notice variant="error" class="text-sm" role="alert">{passwordChangeError}</Notice>{/if}
+        {#if passwordChangeError}<Notice variant={passwordChangeUncertain ? "warning" : "error"} class="text-sm" role="alert">{passwordChangeError}</Notice>{/if}
         <div class="flex justify-end gap-2 pt-1">
           <button class="btn btn-ghost btn-sm" type="button" onclick={closePasswordModal} disabled={passwordChangePending}>Cancel</button>
           <button class="btn btn-primary btn-sm" type="submit" disabled={passwordChangePending}>{passwordChangePending ? "Changing..." : "Change password"}</button>

@@ -1,3 +1,5 @@
+import { machineErrorCode } from "../errors/index.ts";
+
 /** Stable browser-auth recovery categories for app-owned recovery flows. */
 export type BrowserAuthRecoveryKind =
   | "recoverable_stale_session"
@@ -16,18 +18,11 @@ export type BrowserAuthRecoveryClassification = {
   code?: string;
 };
 
-function machineCode(error: unknown): string | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const record = error as Record<string, unknown>;
-  if (typeof record.code === "string") return record.code;
-  return undefined;
-}
-
 /** Classifies an exact auth machine error code. */
 export function classifyBrowserAuthError(
   error: unknown,
 ): BrowserAuthRecoveryClassification {
-  const code = machineCode(error);
+  const code = machineErrorCode(error);
   const result = (kind: BrowserAuthRecoveryKind, recoverable: boolean) => ({
     kind,
     recoverable,

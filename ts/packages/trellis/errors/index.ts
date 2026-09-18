@@ -294,3 +294,31 @@ export function getBuiltinRpcError(
 ): RuntimeRpcErrorDesc | undefined {
   return BUILTIN_RPC_ERRORS[type as keyof typeof BUILTIN_RPC_ERRORS];
 }
+
+/**
+ * Reads the machine-readable failure code from any Trellis error shape.
+ *
+ * Declared RPC errors reconstruct into generated error classes that carry the
+ * code under `data`, built-in errors carry `reason`, and undecoded remote
+ * failures carry it under `remoteError`. Callers that must branch on a specific
+ * server code use this instead of matching one historical shape.
+ */
+export function machineErrorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const record = error as Record<string, unknown>;
+  if (typeof record.code === "string") return record.code;
+  if (typeof record.reason === "string") return record.reason;
+  const data = record.data;
+  if (data && typeof data === "object") {
+    const dataRecord = data as Record<string, unknown>;
+    if (typeof dataRecord.code === "string") return dataRecord.code;
+    if (typeof dataRecord.reason === "string") return dataRecord.reason;
+  }
+  const remote = record.remoteError;
+  if (remote && typeof remote === "object") {
+    const remoteRecord = remote as Record<string, unknown>;
+    if (typeof remoteRecord.code === "string") return remoteRecord.code;
+    if (typeof remoteRecord.reason === "string") return remoteRecord.reason;
+  }
+  return undefined;
+}

@@ -9,7 +9,16 @@
     | { [key: string]: JsonValue };
 
   type Summary = {
-    kind: "object" | "array" | "string" | "number" | "boolean" | "null" | "empty";
+    kind:
+      | "object"
+      | "array"
+      | "string"
+      | "number"
+      | "bigint"
+      | "bytes"
+      | "boolean"
+      | "null"
+      | "empty";
     length?: number;
     preview?: string;
   };
@@ -17,6 +26,9 @@
   export function summarize(value: unknown): Summary {
     if (value === null) return { kind: "null" };
     if (value === undefined) return { kind: "empty" };
+    if (value instanceof Uint8Array) {
+      return { kind: "bytes", length: value.byteLength };
+    }
     if (Array.isArray(value)) {
       if (value.length === 0) return { kind: "array", length: 0 };
       return { kind: "array", length: value.length };
@@ -27,6 +39,7 @@
       if (keys.length === 0) return { kind: "object", length: 0 };
       return { kind: "object", length: keys.length };
     }
+    if (t === "bigint") return { kind: "bigint" };
     if (t === "string") {
       const s = value as string;
       return {
@@ -43,6 +56,7 @@
 <script lang="ts">
   import Icon from "./Icon.svelte";
   import JsonTree from "./JsonTree.svelte";
+  import { displayJson } from "../console/display_value.ts";
 
   type Props = {
     value: unknown;
@@ -75,6 +89,8 @@
 
   let expandedOverride = $state<boolean>();
   let stringExpandedOverride = $state<boolean>();
+  let bytesExpanded = $state(false);
+  let copyState = $state<"idle" | "copied" | "failed">("idle");
   const expanded = $derived(expandedOverride ?? initiallyExpanded);
   const stringExpanded = $derived(stringExpandedOverride ?? forceExpandStrings);
   let fullscreenOpen = $state(false);
@@ -116,13 +132,27 @@
     fullscreenOpen = false;
   }
 
-  function copyChild() {
-    if (typeof navigator === "undefined" || !navigator.clipboard) return;
-    try {
-      navigator.clipboard.writeText(JSON.stringify(value, null, 2));
-    } catch {
-      // clipboard denied; ignore
+  async function copyChild() {
+    const text = displayJson(value);
+    if (typeof navigator === "undefined" || !navigator.clipboard) {
+      copyState = "failed";
+      return;
     }
+    try {
+      await navigator.clipboard.writeText(text);
+      copyState = "copied";
+    } catch {
+      copyState = "failed";
+    }
+    setTimeout(() => {
+      copyState = "idle";
+    }, 1_500);
+  }
+
+  function bytesPreview(bytes: Uint8Array): string {
+    const shown = bytes.slice(0, 24);
+    return [...shown].map((byte) => byte.toString(16).padStart(2, "0")).join(" ") +
+      (bytes.length > shown.length ? " …" : "");
   }
 
   function asArray(value: unknown): unknown[] {
@@ -172,6 +202,10 @@
         {`[ ${summary.length ?? 0} ${summary.length === 1 ? "item" : "items"} ]`}
       {:else if summary.kind === "string"}
         "{stringExpanded && typeof value === "string" ? value : (summary.preview ?? "")}"
+      {:else if summary.kind === "bigint"}
+        {String(value)}
+      {:else if summary.kind === "bytes"}
+        {`${summary.length ?? 0} bytes`}
       {:else if summary.kind === "number"}
         {String(value)}
       {:else if summary.kind === "boolean"}
@@ -180,6 +214,19 @@
         null
       {/if}
     </span>
+    {#if summary.kind === "bytes" && value instanceof Uint8Array}
+      <button
+        type="button"
+        class="json-tree-expand"
+        aria-label={bytesExpanded ? "Hide bytes" : "Show bytes"}
+        onclick={() => { bytesExpanded = !bytesExpanded; }}
+      >
+        {bytesExpanded ? "hide" : "show"}
+      </button>
+      {#if bytesExpanded}
+        <span class="json-tree-bytes">{bytesPreview(value)}</span>
+      {/if}
+    {/if}
     {#if summary.kind === "string" && typeof value === "string" && value.length > 80}
       <button
         type="button"
@@ -209,6 +256,7 @@
         onclick={copyChild}
       >
         <Icon name="clipboard" size={10} />
+        {#if copyState === "copied"}<span class="json-tree-copy-state">Copied</span>{:else if copyState === "failed"}<span class="json-tree-copy-state">Copy unavailable</span>{/if}
       </button>
     {/if}
   </div>
@@ -289,6 +337,17 @@
     gap: 0.3rem;
     min-width: 0;
     padding: 0.1rem 0;
+  }
+
+  .json-tree-bytes {
+    color: color-mix(in oklab, var(--color-base-content) 55%, transparent);
+    font-size: 0.7rem;
+    overflow-wrap: anywhere;
+  }
+
+  .json-tree-copy-state {
+    font-size: 0.6rem;
+    margin-left: 0.2rem;
   }
 
   .json-tree-toggle {

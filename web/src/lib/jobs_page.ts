@@ -3,17 +3,6 @@ import { type apis } from "trellis-web-generated";
 
 export type JobInspection = apis.jobs.InspectOutput;
 
-export type JobsPageData = {
-  available: boolean;
-  message?: string;
-  services: apis.jobs.ListServicesOutput["items"];
-  jobs: apis.jobs.QueryOutput["items"];
-  groups: apis.jobs.SummaryOutput["groups"];
-  stats: apis.jobs.SummaryOutput["stats"];
-  count: apis.jobs.SummaryOutput["count"];
-  nextCursor?: string;
-};
-
 export type JobsDetailData = {
   available: boolean;
   message?: string;
@@ -96,61 +85,96 @@ export function queryJobs(
   return rpc.queryJobs(filter);
 }
 
-/** Loads the Jobs list page data and normalizes unavailable Jobs runtime errors. */
-export async function loadJobsPageData(
-  rpc: JobsPageRpc,
-  filter: apis.jobs.QueryInput = { page: { limit: 50 } },
-): Promise<JobsPageData> {
+/**
+ * Loads only the job query page. Service discovery and summary are separate
+ * reads: a failure in either must not discard a successful query.
+ */
+export async function loadJobsQueryPage(
+  rpc: Pick<JobsPageRpc, "queryJobs">,
+  filter: apis.jobs.QueryInput,
+): Promise<
+  | {
+    available: true;
+    jobs: apis.jobs.QueryOutput["items"];
+    nextCursor?: string;
+  }
+  | { available: false; message: string }
+> {
   try {
-    const servicesResponse = (async () => {
-      const items: apis.jobs.ListServicesOutput["items"] = [];
-      const seenCursors = new Set<string>();
-      let cursor: string | undefined;
-      while (true) {
-        const value = await takeOrThrow(rpc.listServices({
-          page: { ...(cursor ? { cursor } : {}), limit: 500 },
-        }));
-        items.push(...value.items);
-        const nextCursor = value.page.nextCursor;
-        if (!nextCursor) return items;
-        if (seenCursors.has(nextCursor)) {
-          throw new Error("Jobs.ListServices returned a cursor cycle");
-        }
-        seenCursors.add(nextCursor);
-        cursor = nextCursor;
-      }
-    })();
-    const jobsResponse = queryJobs(rpc, filter);
-    const { page: _page, sort: _sort, ...summaryFilter } = filter;
-    const summaryResponse = rpc.summarizeJobs(summaryFilter);
-    const [servicesValue, jobsValue, summaryValue] = await Promise.all([
-      servicesResponse,
-      takeOrThrow(jobsResponse),
-      takeOrThrow(summaryResponse),
-    ]);
-
+    const value = await takeOrThrow(queryJobs(rpc, filter));
     return {
       available: true,
-      services: servicesValue,
-      jobs: jobsValue.items,
-      groups: summaryValue.groups,
-      stats: summaryValue.stats,
-      count: summaryValue.count,
-      nextCursor: jobsValue.page.nextCursor,
+      jobs: value.items,
+      ...(value.page.nextCursor === undefined
+        ? {}
+        : { nextCursor: value.page.nextCursor }),
     };
   } catch (error) {
     const message = normalizedJobsUnavailable(error);
-    if (message) {
-      return {
-        available: false,
-        message,
-        services: [],
-        jobs: [],
-        groups: [],
-        stats: { byState: {}, total: 0n },
-        count: 0n,
-      };
+    if (message) return { available: false, message };
+    throw error;
+  }
+}
+
+/** Loads only the service discovery catalog with complete cursor traversal. */
+export async function loadJobsServices(
+  rpc: Pick<JobsPageRpc, "listServices">,
+): Promise<
+  | { available: true; services: apis.jobs.ListServicesOutput["items"] }
+  | { available: false; message: string }
+> {
+  try {
+    const items: apis.jobs.ListServicesOutput["items"] = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | undefined;
+    for (;;) {
+      const value = await takeOrThrow(rpc.listServices({
+        page: { ...(cursor ? { cursor } : {}), limit: 100 },
+      }));
+      items.push(...value.items);
+      const nextCursor = value.page.nextCursor;
+      if (!nextCursor) return { available: true, services: items };
+      if (seenCursors.has(nextCursor)) {
+        throw new Error("Jobs.ListServices returned a cursor cycle");
+      }
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
     }
+  } catch (error) {
+    const message = normalizedJobsUnavailable(error);
+    if (message) return { available: false, message };
+    throw error;
+  }
+}
+
+/**
+ * Loads the job summary. The caller passes the supported common scope; the
+ * focused state tab is deliberately not part of it, so each tab's summary is a
+ * state ledger rather than a summary of itself.
+ */
+export async function loadJobsSummary(
+  rpc: Pick<JobsPageRpc, "summarizeJobs">,
+  filter: apis.jobs.QueryInput,
+): Promise<
+  | {
+    available: true;
+    groups: apis.jobs.SummaryOutput["groups"];
+    stats: apis.jobs.SummaryOutput["stats"];
+    count: bigint;
+  }
+  | { available: false; message: string }
+> {
+  try {
+    const value = await takeOrThrow(rpc.summarizeJobs(filter));
+    return {
+      available: true,
+      groups: value.groups,
+      stats: value.stats,
+      count: value.count,
+    };
+  } catch (error) {
+    const message = normalizedJobsUnavailable(error);
+    if (message) return { available: false, message };
     throw error;
   }
 }

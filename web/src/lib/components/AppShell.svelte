@@ -10,7 +10,6 @@
     getInitials,
     getPageTitle,
     getRoleLabel,
-    requiresAdministrativeRoute,
     type Authority,
     type NavSection,
   } from "../control-panel.ts";
@@ -18,7 +17,6 @@
   import CommandPalette from "./CommandPalette.svelte";
   import { buildCommandIndex } from "../commands.ts";
   import Icon from "./Icon.svelte";
-  import LoadingState from "./LoadingState.svelte";
   import Notice from "./Notice.svelte";
   import StatusBadge from "./StatusBadge.svelte";
   import TrellisLogo from "./TrellisLogo.svelte";
@@ -32,6 +30,7 @@
     navSections: NavSection[];
     connectionStatus: ConnectionStatus["phase"];
     authFailure: string | null;
+    onRetryAuthority?: () => void;
     onSignOut: () => Promise<void> | void;
   };
 
@@ -43,6 +42,7 @@
     navSections,
     connectionStatus,
     authFailure,
+    onRetryAuthority,
     onSignOut,
   }: Props = $props();
 
@@ -175,16 +175,21 @@
       </div>
     </header>
 
-    <main id="trellis-main" tabindex="-1" class="mx-auto w-full max-w-[1500px] flex-1 px-4 py-7 outline-none lg:px-8">
+    <main
+      id="trellis-main"
+      tabindex="-1"
+      class="mx-auto w-full max-w-[1500px] flex-1 px-4 py-7 outline-none lg:px-8"
+    >
       {#if authFailure}
-        <Notice variant="error" class="mb-4">{authFailure}</Notice>
+        <Notice variant="error" class="mb-4">
+          {authFailure}
+          {#if onRetryAuthority}
+            <button class="btn btn-ghost btn-xs ml-2" type="button" onclick={onRetryAuthority}>Retry</button>
+          {/if}
+        </Notice>
       {/if}
 
-      {#if requiresAdministrativeRoute(routePath) && !profileLoaded}
-        <LoadingState label="Loading operator profile" class="min-h-[40vh]" />
-      {:else}
-        {@render children()}
-      {/if}
+      {@render children()}
     </main>
 
     <ToastViewport />

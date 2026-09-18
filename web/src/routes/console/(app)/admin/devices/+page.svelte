@@ -3,6 +3,11 @@
   import { isErr } from "@qlever-llc/result";
   import { type apis } from "trellis-web-generated";
   import { resolve } from "$lib/console_paths";
+  import { TABLE_PAGE_LIMIT } from "$lib/console/paging.ts";
+  import { captureIntent, classifyMutationError, isIntentCurrent, type MutationIntent } from "$lib/console/mutation.ts";
+  import { getConsoleAuthority } from "$lib/console/authority.svelte.ts";
+  import { decodeKnownJsonBytes } from "$lib/console/display_value.ts";
+  import { SvelteSet } from "svelte/reactivity";
   import { onMount } from "svelte";
   import BulkActionBar from "$lib/components/BulkActionBar.svelte";
   import BulkResult from "$lib/components/BulkResult.svelte";
@@ -29,12 +34,18 @@
   type StatusVariant = "healthy" | "degraded" | "unhealthy" | "offline";
 
   const trellis = getTrellis();
-  const understoodMetadataKeys = ["name", "serialNumber", "modelNumber"] as const;
-  const understoodMetadataKeySet = new Set<string>(understoodMetadataKeys);
+  const authority = getConsoleAuthority();
   const tabs: Tab[] = ["instances", "activations", "reviews"];
 
-  let loading = $state(true);
-  let error = $state<string | null>(null);
+  // Each collection loads and fails independently: a review-list failure must
+  // not suppress device records that loaded, and vice versa.
+  let loading = $state({ deployments: true, instances: true, activations: true, reviews: true });
+  let error = $state<{
+    deployments: string | null;
+    instances: string | null;
+    activations: string | null;
+    reviews: string | null;
+  }>({ deployments: null, instances: null, activations: null, reviews: null });
   let deployments = $state.raw<DeviceDeployment[]>([]);
   let instances = $state.raw<DeviceInstance[]>([]);
   let activations = $state.raw<Activation[]>([]);
@@ -43,7 +54,6 @@
   let selectedDeploymentId = $state("");
   let activeTab = $state<Tab>("instances");
   let search = $state("");
-  let showMetadata = $state(false);
   let selectedReviewId = $state<string | null>(null);
 
   const selectedDeployment = $derived(deployments.find((deployment) => deployment.deploymentId === selectedDeploymentId) ?? null);
@@ -79,10 +89,6 @@
     activeTab = tab;
   }
 
-  function deploymentStatus(): StatusVariant {
-    return "offline";
-  }
-
   function instanceStatus(state: DeviceInstance["state"]): StatusVariant {
     if (state === "active") return "healthy";
     if (state === "pending") return "degraded";
@@ -104,14 +110,6 @@
   }
 
 
-  function badgeClassForDeployment(): string {
-    return "badge-neutral";
-  }
-
-  function dotClassForDeployment(): string {
-    return "bg-base-content/30";
-  }
-
   function deploymentInstances(deploymentId: string): DeviceInstance[] {
     return instances.filter((instance) => instance.deploymentId === deploymentId);
   }
@@ -120,52 +118,84 @@
     return reviews.filter((review) => review.deploymentId === deploymentId && review.state === "pending").length;
   }
 
-  function metadataValue(instanceId: string, key: (typeof understoodMetadataKeys)[number]): string | null {
-    return null;
-  }
-
-  function metadataEntries(instanceId: string): Array<[string, string]> {
-    return [];
-  }
-
   function instanceRowKey(instance: DeviceInstance): string {
     return `${instance.instanceId}:${instance.createdAt}:${instance.identityPublicKey ?? ""}`;
   }
 
-  let selectedInstanceIds = $state(new Set<string>());
+  const selectedInstanceIds = new SvelteSet<string>();
   let bulkBusy = $state(false);
   let bulkResult = $state<{ succeeded: number; failed: string[] } | null>(null);
-  let failedInstances = $state.raw<DeviceInstance[]>([]);
+  let uncertain = $state(false);
+  let unknownInstances = $state<string[]>([]);
+  let disposed = false;
   let confirmationModal: ConfirmationModal | undefined = $state();
 
-  const disableableInstances = $derived(selectedInstances.filter((instance) => instance.state !== "disabled"));
+  type DisableIntent = MutationIntent<apis.auth.DevicesDisableInput>;
+
+  // Only active or pending identities are disable candidates; an already
+  // disabled/revoked/unknown identity is not silently eligible.
+  const disableableInstances = $derived(
+    selectedInstances.filter((instance) =>
+      instance.state === "active" || instance.state === "pending"
+    ),
+  );
   const selectableInstanceIds = $derived(disableableInstances.map((instance) => instance.instanceId));
 
-  async function disableInstances(targets: DeviceInstance[]) {
+  async function disableInstances(intents: DisableIntent[]) {
     bulkBusy = true;
     bulkResult = null;
-    const outcome = await runBulk(targets, async (instance) => {
-      const response = await trellis.devicesDisable({
-        expectedVersion: instance.version,
-        idempotencyKey: ulid(),
-        instanceId: instance.instanceId,
-        reason: null,
-      }).take();
-      if (isErr(response)) throw new Error(errorMessage(response));
-    });
-    failedInstances = outcome.failed.map((failure) => failure.target);
-    for (const instance of targets) selectedInstanceIds.delete(instance.instanceId);
+    const outcome = await runBulk(intents, async (intent) => {
+      if (
+        disposed || !isIntentCurrent(intent, {
+
+          routeKey: "/admin/devices",
+        }) || !instances.some((instance) =>
+
+          instance.instanceId === intent.targetId && instance.version === intent.input.expectedVersion &&
+
+          (instance.state === "active" || instance.state === "pending")
+        )
+      ) {
+        throw new Error("Target or authority changed before dispatch; no disable sent.");
+      }
+      await trellis.devicesDisable(intent.input).orThrow();
+    }, (cause) => classifyMutationError(cause).kind === "unknown" ? "unknown" : "failed");
+    if (disposed) { bulkBusy = false; return; }
+    for (const intent of intents) selectedInstanceIds.delete(intent.targetId);
     bulkResult = {
       succeeded: outcome.succeeded,
-      failed: outcome.failed.map((failure) => `${failure.target.instanceId}: ${failure.reason}`),
+      failed: outcome.failed.map((failure) => `${failure.target.label}: ${failure.reason}`),
     };
+    if (outcome.unknown.length > 0) {
+      uncertain = true;
+      unknownInstances = outcome.unknown.map((item) => item.target.label);
+    }
     bulkBusy = false;
     void load();
   }
 
   async function requestBulkDisable() {
+    if (bulkBusy || uncertain) return;
     const targets = disableableInstances.filter((instance) => selectedInstanceIds.has(instance.instanceId));
     if (targets.length === 0) return;
+    const intents = targets.map((instance) => {
+      const idempotencyKey = ulid();
+      return captureIntent<apis.auth.DevicesDisableInput>({
+        operation: "devicesDisable",
+        input: {
+          expectedVersion: instance.version,
+          idempotencyKey,
+          instanceId: instance.instanceId,
+          reason: null,
+        },
+        label: instance.instanceId,
+        targetId: instance.instanceId,
+        scope: {
+          routeKey: "/admin/devices",
+        },
+        idempotencyKey,
+      });
+    });
     const confirmed = await confirmationModal?.confirm({
       title: `Disable ${targets.length} device instance${targets.length === 1 ? "" : "s"}?`,
       message: "Selected device instances stop operating. Each must complete activation again before use.",
@@ -173,14 +203,29 @@
       targetLabel: "Instances",
       targetName: `${targets.length} instances`,
       expectedValue: bulkExpectedCount(targets.length),
-      details: bulkTargetDetails(targets.map((instance) => instance.instanceId)),
+      details: bulkTargetDetails(intents.map((intent) => intent.label)),
     });
-    if (!confirmed) return;
-    await disableInstances(targets);
+    if (
+      !confirmed || disposed || uncertain || intents.some((intent) =>
+
+        !isIntentCurrent(intent, {
+          routeKey: "/admin/devices",
+        })
+      )
+    ) return;
+    await disableInstances(intents);
   }
 
   function activationRowKey(activation: Activation): string {
     return `${activation.device.instanceId}:${activation.device.updatedAt}`;
+  }
+
+  /** Decodes the deployment reviewMode byte payload; unknown values stay visible. */
+  function reviewModeLabel(reviewMode: Uint8Array | null | undefined): string {
+    if (reviewMode === null || reviewMode === undefined) return "none";
+    const decoded = decodeKnownJsonBytes(reviewMode);
+    if (!decoded.ok) return "unknown";
+    return typeof decoded.value === "string" ? decoded.value : "unknown";
   }
 
   function tabLabel(tab: Tab): string {
@@ -196,36 +241,60 @@
   }
 
   async function load() {
-    loading = true;
-    error = null;
-    try {
-      const [deploymentsResponse, instancesResponse, activationsResponse, reviewsResponse] = await Promise.all([
-        trellis.deploymentsList({ kind: "device", limit: 100 }).take(),
-        trellis.devicesList({ limit: 100 }).take(),
-        trellis.deviceUserAuthoritiesList({ limit: 100 }).take(),
-        trellis.deviceUserAuthoritiesReviewsList({ limit: 100 }).take(),
-      ]);
+    loading = { deployments: true, instances: true, activations: true, reviews: true };
+    error = { deployments: null, instances: null, activations: null, reviews: null };
+    const page = { limit: TABLE_PAGE_LIMIT };
+    const [deploymentsResult, instancesResult, activationsResult, reviewsResult] = await Promise.allSettled([
+      trellis.deploymentsList({ kind: "device", page }).take(),
+      trellis.devicesList({ page }).take(),
+      trellis.deviceUserAuthoritiesList({ page }).take(),
+      trellis.deviceUserAuthoritiesReviewsList({ page }).take(),
+    ]);
 
-      if (isErr(deploymentsResponse)) { error = errorMessage(deploymentsResponse); return; }
-      if (isErr(instancesResponse)) { error = errorMessage(instancesResponse); return; }
-      if (isErr(activationsResponse)) { error = errorMessage(activationsResponse); return; }
-      if (isErr(reviewsResponse)) { error = errorMessage(reviewsResponse); return; }
-
-      deployments = (deploymentsResponse.items ?? []).filter((deployment): deployment is DeviceDeployment => deployment.kind === "device");
-      instances = instancesResponse.items ?? [];
-      activations = activationsResponse.items ?? [];
-      reviews = reviewsResponse.items ?? [];
+    if (deploymentsResult.status === "fulfilled" && !isErr(deploymentsResult.value)) {
+      deployments = (deploymentsResult.value.items ?? []).filter(
+        (deployment): deployment is DeviceDeployment => deployment.kind === "device",
+      );
       syncSelectedDeployment(deployments);
-      if (selectedReviewId && !reviews.some((review) => review.reviewId === selectedReviewId)) selectedReviewId = null;
-    } catch (cause) {
-      error = errorMessage(cause);
-    } finally {
-      loading = false;
+    } else {
+      error.deployments = errorMessage(
+        deploymentsResult.status === "rejected" ? deploymentsResult.reason : deploymentsResult.value,
+      );
     }
+
+    if (instancesResult.status === "fulfilled" && !isErr(instancesResult.value)) {
+      instances = instancesResult.value.items ?? [];
+    } else {
+      error.instances = errorMessage(
+        instancesResult.status === "rejected" ? instancesResult.reason : instancesResult.value,
+      );
+    }
+
+    if (activationsResult.status === "fulfilled" && !isErr(activationsResult.value)) {
+      activations = activationsResult.value.items ?? [];
+    } else {
+      error.activations = errorMessage(
+        activationsResult.status === "rejected" ? activationsResult.reason : activationsResult.value,
+      );
+    }
+
+    if (reviewsResult.status === "fulfilled" && !isErr(reviewsResult.value)) {
+      reviews = reviewsResult.value.items ?? [];
+      if (selectedReviewId && !reviews.some((review) => review.reviewId === selectedReviewId)) {
+        selectedReviewId = null;
+      }
+    } else {
+      error.reviews = errorMessage(
+        reviewsResult.status === "rejected" ? reviewsResult.reason : reviewsResult.value,
+      );
+    }
+
+    loading = { deployments: false, instances: false, activations: false, reviews: false };
   }
 
   onMount(() => {
     void load();
+    return () => { disposed = true; };
   });
 </script>
 
@@ -235,17 +304,24 @@
     description="Manage device deployments, provisioned identities, activation state, and review decisions from one operator surface."
   >
     {#snippet actions()}
-      <button class="btn btn-ghost btn-sm" onclick={load} disabled={loading}>Refresh</button>
+      <button class="btn btn-ghost btn-sm" onclick={load} disabled={loading.deployments}>Refresh</button>
       <a class="btn btn-outline btn-sm" href={resolve("/admin/devices/profiles/new")}>Create deployment</a>
       <a class="btn btn-outline btn-sm" href={resolve("/admin/devices/instances/provision")}>Provision device</a>
     {/snippet}
   </PageToolbar>
 
-  {#if error}
-    <Notice variant="error">{error}</Notice>
+  {#if error.deployments}<Notice variant="error">Deployments: {error.deployments}</Notice>{/if}
+  {#if error.instances}<Notice variant="warning">Device instances: {error.instances}</Notice>{/if}
+  {#if error.activations}<Notice variant="warning">Activations: {error.activations}</Notice>{/if}
+  {#if error.reviews}<Notice variant="warning">Reviews: {error.reviews}</Notice>{/if}
+
+  {#if unknownInstances.length > 0}
+    <Notice variant="warning">
+      Disable outcome unknown for {unknownInstances.join(", ")}. The instances may already be disabled. Inspect the list and reload before any further action.
+    </Notice>
   {/if}
 
-  {#if loading}
+  {#if loading.deployments && deployments.length === 0}
     <Panel><LoadingState label="Loading devices" /></Panel>
   {:else}
     <div class="grid min-h-[calc(100vh-12rem)] items-stretch gap-4 xl:grid-cols-[22rem_minmax(0,1fr)]">
@@ -272,17 +348,17 @@
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
                     <div class="flex items-center gap-2">
-                      <span class={["h-2.5 w-2.5 rounded-full", dotClassForDeployment()]}></span>
+                      <span class={["h-2.5 w-2.5 rounded-full", deployment.state === "active" ? "bg-success" : "bg-base-content/30"]}></span>
                       <span class="trellis-identifier truncate font-medium">{deployment.deploymentId}</span>
                     </div>
                     <div class="mt-1 text-xs text-base-content/60">{activeDevices.length}/{deploymentDeviceInstances.length} activated instances</div>
                     <div class="mt-1 flex flex-wrap gap-1">
-                      <span class="badge badge-outline badge-xs">review {deployment.reviewMode}</span>
+                      <span class="badge badge-outline badge-xs">review {reviewModeLabel(deployment.reviewMode)}</span>
                       <span class="badge badge-outline badge-xs">delegation {deployment.requiresDeviceDelegation ? "required" : "none"}</span>
                       {#if pendingReviewCount > 0}<span class="badge badge-warning badge-xs">{pendingReviewCount} review</span>{/if}
                     </div>
                   </div>
-                  <span class={["badge badge-sm", badgeClassForDeployment()]}>{deployment.state === "disabled" ? "Disabled" : "Enabled"}</span>
+                  <span class={["badge badge-sm", deployment.state === "active" ? "badge-success" : "badge-neutral"]}>{deployment.state}</span>
                 </div>
               </SelectableRecordButton>
             {:else}
@@ -307,10 +383,10 @@
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
                     <h2 class="trellis-identifier truncate text-lg font-semibold">{selectedDeployment.deploymentId}</h2>
-                    <StatusBadge label={selectedDeployment.state === "disabled" ? "Disabled" : "Enabled"} status={deploymentStatus()} />
+                    <StatusBadge label={selectedDeployment.state} status={selectedDeployment.state === "active" ? "healthy" : "offline"} />
                   </div>
                   <div class="mt-1 flex flex-wrap gap-1 text-sm text-base-content/60">
-                    <span>Review: <span class="badge badge-outline badge-sm">{selectedDeployment.reviewMode}</span></span>
+                    <span>Review: <span class="badge badge-outline badge-sm">{reviewModeLabel(selectedDeployment.reviewMode)}</span></span>
                     <span>Delegation: <span class="badge badge-outline badge-sm">{selectedDeployment.requiresDeviceDelegation ? "required" : "none"}</span></span>
                   </div>
                 </div>
@@ -355,24 +431,17 @@
                     succeeded={bulkResult.succeeded}
                     failed={bulkResult.failed}
                     pastTense="instances disabled"
-                    onRetry={failedInstances.length > 0 ? () => void disableInstances(failedInstances) : undefined}
                     onDismiss={() => { bulkResult = null; }}
                   />
                 {:else if selectedInstanceIds.size > 0}
                   <BulkActionBar count={selectedInstanceIds.size} noun="instance" onClear={() => selectedInstanceIds.clear()}>
                     {#snippet actions()}
-                      <button class="btn btn-error btn-outline btn-sm" disabled={bulkBusy} onclick={() => void requestBulkDisable()}>
+                      <button class="btn btn-error btn-outline btn-sm" disabled={bulkBusy || uncertain} onclick={() => void requestBulkDisable()}>
                         {bulkBusy ? "Disabling…" : "Disable selected"}
                       </button>
                     {/snippet}
                   </BulkActionBar>
                 {/if}
-                <div class="mb-2 flex justify-end">
-                  <label class="label cursor-pointer gap-2 py-0">
-                    <span class="label-text text-sm">Metadata</span>
-                    <input class="toggle toggle-sm" type="checkbox" bind:checked={showMetadata} />
-                  </label>
-                </div>
                 {#if selectedInstances.length === 0}
                   <EmptyState title="No device instances" description="Provisioned device identities for this deployment appear here." />
                 {:else}
@@ -390,7 +459,7 @@
                             onchange={() => toggleAll(selectedInstanceIds, selectableInstanceIds)}
                           />
                         </th>
-                        <th>Instance</th><th>Identity key</th><th>Name</th><th>Serial</th><th>Model</th>{#if showMetadata}<th>Metadata</th>{/if}<th>State</th><th>Created</th><th>Actions</th></tr></thead>
+                        <th>Instance</th><th>Identity key</th><th>State</th><th>Created</th><th>Actions</th></tr></thead>
                       <tbody>
                         {#each selectedInstances as instance (instanceRowKey(instance))}
                           <tr>
@@ -410,22 +479,6 @@
                             </td>
                             <td class="trellis-identifier font-medium">{instance.instanceId}</td>
                             <td class="trellis-identifier text-base-content/60">{instance.identityPublicKey ?? "—"}</td>
-                            <td class="text-base-content/60">{metadataValue(instance.instanceId, "name") ?? "—"}</td>
-                            <td class="text-base-content/60">{metadataValue(instance.instanceId, "serialNumber") ?? "—"}</td>
-                            <td class="text-base-content/60">{metadataValue(instance.instanceId, "modelNumber") ?? "—"}</td>
-                            {#if showMetadata}
-                              <td class="text-xs text-base-content/60">
-                                {#if metadataEntries(instance.instanceId).length > 0}
-                                  <div class="space-y-1">
-                                    {#each metadataEntries(instance.instanceId) as [key, value] (key)}
-                                      <div><span class="font-medium text-base-content">{key}</span>=<span class="trellis-identifier">{value}</span></div>
-                                    {/each}
-                                  </div>
-                                {:else}
-                                  —
-                                {/if}
-                              </td>
-                            {/if}
                             <td><StatusBadge label={instance.state} status={instanceStatus(instance.state)} /></td>
                             <td class="text-base-content/60">{formatDate(instance.createdAt)}</td>
                             <td>
@@ -510,11 +563,6 @@
                           <div><span class="text-base-content/50">Requested</span><div>{formatDate(selectedReview.requestedAt)}</div></div>
                           <div><span class="text-base-content/50">Decided</span><div>{selectedReview.decidedAt ? formatDate(selectedReview.decidedAt) : "—"}</div></div>
                           <div class="col-span-2"><span class="text-base-content/50">Reason</span><div>{selectedReview.reason ?? "—"}</div></div>
-                        </div>
-                        <div class="space-y-0.5 text-xs text-base-content/60">
-                          <div><span class="font-medium text-base-content">Name</span>: {metadataValue(selectedReview.instanceId, "name") ?? "—"}</div>
-                          <div><span class="font-medium text-base-content">Serial</span>: {metadataValue(selectedReview.instanceId, "serialNumber") ?? "—"}</div>
-                          <div><span class="font-medium text-base-content">Model</span>: {metadataValue(selectedReview.instanceId, "modelNumber") ?? "—"}</div>
                         </div>
                         {#if selectedReview.state === "pending"}
                           <a class="btn btn-outline btn-sm w-full" href={resolve(`/admin/devices/reviews/decide?review=${encodeURIComponent(selectedReview.reviewId)}`)}>Decide review</a>

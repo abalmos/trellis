@@ -1,7 +1,9 @@
 <script lang="ts">
   import { ulid } from "ulid";
-  import { isErr } from "@qlever-llc/result";
   import { type apis } from "trellis-web-generated";
+  import { onMount } from "svelte";
+  import { authorityIdentityChanged, getConsoleAuthority } from "$lib/console/authority.svelte.ts";
+  import { captureIntent, isIntentCurrent, MutationController } from "$lib/console/mutation.ts";
   import { resolve } from "$lib/console_paths";
   import Notice from "$lib/components/Notice.svelte";
   import PageToolbar from "$lib/components/PageToolbar.svelte";
@@ -11,33 +13,68 @@
   import { getTrellis } from "$lib/trellis";
 
   const trellis = getTrellis();
+  const authority = getConsoleAuthority();
+  const mutation = new MutationController<apis.auth.DeploymentsCreateInput, apis.auth.DeploymentsCreateOutput>();
   const notifications = getNotifications();
 
   let error = $state<string | null>(null);
   let pending = $state(false);
-  let deploymentId = $state("");
+  let uncertain = $state(false);
+  let disposed = false;
+  let displayName = $state("");
   let reviewMode = $state<"none" | "required">("none");
   let requiresDeviceDelegation = $state(false);
+  /** Set when the create succeeded so the operator keeps the allocated ID. */
+  let createdDeploymentId = $state<string | null>(null);
 
   async function createDeployment() {
+    if (pending || uncertain) return;
+    const idempotencyKey = ulid();
+    const actingIdentity = authority.identity;
+    const capturedReviewMode = reviewMode;
+    const input: apis.auth.DeploymentsCreateInput = {
+      displayName: displayName.trim(),
+      expiresAt: null,
+      idempotencyKey,
+      kind: "device",
+      participantId: null,
+      portalId: null,
+      requiresDeviceDelegation,
+      reviewMode: new TextEncoder().encode(JSON.stringify(reviewMode)),
+    };
+    if (!input.displayName) return;
+    const intent = captureIntent({
+      operation: "deploymentsCreate",
+      input,
+      label: input.displayName,
+      targetId: "new-device-deployment",
+      scope: { routeKey: "new-device-deployment" },
+      idempotencyKey,
+    });
+    if (!mutation.begin(intent)) return;
     pending = true;
     error = null;
     try {
-      const input: apis.auth.DeploymentsCreateInput = {
-        displayName: deploymentId.trim(),
-        expiresAt: null,
-        idempotencyKey: ulid(),
-        kind: "device",
-        participantId: null,
-        portalId: null,
-        requiresDeviceDelegation,
-        reviewMode: new TextEncoder().encode(JSON.stringify(reviewMode)),
-      };
+      const outcome = await mutation.send({
+        isStillValid: () => !disposed && isIntentCurrent(intent, { routeKey: "new-device-deployment" }) &&
 
-      const response = await trellis.deploymentsCreate(input).take();
-      if (isErr(response)) { error = errorMessage(response); return; }
-      notifications.success(`Device deployment ${response.deployment.deploymentId} created.`, "Created");
-      deploymentId = "";
+          displayName.trim() === intent.input.displayName && requiresDeviceDelegation === intent.input.requiresDeviceDelegation &&
+
+          reviewMode === capturedReviewMode,
+        dispatch: (captured) => trellis.deploymentsCreate(captured.input).orThrow(),
+      });
+      if (!outcome) return;
+      if (disposed || authorityIdentityChanged(actingIdentity, authority.identity)) { mutation.reset(); return; }
+      if (outcome.kind === "unknown") {
+        uncertain = true;
+        error = `Creation outcome unknown for ${intent.label}. Inspect device deployments and reload before attempting another create.`;
+        return;
+      }
+      if (outcome.kind !== "succeeded") { error = errorMessage(outcome.error); return; }
+      const response = outcome.value;
+      createdDeploymentId = response.deployment.deploymentId;
+      notifications.success(`Device deployment ${createdDeploymentId} created.`, "Created");
+      displayName = "";
       reviewMode = "none";
       requiresDeviceDelegation = false;
     } catch (e) {
@@ -46,6 +83,8 @@
       pending = false;
     }
   }
+
+  onMount(() => () => { disposed = true; mutation.reset(); });
 </script>
 
 <section class="space-y-4">
@@ -56,14 +95,24 @@
   </PageToolbar>
 
   {#if error}
-    <Notice variant="error">{error}</Notice>
+    <Notice variant={uncertain ? "warning" : "error"}>{error}</Notice>
+  {/if}
+
+  {#if createdDeploymentId}
+    <Notice variant="success">
+      Last confirmed device deployment profile: {createdDeploymentId}. Provisioning a device instance is a separate step.
+      <a class="link ml-1" href={resolve("/admin/devices/instances/provision")} data-provision-link>Provision device</a>
+    </Notice>
   {/if}
 
   <Panel title="Deployment details" eyebrow="Device authorization">
     <form class="grid gap-3 lg:grid-cols-2" onsubmit={(event) => { event.preventDefault(); void createDeployment(); }}>
       <label class="form-control gap-1">
-        <span class="label-text text-xs">Deployment ID</span>
-        <input class="input input-bordered input-sm" bind:value={deploymentId} placeholder="reader.default" required />
+        <span class="label-text text-xs">Display name</span>
+        <input class="input input-bordered input-sm" bind:value={displayName} placeholder="Reader fleet" required />
+        <span class="label-text-alt text-base-content/60">
+          Labels the deployment profile. The deployment ID is allocated by the server.
+        </span>
       </label>
 
       <label class="form-control gap-1">
@@ -85,8 +134,8 @@
       </label>
 
       <div class="flex items-end justify-end lg:col-span-2">
-        <button type="submit" class="btn btn-outline btn-sm" disabled={pending || !deploymentId.trim()}>
-          {pending ? "Creating…" : "Create deployment"}
+        <button type="submit" class="btn btn-outline btn-sm" disabled={pending || uncertain || displayName.trim().length === 0}>
+          {pending ? "Creating…" : "Create deployment profile"}
         </button>
       </div>
     </form>

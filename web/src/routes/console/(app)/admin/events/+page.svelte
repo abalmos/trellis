@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import EmptyState from "$lib/components/EmptyState.svelte";
@@ -12,7 +12,19 @@
   import Panel from "$lib/components/Panel.svelte";
   import StatusBadge from "$lib/components/StatusBadge.svelte";
   import { boundedNumber, compactDuration, errorMessage, formatDate, jsonBlock } from "$lib/format";
-  import { getTrellis } from "$lib/trellis";
+  import { getConnection, getTrellis } from "$lib/trellis";
+  import { getConsoleAuthority } from "$lib/console/authority.svelte.ts";
+  import {
+    consumerSeverityOf,
+    consumerStatus,
+    type ConsumerStatus,
+    DetailOwnership,
+    type OptionalReadState,
+    projectEventsHealthLedger,
+    runDeadLetterMutation,
+  } from "$lib/console/events_detail.ts";
+  import { LiveSubscription, RefreshScheduler } from "$lib/console/live_refresh.ts";
+  import { classifyMutationError } from "$lib/console/mutation.ts";
   import { type apis } from "trellis-web-generated";
   import { subjectMatches } from "./subject";
 
@@ -31,7 +43,6 @@
   type Focus = "exceptions" | "all" | "unresolved" | "malformed" | "largest" | EventVerificationStatus;
   type EventTypeRef = { ownerContractId: string; ownerEventName: string };
   type ConsumerManagedBy = "authority" | "platform" | "external";
-  type ConsumerStatus = "current" | "processing" | "behind" | "saturated" | "inactive" | "failing" | "missing" | "orphaned" | "unmanaged";
 
   type EventRow = apis.events.QueryOutput["items"][number];
 
@@ -66,6 +77,8 @@
   };
 
   const trellis = getTrellis();
+  const connection = getConnection();
+  const authority = getConsoleAuthority();
   const rpcTimeout = 10_000;
   const pageLimit = 40;
   const windows: Array<{ value: WindowValue; label: string; minutes: number }> = [
@@ -85,17 +98,6 @@
     "outside-session-window",
     "auth-unavailable",
   ];
-  const consumerSeverity: Record<ConsumerStatus, number> = {
-    missing: 0,
-    saturated: 1,
-    inactive: 2,
-    failing: 3,
-    behind: 4,
-    processing: 5,
-    current: 6,
-    orphaned: 7,
-    unmanaged: 8,
-  };
 
   let loading = $state(true);
   let refreshing = $state(false);
@@ -118,6 +120,17 @@
   let detailError = $state<string | null>(null);
   let focus = $state<Focus>(asEventFocus(page.url.searchParams.get("focus")) ?? "exceptions");
   let handledFocusParam = page.url.searchParams.get("focus");
+  /**
+   * Completion status of each optional read, separate from its value.
+   *
+   * A successful empty result is ready/empty; a failed, denied, or
+   * not-yet-completed read is not, and must never be presented as a numeric
+   * zero or a healthy-empty state for the same data.
+   */
+  let metricsState = $state<OptionalReadState>("pending");
+  let consumersState = $state<OptionalReadState>("pending");
+  /** The window the retained metrics belong to, so a window change cannot show them. */
+  let metricsScope = $state<WindowValue | null>(null);
 
   afterNavigate(() => {
     const value = page.url.searchParams.get("focus");
@@ -128,8 +141,8 @@
       focus = next;
       cursor = undefined;
       cursorBackStack = [];
-      selectedEvent = null;
-      void load();
+      invalidateDetails();
+      void requestSnapshot();
     }
   });
   let selectedEventType = $state.raw<EventTypeRef | null>(null);
@@ -144,13 +157,50 @@
   let lastUpdated = $state<Date | null>(null);
 
   let loadSequence = 0;
-  let detailSequence = 0;
+  let deadLetterSequence = 0;
+  let disposed = false;
+  /**
+   * Semantic identity of the committed list query. Changing focus, filters,
+   * window, or page invalidates every detail read that belonged to the old
+   * query, so a late response cannot repopulate the detail area.
+   */
+  let listKey = $state("");
+  const detailOwnership = new DetailOwnership();
   let watchController: AbortController | null = null;
-  let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+  let subscription: LiveSubscription | null = null;
+  let consumerError = $state<string | null>(null);
+  let metricsError = $state<string | null>(null);
+  let diagnosticsError = $state<string | null>(null);
+  let deadLetterPanelError = $state<string | null>(null);
+  let snapshotShowsLoading = true;
+  const refreshScheduler = new RefreshScheduler({
+    canRefresh: () =>
+      !disposed &&
+      document.visibilityState === "visible" &&
+      connection.status.phase === "connected",
+    onRefresh: () => {
+      const showLoading = snapshotShowsLoading;
+      snapshotShowsLoading = false;
+      return readSnapshot(showLoading);
+    },
+    onRefreshError: (cause) => { error = errorMessage(cause); },
+  });
 
   const windowOption = $derived(windows.find((option) => option.value === windowValue) ?? windows[1]);
-  const eventRate = $derived(boundedNumber(metrics?.summary.total ?? 0n) / windowOption.minutes);
-  const averagePayload = $derived(metrics?.summary.total ? boundedNumber(metrics.summary.payloadSizeBytes) / boundedNumber(metrics.summary.total) : 0);
+  const visibleMetricsState = $derived<OptionalReadState>(
+    metricsScope === windowValue ? metricsState : "pending",
+  );
+  const metricsReady = $derived(visibleMetricsState === "ready" && metrics !== null);
+  const eventRate = $derived(
+    metricsReady && metrics
+      ? boundedNumber(metrics.summary.total) / windowOption.minutes
+      : null,
+  );
+  const averagePayload = $derived(
+    metricsReady && metrics && metrics.summary.total
+      ? boundedNumber(metrics.summary.payloadSizeBytes) / boundedNumber(metrics.summary.total)
+      : null,
+  );
   const eventTypesByCount = $derived.by(() => [...(metrics?.summary.eventTypes ?? [])].sort((a, b) => boundedNumber(b.count - a.count)));
   const matchingConsumers = $derived.by(() => {
     const subject = selectedEvent?.event.subject;
@@ -158,7 +208,11 @@
       ? consumers.filter((consumer) => consumer.filterSubjects.some((filter) => subjectMatches(filter, subject)))
       : [];
   });
-  const sortedConsumers = $derived.by(() => [...consumers].sort((a, b) => consumerSeverity[a.status] - consumerSeverity[b.status]));
+  const sortedConsumers = $derived.by(() =>
+    [...consumers].sort((a, b) =>
+      consumerSeverityOf(a.status) - consumerSeverityOf(b.status)
+    )
+  );
   const attentionConsumers = $derived(sortedConsumers.filter(isAttentionConsumer));
   const displayedConsumers = $derived(attentionConsumersOnly ? attentionConsumers : sortedConsumers);
   const oldestLagConsumer = $derived.by(() =>
@@ -166,8 +220,16 @@
       .filter((consumer) => consumer.oldestPendingAt)
       .sort((a, b) => new Date(a.oldestPendingAt ?? 0).getTime() - new Date(b.oldestPendingAt ?? 0).getTime())[0],
   );
-  const eventPoints = $derived(chartPoints(metrics?.buckets.map((bucket) => boundedNumber(bucket.total)) ?? []));
-  const exceptionPoints = $derived(chartPoints(metrics?.buckets.map((bucket) => boundedNumber(bucket.integrityExceptions)) ?? []));
+  const eventPoints = $derived(
+    metricsReady && metrics
+      ? chartPoints(metrics.buckets.map((bucket) => boundedNumber(bucket.total)))
+      : "",
+  );
+  const exceptionPoints = $derived(
+    metricsReady && metrics
+      ? chartPoints(metrics.buckets.map((bucket) => boundedNumber(bucket.integrityExceptions)))
+      : "",
+  );
   const focusTitle = $derived(`${selectedEventType ? `${selectedEventType.ownerEventName} · ` : ""}${focusLabel(focus)}`);
   const focusDescription = $derived(focusDetail(focus));
 
@@ -196,9 +258,6 @@
     return value === "verified" || verificationIssues.includes(value as EventVerificationStatus);
   }
 
-  function isConsumerStatus(value: unknown): value is ConsumerStatus {
-    return Object.hasOwn(consumerSeverity, String(value));
-  }
 
   function isConsumerManagedBy(value: unknown): value is ConsumerManagedBy {
     return value === "authority" || value === "platform" || value === "external";
@@ -208,7 +267,7 @@
     const row = objectRecord(value);
     const stream = stringValue(row.stream);
     const consumerName = stringValue(row.consumerName);
-    if (!stream || !consumerName || !isConsumerStatus(row.status)) return null;
+    if (!stream || !consumerName) return null;
     const managedBy = isConsumerManagedBy(row.managedBy) ? row.managedBy : stringValue(row.deploymentId) ? "authority" : "external";
     return {
       resourceId: stringValue(row.resourceId) ?? "",
@@ -219,7 +278,7 @@
       consumerName,
       filterSubjects: stringArray(row.filterSubjects),
       managedBy,
-      status: managedBy === "external" ? "unmanaged" : row.status,
+      status: managedBy === "external" ? "unmanaged" : consumerStatus(row.status),
       pending: numberValue(row.pending) ?? 0,
       ackPending: numberValue(row.ackPending) ?? 0,
       waitingPulls: numberValue(row.waitingPulls) ?? 0,
@@ -242,13 +301,14 @@
   }
 
   function isAttentionConsumer(consumer: ConsumerRow): boolean {
-    return consumer.status !== "current" && consumer.status !== "processing" && consumer.status !== "unmanaged";
+    return consumer.status !== "current" && consumer.status !== "processing" &&
+      consumer.status !== "unmanaged";
   }
 
   function statusBadgeClass(status: string): string {
     if (status === "verified" || status === "current") return "badge-success";
     if (status === "processing" || status === "behind" || status === "saturated" || status === "orphaned" || status === "unresolved") return "badge-warning";
-    if (status === "missing-proof" || status === "auth-unavailable" || status === "inactive" || status === "unmanaged") return "badge-neutral";
+    if (status === "missing-proof" || status === "auth-unavailable" || status === "inactive" || status === "unmanaged" || status.startsWith("unknown:")) return "badge-neutral";
     return "badge-error";
   }
 
@@ -268,18 +328,30 @@
   function consumerVariant(consumer: ConsumerRow): "healthy" | "degraded" | "unhealthy" | "offline" {
     if (consumer.status === "current" || consumer.status === "processing") return "healthy";
     if (consumer.status === "behind" || consumer.status === "saturated") return "degraded";
-    if (consumer.status === "unmanaged") return "offline";
+    if (consumer.status === "unmanaged" || consumer.status.startsWith("unknown:")) return "offline";
     return "unhealthy";
   }
 
-  const ledgerItems = $derived([
-    { id: "all", label: "Event flow", value: (metrics?.summary.total ?? 0).toLocaleString(), detail: `${eventRate.toLocaleString(undefined, { maximumFractionDigits: 1 })} per minute`, tone: "info" as const, active: focus === "all" },
-    { id: "exceptions", label: "Integrity exceptions", value: (metrics?.summary.integrityExceptions ?? 0n).toLocaleString(), detail: `${metrics?.summary.total ? (boundedNumber(metrics.summary.integrityExceptions) / boundedNumber(metrics.summary.total) * 100).toFixed(2) : "0.00"}% of events`, tone: "error" as const, active: focus === "exceptions" },
-    { id: "unresolved", label: "Unresolved", value: (metrics?.summary.byResolution.unresolved ?? 0).toLocaleString(), detail: "owner not resolved", tone: "warning" as const, active: focus === "unresolved" },
-    { id: "consumers", label: "Consumers", value: attentionConsumers.length, detail: `need attention · ${consumers.length} shown`, tone: "error" as const, active: attentionConsumersOnly },
-    { id: "oldest-lag", label: "Oldest lag", value: ageLabel(oldestLagConsumer?.oldestPendingAt), detail: oldestLagConsumer?.consumerName ?? "no pending events", tone: "warning" as const, active: selectedConsumer?.row.consumerName === oldestLagConsumer?.consumerName, disabled: !oldestLagConsumer },
-    { id: "largest", label: "Payload", value: formatBytes(boundedNumber(metrics?.summary.payloadSizeBytes ?? 0n)), detail: `${formatBytes(averagePayload)} average`, tone: "success" as const, active: focus === "largest" },
-  ]);
+  const ledgerItems = $derived(projectEventsHealthLedger({
+    metricsState: visibleMetricsState,
+    consumersState,
+    total: metricsReady && metrics ? metrics.summary.total : undefined,
+    integrityExceptions: metricsReady && metrics ? metrics.summary.integrityExceptions : undefined,
+    unresolved: metricsReady && metrics ? metrics.summary.byResolution.unresolved : undefined,
+    payloadTotalLabel: formatBytes(
+      metricsReady && metrics ? boundedNumber(metrics.summary.payloadSizeBytes) : 0,
+    ),
+    payloadAverageLabel: formatBytes(averagePayload ?? 0),
+    windowMinutes: windowOption.minutes,
+    attentionConsumers: attentionConsumers.length,
+    shownConsumers: consumers.length,
+    oldestLagValue: ageLabel(oldestLagConsumer?.oldestPendingAt),
+    oldestLagDetail: oldestLagConsumer?.consumerName ?? "no pending events",
+    oldestLagDisabled: !oldestLagConsumer,
+    focus,
+    attentionConsumersOnly,
+    oldestLagActive: selectedConsumer?.row.consumerName === oldestLagConsumer?.consumerName,
+  }));
 
   function handleLedgerSelect(id: string) {
     if (id === "consumers") showAttentionConsumers();
@@ -381,59 +453,135 @@
     return null;
   }
 
-  async function load(showLoading = true) {
+  function requestSnapshot(showLoading = true) {
+    if (showLoading) snapshotShowsLoading = true;
+    return refreshScheduler.refreshNow();
+  }
+
+  async function readSnapshot(showLoading = true) {
     const sequence = ++loadSequence;
+    // The key this read belongs to, captured before any await so a later
+    // filter change cannot make an old response look current.
+    const requestedListKey = currentListKey();
+    const requestedWindow = windowValue;
+    listKey = requestedListKey;
+    // A semantic query change ends the previous detail reads and clears the
+    // selection before the new list read starts.
+    detailOwnership.setListKey(requestedListKey);
     if (showLoading) loading = true;
     else refreshing = true;
-    error = null;
-    unavailableMessage = null;
-    try {
-      const metricsInput: apis.events.MetricsInput = { window: windowValue };
-      const selectedResourceId = selectedConsumer?.row.resourceId;
-      const [eventData, consumerData, metricData, diagnosticsData, deadLetterData] = await Promise.all([
+    const metricsInput: apis.events.MetricsInput = { window: requestedWindow };
+    const selectedResourceId = selectedConsumer?.row.resourceId;
+    // The event query is primary. Consumer query, metrics, diagnostics, and the
+    // dead-letter query are independent: a denied or failed optional read must
+    // not blank permitted event rows.
+    const [eventResult, consumerResult, metricsResult, diagnosticsResult, deadLetterResult] =
+      await Promise.allSettled([
         trellis.eventsQuery(buildEventQuery(), { timeout: rpcTimeout }).orThrow(),
         loadConsumers(),
         trellis.eventsMetrics(metricsInput, { timeout: rpcTimeout }).orThrow(),
         trellis.diagnostics({}, { timeout: rpcTimeout }).orThrow(),
-        selectedResourceId ? loadDeadLetters(selectedResourceId) : Promise.resolve([]),
+        selectedResourceId ? loadDeadLetters(selectedResourceId) : Promise.resolve(null),
       ]);
-      if (sequence !== loadSequence) return;
-      rows = eventData.items;
-      nextCursor = eventData.page.nextCursor;
-      consumers = consumerData.map(toConsumerRow).filter((row): row is ConsumerRow => row !== null);
-      metrics = metricData;
-      diagnostics = diagnosticsData;
-      deadLetters = deadLetterData;
-      lastUpdated = new Date();
-    } catch (loadError) {
-      if (sequence !== loadSequence) return;
-      const unavailable = unavailableText(loadError);
-      if (unavailable) {
-        unavailableMessage = unavailable;
-        rows = [];
-        consumers = [];
-        metrics = null;
+    if (sequence !== loadSequence || disposed || listKey !== requestedListKey) return;
+    try {
+      if (eventResult.status === "fulfilled") {
+        error = null;
+        unavailableMessage = null;
+        rows = eventResult.value.items;
+        nextCursor = eventResult.value.page.nextCursor;
+        lastUpdated = new Date();
       } else {
-        error = errorMessage(loadError);
-        if (showLoading) {
+        const unavailable = unavailableText(eventResult.reason);
+        if (unavailable) {
+          unavailableMessage = unavailable;
           rows = [];
-          consumers = [];
-          metrics = null;
+          nextCursor = undefined;
+        } else {
+          error = errorMessage(eventResult.reason);
+          rows = [];
+          nextCursor = undefined;
         }
       }
+      if (consumerResult.status === "fulfilled" && consumerResult.value !== null) {
+        consumers = consumerResult.value
+          .map(toConsumerRow)
+          .filter((row): row is ConsumerRow => row !== null);
+        consumersState = "ready";
+        consumerError = null;
+      } else {
+        consumers = [];
+        consumersState = "unavailable";
+        consumerError = consumerResult.status === "rejected" ? errorMessage(consumerResult.reason) : "Consumer query is not permitted.";
+      }
+      if (metricsResult.status === "fulfilled" && metricsResult.value !== null) {
+        metrics = metricsResult.value;
+        metricsState = "ready";
+        metricsScope = requestedWindow;
+        metricsError = null;
+      } else {
+        metrics = null;
+        metricsState = "unavailable";
+        metricsScope = requestedWindow;
+        metricsError = metricsResult.status === "rejected" ? errorMessage(metricsResult.reason) : "Event metrics are not permitted.";
+      }
+      if (diagnosticsResult.status === "fulfilled" && diagnosticsResult.value !== null) {
+        diagnostics = diagnosticsResult.value;
+        diagnosticsError = null;
+      } else {
+        diagnostics = null;
+        diagnosticsError = diagnosticsResult.status === "rejected" ? errorMessage(diagnosticsResult.reason) : "Event diagnostics are not permitted.";
+      }
+      if (deadLetterResult.status === "fulfilled" && deadLetterResult.value !== null && selectedResourceId === selectedConsumer?.row.resourceId) {
+        deadLetters = deadLetterResult.value;
+        deadLetterPanelError = null;
+      } else if (selectedResourceId === selectedConsumer?.row.resourceId) {
+        deadLetters = [];
+        if (selectedResourceId) deadLetterPanelError = deadLetterResult.status === "rejected" ? errorMessage(deadLetterResult.reason) : "Dead-letter query is not permitted.";
+      }
     } finally {
-      if (sequence === loadSequence) {
+      if (sequence === loadSequence && !disposed) {
         loading = false;
         refreshing = false;
       }
     }
   }
 
+  function currentListKey(): string {
+    return JSON.stringify([
+      focus,
+      selectedEventType?.ownerContractId ?? null,
+      selectedEventType?.ownerEventName ?? null,
+      ownerContractId,
+      publisherDeploymentId,
+      searchText.trim(),
+      windowValue,
+      cursor ?? null,
+    ]);
+  }
+
+  /**
+   * Ends every detail read that belonged to the previous list query. Call this
+   * before starting the next list read whenever the semantic query changes.
+   */
+  function invalidateDetails(): void {
+    detailOwnership.invalidate();
+    ++deadLetterSequence;
+    selectedEvent = null;
+    selectedConsumer = null;
+    selectedDeadLetter = null;
+    detailError = null;
+    detailLoading = false;
+    deadLetters = [];
+    deadLetterError = {};
+    deadLetterPanelError = null;
+  }
+
   function resetAndLoad() {
     cursor = undefined;
     cursorBackStack = [];
-    selectedEvent = null;
-    void load();
+    invalidateDetails();
+    void requestSnapshot();
   }
 
   function selectFocus(value: Focus) {
@@ -479,58 +627,73 @@
   }
 
   async function inspectEvent(row: EventRow) {
-    const sequence = ++detailSequence;
+    const token = detailOwnership.begin("event", row.eventId ?? String(row.streamSequence));
+    ++deadLetterSequence;
+    // Selecting B clears A's visible detail synchronously.
     detailLoading = true;
     detailError = null;
     selectedConsumer = null;
+    selectedDeadLetter = null;
+    deadLetters = [];
+    selectedEvent = null;
     try {
       const input: apis.events.InspectInput = row.eventId ? { eventId: row.eventId } : { streamSequence: row.streamSequence };
       const detail = toInspect(await trellis.eventsInspect(input, { timeout: rpcTimeout }).orThrow());
-      if (sequence !== detailSequence) return;
+      if (!detailOwnership.owns(token) || disposed) return;
       selectedEvent = detail;
     } catch (inspectError) {
-      if (sequence !== detailSequence) return;
+      if (!detailOwnership.owns(token) || disposed) return;
       detailError = errorMessage(inspectError);
       selectedEvent = { event: row, headers: {}, related: [] };
     } finally {
-      if (sequence === detailSequence) detailLoading = false;
+      if (detailOwnership.owns(token) && !disposed) detailLoading = false;
     }
   }
 
   async function inspectConsumer(row: ConsumerRow) {
-    const sequence = ++detailSequence;
+    const token = detailOwnership.begin("consumer", row.consumerName);
+    ++deadLetterSequence;
     detailLoading = true;
     detailError = null;
     selectedEvent = null;
     selectedDeadLetter = null;
     deadLetters = [];
     try {
-      const [detail, consumerDeadLetters] = await Promise.all([
+      const [detail, consumerDeadLetters] = await Promise.allSettled([
         trellis.consumersInspect({ resourceId: row.resourceId }, { timeout: rpcTimeout }).orThrow(),
         loadDeadLetters(row.resourceId),
       ]);
-      if (sequence !== detailSequence) return;
-      selectedConsumer = { row, detail: objectRecord(detail) };
-      deadLetters = consumerDeadLetters;
+      // The selection may have changed while the read was in flight; only the
+      // consumer the page still has selected may publish a detail or its DLQ.
+      if (!detailOwnership.owns(token) || disposed) return;
+      selectedConsumer = { row, detail: detail.status === "fulfilled" && detail.value !== null ? objectRecord(detail.value) : null };
+      detailError = detail.status === "rejected" ? errorMessage(detail.reason) : detail.value === null ? "Consumer inspection is not permitted." : null;
+      deadLetters = consumerDeadLetters.status === "fulfilled" ? consumerDeadLetters.value ?? [] : [];
+      deadLetterPanelError = consumerDeadLetters.status === "rejected" ? errorMessage(consumerDeadLetters.reason) : consumerDeadLetters.value === null ? "Dead-letter query is not permitted." : null;
     } catch (inspectError) {
-      if (sequence !== detailSequence) return;
+      if (!detailOwnership.owns(token) || disposed) return;
       detailError = errorMessage(inspectError);
       selectedConsumer = { row, detail: null };
     } finally {
-      if (sequence === detailSequence) detailLoading = false;
+      if (detailOwnership.owns(token) && !disposed) detailLoading = false;
     }
   }
 
   async function inspectDeadLetter(deadLetter: apis.events.DeadLettersQueryOutput["items"][number]) {
+    const sequence = ++deadLetterSequence;
     deadLetterError = { ...deadLetterError, [deadLetter.deadLetterId]: "" };
     try {
-      selectedDeadLetter = (await trellis.deadLettersInspect({ resourceId: deadLetter.resourceId, deadLetterId: deadLetter.deadLetterId }, { timeout: rpcTimeout }).orThrow()).deadLetter;
+      const result = await trellis.deadLettersInspect({ resourceId: deadLetter.resourceId, deadLetterId: deadLetter.deadLetterId }, { timeout: rpcTimeout }).orThrow();
+      if (sequence === deadLetterSequence && !disposed && selectedConsumer?.row.resourceId === deadLetter.resourceId) selectedDeadLetter = result.deadLetter;
     } catch (cause) {
-      deadLetterError = { ...deadLetterError, [deadLetter.deadLetterId]: errorMessage(cause) };
+      if (sequence === deadLetterSequence && !disposed) deadLetterError = { ...deadLetterError, [deadLetter.deadLetterId]: errorMessage(cause) };
     }
   }
 
   async function changeDeadLetter(deadLetter: apis.events.DeadLettersQueryOutput["items"][number], action: "replay" | "dismiss") {
+    const resourceId = selectedConsumer?.row.resourceId;
+    if (resourceId !== deadLetter.resourceId) return;
+    const input = { resourceId: deadLetter.resourceId, deadLetterId: deadLetter.deadLetterId, expectedRevision: deadLetter.revision, requestId: crypto.randomUUID() };
     const confirmed = await confirmationModal?.confirm({
       title: `${action === "replay" ? "Replay" : "Dismiss"} dead letter?`,
       message: action === "replay" ? "The original event will be queued for another delivery attempt." : "The dead letter will be marked dismissed without redelivery.",
@@ -538,18 +701,31 @@
       targetLabel: "Dead letter",
       targetName: deadLetter.deadLetterId,
     });
-    if (!confirmed) return;
+    if (!confirmed || disposed || selectedConsumer?.row.resourceId !== resourceId ||
+
+      !deadLetters.some((item) => item.deadLetterId === input.deadLetterId && item.revision === input.expectedRevision)) return;
     deadLetterBusy = deadLetter.deadLetterId;
     deadLetterError = { ...deadLetterError, [deadLetter.deadLetterId]: "" };
-    const input = { resourceId: deadLetter.resourceId, deadLetterId: deadLetter.deadLetterId, expectedRevision: deadLetter.revision, requestId: crypto.randomUUID() };
     try {
-      if (action === "replay") await trellis.deadLettersReplay(input, { timeout: rpcTimeout }).orThrow();
-      else await trellis.deadLettersDismiss(input, { timeout: rpcTimeout }).orThrow();
-      await load(false);
-    } catch (cause) {
-      deadLetterError = { ...deadLetterError, [deadLetter.deadLetterId]: errorMessage(cause) };
+      await runDeadLetterMutation({
+        mounted: () => !disposed,
+        mutate: async () => {
+          if (action === "replay") await trellis.deadLettersReplay(input, { timeout: rpcTimeout }).orThrow();
+          else await trellis.deadLettersDismiss(input, { timeout: rpcTimeout }).orThrow();
+        },
+        followUp: () => requestSnapshot(false),
+        onError: (cause) => {
+          if (selectedConsumer?.row.resourceId !== resourceId) return;
+          deadLetterError = {
+            ...deadLetterError,
+            [deadLetter.deadLetterId]: classifyMutationError(cause).kind === "unknown"
+              ? "Outcome unknown. Inspect this dead letter before attempting another action."
+              : errorMessage(cause),
+          };
+        },
+      });
     } finally {
-      deadLetterBusy = null;
+      if (!disposed) deadLetterBusy = null;
     }
   }
 
@@ -559,61 +735,98 @@
 
   function goPrevious() {
     cursor = cursorBackStack.pop() || undefined;
-    void load();
+    invalidateDetails();
+    void requestSnapshot();
   }
 
   function goNext() {
     if (!nextCursor) return;
     cursorBackStack.push(cursor ?? "");
     cursor = nextCursor;
-    void load();
-  }
-
-  function scheduleReload() {
-    if (reloadTimer) clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(() => {
-      reloadTimer = null;
-      void load(false);
-    }, 750);
+    invalidateDetails();
+    void requestSnapshot();
   }
 
   function startWatch() {
     stopWatch();
-    const controller = new AbortController();
-    watchController = controller;
-    void (async () => {
-      try {
+    // Each open owns its own controller, so disposal releases the subscription
+    // it belongs to rather than whichever controller happens to be current.
+    const live = new LiveSubscription({
+      subscribe: async () => {
+        const controller = new AbortController();
+        watchController = controller;
         const stream = await trellis.eventsWatch({}, { signal: controller.signal }).orThrow();
-        for await (const frame of stream) {
-          if (controller.signal.aborted) return;
-          const record = objectRecord(frame);
-          if (record.kind === "ready") feedOnline = true;
-          if (record.kind !== "ready") scheduleReload();
-        }
-      } catch (watchError) {
-        if (!controller.signal.aborted) {
-          feedOnline = false;
-          feedMessage = `Live feed offline: ${errorMessage(watchError)}`;
-        }
-      }
-    })();
+        void (async () => {
+          try {
+            for await (const frame of stream) {
+              if (controller.signal.aborted || disposed) return;
+              if (objectRecord(frame).kind !== "ready") refreshScheduler.notify();
+            }
+            if (!controller.signal.aborted) live.closed();
+          } catch (cause) {
+            if (!controller.signal.aborted) live.closed(cause);
+          }
+        })();
+      },
+      unsubscribe: () => {
+        watchController?.abort();
+        watchController = null;
+      },
+      onStatus: (status, detail) => {
+        if (disposed) return;
+        feedOnline = status === "live";
+        feedMessage = status === "reconnecting"
+          ? `Live feed disconnected; retry ${detail?.attempt ?? 1} in ${((detail?.retryInMs ?? 1_000) / 1_000).toFixed(0)}s. Manual refresh remains available.`
+          : null;
+      },
+    });
+    subscription = live;
+    void live.start();
   }
 
   function stopWatch() {
     watchController?.abort();
     watchController = null;
+    void subscription?.dispose();
+    subscription = null;
+    feedOnline = false;
   }
 
-  onMount(() => {
-    void load();
-    startWatch();
+  /** A hidden page or a recovered connection resumes one retained refresh. */
+  function handleVisibilityChange(): void {
+    if (document.visibilityState === "visible") refreshScheduler.resume();
+  }
+
+  $effect(() => {
+    untrack(() => {
+      void requestSnapshot();
+      startWatch();
+    });
+    return () => {
+      ++loadSequence;
+      detailOwnership.invalidate();
+      ++deadLetterSequence;
+      stopWatch();
+    };
+  });
+
+  $effect(() => {
+    if (connection.status.phase === "connected") {
+      untrack(() => refreshScheduler.resume());
+    }
   });
 
   onDestroy(() => {
+    disposed = true;
+    ++loadSequence;
+    detailOwnership.invalidate();
+    ++deadLetterSequence;
     stopWatch();
-    if (reloadTimer) clearTimeout(reloadTimer);
+    refreshScheduler.dispose();
   });
 </script>
+
+<svelte:document onvisibilitychange={handleVisibilityChange} />
 
 <section class="events-page">
   <PageToolbar title="Events" description="Delivery health, event integrity, and recent exceptions.">
@@ -627,7 +840,7 @@
           <button type="button" class:active={windowValue === option.value} aria-pressed={windowValue === option.value} onclick={() => { windowValue = option.value; resetAndLoad(); }}>{option.label}</button>
         {/each}
       </div>
-      <button class="btn btn-ghost btn-sm" onclick={() => { void load(false); }} disabled={loading || refreshing}>{refreshing ? "Refreshing" : "Refresh"}</button>
+      <button class="btn btn-ghost btn-sm" onclick={() => { void requestSnapshot(false); }} disabled={loading || refreshing}>{refreshing ? "Refreshing" : "Refresh"}</button>
     {/snippet}
   </PageToolbar>
 
@@ -642,7 +855,9 @@
   {:else}
     <MetricsLedger ariaLabel="Event health summary" items={ledgerItems} onSelect={handleLedgerSelect} />
 
-    {#if diagnostics?.gapDetected}
+    {#if diagnosticsError}
+      <Notice variant="info" role="status">{diagnosticsError} Completeness of retained event history is unknown.</Notice>
+    {:else if diagnostics?.gapDetected}
       <Notice variant="warning">Event history has a retention gap. Complete since {diagnostics.completeSince ? formatDate(diagnostics.completeSince) : "unknown"}; revision {diagnostics.revision.toLocaleString()}.</Notice>
     {/if}
 
@@ -650,7 +865,11 @@
       <Panel eyebrow="Secondary" title="Consumer delivery health" class="consumer-health min-w-0">
         {#snippet actions()}<span class="text-sm text-base-content/70">{displayedConsumers.length} shown</span>{/snippet}
         <p class="text-sm text-base-content/70">Known Trellis consumers first; external consumers remain neutral.</p>
-        {#if displayedConsumers.length === 0}
+        {#if consumerError}
+          <Notice variant="warning" role="status">
+            {consumerError} Consumer delivery health is unavailable; the event rows below are unaffected.
+          </Notice>
+        {:else if displayedConsumers.length === 0}
           <EmptyState title="No consumers need attention" description="All known Trellis consumers are current or processing." />
         {:else}
           <DataTable>
@@ -658,7 +877,7 @@
             <tbody>
               {#each displayedConsumers as consumer (`${consumer.stream}:${consumer.consumerName}`)}
                 {@const selected = selectedConsumer?.row.consumerName === consumer.consumerName && selectedConsumer.row.stream === consumer.stream}
-                <tr class:row-selected={selected} onclick={() => { void inspectConsumer(consumer); }}>
+                <tr class:row-selected={selected}>
                   <td class="min-w-0">
                     <button type="button" class="link link-hover block max-w-xs truncate text-left trellis-identifier" onclick={() => { void inspectConsumer(consumer); }}>{consumer.deploymentId ?? consumer.consumerName}</button>
                     <span class="trellis-metadata trellis-identifier block max-w-xs truncate">{consumer.contractId ?? consumer.managedBy}{consumer.group ? ` / ${consumer.group}` : ""}</span>
@@ -678,42 +897,61 @@
 
       <aside class="event-rail flex flex-col gap-4" aria-label="Event flow and integrity">
         <Panel eyebrow="Secondary" title="Event volume">
-          {#snippet actions()}<strong class="tabular-nums">{eventRate.toLocaleString(undefined, { maximumFractionDigits: 1 })}/min</strong>{/snippet}
-          <p class="text-sm text-base-content/70">{(metrics?.summary.total ?? 0).toLocaleString()} events · {windowOption.label}</p>
-          <svg viewBox="0 0 260 52" preserveAspectRatio="none" role="img" aria-label={`Event volume over ${windowOption.label}`}>
-            <path class="chart-grid" d="M0 46H260 M0 26H260" />
-            <polyline class="event-line" points={eventPoints} />
-          </svg>
+          <p class="text-sm text-base-content/70">{windowOption.label}</p>
+          {#if !(metricsReady && metrics)}
+            <Notice variant="warning" role="status">
+              {visibleMetricsState === "pending" ? "Loading metrics for this window." : `${metricsError ?? "Event metrics are not permitted."} Event volume is unavailable for this window, not zero.`}
+            </Notice>
+          {:else}
+            {#snippet actions()}<strong class="tabular-nums">{eventRate?.toLocaleString(undefined, { maximumFractionDigits: 1 })}/min</strong>{/snippet}
+            <p class="text-sm text-base-content/70">{metrics?.summary.total.toLocaleString()} events · {windowOption.label}</p>
+            <svg viewBox="0 0 260 52" preserveAspectRatio="none" role="img" aria-label={`Event volume over ${windowOption.label}`}>
+              <path class="chart-grid" d="M0 46H260 M0 26H260" />
+              <polyline class="event-line" points={eventPoints} />
+            </svg>
+          {/if}
         </Panel>
         <Panel eyebrow="Secondary" title="Integrity exceptions">
-          {#snippet actions()}<strong class="tabular-nums text-error">{metrics?.summary.integrityExceptions ?? 0}</strong>{/snippet}
-          <p class="text-sm text-base-content/70">Verification and resolution failures</p>
-          <svg viewBox="0 0 260 52" preserveAspectRatio="none" role="img" aria-label={`Integrity exceptions over ${windowOption.label}`}>
-            <path class="chart-grid" d="M0 46H260 M0 26H260" />
-            <polyline class="exception-line" points={exceptionPoints} />
-          </svg>
-          <div class="integrity-breakdown">
-            {#each verificationIssues as status (status)}
-              {#if verificationCount(status) > 0n}
-                <button aria-pressed={focus === status} onclick={() => selectFocus(status)}><span>{status.replaceAll("-", " ")}</span><strong>{verificationCount(status)}</strong></button>
+          {#if !(metricsReady && metrics)}
+            <Notice variant="warning" role="status">
+              {visibleMetricsState === "pending" ? "Loading metrics for this window." : `${metricsError ?? "Event metrics are not permitted."} Integrity exceptions are unavailable for this window, not zero.`}
+            </Notice>
+          {:else}
+            {#snippet actions()}<strong class="tabular-nums text-error">{metrics?.summary.integrityExceptions}</strong>{/snippet}
+            <p class="text-sm text-base-content/70">Verification and resolution failures</p>
+            <svg viewBox="0 0 260 52" preserveAspectRatio="none" role="img" aria-label={`Integrity exceptions over ${windowOption.label}`}>
+              <path class="chart-grid" d="M0 46H260 M0 26H260" />
+              <polyline class="exception-line" points={exceptionPoints} />
+            </svg>
+            <div class="integrity-breakdown">
+              {#each verificationIssues as status (status)}
+                {#if verificationCount(status) > 0n}
+                  <button aria-pressed={focus === status} onclick={() => selectFocus(status)}><span>{status.replaceAll("-", " ")}</span><strong>{verificationCount(status)}</strong></button>
+                {/if}
+              {/each}
+              {#if (metrics?.summary.byResolution.malformed ?? 0) > 0}
+                <button aria-pressed={focus === "malformed"} onclick={() => selectFocus("malformed")}><span>malformed</span><strong>{metrics?.summary.byResolution.malformed}</strong></button>
               {/if}
-            {/each}
-            {#if (metrics?.summary.byResolution.malformed ?? 0) > 0}
-              <button aria-pressed={focus === "malformed"} onclick={() => selectFocus("malformed")}><span>malformed</span><strong>{metrics?.summary.byResolution.malformed}</strong></button>
-            {/if}
-          </div>
+            </div>
+          {/if}
         </Panel>
         <Panel eyebrow="Secondary" title="Highest-volume types">
-          <div class="event-types">
-            {#each eventTypesByCount.slice(0, 6) as eventType (`${eventType.ownerContractId}:${eventType.ownerEventName}`)}
-              <button class:active={selectedEventType?.ownerContractId === eventType.ownerContractId && selectedEventType.ownerEventName === eventType.ownerEventName} aria-pressed={selectedEventType?.ownerContractId === eventType.ownerContractId && selectedEventType.ownerEventName === eventType.ownerEventName} onclick={() => selectEventType(eventType)}>
-                <span><strong>{eventType.ownerEventName}</strong><small>{eventType.ownerContractId}</small></span><b>{eventType.count.toLocaleString()}</b>
-                 <i style={`--width: ${metrics?.summary.total ? boundedNumber(eventType.count) / boundedNumber(metrics.summary.total) * 100 : 0}%`}></i>
-              </button>
-            {:else}
-              <p class="text-sm text-base-content/70">No resolved event types in this window.</p>
-            {/each}
-          </div>
+          {#if !(metricsReady && metrics)}
+            <Notice variant="warning" role="status">
+              {visibleMetricsState === "pending" ? "Loading metrics for this window." : `${metricsError ?? "Event metrics are not permitted."} Event types by volume are unavailable for this window, not zero.`}
+            </Notice>
+          {:else}
+            <div class="event-types">
+              {#each eventTypesByCount.slice(0, 6) as eventType (`${eventType.ownerContractId}:${eventType.ownerEventName}`)}
+                <button class:active={selectedEventType?.ownerContractId === eventType.ownerContractId && selectedEventType.ownerEventName === eventType.ownerEventName} aria-pressed={selectedEventType?.ownerContractId === eventType.ownerContractId && selectedEventType.ownerEventName === eventType.ownerEventName} onclick={() => selectEventType(eventType)}>
+                  <span><strong>{eventType.ownerEventName}</strong><small>{eventType.ownerContractId}</small></span><b>{eventType.count.toLocaleString()}</b>
+                   <i style={`--width: ${metrics?.summary.total ? boundedNumber(eventType.count) / boundedNumber(metrics.summary.total) * 100 : 0}%`}></i>
+                </button>
+              {:else}
+                <p class="text-sm text-base-content/70">No resolved event types in this window.</p>
+              {/each}
+            </div>
+          {/if}
         </Panel>
       </aside>
     </div>
@@ -721,6 +959,10 @@
     <Panel eyebrow="Primary" title="Consumer dead letters">
       {#if !selectedConsumer}
         <EmptyState title="Select a consumer" description="Choose a managed Consumer above to inspect its active dead letters." />
+      {:else if deadLetterPanelError}
+        <Notice variant="warning" role="status">
+          {deadLetterPanelError} This consumer's dead letters could not be queried.
+        </Notice>
       {:else if deadLetters.length === 0}
         <EmptyState title="No active dead letters" description="Exhausted managed Consumer deliveries appear here for replay or dismissal." />
       {:else}

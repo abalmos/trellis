@@ -1,3 +1,9 @@
+import {
+  displayJson,
+  formatTimestamp,
+  projectConsoleError,
+} from "./console/display_value.ts";
+
 type ErrorLike = {
   name?: unknown;
   message?: unknown;
@@ -41,6 +47,8 @@ function formatAuthReason(reason: unknown): string | null {
       return "This account is inactive. Contact an administrator.";
     case "forbidden":
       return "You are not allowed to complete this action.";
+    case "not_authorized":
+      return "You do not have permission for this operation.";
     case "last_admin_required":
       return "At least one active administrator is required.";
     default:
@@ -88,13 +96,9 @@ function formatIssues(
 export function formatDate(
   value: string | number | bigint | null | undefined,
 ): string {
-  if (!value) return "-";
-  const date = new Date(typeof value === "bigint" ? Number(value) : value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  // Delegates to the shared timestamp rules: zero is valid, decimal strings
+  // are Unix milliseconds before ISO parsing, and invalid input is explicit.
+  return formatTimestamp(value);
 }
 
 export function formatList(values: string[] | null | undefined): string {
@@ -137,12 +141,9 @@ export function compactDuration(ms: number): string {
 }
 
 export function jsonBlock(value: unknown): string {
-  if (value === undefined) return "null";
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
+  // Lossless display JSON: exact bigint decimals and tagged bytes. Protocol
+  // requests are built by generated codecs, never from this string.
+  return displayJson(value);
 }
 
 export function jobStateStatus(
@@ -208,6 +209,12 @@ export function errorMessage(error: unknown): string {
       return nestedContextMessage;
     }
 
+    // Structured projection covers generated errors and the current `code`
+    // field; the legacy `reason` paths above stay for existing callers.
+    const projected = projectConsoleError(error);
+    const projectedCopy = formatAuthReason(projected.code);
+    if (projectedCopy) return projectedCopy;
+
     const directReasonMessage = formatAuthReason(candidate.reason);
     if (directReasonMessage) {
       return directReasonMessage;
@@ -231,6 +238,10 @@ export function errorMessage(error: unknown): string {
 
     if (typeof candidate.error?.message === "string") {
       return candidate.error.message;
+    }
+
+    if (projected.message !== "Unexpected error") {
+      return projected.message;
     }
 
     if (typeof candidate.message === "string") {

@@ -184,6 +184,30 @@ MUST use monospace for:
 
 ---
 
+### State, Health, and Authority
+
+Render administrative state, runtime health, and authorization as separate
+concepts. An active deployment or identity does not establish that a process is
+healthy or connected, and a heartbeat does not establish authority. Preserve
+unknown wire values neutrally instead of mapping them to a reassuring default.
+
+### Partial Reads and Exact Targets
+
+A page of results is not a global total; label counts with their scope. Editors
+must preserve existing values that a discovery catalog does not contain, and a
+missing or forbidden exact target renders an unavailable state with mutations
+disabled rather than silently selecting another record.
+
+### Displaying Generated Values
+
+Large integers, byte fields, and timestamps are generated wire values. Keep
+revisions, sequence numbers, and IDs exact for display and comparison; render
+byte fields explicitly rather than as comma-separated numbers. Use the shared
+display helper for JSON previews, copy, and search so `bigint` and byte values
+survive a round trip.
+
+---
+
 ### Tables
 
 - Left aligned text

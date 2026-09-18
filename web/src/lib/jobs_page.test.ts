@@ -6,7 +6,9 @@ import {
   cancelJob,
   dismissDlqJob,
   loadJobDetailData,
-  loadJobsPageData,
+  loadJobsQueryPage,
+  loadJobsServices,
+  loadJobsSummary,
   replayDlqJob,
   retryJob,
 } from "./jobs_page.ts";
@@ -34,27 +36,19 @@ class JobsNotFoundTestError extends BaseError {
   }
 }
 
-function jobsPageRpc(
-  listServices: () => AsyncResult<apis.jobs.ListServicesOutput, BaseError>,
-) {
-  return {
-    listServices: (_input: apis.jobs.ListServicesInput) => listServices(),
-    queryJobs: (_input: apis.jobs.QueryInput) =>
-      AsyncResult.ok<apis.jobs.QueryOutput>({ items: [], page: {} }),
-    summarizeJobs: (_input: apis.jobs.SummaryInput) =>
-      AsyncResult.ok<apis.jobs.SummaryOutput>({
-        count: 0n,
-        groups: [],
-        stats: { byState: {}, total: 0n },
-      }),
-  };
-}
-
-Deno.test("loadJobsPageData requests query pages and filtered summary", async () => {
+Deno.test("split jobs loaders keep query, services, and summary independent", async () => {
   const serviceCalls: unknown[] = [];
   const queryCalls: unknown[] = [];
   const summaryCalls: unknown[] = [];
-  const data = await loadJobsPageData({
+
+  const query = await loadJobsQueryPage({
+    queryJobs: (input) => {
+      queryCalls.push(input);
+      return AsyncResult.ok({ items: [], page: { nextCursor: "next" } });
+    },
+  }, { groupBy: "type", state: ["pending"], page: { limit: 50 } });
+
+  const services = await loadJobsServices({
     listServices: (input) => {
       serviceCalls.push(input);
       return AsyncResult.ok({
@@ -66,10 +60,9 @@ Deno.test("loadJobsPageData requests query pages and filtered summary", async ()
         page: input.page?.cursor ? {} : { nextCursor: "services-2" },
       });
     },
-    queryJobs: (input) => {
-      queryCalls.push(input);
-      return AsyncResult.ok({ items: [], page: { nextCursor: "next" } });
-    },
+  });
+
+  const summary = await loadJobsSummary({
     summarizeJobs: (input) => {
       summaryCalls.push(input);
       return AsyncResult.ok({
@@ -83,49 +76,49 @@ Deno.test("loadJobsPageData requests query pages and filtered summary", async ()
         stats: { byState: { pending: 2n }, queued: 2n, total: 2n },
       });
     },
-  }, {
-    groupBy: "type",
-    service: "documents",
-    state: ["pending"],
-    page: { limit: 50 },
-  });
-  deepEqual(serviceCalls, [
-    { page: { limit: 500 } },
-    { page: { cursor: "services-2", limit: 500 } },
-  ]);
+  }, { groupBy: "type", service: "documents" });
+
   deepEqual(queryCalls, [{
     groupBy: "type",
-    service: "documents",
     state: ["pending"],
     page: { limit: 50 },
   }]);
-  deepEqual(summaryCalls, [{
-    groupBy: "type",
-    service: "documents",
-    state: ["pending"],
-  }]);
-  deepEqual(data.services.map((service) => service.name), [
-    "documents",
-    "reports",
+  deepEqual(serviceCalls, [
+    { page: { limit: 100 } },
+    { page: { cursor: "services-2", limit: 100 } },
   ]);
-  deepEqual(data.groups, [{
-    count: 2n,
-    depth: 2n,
-    key: "document-process",
-    label: "document-process",
-  }]);
-  deepEqual(data.stats, { byState: { pending: 2n }, queued: 2n, total: 2n });
-  deepEqual(data.count, 2n);
-  deepEqual(data.nextCursor, "next");
+  deepEqual(summaryCalls, [{ groupBy: "type", service: "documents" }]);
+  deepEqual(query.available && query.nextCursor, "next");
+  deepEqual(
+    services.available && services.services.map((service) => service.name),
+    ["documents", "reports"],
+  );
+  deepEqual(summary.available && summary.count, 2n);
 });
 
-Deno.test("loadJobsPageData rejects a Services.List cursor cycle", async () => {
-  await rejects(() =>
-    loadJobsPageData(
-      jobsPageRpc(() =>
-        AsyncResult.ok({ items: [], page: { nextCursor: "cycle" } })
+Deno.test("a split loader failure does not affect the others", async () => {
+  const query = await loadJobsQueryPage({
+    queryJobs: () => AsyncResult.ok({ items: [], page: {} }),
+  }, { page: { limit: 50 } });
+  const services = await loadJobsServices({
+    listServices: () =>
+      AsyncResult.err(
+        new UnexpectedError({ cause: new Error("no responders") }),
       ),
-    )
+  });
+  deepEqual(query.available, true);
+  deepEqual(services, {
+    available: false,
+    message: "Jobs admin runtime is not currently reachable.",
+  });
+});
+
+Deno.test("loadJobsServices rejects a cursor cycle", async () => {
+  await rejects(() =>
+    loadJobsServices({
+      listServices: () =>
+        AsyncResult.ok({ items: [], page: { nextCursor: "cycle" } }),
+    })
   );
 });
 
@@ -148,12 +141,11 @@ for (
     ],
   ] as const
 ) {
-  Deno.test(`loadJobsPageData normalizes ${name} failures`, async () => {
-    const data = await loadJobsPageData(
-      jobsPageRpc(() =>
-        AsyncResult.err(new UnexpectedError({ cause: new Error(cause) }))
-      ),
-    );
+  Deno.test(`loadJobsSummary normalizes ${name} failures`, async () => {
+    const data = await loadJobsSummary({
+      summarizeJobs: () =>
+        AsyncResult.err(new UnexpectedError({ cause: new Error(cause) })),
+    }, {});
     deepEqual(data.available, false);
     deepEqual(data.message, message);
   });
