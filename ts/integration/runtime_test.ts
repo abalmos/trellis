@@ -1375,6 +1375,14 @@ Deno.test("generated runtime workflows", async (t) => {
           let nativeAdminExit = nativeAdmin.wait().catch((error: unknown) =>
             error
           );
+          const deniedOwnDeployment = await nativeAdmin.deploymentsGet({
+            deploymentId: nativeKey.deploymentId,
+          });
+          assert(
+            deniedOwnDeployment.isErr(),
+            "own deployment read requires administrator privilege",
+          );
+          assertEquals(deniedOwnDeployment.error.name, "AuthError");
           const deniedBinding = (await admin.grantsList({
             participantId: participants.Denied.participant.id,
             state: "active",
@@ -1422,6 +1430,12 @@ Deno.test("generated runtime workflows", async (t) => {
             seed: nativeKey.seed,
           }).orThrow();
           nativeAdminExit = nativeAdmin.wait().catch((error: unknown) => error);
+          assertEquals(
+            (await nativeAdmin.deploymentsGet({
+              deploymentId: nativeKey.deploymentId,
+            }).orThrow()).deployment.deploymentId,
+            nativeKey.deploymentId,
+          );
           const nativeSibling = await TrellisService.connect({
             trellisUrl: runtime.trellisUrl,
             participant: participants.AdminService.participant,

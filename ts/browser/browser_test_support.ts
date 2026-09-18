@@ -86,6 +86,31 @@ export async function signInIfPrompted(
   await approveConsentIfRequired(page);
 }
 
+/**
+ * Completes a real portal password-reset link without creating a new browser
+ * context. Used by journeys that then sign in as the created user.
+ */
+export async function completePasswordResetThroughPortal(
+  page: Page,
+  resetUrl: string,
+  password: string,
+): Promise<void> {
+  await completePasswordReset(page, resetUrl, password);
+}
+
+/**
+ * Opens the console as an ordinary username/password account. The harness admin
+ * is ensured first so the portal has a real account to sign in against.
+ */
+export async function openConsoleAsCredentials(
+  page: Page,
+  runtime: TrellisTestRuntime,
+  credentials: { username: string; password: string },
+): Promise<void> {
+  await runtime.ensureAdmin();
+  await openConsole(page, runtime, credentials);
+}
+
 /** Creates the first administrator through the real portal bootstrap page. */
 export async function completeAdminBootstrapInBrowser(
   page: Page,

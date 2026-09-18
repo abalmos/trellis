@@ -87,6 +87,7 @@ app Denied { use runtime; }
 app DevicePortal { use auth { operation DeviceUserAuthorities.Resolve; } }
 service AdminService {
   use auth {
+    rpc Deployments.Get;
     rpc Grants.Get;
     rpc Grants.Revoke;
     rpc Sessions.List;
@@ -103,6 +104,7 @@ service ChildProvider { implements device_child; }
 app Alpha { use events { publish event Alpha; rpc Observed; rpc DropAlpha; rpc DeliveryStats; } }
 app Beta { use events { publish event Beta; } }
 device Device {
+  state telemetry { title "Telemetry"; description "Device-owned State acceptance value."; schema ResourceValue; version 1; }
   app Companion {
     use auth { rpc Sessions.Logout; }
     state shared { title "Shared"; description "Same-user companion State acceptance value."; schema ResourceValue; version 1; }

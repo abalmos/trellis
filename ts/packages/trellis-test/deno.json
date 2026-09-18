@@ -23,6 +23,7 @@
   },
   "publish": {
     "exclude": [
+      "!trellis/**",
       "tests/**",
       "**/*_test.ts",
       "**/*.test.ts"

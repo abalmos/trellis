@@ -1,7 +1,6 @@
 import { createAuth } from "@qlever-llc/trellis";
-import { RemoteError } from "@qlever-llc/trellis/errors";
+import { machineErrorCode } from "@qlever-llc/trellis/errors";
 import { ulid } from "ulid";
-
 import { generateSessionSeed } from "../control_plane_config.ts";
 import type {
   TrellisTestParticipantApplyResult,
@@ -247,9 +246,7 @@ export async function requestParticipantApply(
       };
     } catch (error) {
       if (
-        error instanceof RemoteError &&
-        "code" in error.remoteError &&
-        error.remoteError.code === "revision_conflict" &&
+        machineErrorCode(error) === "revision_conflict" &&
         request.expectedRevision < 64n
       ) {
         request = {

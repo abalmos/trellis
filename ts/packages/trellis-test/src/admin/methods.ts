@@ -45,6 +45,10 @@ function adminMethod<I, O>(
 
 /** @internal Concrete Auth RPCs available to the shared test host. */
 export const adminMethods = {
+  authCapabilityGroupsGet: adminMethod(
+    apis.auth.API.actions["rpc:CapabilityGroups.Get"],
+    (client, input) => client.capabilityGroupsGet(input).orThrow(),
+  ),
   authCapabilityGroupsPut: adminMethod(
     apis.auth.API.actions["rpc:CapabilityGroups.Put"],
     (client, input) => client.capabilityGroupsPut(input).orThrow(),
@@ -68,6 +72,10 @@ export const adminMethods = {
   authPortalsList: adminMethod(
     apis.auth.API.actions["rpc:Portals.List"],
     (client, input) => client.portalsList(input).orThrow(),
+  ),
+  authPortalsLoginSettingsGet: adminMethod(
+    apis.auth.API.actions["rpc:Portals.LoginSettings.Get"],
+    (client, input) => client.portalsLoginSettingsGet(input).orThrow(),
   ),
   authPortalsLoginSettingsUpdate: adminMethod(
     apis.auth.API.actions["rpc:Portals.LoginSettings.Update"],
@@ -109,6 +117,10 @@ export const adminMethods = {
     apis.auth.API.actions["rpc:Participants.Install"],
     (client, input) => client.participantsInstall(input).orThrow(),
   ),
+  authParticipantsGet: adminMethod(
+    apis.auth.API.actions["rpc:Participants.Get"],
+    (client, input) => client.participantsGet(input).orThrow(),
+  ),
   authGrantsGet: adminMethod(
     apis.auth.API.actions["rpc:Grants.Get"],
     (client, input) => client.grantsGet(input).orThrow(),
@@ -140,6 +152,10 @@ export const adminMethods = {
   authServiceInstancesDisable: adminMethod(
     apis.auth.API.actions["rpc:ServiceInstances.Disable"],
     (client, input) => client.serviceInstancesDisable(input).orThrow(),
+  ),
+  authSessionsList: adminMethod(
+    apis.auth.API.actions["rpc:Sessions.List"],
+    (client, input) => client.sessionsList(input).orThrow(),
   ),
   authSessionsRevoke: adminMethod(
     apis.auth.API.actions["rpc:Sessions.Revoke"],

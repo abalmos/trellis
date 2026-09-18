@@ -2,6 +2,7 @@ import { auth, events, health, jobs, state } from trellis;
 
 app cli {
   use auth {
+    rpc CapabilityGroups.Get;
     rpc CapabilityGroups.Put;
     rpc Connections.List;
     rpc Deployments.Apply;
@@ -20,11 +21,13 @@ app cli {
     rpc Portals.GrantOverrides.Put;
     rpc Portals.GrantOverrides.Remove;
     rpc Portals.List;
+    rpc Portals.LoginSettings.Get;
     rpc Portals.LoginSettings.Update;
     rpc Portals.Put;
     rpc Portals.Routes.Put;
     rpc ServiceInstances.Disable;
     rpc ServiceInstances.Provision;
+    rpc Sessions.List;
     rpc Sessions.Revoke;
     rpc UserIdentities.List;
     rpc Users.Create;

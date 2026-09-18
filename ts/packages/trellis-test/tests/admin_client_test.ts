@@ -16,12 +16,14 @@ import {
 import { participants } from "../trellis/index.js";
 
 const expectedAdminMethods = {
+  authCapabilityGroupsGet: "capabilityGroupsGet",
   authCapabilityGroupsPut: "capabilityGroupsPut",
   authConnectionsList: "connectionsList",
   authPortalsGrantOverridesRemove: "portalsGrantOverridesRemove",
   authPortalsGrantOverridesPut: "portalsGrantOverridesPut",
   authPortalsGet: "portalsGet",
   authPortalsList: "portalsList",
+  authPortalsLoginSettingsGet: "portalsLoginSettingsGet",
   authPortalsLoginSettingsUpdate: "portalsLoginSettingsUpdate",
   authPortalsPut: "portalsPut",
   authPortalsRoutesPut: "portalsRoutesPut",
@@ -32,6 +34,7 @@ const expectedAdminMethods = {
   authDeploymentsGet: "deploymentsGet",
   authDeploymentsApply: "deploymentsApply",
   authParticipantsInstall: "participantsInstall",
+  authParticipantsGet: "participantsGet",
   authGrantsGet: "grantsGet",
   authGrantsList: "grantsList",
   authGrantsSet: "grantsSet",
@@ -40,6 +43,7 @@ const expectedAdminMethods = {
   authUsersCreate: "usersCreate",
   authUsersPasswordResetCreate: "usersPasswordResetCreate",
   authServiceInstancesDisable: "serviceInstancesDisable",
+  authSessionsList: "sessionsList",
   authSessionsRevoke: "sessionsRevoke",
   eventsConsumersQuery: "consumersQuery",
   eventsDeadLettersQuery: "deadLettersQuery",
