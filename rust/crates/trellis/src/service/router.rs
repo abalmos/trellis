@@ -126,6 +126,8 @@ struct Route {
     route_token: &'static str,
     /// Whether this registered surface is a unary request/reply RPC.
     unary_rpc: bool,
+    /// Whether this route is a live observation opening or lifecycle control.
+    live: bool,
 }
 
 /// Exact permission surface recorded at registration time for one route.
@@ -215,7 +217,10 @@ pub struct Router {
     provider_instance_id: Option<String>,
     operation_recoveries: Vec<OperationRecovery>,
     /// Live owner for Feed/Operation observation routes on this connection.
-    live_owner: Option<super::live_router::LiveProviderOwner>,
+    ///
+    /// Shared so a route registered before its owner is installed still
+    /// resolves the owner at dispatch time.
+    live_owner: Arc<std::sync::RwLock<Option<super::live_router::LiveProviderOwner>>>,
 }
 
 type OperationRecovery = Box<dyn Fn() -> BoxFuture<'static, Result<(), ServerError>> + Send + Sync>;
@@ -245,7 +250,45 @@ impl Router {
 
     /// Bind live Feed/Operation observation routes to one connected owner.
     pub fn set_live_owner(&mut self, owner: super::live_router::LiveProviderOwner) {
-        self.live_owner = Some(owner);
+        if let Ok(mut live_owner) = self.live_owner.write() {
+            *live_owner = Some(owner);
+        }
+    }
+
+    /// Return whether this router contains any live Feed or Operation route.
+    #[must_use]
+    pub fn serves_live_surface(&self) -> bool {
+        self.handlers.values().any(|route| route.live)
+    }
+
+    /// Return whether a live provider owner is installed.
+    #[must_use]
+    pub fn has_live_owner(&self) -> bool {
+        self.live_owner
+            .read()
+            .map(|owner| owner.is_some())
+            .unwrap_or(false)
+    }
+
+    /// Fail when a live route is registered without a live provider owner.
+    ///
+    /// This is a construction/startup invariant: a router that serves a Feed
+    /// or Operation watch route must be given its connection's provider owner
+    /// before it serves traffic. Missing ownership is an immediate
+    /// configuration failure, never a dispatch-time fallback.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ServerError::Nats`] when this router serves a live surface
+    /// without an installed live provider owner.
+    pub fn require_live_owner(&self) -> Result<(), ServerError> {
+        if self.serves_live_surface() && !self.has_live_owner() {
+            return Err(ServerError::Nats(
+                "a router serving a Feed or Operation watch route requires a live provider owner"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     fn descriptor_subject(
@@ -326,6 +369,7 @@ impl Router {
                 ),
                 route_token: self.intern_route(D::API_ID, D::KEY),
                 unary_rpc: true,
+                live: false,
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let handler = Arc::clone(&handler);
@@ -382,6 +426,7 @@ impl Router {
                 ),
                 route_token: self.intern_route(D::API_ID, D::KEY),
                 unary_rpc: true,
+                live: false,
                 handler: Box::new(|_, _| {
                     Box::pin(async {
                         Err(ServerError::Nats(
@@ -426,6 +471,7 @@ impl Router {
                 ),
                 route_token: operation_token,
                 unary_rpc: false,
+                live: true,
                 handler: metadata_handler(),
             },
         );
@@ -440,6 +486,7 @@ impl Router {
                 permission: RoutePermissionSpec::OperationControl(D::API_ID.to_owned(), name),
                 route_token: operation_token,
                 unary_rpc: false,
+                live: true,
                 handler: metadata_handler(),
             },
         );
@@ -459,7 +506,7 @@ impl Router {
         S: Stream<Item = Result<D::Event, ServerError>> + Send + 'static,
     {
         let handler = Arc::new(handler);
-        let live_owner = self.live_owner.clone();
+        let live_owner = Arc::clone(&self.live_owner);
         let subject = self.descriptor_subject("feed", D::API_ID, D::KEY, D::SUBJECT);
         let provider_deployment_id = self
             .provider_deployment_id
@@ -483,6 +530,7 @@ impl Router {
                 ),
                 route_token: self.intern_route(D::API_ID, D::KEY),
                 unary_rpc: false,
+                live: true,
                 handler: Box::new(
                     move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                         let handler = Arc::clone(&handler);
@@ -491,11 +539,15 @@ impl Router {
                         let provider_instance_id = provider_instance_id.clone();
                         let handler_subject = handler_subject.clone();
                         Box::pin(async move {
-                            let owner = live_owner.ok_or_else(|| {
-                                ServerError::Nats(format!(
-                                    "feed route '{handler_subject}' has no live provider owner"
-                                ))
-                            })?;
+                            let owner = live_owner
+                                .read()
+                                .ok()
+                                .and_then(|owner| owner.clone())
+                                .ok_or_else(|| {
+                                    ServerError::Nats(format!(
+                                        "feed route '{handler_subject}' has no live provider owner"
+                                    ))
+                                })?;
                             let opening = crate::service::live_router::parse_feed_open::<D::Input>(
                                 &payload,
                             )?;
@@ -582,6 +634,7 @@ impl Router {
                 ),
                 route_token: self.intern_route(D::API_ID, D::KEY),
                 unary_rpc: false,
+                live: false,
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let start = Arc::clone(&start);
@@ -621,6 +674,7 @@ impl Router {
                 ),
                 route_token: self.intern_route(D::API_ID, D::KEY),
                 unary_rpc: false,
+                live: true,
                 handler: Box::new(
                 move |ctx, payload| -> BoxFuture<'static, Result<HandlerResponse, ServerError>> {
                     let get = Arc::clone(&get);

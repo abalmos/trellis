@@ -376,7 +376,9 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     )
     .await
     .map_err(runtime_error)?;
-    let nats = context.trellis_nats.clone();
+    let live_owner = context
+        .live_providers
+        .receiver(crate::platform::LiveProviderRole::Events);
     let join = tokio::spawn(async move {
         let _owner = owner;
         let _samplers = crate::telemetry::snapshots::SamplerOwner::start(vec![
@@ -391,13 +393,25 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
                 task_stop.clone(),
             )),
         ]);
-        let api_loop = run_builtin_authenticated_router(
-            nats,
-            events::API_ID,
-            EVENTS_SUBJECTS,
-            router,
-            validator,
-        );
+        let api_stop = task_stop.clone();
+        let api_loop = async move {
+            let mut live_owner = live_owner;
+            let Some(owner) = crate::platform::await_live_owner(&mut live_owner, &api_stop).await
+            else {
+                return Ok(());
+            };
+            let api_nats = owner.runtime_nats();
+            let mut router = router;
+            router.set_live_owner(owner);
+            run_builtin_authenticated_router(
+                api_nats,
+                events::API_ID,
+                EVENTS_SUBJECTS,
+                router,
+                validator,
+            )
+            .await
+        };
         tokio::pin!(api_loop);
         let result = {
             let validator_exit = async {

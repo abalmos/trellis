@@ -576,6 +576,8 @@ pub(crate) struct RuntimeContext {
     /// Runtime-local Auth verifier installed by the platform subsystem once the
     /// validator cache is ready; absent in platform-less modes (fail closed).
     pub(crate) platform_verifier: Arc<tokio::sync::OnceCell<RuntimeAuthVerifier>>,
+    /// Per-role delivery slots for built-in live provider owners.
+    pub(crate) live_providers: crate::platform::LiveProviderSlots,
 }
 
 impl RuntimeContext {
@@ -586,6 +588,23 @@ impl RuntimeContext {
             .ok_or(RuntimeError::OwnerContextMissing {
                 subsystem: group.subsystem(),
             })
+    }
+
+    /// Resolve the public origin used for provider bootstrap and advertised URLs.
+    pub(crate) fn public_origin(&self) -> String {
+        self.config
+            .http
+            .as_ref()
+            .and_then(|http| http.public_origin.clone())
+            .unwrap_or_else(|| format!("http://localhost:{}", self.config.http_port()))
+    }
+
+    /// Return whether the configured non-loopback HTTP origin is allowed.
+    pub(crate) fn allows_insecure_origin(&self, origin: &str) -> bool {
+        self.config
+            .http
+            .as_ref()
+            .is_some_and(|http| http.allows_insecure_origin(origin))
     }
 
     pub(crate) fn register_http_router(&self, router: axum::Router) -> Result<(), RuntimeError> {
@@ -716,22 +735,21 @@ async fn run_owned(
         owners: ownership.contexts(),
         http_router: std::sync::Mutex::new(axum::Router::new()),
         platform_verifier: Arc::new(tokio::sync::OnceCell::new()),
+        live_providers: crate::platform::LiveProviderSlots::new(),
     };
     let mut handles = start_subsystems(&context).await?;
     let root_stop = StopHandle::new();
     // Only components selected by the runtime mode report ready; others are
     // absent rather than failed. Readiness is written here from the real
-    // lifecycle: ready once a subsystem has started, not-ready as soon as the
-    // runtime begins stopping.
+    // lifecycle: ready once the bootstrap listener serves and the built-in
+    // live providers have authenticated, not-ready as soon as the runtime
+    // begins stopping.
     let component_readiness =
         std::sync::Arc::new(crate::telemetry::snapshots::ComponentReadiness::default());
     let component_names: Vec<&'static str> = handles
         .iter()
         .map(|handle| component_label(handle.name))
         .collect();
-    for name in &component_names {
-        component_readiness.set(name, 1.0);
-    }
     let _component_sampler = crate::telemetry::snapshots::spawn_component_sampler(
         component_names.clone(),
         std::sync::Arc::clone(&component_readiness),
@@ -739,12 +757,40 @@ async fn run_owned(
     );
     let server_stop = root_stop.clone();
     let http_router = context.take_http_router()?;
-    let mut server = Box::pin(crate::run_http_server(
-        &context.config,
+    let listener = match crate::bind_http_listener(&context.config).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            root_stop.stop();
+            if let Err(cleanup) = stop_subsystems(handles).await {
+                tracing::error!(error = %cleanup, "runtime startup cleanup also failed");
+            }
+            return Err(RuntimeError::from(error));
+        }
+    };
+    let mut server = Box::pin(crate::serve_http_listener(
+        listener,
         context.mode,
         http_router,
         async move { server_stop.stopped().await },
     ));
+    // The bootstrap listener serves while the built-in live providers
+    // authenticate through the ordinary native bootstrap. A provider failure
+    // or an early listener exit is a startup failure, never a dispatch-time
+    // fallback.
+    let bootstrap_result: Result<(), RuntimeError> = tokio::select! {
+        result = bootstrap_live_providers(&context) => result,
+        result = server.as_mut() => result.map_err(RuntimeError::from),
+    };
+    if let Err(error) = bootstrap_result {
+        root_stop.stop();
+        if let Err(cleanup) = stop_subsystems(handles).await {
+            tracing::error!(error = %cleanup, "runtime startup cleanup also failed");
+        }
+        return Err(error);
+    }
+    for name in &component_names {
+        component_readiness.set(name, 1.0);
+    }
     let (primary, server_finished, cause) = wait_for_runtime_event(
         server.as_mut(),
         &mut handles,
@@ -785,6 +831,39 @@ fn preserve_run_primary(
         (Err(primary), Ok(())) => Err(primary),
         (Ok(()), result) => result,
     }
+}
+
+/// Bound on one built-in live provider's ordinary native bootstrap.
+const BUILTIN_LIVE_PROVIDER_CONNECT_TIMEOUT_MS: u64 = 30_000;
+
+/// Connect every built-in live provider role selected by the runtime mode.
+///
+/// This runs after the bootstrap HTTP listener begins serving so a built-in
+/// provider authenticates through the ordinary native service bootstrap and
+/// Auth Callout. Each connected owner is delivered to the subsystem that
+/// serves its live routes; a role whose subsystem is selected but whose owner
+/// cannot be connected fails startup before any live router serves traffic.
+async fn bootstrap_live_providers(context: &RuntimeContext) -> Result<(), RuntimeError> {
+    let trellis_url = context.public_origin();
+    let allow_insecure_origin = context.allows_insecure_origin(&trellis_url);
+    for role in crate::platform::LiveProviderRole::roles_for_mode(context.mode) {
+        let identity_seed = crate::platform::load_live_provider_seed(&context.config, role)?;
+        let client = crate::platform::connect_builtin_live_provider(
+            role,
+            &identity_seed,
+            crate::platform::BuiltinLiveProviderConnectOptions {
+                trellis_url: &trellis_url,
+                timeout_ms: BUILTIN_LIVE_PROVIDER_CONNECT_TIMEOUT_MS,
+                allow_insecure_origin,
+            },
+        )
+        .await?;
+        context.live_providers.install(
+            role,
+            trellis_rs::service::LiveProviderOwner::from_connected_client(Arc::new(client)),
+        );
+    }
+    Ok(())
 }
 
 async fn wait_for_runtime_event<F, S, R>(

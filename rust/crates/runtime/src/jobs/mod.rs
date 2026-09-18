@@ -12,12 +12,30 @@ use trellis_jobs_runtime::{
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, RequestValidator, ServerError,
 };
+use trellis_runtime_apis::apis::trellis_jobs_v1::{feeds, rpc};
 
 use crate::shutdown::StopHandle;
 use crate::supervisor::{RuntimeContext, RuntimeError, SubsystemHandle};
 use crate::{StorageBackend, SubsystemName};
 
-const JOBS_SUBJECTS: &[&str] = &["rpc.v1.Jobs.>", "feed.v1.Jobs.>"];
+/// Exact public Subjects the Jobs runtime serves on its provider connection.
+///
+/// The provider transport grants each implemented action exactly; wide
+/// wildcards would exceed the materialized grants and are denied fail-closed.
+const JOBS_SUBJECTS: &[&str] = &[
+    rpc::Cancel::SUBJECT,
+    rpc::DismissDLQ::SUBJECT,
+    rpc::GetKey::SUBJECT,
+    rpc::Inspect::SUBJECT,
+    rpc::ListDLQ::SUBJECT,
+    rpc::ListServices::SUBJECT,
+    rpc::Metrics::SUBJECT,
+    rpc::Query::SUBJECT,
+    rpc::ReplayDLQ::SUBJECT,
+    rpc::Retry::SUBJECT,
+    rpc::Summary::SUBJECT,
+    feeds::Watch::SUBJECT,
+];
 const JOBS_API_ID: &str = "trellis.jobs@v1";
 const DEFAULT_JANITOR_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -172,8 +190,10 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         })?);
     let sampler_store = store.clone();
     let loops = RuntimeLoops::start(jobs_runtime, &resources, store, resolver).await?;
-    let nats = context.trellis_nats.clone();
-    let sampler_nats = nats.clone();
+    let sampler_nats = context.trellis_nats.clone();
+    let live_owner = context
+        .live_providers
+        .receiver(crate::platform::LiveProviderRole::Jobs);
     let join = tokio::spawn(async move {
         let _owner = owner;
         let mut loops = loops;
@@ -185,8 +205,25 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
                 task_stop.clone(),
             ),
         )]);
-        let api_loop =
-            run_builtin_authenticated_router(nats, JOBS_API_ID, JOBS_SUBJECTS, router, validator);
+        let api_stop = task_stop.clone();
+        let api_loop = async move {
+            let mut live_owner = live_owner;
+            let Some(owner) = crate::platform::await_live_owner(&mut live_owner, &api_stop).await
+            else {
+                return Ok(());
+            };
+            let api_nats = owner.runtime_nats();
+            let mut router = router;
+            router.set_live_owner(owner);
+            run_builtin_authenticated_router(
+                api_nats,
+                JOBS_API_ID,
+                JOBS_SUBJECTS,
+                router,
+                validator,
+            )
+            .await
+        };
         tokio::pin!(api_loop);
         let result = {
             let validator_exit = async {

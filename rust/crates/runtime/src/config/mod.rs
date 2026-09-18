@@ -377,6 +377,8 @@ impl RuntimeConfig {
         if let Some(seeds) = &mut self.live_provider_seed_files {
             resolve_path(base_dir, &mut seeds.platform);
             resolve_path(base_dir, &mut seeds.health);
+            resolve_path(base_dir, &mut seeds.jobs);
+            resolve_path(base_dir, &mut seeds.events);
         }
         if let Some(nats) = &mut self.nats {
             if let Some(runtime) = &mut nats.runtime {
@@ -802,6 +804,12 @@ pub struct LiveProviderSeedFilesConfig {
     /// Health API/Feed provider identity seed file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health: Option<PathBuf>,
+    /// Jobs API/Feed provider identity seed file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jobs: Option<PathBuf>,
+    /// Events API/Feed provider identity seed file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub events: Option<PathBuf>,
 }
 
 /// File-backed authorization trust and context-runtime policy.

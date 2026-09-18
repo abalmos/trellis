@@ -53,7 +53,10 @@ pub use config::{
     SqliteStorageConfig, StorageBackend, StorageConfig, SubsystemConfig,
 };
 pub use mode::{RuntimeMode, RuntimeModeParseError, SubsystemName};
-pub use server::{build_version_info, run_http_server, ServerError, VersionInfo};
+pub use server::{
+    bind_http_listener, build_version_info, run_http_server, serve_http_listener, ServerError,
+    VersionInfo,
+};
 
 #[cfg(all(feature = "sqlite-storage", feature = "nats-leases"))]
 pub use supervisor::{run, RuntimeError, RuntimeOptions};

@@ -51,10 +51,32 @@ impl LiveProviderOwner {
         Self { client }
     }
 
+    /// Construct one live provider owner from a connected client.
+    ///
+    /// Exposed to the runtime crate so built-in subsystems can adopt the
+    /// normal authenticated provider connection they bootstrapped with.
+    #[cfg(feature = "runtime-internals")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn from_connected_client(client: std::sync::Arc<TrellisClient>) -> Self {
+        Self { client }
+    }
+
     /// Return the owning client.
     #[must_use]
     pub(crate) fn client(&self) -> &std::sync::Arc<TrellisClient> {
         &self.client
+    }
+
+    /// Return the authenticated NATS connection of the owning client.
+    ///
+    /// Exposed to the runtime crate so built-in subsystems serve their public
+    /// routers over the exact connection they bootstrapped with.
+    #[cfg(feature = "runtime-internals")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn runtime_nats(&self) -> async_nats::Client {
+        self.client.runtime_nats()
     }
 
     /// Return the connection's live manager.

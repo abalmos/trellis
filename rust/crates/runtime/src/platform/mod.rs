@@ -35,8 +35,12 @@ use auth::rpc::{AuthRpcProcessor, AuthRpcRuntime};
 use auth_callout::{AuthCallout, CalloutKeys};
 use auth_operation::AuthOperationRuntime;
 use auth_post_commit::{AuthEventPublisher, AuthPostCommitRuntime};
+pub(crate) use builtin_live_provider::{
+    connect_builtin_live_provider, BuiltinLiveProviderConnectOptions,
+};
 pub(crate) use live_provider::{
-    ensure_live_provider_resources, ensure_live_provider_seed, LiveProviderRole,
+    await_live_owner, ensure_live_provider_resources, ensure_live_provider_seed,
+    load_live_provider_seed, LiveProviderRole, LiveProviderSlots,
 };
 
 /// Browser-flow records are retained for one day, so a configured pending-auth
@@ -237,10 +241,10 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         ensure_auth_event_session(&auth_service, &auth_participant, now).await?;
     // Built-in live providers need normal authenticated identities before any
     // live-capable router registers. The platform owner is the only writer, so
-    // both reserved roles are provisioned here under their fixed deployments.
-    for role in [LiveProviderRole::Platform, LiveProviderRole::Health] {
+    // every reserved role is provisioned here under its fixed deployment.
+    for role in LiveProviderRole::all() {
         let provider = ensure_live_provider_seed(&auth_service, &context.config, role, now).await?;
-        ensure_live_provider_resources(&auth_service, &provider).await?;
+        ensure_live_provider_resources(&auth_service, role, &provider).await?;
     }
     let event_context = authorization_contexts
         .issue(
@@ -290,6 +294,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
         auth_operation_session,
         auth_service.clone(),
         verifier.clone(),
+        context.live_providers.receiver(LiveProviderRole::Platform),
     )
     .await?;
     let mut auth_rpc_routes = Router::new();

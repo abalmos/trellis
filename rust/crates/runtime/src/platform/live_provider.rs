@@ -1,8 +1,8 @@
 //! Trusted startup provisioning for built-in live providers.
 //!
-//! Built-in roles that serve a live surface (`Health.Watch`, Platform Operation
-//! observation) need a normal authenticated provider connection with a current
-//! signed context. Those providers sign every offer and data frame with their
+//! Built-in roles that serve a live surface (`Health.Watch`, `Jobs.Watch`,
+//! `Events.Watch`, Platform Operation observation) need a normal authenticated
+//! provider connection with a current signed context. Those providers sign every offer and data frame with their
 //! runtime key, so they must not reuse a fixed event digest or present an
 //! unsigned process identity.
 //!
@@ -31,12 +31,16 @@ use super::auth::{
 use super::{ensure_builtin_provider_deployment, RuntimeError};
 
 /// Built-in roles that serve a live observation surface.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum LiveProviderRole {
     /// Platform Operation provider for the Auth/Core/State public routes.
     Platform,
     /// Health API and Feed provider.
     Health,
+    /// Jobs API and Feed provider.
+    Jobs,
+    /// Events API and Feed provider.
+    Events,
 }
 
 impl LiveProviderRole {
@@ -46,7 +50,29 @@ impl LiveProviderRole {
         match self {
             Self::Platform => "platform",
             Self::Health => "health",
+            Self::Jobs => "jobs",
+            Self::Events => "events",
         }
+    }
+
+    /// Return every built-in live provider role in startup order.
+    #[must_use]
+    pub const fn all() -> [Self; 4] {
+        [Self::Platform, Self::Health, Self::Jobs, Self::Events]
+    }
+
+    /// Return the roles whose subsystem runs in the selected runtime mode.
+    #[must_use]
+    pub fn roles_for_mode(mode: crate::RuntimeMode) -> Vec<Self> {
+        mode.subsystems()
+            .iter()
+            .map(|subsystem| match subsystem {
+                crate::SubsystemName::Platform => Self::Platform,
+                crate::SubsystemName::Jobs => Self::Jobs,
+                crate::SubsystemName::Health => Self::Health,
+                crate::SubsystemName::Events => Self::Events,
+            })
+            .collect()
     }
 
     /// Return the reserved deployment that owns this role's live surface.
@@ -55,6 +81,8 @@ impl LiveProviderRole {
         match self {
             Self::Platform => "dep_trellis_auth_runtime",
             Self::Health => "dep_trellis_health_runtime",
+            Self::Jobs => "dep_trellis_jobs_runtime",
+            Self::Events => "dep_trellis_events_runtime",
         }
     }
 
@@ -64,6 +92,8 @@ impl LiveProviderRole {
         match self {
             Self::Platform => "Trellis Platform Live Provider",
             Self::Health => "Trellis Health Live Provider",
+            Self::Jobs => "Trellis Jobs Live Provider",
+            Self::Events => "Trellis Events Live Provider",
         }
     }
 
@@ -72,22 +102,128 @@ impl LiveProviderRole {
         let binding = match self {
             Self::Platform => auth::auth_runtime_participant_binding(now),
             Self::Health => auth::health_runtime_participant_binding(now),
+            Self::Jobs => auth::jobs_runtime_participant_binding(now),
+            Self::Events => auth::events_runtime_participant_binding(now),
         };
         binding.map_err(|error| RuntimeError::Platform(error.to_string()))
     }
 }
 
-/// Resolved native identity seed for one built-in live provider role.
+/// Per-role delivery slots for built-in live provider owners.
+///
+/// Subsystems subscribe before serving their live routers; the supervisor
+/// installs each owner after the bootstrap listener is serving and the
+/// ordinary native provider bootstrap has completed. A live-capable router
+/// that never receives its owner fails startup instead of serving without
+/// one.
+#[derive(Clone)]
+pub(crate) struct LiveProviderSlots {
+    senders: std::sync::Arc<
+        std::collections::BTreeMap<LiveProviderRole, tokio::sync::watch::Sender<OwnerSlot>>,
+    >,
+}
+
+impl std::fmt::Debug for LiveProviderSlots {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LiveProviderSlots")
+            .finish_non_exhaustive()
+    }
+}
+
+type OwnerSlot = Option<trellis_rs::service::LiveProviderOwner>;
+
+impl LiveProviderSlots {
+    pub(crate) fn new() -> Self {
+        let mut senders = std::collections::BTreeMap::new();
+        for role in LiveProviderRole::all() {
+            let (sender, _receiver) = tokio::sync::watch::channel(None);
+            senders.insert(role, sender);
+        }
+        Self {
+            senders: std::sync::Arc::new(senders),
+        }
+    }
+
+    pub(crate) fn receiver(
+        &self,
+        role: LiveProviderRole,
+    ) -> tokio::sync::watch::Receiver<OwnerSlot> {
+        self.senders
+            .get(&role)
+            .expect("every live provider role has a delivery slot")
+            .subscribe()
+    }
+
+    pub(crate) fn install(
+        &self,
+        role: LiveProviderRole,
+        owner: trellis_rs::service::LiveProviderOwner,
+    ) {
+        if let Some(sender) = self.senders.get(&role) {
+            let _ = sender.send(Some(owner));
+        }
+    }
+}
+
+/// Await one role's installed provider owner while honoring shutdown.
+pub(crate) async fn await_live_owner(
+    receiver: &mut tokio::sync::watch::Receiver<OwnerSlot>,
+    stop: &crate::shutdown::StopHandle,
+) -> Option<trellis_rs::service::LiveProviderOwner> {
+    loop {
+        if let Some(owner) = receiver.borrow_and_update().clone() {
+            return Some(owner);
+        }
+        tokio::select! {
+            changed = receiver.changed() => {
+                if changed.is_err() {
+                    return None;
+                }
+            }
+            () = stop.stopped() => return None,
+        }
+    }
+}
+
+/// Read one role's provisioned seed without creating or provisioning it.
+///
+/// All-in-one startup writes managed defaults in the platform owner; split
+/// processes read the operator-distributed file. A missing file is a clear
+/// configuration error rather than a silent replacement identity.
+///
+/// # Errors
+///
+/// Returns [`RuntimeError::Platform`] for unreadable, missing, or malformed
+/// seed files.
+pub fn load_live_provider_seed(
+    config: &crate::RuntimeConfig,
+    role: LiveProviderRole,
+) -> Result<String, RuntimeError> {
+    let path = resolve_live_provider_seed_file(config, role)?;
+    let contents = std::fs::read_to_string(&path).map_err(|error| {
+        RuntimeError::Platform(format!(
+            "failed to read live provider seed '{}': {error}",
+            path.display()
+        ))
+    })?;
+    let seed = contents.trim().to_owned();
+    SessionAuth::from_seed_base64url(&seed).map_err(|error| {
+        RuntimeError::Platform(format!(
+            "invalid live provider seed '{}': {error}",
+            path.display()
+        ))
+    })?;
+    Ok(seed)
+}
+
+/// Resolved provisioning record for one built-in live provider role.
 #[derive(Clone, Debug)]
 pub struct ProvisionedLiveProvider {
-    /// Role this identity serves.
-    pub role: LiveProviderRole,
     /// Generated participant id installed for this role.
     pub participant_id: String,
     /// Reserved deployment the identity is provisioned under.
     pub deployment_id: String,
-    /// Native identity seed for the ordinary service bootstrap path.
-    pub identity_seed_base64url: String,
     /// Runtime instance id installed for this identity.
     #[allow(
         dead_code,
@@ -122,6 +258,8 @@ pub fn resolve_live_provider_seed_file(
         .and_then(|files| match role {
             LiveProviderRole::Platform => files.platform.clone(),
             LiveProviderRole::Health => files.health.clone(),
+            LiveProviderRole::Jobs => files.jobs.clone(),
+            LiveProviderRole::Events => files.events.clone(),
         });
     if let Some(path) = explicit {
         return Ok(path);
@@ -167,6 +305,8 @@ pub async fn ensure_live_provider_seed(
         .and_then(|files| match role {
             LiveProviderRole::Platform => files.platform.as_ref(),
             LiveProviderRole::Health => files.health.as_ref(),
+            LiveProviderRole::Jobs => files.jobs.as_ref(),
+            LiveProviderRole::Events => files.events.as_ref(),
         })
         .is_some();
     let seed = match std::fs::read_to_string(&path) {
@@ -331,10 +471,8 @@ pub async fn provision_live_provider(
         }
         let instance_id = existing.instance_id.clone();
         return Ok(ProvisionedLiveProvider {
-            role,
             participant_id: participant.participant_id.clone(),
             deployment_id: deployment_id.to_owned(),
-            identity_seed_base64url: seed.to_owned(),
             instance_id,
             participant,
         });
@@ -370,10 +508,8 @@ pub async fn provision_live_provider(
             RuntimeError::Platform(format!("install live provider identity: {error}"))
         })?;
     Ok(ProvisionedLiveProvider {
-        role,
         participant_id: participant.participant_id.clone(),
         deployment_id: deployment_id.to_owned(),
-        identity_seed_base64url: seed.to_owned(),
         instance_id,
         participant,
     })
@@ -579,8 +715,16 @@ pub async fn ensure_live_provider_deployment_profile(
 /// Returns [`RuntimeError::Platform`] when the commitment set cannot be stored.
 pub async fn ensure_live_provider_resources(
     service: &AuthService<SqliteAuthorizationStore>,
+    role: LiveProviderRole,
     provider: &ProvisionedLiveProvider,
 ) -> Result<(), RuntimeError> {
+    if role == LiveProviderRole::Platform {
+        // The Platform provider shares `dep_trellis_auth_runtime` with the Auth
+        // runtime's event and operation sessions; those KV resources are bound
+        // by the auth-runtime setup and must not be replaced with an empty set,
+        // or the shared grant binding stops matching its resolved authority.
+        return Ok(());
+    }
     let resources: Vec<ResourceBindingEvidence> = Vec::new();
     let installed_revision = service
         .repository()
@@ -618,7 +762,10 @@ pub async fn ensure_live_provider_resources(
 )]
 pub fn live_provider_declares_resources(role: LiveProviderRole) -> bool {
     match role {
-        LiveProviderRole::Platform | LiveProviderRole::Health => false,
+        LiveProviderRole::Platform
+        | LiveProviderRole::Health
+        | LiveProviderRole::Jobs
+        | LiveProviderRole::Events => false,
     }
 }
 

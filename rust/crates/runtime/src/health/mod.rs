@@ -126,6 +126,9 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             Some(verifier) => std::sync::Arc::new(verifier.clone()),
             None => std::sync::Arc::new(crate::platform::auth::verifier::DenyAllValidator),
         };
+    let live_owner = context
+        .live_providers
+        .receiver(crate::platform::LiveProviderRole::Health);
     let join = tokio::spawn(async move {
         let invalidation_loop = run_invalidation_subscriber(
             nats.clone(),
@@ -145,13 +148,25 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
             event_auth,
             task_stop.clone(),
         );
-        let api_loop = run_builtin_authenticated_router(
-            nats,
-            "trellis.health@v1",
-            RPC_SUBJECTS,
-            router,
-            verifier,
-        );
+        let api_stop = task_stop.clone();
+        let api_loop = async move {
+            let mut live_owner = live_owner;
+            let Some(owner) = crate::platform::await_live_owner(&mut live_owner, &api_stop).await
+            else {
+                return Ok(());
+            };
+            let api_nats = owner.runtime_nats();
+            let mut router = router;
+            router.set_live_owner(owner);
+            run_builtin_authenticated_router(
+                api_nats,
+                "trellis.health@v1",
+                RPC_SUBJECTS,
+                router,
+                verifier,
+            )
+            .await
+        };
         tokio::pin!(invalidation_loop, owner_loop, api_loop);
         let result = {
             let validator_exit = async {

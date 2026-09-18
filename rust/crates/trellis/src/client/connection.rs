@@ -1446,6 +1446,18 @@ impl TrellisClient {
         })
     }
 
+    /// Return the underlying NATS client for runtime-owned serving.
+    ///
+    /// Exposed to the runtime crate so a built-in subsystem can serve its
+    /// public router over the exact authenticated provider connection it
+    /// bootstrapped with.
+    #[cfg(feature = "runtime-internals")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn runtime_nats(&self) -> async_nats::Client {
+        self.nats.clone()
+    }
+
     /// Return the signed authorization context used by this connection.
     pub fn authorization_context(
         &self,

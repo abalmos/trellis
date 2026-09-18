@@ -12,14 +12,10 @@
 use trellis_rs::client::{ServiceConnectWithContractOptions, TrellisClient, TrellisClientError};
 use trellis_rs::generated::ParticipantDescriptor;
 
-use super::live_provider::{LiveProviderRole, ProvisionedLiveProvider};
+use super::live_provider::LiveProviderRole;
 use super::RuntimeError;
 
 /// Inputs for connecting one built-in live provider through normal bootstrap.
-#[allow(
-    dead_code,
-    reason = "consumed by built-in live-router startup wiring in the Feed migration work package"
-)]
 pub struct BuiltinLiveProviderConnectOptions<'a> {
     /// Configured Trellis HTTP origin.
     pub trellis_url: &'a str,
@@ -36,42 +32,68 @@ pub struct BuiltinLiveProviderConnectOptions<'a> {
 ///
 /// Returns [`RuntimeError::Platform`] for bootstrap failure or when the
 /// installed participant/deployment does not match the provisioned role.
-#[allow(
-    dead_code,
-    reason = "consumed by built-in live-router startup wiring in the Feed migration work package"
-)]
 pub async fn connect_builtin_live_provider(
-    provider: &ProvisionedLiveProvider,
+    role: LiveProviderRole,
+    identity_seed_base64url: &str,
     options: BuiltinLiveProviderConnectOptions<'_>,
 ) -> Result<TrellisClient, RuntimeError> {
-    let client = match provider.role {
+    let client = match role {
         LiveProviderRole::Platform => {
             connect::<trellis_runtime_apis::participants::trellis_platform::Participant>(
-                provider, options,
+                identity_seed_base64url,
+                options,
             )
             .await?
         }
         LiveProviderRole::Health => {
             connect::<trellis_runtime_apis::participants::trellis_health_runtime::Participant>(
-                provider, options,
+                identity_seed_base64url,
+                options,
+            )
+            .await?
+        }
+        LiveProviderRole::Jobs => {
+            connect::<trellis_runtime_apis::participants::trellis_jobs_runtime::Participant>(
+                identity_seed_base64url,
+                options,
+            )
+            .await?
+        }
+        LiveProviderRole::Events => {
+            connect::<trellis_runtime_apis::participants::trellis_events_runtime::Participant>(
+                identity_seed_base64url,
+                options,
             )
             .await?
         }
     };
-    let deployment_id = match provider.role {
-        LiveProviderRole::Platform => expect_deployment::<
-            trellis_runtime_apis::participants::trellis_platform::Participant,
-        >(provider, &client)?,
-        LiveProviderRole::Health => expect_deployment::<
-            trellis_runtime_apis::participants::trellis_health_runtime::Participant,
-        >(provider, &client)?,
-    };
-    let _ = deployment_id;
+    match role {
+        LiveProviderRole::Platform => {
+            expect_deployment::<trellis_runtime_apis::participants::trellis_platform::Participant>(
+                role, &client,
+            )?;
+        }
+        LiveProviderRole::Health => {
+            expect_deployment::<
+                trellis_runtime_apis::participants::trellis_health_runtime::Participant,
+            >(role, &client)?;
+        }
+        LiveProviderRole::Jobs => {
+            expect_deployment::<
+                trellis_runtime_apis::participants::trellis_jobs_runtime::Participant,
+            >(role, &client)?;
+        }
+        LiveProviderRole::Events => {
+            expect_deployment::<
+                trellis_runtime_apis::participants::trellis_events_runtime::Participant,
+            >(role, &client)?;
+        }
+    }
     Ok(client)
 }
 
 async fn connect<C: ParticipantDescriptor>(
-    provider: &ProvisionedLiveProvider,
+    identity_seed_base64url: &str,
     options: BuiltinLiveProviderConnectOptions<'_>,
 ) -> Result<TrellisClient, RuntimeError> {
     TrellisClient::connect_service_with_contract(ServiceConnectWithContractOptions {
@@ -79,7 +101,7 @@ async fn connect<C: ParticipantDescriptor>(
         participant_id: C::ID,
         participant_path: C::PATH,
         package_evidence: C::package_evidence(),
-        provisioned_identity_seed_base64url: &provider.identity_seed_base64url,
+        provisioned_identity_seed_base64url: identity_seed_base64url,
         name: None,
         timeout_ms: options.timeout_ms,
         allow_insecure_origin: options.allow_insecure_origin,
@@ -89,13 +111,13 @@ async fn connect<C: ParticipantDescriptor>(
 }
 
 fn expect_deployment<C: ParticipantDescriptor>(
-    provider: &ProvisionedLiveProvider,
+    role: LiveProviderRole,
     client: &TrellisClient,
 ) -> Result<String, RuntimeError> {
     let deployment_id = client
         .runtime_deployment_id()
         .map_err(|error: TrellisClientError| RuntimeError::Platform(error.to_string()))?;
-    let expected = provider.role.deployment_id();
+    let expected = role.deployment_id();
     if deployment_id != expected {
         return Err(RuntimeError::Platform(format!(
             "built-in live provider '{}' is installed under deployment '{deployment_id}' instead of '{expected}'",

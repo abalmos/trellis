@@ -53,6 +53,8 @@ pub use error::{
     DeclaredRpcError, HandlerResult, SchemaValidationIssue, ServerError, ValidationIssue,
 };
 pub use events_runtime::{EventsMessageStream, EventsRuntime};
+#[cfg(feature = "runtime-internals")]
+pub use live_router::LiveProviderOwner;
 #[doc(hidden)]
 pub use local_validator::{
     payload_hash_base64url, EventVerificationFailure, LocalAuthVerifier, VerifiedCaller,
@@ -140,52 +142,76 @@ pub mod internal {
                 )))
             }
         };
-        let bound = subjects
-            .iter()
-            .map(|subject| {
-                let family = subject.split('.').next().unwrap_or_default();
-                let wildcard = subject.ends_with(".>");
-                let subject = subject.strip_suffix(".>").unwrap_or(subject);
-                let action = if wildcard {
-                    "Route"
-                } else if family == "operations" {
-                    subject.splitn(5, '.').nth(4).unwrap_or_default()
-                } else {
-                    subject.splitn(4, '.').nth(3).unwrap_or_default()
-                };
-                match family {
-                    "rpc" => {
+        let mut bound: Vec<String> = Vec::new();
+        for subject in subjects {
+            let family = subject.split('.').next().unwrap_or_default();
+            let wildcard = subject.ends_with(".>");
+            let subject = subject.strip_suffix(".>").unwrap_or(subject);
+            let action = if wildcard {
+                "Route"
+            } else if family == "operations" {
+                subject.splitn(5, '.').nth(4).unwrap_or_default()
+            } else {
+                subject.splitn(4, '.').nth(3).unwrap_or_default()
+            };
+            match family {
+                "rpc" => {
+                    let derived =
                         trellis_protocol::derive_bound_rpc_subject(api_id, deployment_id, action)
-                    }
-                    "feed" => {
-                        trellis_protocol::derive_bound_feed_subject(api_id, deployment_id, action)
-                    }
-                    "operations" => trellis_protocol::derive_bound_operation_subject(
-                        api_id,
-                        deployment_id,
-                        action,
-                    ),
-                    _ => {
-                        return Err(super::ServerError::Nats(format!(
-                            "unsupported built-in subject {subject}"
-                        )))
-                    }
-                }
-                .map(|subject| {
-                    if wildcard {
-                        subject
+                            .map_err(|error| super::ServerError::Nats(error.to_string()))?;
+                    bound.push(if wildcard {
+                        derived
                             .strip_suffix("Route")
                             .expect("derived subject contains action")
                             .to_owned()
                             + ">"
                     } else {
-                        subject
+                        derived
+                    });
+                }
+                "feed" => {
+                    let derived =
+                        trellis_protocol::derive_bound_feed_subject(api_id, deployment_id, action)
+                            .map_err(|error| super::ServerError::Nats(error.to_string()))?;
+                    bound.push(if wildcard {
+                        derived
+                            .strip_suffix("Route")
+                            .expect("derived subject contains action")
+                            .to_owned()
+                            + ">"
+                    } else {
+                        derived
+                    });
+                }
+                "operations" => {
+                    let base = trellis_protocol::derive_bound_operation_subject(
+                        api_id,
+                        deployment_id,
+                        action,
+                    )
+                    .map_err(|error| super::ServerError::Nats(error.to_string()))?;
+                    if wildcard {
+                        // The provider transport grants this exact operation
+                        // subject, its `.control` lane, and its `.updates.*`
+                        // lane; a deployment-wide wildcard would exceed them.
+                        bound.push(format!("{base}.control"));
+                        bound.push(format!("{base}.updates.*"));
+                    } else {
+                        bound.push(base);
                     }
-                })
-                .map_err(|error| super::ServerError::Nats(error.to_string()))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                }
+                _ => {
+                    return Err(super::ServerError::Nats(format!(
+                        "unsupported built-in subject {subject}"
+                    )))
+                }
+            }
+        }
         let subjects = bound.iter().map(String::as_str).collect::<Vec<_>>();
+        // A live-capable router must be given its connection's provider owner
+        // before it serves any traffic; fail loudly here instead of surfacing
+        // the mistake to the first caller.
+        router.require_live_owner()?;
         let router = super::AuthenticatedRouter::new(router, validator);
         super::runtime::run_multi_subject_service(nats, &subjects, router).await
     }

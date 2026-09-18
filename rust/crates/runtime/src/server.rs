@@ -45,17 +45,35 @@ pub fn build_version_info(mode: RuntimeMode) -> VersionInfo {
     }
 }
 
-/// Runs the runtime readiness HTTP server until `shutdown` resolves.
-pub async fn run_http_server(
+/// Binds the runtime HTTP listener without serving it yet.
+///
+/// Binding early reserves the configured port so it is stable for the whole
+/// process lifetime, and lets the supervisor start serving the bootstrap
+/// routes before built-in live providers attempt native bootstrap.
+///
+/// # Errors
+///
+/// Returns [`ServerError::Bind`] when the listener cannot bind.
+pub async fn bind_http_listener(
     config: &RuntimeConfig,
+) -> Result<tokio::net::TcpListener, ServerError> {
+    let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, config.http_port()));
+    tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|source| ServerError::Bind { addr, source })
+}
+
+/// Serves `application_router` plus the readiness endpoints on a bound listener.
+///
+/// # Errors
+///
+/// Returns [`ServerError::Serve`] when the HTTP server exits with an error.
+pub async fn serve_http_listener(
+    listener: tokio::net::TcpListener,
     mode: RuntimeMode,
     application_router: Router,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServerError> {
-    let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, config.http_port()));
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .map_err(|source| ServerError::Bind { addr, source })?;
     let version = build_version_info(mode);
     let router = Router::new()
         .route("/healthz", get(healthz))
@@ -70,6 +88,17 @@ pub async fn run_http_server(
     .with_graceful_shutdown(shutdown)
     .await
     .map_err(ServerError::Serve)
+}
+
+/// Runs the runtime readiness HTTP server until `shutdown` resolves.
+pub async fn run_http_server(
+    config: &RuntimeConfig,
+    mode: RuntimeMode,
+    application_router: Router,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> Result<(), ServerError> {
+    let listener = bind_http_listener(config).await?;
+    serve_http_listener(listener, mode, application_router, shutdown).await
 }
 
 /// Returns readiness metadata for runtime liveness probes.
