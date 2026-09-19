@@ -147,10 +147,11 @@ pub mod internal {
             let family = subject.split('.').next().unwrap_or_default();
             let wildcard = subject.ends_with(".>");
             let subject = subject.strip_suffix(".>").unwrap_or(subject);
-            let action = if wildcard {
+            // An operation action name may contain dots (`Auth.X.Y`), so it
+            // spans every segment after the `operations.v1.<api>` prefix. RPC
+            // and Feed wildcard entries keep the derived `Route` prefix form.
+            let action = if wildcard && family != "operations" {
                 "Route"
-            } else if family == "operations" {
-                subject.splitn(5, '.').nth(4).unwrap_or_default()
             } else {
                 subject.splitn(4, '.').nth(3).unwrap_or_default()
             };

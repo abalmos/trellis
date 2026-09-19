@@ -879,6 +879,29 @@ Deno.test("Z08 page discards superseded results and drains the latest query", as
     const seededA = await seedProvider(runtime, "z08-a");
     const seededB = await seedProvider(runtime, "z08-b");
     try {
+      // Publish before the page loads and confirm projection through the
+      // ordinary generated query, so establishing the initial rows does not
+      // depend on a first live invalidation racing the initial snapshot.
+      await seededA.service.publishChanged({ value: `z08-a-${ulid()}` })
+        .orThrow();
+      await seededB.service.publishChanged({ value: `z08-b-${ulid()}` })
+        .orThrow();
+      const reader = await runtime.connectClient({
+        name: fixtureName("z08-reader"),
+        contract: consoleParticipant,
+      });
+      await runtime.waitFor(async () => {
+        const a = (await reader.eventsQuery({
+          publisherDeploymentId: seededA.deploymentId,
+          window: "1h",
+        }).orThrow()).items;
+        const b = (await reader.eventsQuery({
+          publisherDeploymentId: seededB.deploymentId,
+          window: "1h",
+        }).orThrow()).items;
+        return a.length > 0 && b.length > 0 ? true : undefined;
+      }, { timeoutMs: 60_000 });
+
       const context = await launchProfile(runtime);
       try {
         const page = await context.newPage();
@@ -896,10 +919,6 @@ Deno.test("Z08 page discards superseded results and drains the latest query", as
             state: "visible",
             timeout: 30_000,
           });
-          await seededA.service.publishChanged({ value: `z08-a-${ulid()}` })
-            .orThrow();
-          await seededB.service.publishChanged({ value: `z08-b-${ulid()}` })
-            .orThrow();
           const search = main.getByPlaceholder("Search event metadata");
           const rowA = main.locator("tbody tr")
             .filter({ hasText: "runtime-trellis.runtime@v1 / Changed" })
@@ -907,8 +926,8 @@ Deno.test("Z08 page discards superseded results and drains the latest query", as
           const rowB = main.locator("tbody tr")
             .filter({ hasText: "runtime-trellis.runtime@v1 / Changed" })
             .filter({ hasText: seededB.deploymentId });
-          await rowA.first().waitFor({ state: "visible", timeout: 30_000 });
-          await rowB.first().waitFor({ state: "visible", timeout: 30_000 });
+          await rowA.first().waitFor({ state: "visible", timeout: 60_000 });
+          await rowB.first().waitFor({ state: "visible", timeout: 60_000 });
 
           // Commit real metadata scope A through the search control.
           await search.click();

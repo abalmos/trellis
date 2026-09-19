@@ -1,9 +1,13 @@
 use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::get;
-use axum::Json;
-use axum::Router;
+use axum::{Json, Router};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -63,7 +67,19 @@ pub async fn bind_http_listener(
         .map_err(|source| ServerError::Bind { addr, source })
 }
 
+/// Shared state for the runtime liveness and readiness endpoints.
+#[derive(Clone)]
+struct HttpState {
+    version: VersionInfo,
+    ready: Arc<AtomicBool>,
+}
+
 /// Serves `application_router` plus the readiness endpoints on a bound listener.
+///
+/// `/healthz` always answers process metadata. `/readyz` answers `503` until
+/// the supervisor marks startup complete and `200` afterwards, so a caller
+/// never begins work against a runtime whose routes and built-in live
+/// providers are still bootstrapping.
 ///
 /// # Errors
 ///
@@ -72,13 +88,17 @@ pub async fn serve_http_listener(
     listener: tokio::net::TcpListener,
     mode: RuntimeMode,
     application_router: Router,
+    ready: Arc<AtomicBool>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServerError> {
-    let version = build_version_info(mode);
+    let state = HttpState {
+        version: build_version_info(mode),
+        ready,
+    };
     let router = Router::new()
         .route("/healthz", get(healthz))
-        .route("/readyz", get(healthz))
-        .with_state(version)
+        .route("/readyz", get(readyz))
+        .with_state(state)
         .merge(application_router);
 
     axum::serve(
@@ -95,15 +115,24 @@ pub async fn run_http_server(
     config: &RuntimeConfig,
     mode: RuntimeMode,
     application_router: Router,
+    ready: Arc<AtomicBool>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), ServerError> {
     let listener = bind_http_listener(config).await?;
-    serve_http_listener(listener, mode, application_router, shutdown).await
+    serve_http_listener(listener, mode, application_router, ready, shutdown).await
 }
 
-/// Returns readiness metadata for runtime liveness probes.
-async fn healthz(
-    axum::extract::State(version): axum::extract::State<VersionInfo>,
-) -> Json<VersionInfo> {
-    Json(version)
+/// Returns liveness metadata for the runtime process.
+async fn healthz(State(state): State<HttpState>) -> Json<VersionInfo> {
+    Json(state.version)
+}
+
+/// Reports ready only once runtime startup has completed.
+async fn readyz(State(state): State<HttpState>) -> impl IntoResponse {
+    let status = if state.ready.load(Ordering::SeqCst) {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (status, Json(state.version))
 }
