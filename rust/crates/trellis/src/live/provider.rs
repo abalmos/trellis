@@ -52,7 +52,7 @@ pub(crate) struct ProviderSession {
     pub control_subject: String,
     pub consumer: PinnedPeerIdentity,
     pub phase: Mutex<ProviderPhase>,
-    pub reservation_deadline_ms: u64,
+    pub reservation_deadline: std::time::Instant,
     pub challenge: Mutex<Option<ChallengeState>>,
     pub last_fresh_pulse_ms: AtomicU64,
     pub highest_sent: AtomicU64,
@@ -63,6 +63,7 @@ pub(crate) struct ProviderSession {
     pub cleanup_complete: AtomicBool,
     /// One staged producer application frame; a second concurrent emit is rejected.
     pub staged: Mutex<Option<StagedFrame>>,
+    pub credit: tokio::sync::Notify,
 }
 
 /// Identity fields of one offered provider reservation.
@@ -95,7 +96,7 @@ impl ProviderSession {
         reservation: ProviderReservationIdentity,
         subjects: ProviderSessionSubjects,
         consumer: PinnedPeerIdentity,
-        now_ms: u64,
+        _now_ms: u64,
     ) -> Self {
         let ProviderReservationIdentity {
             session_id,
@@ -116,7 +117,8 @@ impl ProviderSession {
             control_subject,
             consumer,
             phase: Mutex::new(ProviderPhase::Offered),
-            reservation_deadline_ms: now_ms.saturating_add(OPEN_RESERVATION_MS),
+            reservation_deadline: std::time::Instant::now()
+                + std::time::Duration::from_millis(OPEN_RESERVATION_MS),
             challenge: Mutex::new(None),
             last_fresh_pulse_ms: AtomicU64::new(0),
             highest_sent: AtomicU64::new(0),
@@ -126,6 +128,7 @@ impl ProviderSession {
             outstanding_bytes: AtomicU64::new(0),
             cleanup_complete: AtomicBool::new(true),
             staged: Mutex::new(None),
+            credit: tokio::sync::Notify::new(),
         }
     }
 
@@ -143,8 +146,12 @@ impl ProviderSession {
 
     /// Return whether the reservation deadline has elapsed.
     #[must_use]
-    pub(crate) fn reservation_elapsed(&self, now_ms: u64) -> bool {
-        now_ms >= self.reservation_deadline_ms
+    pub(crate) fn reservation_elapsed(&self) -> bool {
+        std::time::Instant::now() >= self.reservation_deadline
+    }
+
+    pub(crate) fn wake_credit(&self) {
+        self.credit.notify_waiters();
     }
 
     /// Admit one application frame against the exact credit window.
@@ -211,6 +218,8 @@ impl ProviderSession {
                 break;
             }
         }
+        drop(outstanding);
+        self.wake_credit();
         Ok(())
     }
 

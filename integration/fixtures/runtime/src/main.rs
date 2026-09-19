@@ -119,19 +119,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     retry.wait().await?;
     assert_eq!(retry_runs.load(Ordering::SeqCst), 2);
-    provider
-        .runtime_trellis_runtime_v1()
-        .register_watch(|_, _| {
-            futures_util::stream::unfold(0_u64, |frame| async move {
-                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                Some((
-                    Ok(Value {
-                        value: format!("rust-feed-{frame}"),
-                    }),
-                    frame + 1,
-                ))
-            })
-        });
+    if std::env::var_os("TRELLIS_FEED_EMPTY").is_some() {
+        provider
+            .runtime_trellis_runtime_v1()
+            .register_watch(|_, _| futures_util::stream::empty());
+    } else {
+        provider
+            .runtime_trellis_runtime_v1()
+            .register_watch(|_, _| {
+                futures_util::stream::unfold(0_u64, |frame| async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    Some((
+                        Ok(Value {
+                            value: format!("rust-feed-{frame}"),
+                        }),
+                        frame + 1,
+                    ))
+                })
+            });
+    }
     provider
         .runtime_trellis_runtime_v1()
         .register_work(|context, input, op| async move {

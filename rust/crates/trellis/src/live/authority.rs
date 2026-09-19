@@ -11,9 +11,12 @@
 
 use std::sync::Arc;
 
-use trellis_protocol::{PermissionAtom, ProtocolError};
+use trellis_protocol::{LiveErrorCode, PermissionAtom, ProtocolError};
 
-use crate::client::{AuthorizationContextLease, AuthorizationProviderCache, TrellisClientError};
+use crate::client::{
+    AuthorizationContextLease, AuthorizationProviderCache, AuthorizationVerificationCore,
+    RequestVerificationInput, TrellisClientError,
+};
 
 /// Immutable identity tuple a live session pins for its whole lifetime.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,13 +77,24 @@ impl LiveAuthorityLost {
     }
 }
 
+/// Extra evidence a retained guard must keep true besides the covered lease.
+pub(crate) enum LiveGuardRequirement {
+    /// Local consumer or admitted remote caller Subscribe/Observe atom.
+    Observer(PermissionAtom),
+    /// Publishing endpoint: installed identity, not the caller's Subscribe grant.
+    LocalProvider,
+    /// Consumer authenticating a remote provider's pinned identity.
+    PeerProvider { expected: PinnedPeerIdentity },
+}
+
 /// One retained live-authority guard over an existing provider-cache lease.
 pub(crate) struct LiveAuthorityGuard {
     cache: AuthorizationProviderCache,
     lease: AuthorizationContextLease,
     expected_epoch: u64,
     identity: PinnedPeerIdentity,
-    permission: PermissionAtom,
+    permission: Option<PermissionAtom>,
+    peer: Option<PinnedPeerIdentity>,
 }
 
 impl LiveAuthorityGuard {
@@ -93,7 +107,7 @@ impl LiveAuthorityGuard {
     pub(crate) async fn retain(
         cache: &AuthorizationProviderCache,
         digest: &str,
-        permission: PermissionAtom,
+        requirement: LiveGuardRequirement,
     ) -> Result<Self, LiveAuthorityLost> {
         let expected_epoch = cache.epoch();
         let lease = cache
@@ -104,15 +118,28 @@ impl LiveAuthorityGuard {
                 _ => LiveAuthorityLost::CoverageUnknown,
             })?;
         let identity = pinned_identity(&lease);
-        if !lease.allows(&permission) {
-            return Err(LiveAuthorityLost::PermissionLost);
-        }
+        let (permission, peer) = match requirement {
+            LiveGuardRequirement::Observer(permission) => {
+                if !lease.allows(&permission) {
+                    return Err(LiveAuthorityLost::PermissionLost);
+                }
+                (Some(permission), None)
+            }
+            LiveGuardRequirement::LocalProvider => (None, None),
+            LiveGuardRequirement::PeerProvider { expected } => {
+                if identity != expected {
+                    return Err(LiveAuthorityLost::IdentityChanged);
+                }
+                (None, Some(expected))
+            }
+        };
         Ok(Self {
             cache: cache.clone(),
             lease,
             expected_epoch,
             identity,
             permission,
+            peer,
         })
     }
 
@@ -168,9 +195,71 @@ impl LiveAuthorityGuard {
         if pinned_identity(&self.lease) != self.identity {
             return Err(LiveAuthorityLost::IdentityChanged);
         }
-        if !self.lease.allows(&self.permission) {
-            return Err(LiveAuthorityLost::PermissionLost);
+        if let Some(expected) = &self.peer {
+            if &self.identity != expected {
+                return Err(LiveAuthorityLost::IdentityChanged);
+            }
         }
+        if let Some(permission) = &self.permission {
+            if !self.lease.allows(permission) {
+                return Err(LiveAuthorityLost::PermissionLost);
+            }
+        }
+        Ok(())
+    }
+
+    /// Authenticate one owner-control request against this retained caller.
+    ///
+    /// Unverified, foreign-reply, and mismatched-identity requests fail so the
+    /// caller can drop them without reflection.
+    pub(crate) fn verify_control_request(
+        &self,
+        subject: &str,
+        reply: &str,
+        payload: &[u8],
+        headers: &async_nats::HeaderMap,
+    ) -> Result<(), LiveErrorCode> {
+        self.check_now()
+            .map_err(|_| LiveErrorCode::PermissionDenied)?;
+        let session_key = header_once(headers, "session-key")?;
+        if session_key != self.identity.session_key {
+            return Err(LiveErrorCode::PermissionDenied);
+        }
+        let context_digest = header_once(headers, "authorization-context")?;
+        if context_digest != self.context_digest() {
+            return Err(LiveErrorCode::PermissionDenied);
+        }
+        let proof = header_once(headers, "proof")?;
+        let request_id = header_once(headers, "request-id")?;
+        let iat = header_once(headers, "iat")?
+            .parse::<i64>()
+            .map_err(|_| LiveErrorCode::InvalidRequest)?;
+        let prefix = self.lease.inbox_prefix();
+        if reply != prefix && !reply.starts_with(&format!("{prefix}.")) {
+            return Err(LiveErrorCode::InvalidSubject);
+        }
+        let required = match &self.permission {
+            Some(permission) => std::slice::from_ref(permission),
+            None => &[],
+        };
+        let policy = self
+            .cache
+            .policy()
+            .map_err(|_| LiveErrorCode::AuthorizationUnavailable)?;
+        AuthorizationVerificationCore::new()
+            .verify_request(RequestVerificationInput {
+                context: &self.lease,
+                context_digest: &context_digest,
+                subject,
+                payload,
+                iat,
+                request_id: &request_id,
+                reply_subject: Some(reply),
+                proof: &proof,
+                policy: &policy,
+                required_permissions: required,
+            })
+            .map_err(|_| LiveErrorCode::PermissionDenied)?;
         Ok(())
     }
 
@@ -193,8 +282,15 @@ impl LiveAuthorityGuard {
         if pinned_identity(&lease) != self.identity {
             return Err(LiveAuthorityLost::IdentityChanged);
         }
-        if !lease.allows(&self.permission) {
-            return Err(LiveAuthorityLost::PermissionLost);
+        if let Some(expected) = &self.peer {
+            if pinned_identity(&lease) != *expected {
+                return Err(LiveAuthorityLost::IdentityChanged);
+            }
+        }
+        if let Some(permission) = &self.permission {
+            if !lease.allows(permission) {
+                return Err(LiveAuthorityLost::PermissionLost);
+            }
         }
         self.lease = lease;
         Ok(())
@@ -218,6 +314,17 @@ impl PinnedPeerIdentity {
 
 fn pinned_identity(lease: &AuthorizationContextLease) -> PinnedPeerIdentity {
     PinnedPeerIdentity::from_signed(lease.signed_context())
+}
+
+fn header_once(headers: &async_nats::HeaderMap, name: &str) -> Result<String, LiveErrorCode> {
+    let value = headers
+        .get(name)
+        .ok_or(LiveErrorCode::InvalidRequest)?
+        .to_string();
+    if value.is_empty() {
+        return Err(LiveErrorCode::InvalidRequest);
+    }
+    Ok(value)
 }
 
 /// One retained guard pair for a session that both publishes and consumes.

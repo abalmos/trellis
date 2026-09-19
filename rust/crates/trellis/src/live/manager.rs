@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+use futures_util::StreamExt;
+
 use trellis_protocol::{
     derive_live_observe_wildcard_subject, LiveEndReason, LiveErrorCode, LiveSessionKind,
     MAX_CONSUMER_SESSIONS, MAX_PROVIDER_SESSIONS, MAX_PROVIDER_SESSIONS_PER_CALLER, MAX_TOMBSTONES,
@@ -40,7 +42,7 @@ pub(crate) struct OwnerControlRegistration {
     pub base_subject: String,
     pub provider_connection_id: String,
     pub wildcard_subject: String,
-    pub subscription: Option<async_nats::Subscriber>,
+    pub dispatcher: Option<tokio::task::JoinHandle<()>>,
 }
 
 /// Admission counters for provider reservations.
@@ -105,8 +107,9 @@ pub struct LiveSessionManager {
     auth: Arc<SessionAuth>,
     contexts: Arc<crate::client::AuthorizationContextCache>,
     provider_connection_id: String,
-    local_epoch: u64,
+    local_epoch: AtomicU64,
     stopped: AtomicBool,
+    suspended: AtomicBool,
     generation: AtomicU64,
     provider_admission: Mutex<ProviderAdmission>,
     consumer_sessions: AtomicU64,
@@ -141,8 +144,9 @@ impl LiveSessionManager {
             auth,
             contexts,
             provider_connection_id,
-            local_epoch,
+            local_epoch: AtomicU64::new(local_epoch),
             stopped: AtomicBool::new(false),
+            suspended: AtomicBool::new(false),
             generation: AtomicU64::new(1),
             provider_admission: Mutex::new(ProviderAdmission::new()),
             consumer_sessions: AtomicU64::new(0),
@@ -162,7 +166,25 @@ impl LiveSessionManager {
     /// Return the local transport epoch this manager was created on.
     #[must_use]
     pub(crate) fn local_epoch(&self) -> u64 {
-        self.local_epoch
+        self.local_epoch.load(Ordering::Acquire)
+    }
+
+    /// Fence old sessions after transport loss; new opens wait for [`Self::resume`].
+    pub(crate) fn suspend(&self) {
+        self.suspended.store(true, Ordering::Release);
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        if let Ok(sessions) = self.provider_sessions.lock() {
+            for record in sessions.values() {
+                record.cancellation.cancel();
+            }
+        }
+    }
+
+    /// Permit new sessions on the current transport attachment.
+    pub(crate) fn resume(&self) {
+        let connects = self.nats.statistics().connects.load(Ordering::Acquire);
+        self.local_epoch.store(connects, Ordering::Release);
+        self.suspended.store(false, Ordering::Release);
     }
 
     /// Return whether the manager still accepts new opens.
@@ -170,8 +192,8 @@ impl LiveSessionManager {
         if self.stopped.load(Ordering::Acquire) {
             return Err(ManagerUnavailable::Stopped);
         }
-        if self.nats.connection_state() != async_nats::connection::State::Connected
-            || self.nats.statistics().connects.load(Ordering::Acquire) != self.local_epoch
+        if self.suspended.load(Ordering::Acquire)
+            || self.nats.connection_state() != async_nats::connection::State::Connected
         {
             return Err(ManagerUnavailable::EpochChanged);
         }
@@ -207,14 +229,21 @@ impl LiveSessionManager {
     /// Returns [`trellis_protocol::LiveErrorCode::ResourceExhausted`] when the
     /// consumer bound is reached.
     pub(crate) fn admit_consumer(self: &Arc<Self>) -> Result<ConsumerPermit, LiveErrorCode> {
-        let current = self.consumer_sessions.load(Ordering::Acquire);
-        if current as usize >= MAX_CONSUMER_SESSIONS {
-            return Err(LiveErrorCode::ResourceExhausted);
+        loop {
+            let current = self.consumer_sessions.load(Ordering::Acquire);
+            if current as usize >= MAX_CONSUMER_SESSIONS {
+                return Err(LiveErrorCode::ResourceExhausted);
+            }
+            if self
+                .consumer_sessions
+                .compare_exchange(current, current + 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                return Ok(ConsumerPermit {
+                    manager: Arc::downgrade(self),
+                });
+            }
         }
-        self.consumer_sessions.fetch_add(1, Ordering::AcqRel);
-        Ok(ConsumerPermit {
-            manager: Arc::downgrade(self),
-        })
     }
 
     /// Install the nonqueued owner-control subscription for one exact route.
@@ -228,7 +257,7 @@ impl LiveSessionManager {
     /// Returns a transport error when the subscription cannot be installed or
     /// flushed.
     pub(crate) async fn register_owner_control(
-        &self,
+        self: &Arc<Self>,
         base_subject: &str,
     ) -> Result<(), async_nats::Error> {
         let wildcard =
@@ -252,8 +281,23 @@ impl LiveSessionManager {
                 return Ok(());
             }
         }
-        let subscription = self.nats.subscribe(wildcard.clone()).await?;
+        let mut subscription = self.nats.subscribe(wildcard.clone()).await?;
         self.nats.flush().await?;
+        let manager = Arc::clone(self);
+        let nats = self.nats.clone();
+        let dispatcher = tokio::spawn(async move {
+            while let Some(message) = subscription.next().await {
+                if manager.stopped.load(Ordering::Acquire) {
+                    return;
+                }
+                let Some(session_id) = message.subject.rsplit('.').next().map(str::to_owned) else {
+                    continue;
+                };
+                if let Some(record) = manager.provider_session(&session_id) {
+                    record.dispatch_control(&nats, message).await;
+                }
+            }
+        });
         self.owner_controls
             .write()
             .map_err(|_| std::io::Error::other("owner control lock poisoned"))?
@@ -261,7 +305,7 @@ impl LiveSessionManager {
                 base_subject: base_subject.to_owned(),
                 provider_connection_id: self.provider_connection_id.clone(),
                 wildcard_subject: wildcard,
-                subscription: Some(subscription),
+                dispatcher: Some(dispatcher),
             });
         Ok(())
     }
@@ -276,9 +320,9 @@ impl LiveSessionManager {
         &self,
         cache: &crate::client::AuthorizationProviderCache,
         digest: &str,
-        permission: trellis_protocol::PermissionAtom,
+        requirement: super::authority::LiveGuardRequirement,
     ) -> Result<(), LiveAuthorityLost> {
-        let guard = LiveAuthorityGuard::retain(cache, digest, permission).await?;
+        let guard = LiveAuthorityGuard::retain(cache, digest, requirement).await?;
         self.retained_guards
             .lock()
             .map_err(|_| LiveAuthorityLost::CoverageUnknown)?
@@ -331,8 +375,36 @@ impl LiveSessionManager {
         self.stopped.store(true, Ordering::Release);
         self.generation.fetch_add(1, Ordering::AcqRel);
         if let Ok(mut controls) = self.owner_controls.write() {
-            controls.clear();
+            for registration in controls.drain(..) {
+                if let Some(dispatcher) = registration.dispatcher {
+                    dispatcher.abort();
+                }
+            }
         }
+    }
+
+    /// Fence then close every live session within one five-second budget.
+    pub(crate) async fn shutdown(&self) {
+        self.stop();
+        let sessions = self
+            .provider_sessions
+            .lock()
+            .map(|mut sessions| {
+                sessions
+                    .drain()
+                    .map(|(_, record)| record)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let now_ms = crate::client::now_iat_seconds() * 1_000;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            futures_util::future::join_all(sessions.iter().map(|record| async {
+                record.cancellation.cancel();
+                record.finish_closed(now_ms).await;
+            })),
+        )
+        .await;
     }
 
     /// Return the manager's current generation.

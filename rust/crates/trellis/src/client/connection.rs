@@ -781,6 +781,9 @@ async fn connect_authorized_nats(
     authorization_contexts: Arc<AuthorizationContextCache>,
     timeout_ms: u64,
     refresh_before_connect: bool,
+    live_slot: std::sync::Arc<
+        std::sync::Mutex<Option<std::sync::Weak<crate::live::manager::LiveSessionManager>>>,
+    >,
 ) -> Result<async_nats::Client, TrellisClientError> {
     if refresh_before_connect {
         authorization_contexts.refresh(&auth).await?;
@@ -816,10 +819,16 @@ async fn connect_authorized_nats(
     .connection_timeout(Duration::from_millis(timeout_ms))
     .event_callback(move |event| {
         let contexts = event_contexts.clone();
+        let live_slot = live_slot.clone();
         async move {
             if matches!(event, async_nats::Event::Disconnected) {
                 contexts.suspend();
                 contexts.request_coverage_reconciliation();
+                if let Ok(slot) = live_slot.lock() {
+                    if let Some(live) = slot.as_ref().and_then(std::sync::Weak::upgrade) {
+                        live.suspend();
+                    }
+                }
                 tracing::info!(
                     context_digest = contexts.retained_context_digest().ok(),
                     "suspended authorization installation after NATS disconnect"
@@ -827,6 +836,11 @@ async fn connect_authorized_nats(
             }
             if matches!(event, async_nats::Event::Connected) {
                 contexts.request_coverage_reconciliation();
+                if let Ok(slot) = live_slot.lock() {
+                    if let Some(live) = slot.as_ref().and_then(std::sync::Weak::upgrade) {
+                        live.resume();
+                    }
+                }
             }
             if matches!(
                 event,
@@ -1399,11 +1413,15 @@ impl TrellisClient {
         let applied_native_authorization =
             AppliedNativeAuthorization::from_cache(&authorization_contexts)?;
         let auth = Arc::new(auth);
+        let live_slot = std::sync::Arc::new(std::sync::Mutex::new(
+            None::<std::sync::Weak<crate::live::manager::LiveSessionManager>>,
+        ));
         let nats = connect_authorized_nats(
             auth.clone(),
             authorization_contexts.clone(),
             timeout_ms,
             false,
+            live_slot.clone(),
         )
         .await?;
 
@@ -1413,6 +1431,9 @@ impl TrellisClient {
             authorization_contexts.clone(),
             authorization_contexts.runtime_binding()?.connection_id,
         );
+        if let Ok(mut slot) = live_slot.lock() {
+            *slot = Some(std::sync::Arc::downgrade(&live));
+        }
         let provider =
             attach_authorization_provider(nats.clone(), authorization_contexts.clone()).await?;
         let applied_native_authorization =
@@ -1979,7 +2000,7 @@ impl TrellisClient {
         let prepared =
             crate::live::client_open::open_client_session(self, &self.authorization_provider, open)
                 .await?;
-        crate::live::client_open::install_feed_handle::<D>(self, prepared)
+        crate::live::client_open::install_feed_handle::<D>(self, prepared).await
     }
 
     /// Download the bytes exposed by a receive transfer grant.

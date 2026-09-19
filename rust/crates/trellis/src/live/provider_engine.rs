@@ -6,7 +6,8 @@
 //! round trip completes.
 
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -17,7 +18,7 @@ use trellis_protocol::{
 };
 
 use super::authority::{LiveAuthorityGuard, LiveAuthorityLost, PinnedPeerIdentity};
-use super::manager::LiveSessionManager;
+use super::manager::{LiveSessionManager, ProviderPermit};
 use super::provider::{
     bounded_message, challenge_frame, control_ack, control_error, data_frame, end_frame,
     provider_failure, receipt_for, terminal_from_end, ProviderPhase, ProviderReservationIdentity,
@@ -33,8 +34,6 @@ pub(crate) struct ProviderOpenRequest {
     pub consumer: PinnedPeerIdentity,
     pub consumer_max_payload_bytes: u64,
     pub canonical_open_hash: String,
-    pub caller_guard: LiveAuthorityGuard,
-    pub own_guard: LiveAuthorityGuard,
 }
 
 /// One domain source item ready for publication.
@@ -58,12 +57,17 @@ pub(crate) type ProviderSourceFactory = Box<dyn FnOnce() -> ProviderSource + Sen
 /// One registered provider session with its source factory and cleanup hook.
 pub(crate) struct ProviderSessionRecord {
     pub session: Arc<ProviderSession>,
-    pub manager: Arc<LiveSessionManager>,
+    pub manager: Weak<LiveSessionManager>,
+    pub permit: std::sync::Mutex<Option<ProviderPermit>>,
+    pub own_guard: LiveAuthorityGuard,
+    pub caller_guard: LiveAuthorityGuard,
     pub source_factory: std::sync::Mutex<Option<ProviderSourceFactory>>,
     pub cleanup: std::sync::Mutex<Vec<ProviderCleanup>>,
     pub terminal: std::sync::Mutex<Option<LiveEnd>>,
     /// Cancellation for this session's source scope.
     pub cancellation: super::types::LiveCancellation,
+    pub source_started: AtomicBool,
+    pub max_data_body_bytes: u64,
 }
 
 impl ProviderSessionRecord {
@@ -79,7 +83,7 @@ impl ProviderSessionRecord {
         own_deployment_id: &str,
         max_data_body_bytes: u64,
         now_ms: u64,
-    ) -> Result<(Arc<ProviderSession>, Arc<LiveSessionManager>), LiveErrorCode> {
+    ) -> Result<(Arc<ProviderSession>, ProviderPermit), LiveErrorCode> {
         let permit = manager.clone().admit_provider(
             &request.consumer.connection_id,
             &request.consumer.session_key,
@@ -117,10 +121,44 @@ impl ProviderSessionRecord {
             request.consumer.clone(),
             now_ms,
         ));
-        // Keep the admission permit alive for the session's whole reservation
-        // by leaking it into the record's cleanup path.
-        std::mem::forget(permit);
-        Ok((session, Arc::clone(manager)))
+        Ok((session, permit))
+    }
+
+    pub(crate) fn manager(&self) -> Result<Arc<LiveSessionManager>, LiveErrorCode> {
+        self.manager.upgrade().ok_or(LiveErrorCode::Disconnected)
+    }
+
+    pub(crate) fn signed_headers(
+        &self,
+        subject: &str,
+        body: &[u8],
+    ) -> Result<async_nats::HeaderMap, LiveErrorCode> {
+        self.own_guard
+            .check_now()
+            .map_err(|_| LiveErrorCode::PermissionDenied)?;
+        self.caller_guard
+            .check_now()
+            .map_err(|_| LiveErrorCode::PermissionDenied)?;
+        let manager = self.manager()?;
+        let digest = manager
+            .contexts_handle()
+            .context_digest()
+            .map_err(|_| LiveErrorCode::AuthorizationUnavailable)?;
+        if digest.is_empty() {
+            return Err(LiveErrorCode::AuthorizationUnavailable);
+        }
+        let proof = trellis_protocol::sign_live_server_proof(
+            &digest,
+            subject,
+            body,
+            manager.auth_handle().live_signing_key(),
+        )
+        .map_err(|_| LiveErrorCode::AuthorizationUnavailable)?;
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("authorization-context", digest.as_str());
+        headers.insert("session-key", manager.auth_handle().session_key.as_str());
+        headers.insert("trellis-live-proof", proof.as_str());
+        Ok(headers)
     }
 
     /// Build one signed offer body for this reservation.
@@ -150,7 +188,7 @@ impl ProviderSessionRecord {
             control_subject: self.session.control_subject.clone(),
             provider: trellis_protocol::LiveOfferProvider {
                 connection_id: provider.connection_id.clone(),
-                session_key: provider.session_key.clone(),
+                session_key: trellis_protocol::encode_subject_token(&provider.session_key),
                 principal_id: provider.principal_id.clone(),
                 participant_id: provider.participant_id.clone(),
                 deployment_id: provider.deployment_id.clone().unwrap_or_default(),
@@ -158,7 +196,7 @@ impl ProviderSessionRecord {
             },
             consumer: trellis_protocol::LiveOfferConsumer {
                 connection_id: consumer.connection_id.clone(),
-                session_key: consumer.session_key.clone(),
+                session_key: trellis_protocol::encode_subject_token(&consumer.session_key),
                 principal_id: consumer.principal_id.clone(),
                 participant_id: consumer.participant_id.clone(),
             },
@@ -208,6 +246,7 @@ impl ProviderSessionRecord {
                     terminal: None,
                     cleanup: None,
                     challenge: Some(challenge_id),
+                    start_source: false,
                 })
             }
             LiveControl::Pulse(pulse) => {
@@ -215,7 +254,8 @@ impl ProviderSessionRecord {
                 if !committed {
                     return Err(LiveErrorCode::InvalidChallenge);
                 }
-                if !matches!(self.session.phase(), ProviderPhase::Active) {
+                let first_active = !matches!(self.session.phase(), ProviderPhase::Active);
+                if first_active {
                     self.session.set_phase(ProviderPhase::Active);
                 }
                 self.session
@@ -225,6 +265,7 @@ impl ProviderSessionRecord {
                     terminal: None,
                     cleanup: None,
                     challenge: None,
+                    start_source: first_active && !self.source_started.swap(true, Ordering::AcqRel),
                 })
             }
             LiveControl::Ack(ack) => {
@@ -235,6 +276,7 @@ impl ProviderSessionRecord {
                     terminal: None,
                     cleanup: None,
                     challenge: None,
+                    start_source: false,
                 })
             }
             LiveControl::Close(close) => {
@@ -252,6 +294,7 @@ impl ProviderSessionRecord {
                         _ => trellis_protocol::CleanupStatus::Incomplete,
                     }),
                     challenge: None,
+                    start_source: false,
                 })
             }
             LiveControl::EndAck(ack) => {
@@ -268,6 +311,7 @@ impl ProviderSessionRecord {
                         _ => trellis_protocol::CleanupStatus::Incomplete,
                     }),
                     challenge: None,
+                    start_source: false,
                 })
             }
         }
@@ -322,12 +366,136 @@ impl ProviderSessionRecord {
         cleanup: CloseCleanupState,
         now_ms: u64,
     ) -> super::manager::ClosedReceipt {
+        let _permit = self.permit.lock().ok().and_then(|mut slot| slot.take());
         receipt_for(
             &self.session,
             self.committed_end().reason(),
             cleanup,
             now_ms,
         )
+    }
+
+    /// Authenticate and apply one owner-control message, then reply if safe.
+    pub(crate) async fn dispatch_control(
+        self: &Arc<Self>,
+        nats: &async_nats::Client,
+        message: async_nats::Message,
+    ) {
+        let Some(reply) = message.reply.clone() else {
+            return;
+        };
+        let Some(headers) = message.headers.as_ref() else {
+            return;
+        };
+        if self
+            .caller_guard
+            .verify_control_request(
+                message.subject.as_str(),
+                reply.as_str(),
+                &message.payload,
+                headers,
+            )
+            .is_err()
+        {
+            return;
+        }
+        let Ok(control) = trellis_protocol::parse_live_control(&message.payload) else {
+            return;
+        };
+        if control.session_id() != self.session.session_id {
+            return;
+        }
+        if message.subject.as_str() != self.session.control_subject {
+            return;
+        }
+        let now_ms = crate::client::now_iat_seconds() * 1_000;
+        let request_id = headers
+            .get("request-id")
+            .map_or_else(String::new, ToString::to_string);
+        match self.handle_control(&control, now_ms).await {
+            Ok(outcome) => {
+                let ack = ack_for(&self.session, &control, &request_id, &outcome);
+                let Ok(body) = serde_json::to_vec(&ack) else {
+                    return;
+                };
+                let Ok(signed) = self.signed_headers(reply.as_str(), &body) else {
+                    return;
+                };
+                let _ = nats
+                    .publish_with_headers(reply, signed, Bytes::from(body))
+                    .await;
+                if let Some(challenge_id) = outcome.challenge.as_ref() {
+                    let _ = publish_challenge(self, nats, challenge_id).await;
+                }
+                if outcome.start_source {
+                    if let Ok(source) = take_source(&self.source_factory) {
+                        let driver_record = Arc::clone(self);
+                        let driver_nats = nats.clone();
+                        let driver_cancellation = self.cancellation_handle();
+                        let max_data_body_bytes = self.max_data_body_bytes;
+                        tokio::spawn(async move {
+                            drive_source(
+                                Arc::clone(&driver_record.session),
+                                driver_record,
+                                driver_nats,
+                                max_data_body_bytes,
+                                driver_cancellation,
+                                source,
+                            )
+                            .await;
+                        });
+                    }
+                }
+                if outcome.state == LiveSessionState::Closed {
+                    self.finish_closed(now_ms).await;
+                }
+            }
+            Err(code) => {
+                let error = error_for(&self.session, &control, &request_id, code);
+                let Ok(body) = serde_json::to_vec(&error) else {
+                    return;
+                };
+                let Ok(signed) = self.signed_headers(reply.as_str(), &body) else {
+                    return;
+                };
+                let _ = nats
+                    .publish_with_headers(reply, signed, Bytes::from(body))
+                    .await;
+            }
+        }
+    }
+
+    pub(crate) async fn finish_closed(&self, now_ms: u64) {
+        let cleanup = self.run_owned_cleanup().await;
+        let receipt = self.tombstone(cleanup, now_ms);
+        if let Ok(manager) = self.manager() {
+            manager.insert_receipt(receipt);
+            manager.remove_provider_session(&self.session.session_id);
+        }
+    }
+
+    pub(crate) async fn run_liveness_tick(&self, nats: &async_nats::Client) -> bool {
+        let now_ms = crate::client::now_iat_seconds() * 1_000;
+        if self.session.reservation_elapsed() {
+            self.commit_end(LiveEnd::new(
+                trellis_protocol::LiveEndReason::SetupTimeout,
+                None,
+            ));
+            self.session.set_phase(ProviderPhase::Closing);
+            self.finish_closed(now_ms).await;
+            return true;
+        }
+        if matches!(self.session.phase(), ProviderPhase::Activating) {
+            let challenge = self.session.challenge.lock().ok().and_then(|challenge| {
+                challenge
+                    .as_ref()
+                    .map(|challenge| challenge.challenge_id.clone())
+            });
+            if let Some(challenge_id) = challenge {
+                let _ = publish_challenge(self, nats, &challenge_id).await;
+            }
+        }
+        false
     }
 }
 
@@ -338,6 +506,8 @@ pub(crate) struct ControlOutcome {
     pub cleanup: Option<trellis_protocol::CleanupStatus>,
     /// One challenge to publish on the data subject after the acknowledgement.
     pub challenge: Option<String>,
+    /// Start the source after a verified first Pulse acknowledgement is sent.
+    pub start_source: bool,
 }
 
 fn current_state(phase: ProviderPhase) -> LiveSessionState {
@@ -355,19 +525,24 @@ fn current_state(phase: ProviderPhase) -> LiveSessionState {
 /// Returns a wire error when the frame exceeds the window or the negotiated
 /// body limit, or when the publication handoff fails.
 pub(crate) async fn publish_data_frame(
-    session: &ProviderSession,
+    record: &ProviderSessionRecord,
     nats: &async_nats::Client,
     value: serde_json::Value,
     max_data_body_bytes: u64,
 ) -> Result<u64, LiveErrorCode> {
-    // Admit the worst-case serialized size (a 20-digit u64 sequence) before the
-    // real sequence is known, so an admitted frame can never exceed the bound.
-    let probe = serde_json::to_vec(&data_frame(&session.session_id, u64::MAX, value.clone()))
-        .map_err(|_| LiveErrorCode::ProtocolError)?;
-    let seq = session.admit_frame(probe.len() as u64, max_data_body_bytes)?;
+    let session = &record.session;
+    let seq = session
+        .highest_sent
+        .load(Ordering::Acquire)
+        .saturating_add(1);
     let body = serde_json::to_vec(&data_frame(&session.session_id, seq, value))
         .map_err(|_| LiveErrorCode::ProtocolError)?;
-    nats.publish(session.data_subject.clone(), Bytes::from(body))
+    let admitted = session.admit_frame(body.len() as u64, max_data_body_bytes)?;
+    if admitted != seq {
+        return Err(LiveErrorCode::ProtocolError);
+    }
+    let headers = record.signed_headers(&session.data_subject, &body)?;
+    nats.publish_with_headers(session.data_subject.clone(), headers, Bytes::from(body))
         .await
         .map_err(|_| LiveErrorCode::PeerLost)?;
     Ok(seq)
@@ -379,20 +554,20 @@ pub(crate) async fn publish_data_frame(
 ///
 /// Returns a wire error when the publication handoff fails.
 pub(crate) async fn publish_challenge(
-    session: &ProviderSession,
+    record: &ProviderSessionRecord,
     nats: &async_nats::Client,
     challenge_id: &str,
 ) -> Result<(), LiveErrorCode> {
-    let last_sent = session
-        .highest_sent
-        .load(std::sync::atomic::Ordering::Acquire);
+    let session = &record.session;
+    let last_sent = session.highest_sent.load(Ordering::Acquire);
     let body = serde_json::to_vec(&challenge_frame(
         &session.session_id,
         challenge_id,
         last_sent,
     ))
     .map_err(|_| LiveErrorCode::ProtocolError)?;
-    nats.publish(session.data_subject.clone(), Bytes::from(body))
+    let headers = record.signed_headers(&session.data_subject, &body)?;
+    nats.publish_with_headers(session.data_subject.clone(), headers, Bytes::from(body))
         .await
         .map_err(|_| LiveErrorCode::PeerLost)
 }
@@ -403,16 +578,16 @@ pub(crate) async fn publish_challenge(
 ///
 /// Returns a wire error when the publication handoff fails.
 pub(crate) async fn publish_end(
-    session: &ProviderSession,
+    record: &ProviderSessionRecord,
     nats: &async_nats::Client,
     terminal: WireTerminal,
 ) -> Result<(), LiveErrorCode> {
-    let final_seq = session
-        .highest_sent
-        .load(std::sync::atomic::Ordering::Acquire);
+    let session = &record.session;
+    let final_seq = session.highest_sent.load(Ordering::Acquire);
     let body = serde_json::to_vec(&end_frame(&session.session_id, final_seq, terminal))
         .map_err(|_| LiveErrorCode::ProtocolError)?;
-    nats.publish(session.data_subject.clone(), Bytes::from(body))
+    let headers = record.signed_headers(&session.data_subject, &body)?;
+    nats.publish_with_headers(session.data_subject.clone(), headers, Bytes::from(body))
         .await
         .map_err(|_| LiveErrorCode::PeerLost)
 }
@@ -487,7 +662,7 @@ pub(crate) async fn drive_source<S>(
         };
         let Some(item) = item else {
             let terminal = terminal_from_end(&LiveEnd::complete());
-            let _ = publish_end(&session, &nats, terminal).await;
+            let _ = publish_end(&record, &nats, terminal).await;
             record.commit_end(LiveEnd::complete());
             session.set_phase(ProviderPhase::Closed);
             return;
@@ -503,12 +678,22 @@ pub(crate) async fn drive_source<S>(
                     ) {
                         return;
                     }
-                    match publish_data_frame(&session, &nats, value.clone(), max_data_body_bytes)
+                    match publish_data_frame(&record, &nats, value.clone(), max_data_body_bytes)
                         .await
                     {
                         Ok(_) => break,
                         Err(LiveErrorCode::ResourceExhausted) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                            tokio::select! {
+                                _ = cancellation.cancelled() => {
+                                    record.commit_end(LiveEnd::new(
+                                        trellis_protocol::LiveEndReason::Cancelled,
+                                        None,
+                                    ));
+                                    session.set_phase(ProviderPhase::Closed);
+                                    return;
+                                }
+                                _ = session.credit.notified() => {}
+                            }
                         }
                         Err(code) => {
                             let end = provider_failure(code, "live publication failed");
@@ -521,7 +706,7 @@ pub(crate) async fn drive_source<S>(
             }
             Ok(SourceItem::End) => {
                 let terminal = terminal_from_end(&LiveEnd::complete());
-                let _ = publish_end(&session, &nats, terminal).await;
+                let _ = publish_end(&record, &nats, terminal).await;
                 record.commit_end(LiveEnd::complete());
                 session.set_phase(ProviderPhase::Closed);
                 return;
@@ -529,7 +714,7 @@ pub(crate) async fn drive_source<S>(
             Err(message) => {
                 let end = source_failure_end(&message);
                 let terminal = terminal_from_end(&end);
-                let _ = publish_end(&session, &nats, terminal).await;
+                let _ = publish_end(&record, &nats, terminal).await;
                 record.commit_end(end);
                 session.set_phase(ProviderPhase::Closing);
                 return;

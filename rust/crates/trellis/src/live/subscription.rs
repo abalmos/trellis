@@ -60,6 +60,7 @@ pub(crate) struct ConsumerCore<T> {
     pub(crate) error_reported: AtomicBool,
     /// A verified remote normal end, pending until the queue drains.
     pub(crate) pending_end: Mutex<Option<LiveEnd>>,
+    pub(crate) start: tokio::sync::Notify,
 }
 
 impl<T> ConsumerCore<T> {
@@ -78,6 +79,7 @@ impl<T> ConsumerCore<T> {
             waker: Mutex::new(None),
             error_reported: AtomicBool::new(false),
             pending_end: Mutex::new(None),
+            start: tokio::sync::Notify::new(),
         }
     }
 
@@ -203,6 +205,10 @@ impl<T> ConsumerCore<T> {
         true
     }
 
+    pub(crate) fn has_queued(&self) -> bool {
+        self.queue.lock().is_ok_and(|queue| !queue.is_empty())
+    }
+
     /// Take one queued item and advance the consumed cursor.
     pub(crate) fn consume(&self) -> Option<AdmittedItem<T>> {
         let item = {
@@ -241,6 +247,8 @@ pub struct LiveSubscription<T> {
     pub(crate) closed_once: Arc<tokio::sync::Notify>,
     /// Set once the first poll installed the activation path.
     pub(crate) activated: bool,
+    pub(crate) _permit: super::manager::ConsumerPermit,
+    pub(crate) _provider_guard: super::authority::LiveAuthorityGuard,
 }
 
 impl<T> LiveSubscription<T> {
@@ -254,6 +262,8 @@ impl<T> LiveSubscription<T> {
         drain: tokio::task::JoinHandle<()>,
         control: Arc<ConsumerControl>,
         cancellation: LiveCancellation,
+        permit: super::manager::ConsumerPermit,
+        provider_guard: super::authority::LiveAuthorityGuard,
     ) -> Self {
         Self {
             core,
@@ -262,16 +272,19 @@ impl<T> LiveSubscription<T> {
             cancellation,
             closed_once: Arc::new(tokio::sync::Notify::new()),
             activated: false,
+            _permit: permit,
+            _provider_guard: provider_guard,
         }
     }
 
     /// Return the committed terminal outcome, waiting for closure.
     pub async fn closed(&self) -> LiveEnd {
         loop {
+            let notified = self.core.end_notify.notified();
             if let Some(end) = self.core.committed_end() {
                 return end;
             }
-            self.core.end_notify.notified().await;
+            notified.await;
         }
     }
 
@@ -311,36 +324,43 @@ impl<T> Stream for LiveSubscription<T> {
     type Item = Result<T, TrellisClientError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // Queued application bodies are delivered in order, and each delivery
-        // advances the consumed cursor that releases credit.
-        if let Some(item) = self.core.consume() {
-            return Poll::Ready(Some(Ok(item.value)));
+        let this = self.get_mut();
+        if !this.activated {
+            this.activated = true;
+            this.core.start.notify_one();
         }
-        // A verified normal end resolves once every queued item was handed out.
-        if self.core.drain_complete().is_some() {
+        if this.core.cancelled.load(Ordering::Acquire) {
+            this.core.discard_queue();
             return Poll::Ready(None);
         }
-        match self.core.committed_end() {
-            Some(end) => match end.error() {
-                // A committed failure is reported once; later polls return done.
-                Some(error) if !end.is_complete() && !self.core.reported_error() => {
-                    self.core.mark_error_reported();
-                    Poll::Ready(Some(Err(TrellisClientError::Live(error.clone()))))
+        if let Some(end) = this.core.committed_end() {
+            if !end.is_complete() {
+                this.core.discard_queue();
+                if let Some(error) = end.error() {
+                    if !this.core.reported_error() {
+                        this.core.mark_error_reported();
+                        return Poll::Ready(Some(Err(TrellisClientError::Live(error.clone()))));
+                    }
                 }
-                _ => Poll::Ready(None),
-            },
-            None => {
-                // Register for the next admission or terminal outcome, then
-                // re-check to avoid a lost wakeup between the two steps.
-                if let Ok(mut slot) = self.core.waker.lock() {
-                    *slot = Some(cx.waker().clone());
-                }
-                if self.core.consume().is_some() || self.core.committed_end().is_some() {
-                    cx.waker().wake_by_ref();
-                }
-                Poll::Pending
+                return Poll::Ready(None);
+            }
+            if this.core.drain_complete().is_some() || !this.core.has_queued() {
+                return Poll::Ready(None);
             }
         }
+        if let Some(item) = this.core.consume() {
+            return Poll::Ready(Some(Ok(item.value)));
+        }
+        if this.core.drain_complete().is_some() {
+            return Poll::Ready(None);
+        }
+        if let Ok(mut slot) = this.core.waker.lock() {
+            *slot = Some(cx.waker().clone());
+        }
+        if this.core.has_queued() || this.core.committed_end().is_some() {
+            cx.waker().wake_by_ref();
+        }
+        Poll::Pending
     }
 }
 
@@ -406,20 +426,8 @@ impl ConsumerControl {
     pub(crate) fn schedule_local_drop_cleanup(&self) {
         // Only schedule when a runtime is already available; Drop must never
         // create one or block on async work.
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            return;
-        };
-        if self.close_started.swap(true, Ordering::AcqRel) {
-            return;
-        }
-        let nats = self.nats.clone();
-        let subject = self.control_subject.clone();
-        let session_id = self.session_id.clone();
-        handle.spawn(async move {
-            let _ = nats
-                .publish(subject, control_close_bytes(&session_id, 1))
-                .await;
-        });
+        let _ = tokio::runtime::Handle::try_current();
+        let _ = self.close_started.swap(true, Ordering::AcqRel);
     }
 
     /// Send one logical control and await its signed acknowledgement.
@@ -456,7 +464,7 @@ impl ConsumerControl {
         .await
         .map_err(|_| TrellisClientError::Timeout)?
         .ok_or(TrellisClientError::Timeout)?;
-        parse_control_response(&response)
+        parse_control_response(self, &response)
     }
 
     /// Send a bounded close exchange and report remote confirmation.
@@ -478,16 +486,20 @@ impl ConsumerControl {
     /// Retry the same logical close within one total exchange budget.
     async fn retry_until_confirmed(&self) -> Option<CloseCleanupState> {
         let deadline = tokio::time::Instant::now() + close_exchange();
+        let control_seq = self
+            .last_control_seq
+            .load(Ordering::Acquire)
+            .saturating_add(1);
+        let received = 0;
+        let consumed = 0;
+        let control = close_control(
+            &self.session_id,
+            control_seq,
+            trellis_protocol::ConsumerCloseReason::Cancelled,
+            received,
+            consumed,
+        );
         loop {
-            let control = close_control(
-                &self.session_id,
-                self.last_control_seq
-                    .load(Ordering::Acquire)
-                    .saturating_add(1),
-                trellis_protocol::ConsumerCloseReason::Cancelled,
-                0,
-                0,
-            );
             let attempt_deadline =
                 deadline.min(tokio::time::Instant::now() + std::time::Duration::from_millis(1_000));
             let attempt = tokio::time::timeout_at(
@@ -528,20 +540,6 @@ pub(crate) fn control_body_bytes(
         LiveControl::EndAck(body) => serde_json::to_value(body)?,
     };
     Ok(bytes::Bytes::from(serde_json::to_vec(&value)?))
-}
-
-fn control_close_bytes(session_id: &str, control_seq: u64) -> bytes::Bytes {
-    let body = serde_json::json!({
-        "format": trellis_protocol::LIVE_VERSION,
-        "type": "control",
-        "sessionId": session_id,
-        "controlSeq": control_seq.to_string(),
-        "action": "close",
-        "reason": "local_shutdown",
-        "receivedSeq": "0",
-        "consumedSeq": "0",
-    });
-    bytes::Bytes::from(serde_json::to_vec(&body).expect("static control body"))
 }
 
 /// Verified offer data retained by a prepared consumer handle.
@@ -753,13 +751,52 @@ pub(crate) fn validate_frame_sequence(
 /// Returns a protocol error for an unknown response shape; a `control-error`
 /// surfaces its wire code.
 pub(crate) fn parse_control_response(
+    control: &ConsumerControl,
     message: &async_nats::Message,
 ) -> Result<LiveControlAck, TrellisClientError> {
+    let headers = message
+        .headers
+        .as_ref()
+        .ok_or_else(|| TrellisClientError::FeedProtocol("control reply omitted headers".into()))?;
+    let context_digest = headers
+        .get("authorization-context")
+        .ok_or_else(|| TrellisClientError::FeedProtocol("control reply omitted context".into()))?
+        .to_string();
+    let session_key = headers
+        .get("session-key")
+        .ok_or_else(|| TrellisClientError::FeedProtocol("control reply omitted signer".into()))?
+        .to_string();
+    let proof = headers
+        .get("trellis-live-proof")
+        .ok_or_else(|| TrellisClientError::FeedProtocol("control reply omitted proof".into()))?
+        .to_string();
+    if session_key != control.pinned_session_key {
+        return Err(TrellisClientError::FeedProtocol(
+            "control reply signer does not match the pinned provider".into(),
+        ));
+    }
+    trellis_protocol::verify_live_server_proof_encoded(
+        &trellis_protocol::LiveServerProof::parse(proof)
+            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?,
+        &context_digest,
+        message.subject.as_str(),
+        &message.payload,
+        &control.pinned_session_key,
+    )
+    .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
     let value: serde_json::Value = serde_json::from_slice(&message.payload)
         .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
     match value.get("type").and_then(|kind| kind.as_str()) {
-        Some("control-ack") => serde_json::from_value(value)
-            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string())),
+        Some("control-ack") => {
+            let ack: LiveControlAck = serde_json::from_value(value)
+                .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+            if ack.session_id != control.session_id {
+                return Err(TrellisClientError::FeedProtocol(
+                    "control reply session does not match".into(),
+                ));
+            }
+            Ok(ack)
+        }
         Some("control-error") => {
             let code = value
                 .get("code")
@@ -781,4 +818,43 @@ static CONTROL_INBOX_COUNTER: AtomicU64 = AtomicU64::new(1);
 #[must_use]
 pub(crate) fn encoded_len(value: &serde_json::Value) -> u64 {
     serde_json::to_vec(value).map_or(0, |bytes| bytes.len() as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn waker_recheck_does_not_consume_credit() {
+        let core = ConsumerCore::new("session".into());
+        assert!(!core.has_queued());
+        assert_eq!(core.consumed_seq(), 0);
+        assert!(core.admit(AdmittedItem {
+            value: 7_u8,
+            encoded_len: 1,
+        }));
+        assert!(core.has_queued());
+        assert_eq!(core.consumed_seq(), 0);
+        let item = core.consume().expect("queued item");
+        assert_eq!(item.value, 7);
+        assert_eq!(core.consumed_seq(), 1);
+        assert!(!core.has_queued());
+    }
+
+    #[test]
+    fn abnormal_end_discards_queued_items() {
+        let core = ConsumerCore::new("session".into());
+        assert!(core.admit(AdmittedItem {
+            value: 1_u8,
+            encoded_len: 1,
+        }));
+        core.commit_end(consumer_failure(
+            LiveErrorCode::AuthorizationRevoked,
+            "revoked",
+        ));
+        core.discard_queue();
+        assert!(!core.has_queued());
+        assert!(core.committed_end().is_some());
+        assert_eq!(core.consumed_seq(), 0);
+    }
 }

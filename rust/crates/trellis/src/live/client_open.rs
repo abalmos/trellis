@@ -14,7 +14,7 @@ use trellis_protocol::{
 
 use crate::client::{AuthorizationProviderCache, TrellisClientError};
 
-use super::authority::PinnedPeerIdentity;
+use super::authority::{LiveAuthorityGuard, LiveGuardRequirement, PinnedPeerIdentity};
 use super::subscription::{
     activate_control, consumer_failure, credit_control, end_ack_control, peer_inactivity,
     pulse_control, ConsumerControl, ConsumerCore, ConsumerPhase,
@@ -36,7 +36,7 @@ pub(crate) struct PreparedClientSession {
     pub offer: LiveOffer,
     pub peer: PinnedPeerIdentity,
     pub max_data_body_bytes: u64,
-    pub data_subscription: async_nats::Subscriber,
+    pub context_digest: String,
 }
 
 /// Outcome of one complete client open.
@@ -63,6 +63,10 @@ pub(crate) async fn open_client_session(
         LIVE_INBOX_COUNTER.fetch_add(1, Ordering::Relaxed)
     );
     let headers = client.signed_headers(&subject, &reply, &open.body)?;
+    let request_id = headers
+        .get("request-id")
+        .map(ToString::to_string)
+        .unwrap_or_default();
     let mut subscriber = tokio::time::timeout(
         Duration::from_millis(client.timeout_ms()),
         client.nats().subscribe(reply.clone()),
@@ -88,13 +92,14 @@ pub(crate) async fn open_client_session(
     .map_err(|_| TrellisClientError::Timeout)?
     .ok_or(TrellisClientError::Timeout)?;
 
-    verify_offer(client, provider, &open, &response).await
+    verify_offer(client, provider, &open, &request_id, &response).await
 }
 
 async fn verify_offer(
     client: &crate::client::TrellisClient,
     provider: &AuthorizationProviderCache,
     open: &ClientOpen<'_>,
+    request_id: &str,
     response: &async_nats::Message,
 ) -> Result<PreparedClientSession, TrellisClientError> {
     trellis_protocol::validate_control_body(&response.payload)
@@ -108,9 +113,10 @@ async fn verify_offer(
         let code = value
             .get("code")
             .and_then(|code| code.as_str())
+            .or_else(|| value.get("type").and_then(|kind| kind.as_str()))
             .unwrap_or("invalid_request");
         return Err(TrellisClientError::FeedProtocol(format!(
-            "live open rejected with '{code}'"
+            "live open rejected with '{code}': {value}"
         )));
     }
     let offer: LiveOffer = serde_json::from_value(value)
@@ -147,20 +153,38 @@ async fn verify_offer(
         .and_then(|headers| headers.get("trellis-live-proof"))
         .map(ToString::to_string)
         .ok_or_else(|| TrellisClientError::FeedProtocol("offer omitted its proof".into()))?;
-    if session_key != offer.provider.session_key {
-        return Err(TrellisClientError::FeedProtocol(
-            "offer signer does not match its advertised identity".into(),
-        ));
-    }
     trellis_protocol::verify_live_server_proof_encoded(
         &trellis_protocol::LiveServerProof::parse(proof)
             .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?,
         &context_digest,
-        &response.subject,
+        response.subject.as_str(),
         &response.payload,
-        &offer.provider.session_key,
+        &session_key,
     )
     .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+    let policy = provider
+        .policy()
+        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+    let lease = provider
+        .resolve_context(&context_digest, policy.now_unix_seconds)
+        .await
+        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+    let peer = PinnedPeerIdentity::from_signed(lease.signed_context());
+    if peer.session_key != session_key {
+        return Err(TrellisClientError::FeedProtocol(
+            "offer context does not bind the signing session key".into(),
+        ));
+    }
+    if trellis_protocol::encode_subject_token(&session_key) != offer.provider.session_key {
+        return Err(TrellisClientError::FeedProtocol(
+            "offer signer does not match its advertised identity".into(),
+        ));
+    }
+    if offer.request_id != request_id {
+        return Err(TrellisClientError::FeedProtocol(
+            "offer answers a different opening request".into(),
+        ));
+    }
     // The exact subjects must recompute from this session's identities.
     let expected_data = derive_live_data_subject(
         &offer.provider.connection_id,
@@ -208,35 +232,18 @@ async fn verify_offer(
             "offer exceeds the negotiated data body limit".into(),
         ));
     }
-    // Reserve receive-side verification capacity on the provider cache so this
-    // consumer can authenticate later frames.
-    let _ = provider;
-    // Install the exact data subscription now: the first iteration only needs
-    // to flush it and send activation.
-    let data_subscription = client
-        .nats()
-        .subscribe(offer.data_subject.clone())
-        .await
-        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-    let peer = PinnedPeerIdentity {
-        connection_id: offer.provider.connection_id.clone(),
-        session_key: offer.provider.session_key.clone(),
-        principal_id: offer.provider.principal_id.clone(),
-        participant_id: offer.provider.participant_id.clone(),
-        deployment_id: Some(offer.provider.deployment_id.clone()),
-        instance_id: Some(offer.provider.instance_id.clone()),
-    };
     if offer.kind != LiveOfferKind::Offer {
         return Err(TrellisClientError::FeedProtocol(
             "unsupported live offer kind".into(),
         ));
     }
     let _ = open.kind;
+    let _ = client;
     Ok(PreparedClientSession {
         max_data_body_bytes: offer.limits.max_data_body_bytes,
         offer,
         peer,
-        data_subscription,
+        context_digest,
     })
 }
 
@@ -249,7 +256,7 @@ async fn verify_offer(
 ///
 /// Returns a setup error when the data subscription cannot be flushed or the
 /// consumer admission bound is reached.
-pub(crate) fn install_feed_handle<D>(
+pub(crate) async fn install_feed_handle<D>(
     client: &crate::client::TrellisClient,
     prepared: PreparedClientSession,
 ) -> Result<crate::live::subscription::LiveSubscription<D::Event>, TrellisClientError>
@@ -265,7 +272,7 @@ where
             "live manager unavailable: {unavailable:?}"
         ))
     })?;
-    let _permit = manager.clone().admit_consumer().map_err(|code| {
+    let permit = manager.clone().admit_consumer().map_err(|code| {
         TrellisClientError::FeedProtocol(format!("admission rejected: {code:?}"))
     })?;
     let core = Arc::new(ConsumerCore::new(prepared.offer.session_id.clone()));
@@ -277,22 +284,39 @@ where
         inbox_prefix: client.inbox_prefix().to_owned(),
         session_id: prepared.offer.session_id.clone(),
         control_subject: prepared.offer.control_subject.clone(),
-        pinned_session_key: prepared.offer.provider.session_key.clone(),
+        pinned_session_key: prepared.peer.session_key.clone(),
         pinned_identity: prepared.peer.clone(),
         close_started: std::sync::atomic::AtomicBool::new(false),
         last_control_seq: std::sync::atomic::AtomicU64::new(0),
     });
+    let provider_guard = LiveAuthorityGuard::retain(
+        client.authorization_provider(),
+        &prepared.context_digest,
+        LiveGuardRequirement::PeerProvider {
+            expected: prepared.peer.clone(),
+        },
+    )
+    .await
+    .map_err(|lost| {
+        TrellisClientError::AuthorizationUnavailable(format!("provider guard: {lost:?}"))
+    })?;
     let cancellation = LiveCancellation::new();
     let pump = ConsumerPump::new(core.clone(), control.clone(), cancellation.clone());
-    let drain = pump.spawn(prepared.data_subscription, |value| {
-        <D::Event as crate::generated::Codec>::decode(value)
-            .map_err(|error| TrellisClientError::Codec(error.to_string()))
-    });
+    let drain = pump.spawn(
+        client.nats(),
+        prepared.offer.data_subject.clone(),
+        |value| {
+            <D::Event as crate::generated::Codec>::decode(value)
+                .map_err(|error| TrellisClientError::Codec(error.to_string()))
+        },
+    );
     Ok(crate::live::subscription::LiveSubscription::new(
         core,
         drain,
         control,
         cancellation,
+        permit,
+        provider_guard,
     ))
 }
 
@@ -342,7 +366,8 @@ impl<T> ConsumerPump<T> {
     /// the consumer core so the application sees exactly one diagnosis.
     pub(crate) fn spawn<F>(
         self,
-        mut subscription: async_nats::Subscriber,
+        nats: async_nats::Client,
+        data_subject: String,
         decode: F,
     ) -> tokio::task::JoinHandle<()>
     where
@@ -350,9 +375,27 @@ impl<T> ConsumerPump<T> {
         F: Fn(serde_json::Value) -> Result<T, TrellisClientError> + Send + 'static,
     {
         tokio::spawn(async move {
-            self.core.set_phase(ConsumerPhase::Activating);
-            // The data subscription is registered before the offer is
-            // published, so activation cannot race message delivery.
+            tokio::select! {
+                _ = self.core.start.notified() => {}
+                _ = self.cancellation.cancelled() => return,
+            }
+            let mut subscription = match nats.subscribe(data_subject).await {
+                Ok(subscription) => subscription,
+                Err(_) => {
+                    self.core.commit_end(consumer_failure(
+                        LiveErrorCode::Disconnected,
+                        "live data subscription could not be installed",
+                    ));
+                    return;
+                }
+            };
+            if nats.flush().await.is_err() {
+                self.core.commit_end(consumer_failure(
+                    LiveErrorCode::Disconnected,
+                    "live data subscription could not be flushed",
+                ));
+                return;
+            }
             self.core.set_phase(ConsumerPhase::Activating);
             let session_id = self.core.session_id.clone();
             let control_seq = self.control.next_control_seq();
