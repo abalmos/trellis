@@ -12,6 +12,8 @@ import {
   TransportError,
   UnexpectedError,
 } from "./errors/index.ts";
+import type { LiveSubscription } from "./live/subscription.ts";
+import { LiveEnd, LiveStreamError } from "./live/types.ts";
 import type { FileInfo, SendTransferGrant, TransferBody } from "./transfer.ts";
 
 type ActiveJobWaitTarget = {
@@ -139,9 +141,14 @@ export type OperationRef<
     OperationControlError | UnexpectedError
   >;
   watch(options?: OperationWatchOptions): AsyncResult<
-    AsyncIterable<OperationEvent<TProgress, TOutput, TUpdate>>,
+    LiveSubscription<OperationEvent<TProgress, TOutput, TUpdate>>,
     OperationControlError | UnexpectedError
   >;
+  /** Resolves when the automatic callback observer ends, if start created one. */
+  readonly observationClosed?: Promise<LiveEnd>;
+  /** Stop only the automatic callback observer. Does not cancel the Operation. */
+  stopObserving(): AsyncResult<null, UnexpectedError>;
+  [Symbol.asyncDispose](): Promise<void>;
   cancel(): AsyncResult<
     OperationSnapshot<TProgress, TOutput>,
     OperationControlError | UnexpectedError
@@ -159,11 +166,15 @@ export type OperationRef<
 export type OperationWatchOptions = {
   /** Include transient typed update events. */
   updates?: boolean;
+  /** Abort only this observation; not a business cancel. */
+  signal?: AbortSignal;
 };
 
 /** Options that identify an idempotent operation invocation. */
 export type OperationStartOptions = {
   invocationId?: string;
+  /** Abort only automatic callback observation; not a business cancel. */
+  observationSignal?: AbortSignal;
 };
 
 export type AcceptedOperationEvent<TProgress = unknown, TOutput = unknown> = {
@@ -267,6 +278,10 @@ export type OperationObserverCallbacks<
   ) => void | Promise<void>;
   onEvent?: (
     event: OperationEvent<TProgress, TOutput, TUpdate>,
+  ) => void | Promise<void>;
+  /** Automatic observer transport/callback failure. Does not cancel business work. */
+  onObservationError?: (
+    error: LiveStreamError,
   ) => void | Promise<void>;
 };
 
@@ -451,11 +466,12 @@ export interface OperationTransport {
     subject: string,
     body: JsonValue,
   ): AsyncResult<JsonValue, TransportError | UnexpectedError>;
-  watchJson(
+  watchJson<T>(
     subject: string,
     body: JsonValue,
+    decodeEvent: (value: unknown) => T | undefined,
   ): AsyncResult<
-    AsyncIterable<Result<JsonValue, TransportError | UnexpectedError>>,
+    LiveSubscription<T>,
     TransportError | UnexpectedError
   >;
   putTransfer(
@@ -828,8 +844,9 @@ class RuntimeOperationRef<
         return eventsValue;
       }
 
+      const subscription = eventsValue;
       try {
-        for await (const event of eventsValue) {
+        for await (const event of subscription) {
           if (isTerminalEvent(event)) {
             return ok(event.snapshot);
           }
@@ -839,12 +856,9 @@ class RuntimeOperationRef<
         if (!isErr(terminal) && terminal !== null) {
           return ok(terminal);
         }
-        return err(
-          cause instanceof TransportError || cause instanceof UnexpectedError ||
-            isOperationLifecycleError(cause)
-            ? cause
-            : new UnexpectedError({ cause }),
-        );
+        return err(watchFailure(cause));
+      } finally {
+        await subscription[Symbol.asyncDispose]();
       }
 
       const terminal = await this.#terminalSnapshotFromGet().take();
@@ -946,55 +960,48 @@ class RuntimeOperationRef<
   }
 
   watch(options: OperationWatchOptions = {}): AsyncResult<
-    AsyncIterable<OperationEvent<TProgress, TOutput, TUpdate>>,
+    LiveSubscription<OperationEvent<TProgress, TOutput, TUpdate>>,
     OperationControlError | UnexpectedError
   > {
     return AsyncResult.from((async () => {
-      const rawIterable = await this.#transport.watchJson(
+      if (options.signal?.aborted) {
+        return err(createTransportError({
+          code: "trellis.operation.watch_aborted",
+          message: "The operation watch was aborted before it opened.",
+          hint: "Retry watching the operation if it is still needed.",
+          context: { operationId: this.id, operation: this.operation },
+        }));
+      }
+      const decodeEvent = this.#decodeEvent.bind(this);
+      const subscription = await this.#transport.watchJson(
         controlSubject(this.#descriptor.subject),
         {
           action: "watch",
           operationId: this.id,
           ...(options.updates ? { includeUpdates: true } : {}),
         },
-      ).take();
-      if (isErr(rawIterable)) {
-        return err(rawIterable.error);
-      }
-      const iterable = rawIterable as AsyncIterable<
-        Result<JsonValue, TransportError | UnexpectedError>
-      >;
-      const decodeEvent = this.#decodeEvent.bind(this);
-
-      async function* events() {
-        for await (const frame of iterable) {
-          const frameValue = frame.take();
-          if (isErr(frameValue)) {
-            throw frameValue.error;
-          }
+        (value) => {
           const decoded = decodeWatchFrame<TProgress, TOutput, TUpdate>(
-            frameValue,
-          );
-          const decodedValue = decoded.take();
-          if (isErr(decodedValue)) {
-            throw decodedValue.error;
-          }
-          if (decodedValue === null) {
-            continue;
-          }
-          const normalized = normalizeOperationEvent(decodedValue).take();
-          if (isErr(normalized)) {
-            throw normalized.error;
-          }
-          const event = decodeEvent(normalized);
-          yield event;
-          if (isTerminalEvent(event)) {
-            break;
-          }
-        }
+            value as JsonValue,
+          ).take();
+          if (isErr(decoded)) throw decoded.error;
+          if (decoded === null) return;
+          const normalized = normalizeOperationEvent(decoded).take();
+          if (isErr(normalized)) throw normalized.error;
+          return decodeEvent(normalized);
+        },
+      ).take();
+      if (isErr(subscription)) {
+        return err(subscription.error);
       }
-
-      return ok(events());
+      if (options.signal) {
+        options.signal.addEventListener(
+          "abort",
+          () => subscription.close(),
+          { once: true },
+        );
+      }
+      return ok(subscription);
     })());
   }
 
@@ -1081,7 +1088,29 @@ type OperationWatchObservation<TProgress, TOutput> = {
     >
   >;
   close?: () => Promise<void>;
+  closed?: Promise<LiveEnd>;
 };
+
+function watchFailure(
+  cause: unknown,
+): OperationControlError | UnexpectedError {
+  if (
+    cause instanceof TransportError || cause instanceof UnexpectedError ||
+    isOperationLifecycleError(cause)
+  ) {
+    return cause;
+  }
+  if (cause instanceof LiveStreamError) {
+    return createTransportError({
+      code: cause.codeString(),
+      message: cause.message,
+      hint:
+        "Retry watching the operation. If it keeps failing, check Trellis runtime health.",
+      cause,
+    });
+  }
+  return new UnexpectedError({ cause });
+}
 
 type ObservedWatchOptions<TProgress, TOutput, TUpdate> = {
   ready?: Promise<void>;
@@ -1170,9 +1199,9 @@ function beginObservedWatch<
       return watchValue;
     }
 
-    const iterator = watchValue[Symbol.asyncIterator]();
+    const subscription = watchValue;
     const close = async () => {
-      await iterator.return?.();
+      await subscription[Symbol.asyncDispose]();
     };
 
     const task = (async (): Promise<
@@ -1184,19 +1213,19 @@ function beginObservedWatch<
       try {
         await options.ready;
 
-        while (true) {
-          const next = await iterator.next();
-          if (next.done) {
-            break;
-          }
-
-          const event = next.value;
+        for await (const event of subscription) {
           if (options.skipEvent?.(event)) {
             continue;
           }
           try {
             await dispatchObservedOperationEvent(callbacks, event);
           } catch (cause) {
+            await close();
+            const callbackError = new LiveStreamError(
+              "callback_failed",
+              cause instanceof Error ? cause.message : String(cause),
+            );
+            await reportObservationError(callbacks, callbackError);
             return err(toObservedCallbackError(cause));
           }
           if (isTerminalEvent(event)) {
@@ -1207,24 +1236,33 @@ function beginObservedWatch<
           }
         }
 
-        return err(createTransportError({
+        const incomplete = createTransportError({
           code: "trellis.operation.watch_incomplete",
           message: "Trellis ended the operation watch before completion.",
           hint:
             "Retry watching the operation. If it keeps happening, reconnect to Trellis and try again.",
           cause: new Error("operation watch ended before terminal event"),
-        }));
-      } catch (cause) {
-        return err(
-          cause instanceof TransportError || cause instanceof UnexpectedError ||
-            isOperationLifecycleError(cause)
-            ? cause
-            : new UnexpectedError({ cause }),
+        });
+        await reportObservationError(
+          callbacks,
+          new LiveStreamError("source_error", incomplete.message),
         );
+        return err(incomplete);
+      } catch (cause) {
+        const failure = watchFailure(cause);
+        await reportObservationError(
+          callbacks,
+          cause instanceof LiveStreamError
+            ? cause
+            : new LiveStreamError("source_error", failure.message),
+        );
+        return err(failure);
+      } finally {
+        await close();
       }
     })();
 
-    return ok({ task, close });
+    return ok({ task, close, closed: subscription.closed() });
   })());
 }
 
@@ -1269,7 +1307,16 @@ function startObservedOperation<
         skipEvent: createAcceptedReplayFilter(startedValue.accepted),
       },
     ).take();
-    const observation = isErr(observedValue) ? {} : observedValue;
+    if (isErr(observedValue)) {
+      await reportObservationError(
+        callbacks,
+        new LiveStreamError("source_error", observedValue.error.message),
+      );
+    }
+    const observation: OperationWatchObservation<TProgress, TOutput> =
+      isErr(observedValue)
+        ? failedObservation<TProgress, TOutput>(observedValue.error)
+        : observedValue;
 
     const accepted = await dispatchOperationEventResult(
       callbacks,
@@ -1288,6 +1335,7 @@ function startObservedOperation<
 
     if (!isErr(observedValue)) {
       ready.resolve();
+      bindObservationSignal(observation, options?.observationSignal);
     }
     return ok(createPublicOperationRef(startedValue.operation, observation));
   })());
@@ -1346,6 +1394,7 @@ function startObservedTransfer<
 
     if (!isErr(observedValue)) {
       ready.resolve();
+      bindObservationSignal(observation, options?.observationSignal);
     }
 
     const transferredValue = await operation.startTransfer(body).take();
@@ -1444,9 +1493,34 @@ function createPublicOperationRef<
     cancel: () => operation.cancel(),
     signal: (signal: string, input?: unknown) =>
       operation.signal(signal, input),
+    observationClosed: observation.closed,
+    stopObserving: () =>
+      AsyncResult.from((async () => {
+        if (!observation.close) return ok(null);
+        await observation.close();
+        return ok(null);
+      })()),
+    [Symbol.asyncDispose]: async () => {
+      await observation.close?.();
+    },
   };
 
   return base as OperationRef<TDesc, TProgress, TOutput, TUpdate>;
+}
+
+function bindObservationSignal<TProgress, TOutput>(
+  observation: OperationWatchObservation<TProgress, TOutput>,
+  signal?: AbortSignal,
+): void {
+  if (!signal || !observation.close) return;
+  const abort = () => {
+    void observation.close?.();
+  };
+  if (signal.aborted) {
+    abort();
+    return;
+  }
+  signal.addEventListener("abort", abort, { once: true });
 }
 
 function createOperationInputBuilder<
@@ -1856,7 +1930,24 @@ function failedObservation<TProgress, TOutput>(
 ): OperationWatchObservation<TProgress, TOutput> {
   return {
     task: Promise.resolve(err(error)),
+    closed: Promise.resolve(
+      new LiveEnd(
+        "source_error",
+        new LiveStreamError("source_error", error.message),
+      ),
+    ),
   };
+}
+
+async function reportObservationError<TProgress, TOutput, TUpdate>(
+  callbacks: OperationObserverCallbacks<TProgress, TOutput, TUpdate>,
+  error: LiveStreamError,
+): Promise<void> {
+  try {
+    await callbacks.onObservationError?.(error);
+  } catch {
+    // The observation-error callback must not reject or change durable state.
+  }
 }
 
 async function dispatchOperationEventResult<TProgress, TOutput, TUpdate>(

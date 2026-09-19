@@ -136,6 +136,8 @@ export type {
   UpdateOperationEvent,
 } from "./operations.ts";
 export { controlSubject, OperationInvoker } from "./operations.ts";
+export { LiveSubscription } from "./live/subscription.ts";
+export { LiveEnd, LiveStreamError } from "./live/types.ts";
 export type {
   AcceptedOperation,
   EventListenerContext,

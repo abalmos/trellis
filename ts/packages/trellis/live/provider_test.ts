@@ -76,6 +76,7 @@ Deno.test("NX04 unsigned and foreign control are dropped without reflection", as
     },
   );
   const offerJson = JSON.parse(new TextDecoder().decode(encodedOffers.at(-1)!));
+  assertEquals(offerJson.kind, "feed");
   const sessionId = offerJson.sessionId as string;
   const closeBody = new TextEncoder().encode(JSON.stringify({
     format: LIVE_VERSION,
@@ -131,4 +132,34 @@ Deno.test("NX04 unsigned and foreign control are dropped without reflection", as
     headers: ownerHeaders,
   }));
   assertEquals(sourceStarts, 1);
+});
+
+Deno.test("operation-watch offers advertise operation-watch kind", async () => {
+  const encodedOffers: Uint8Array[] = [];
+  const nats = {
+    publish(_subject: string, data?: Uint8Array) {
+      if (data) encodedOffers.push(data);
+    },
+    info: { max_payload: 1_048_576 },
+  } as unknown as NatsConnection;
+  const provider = new LiveFeedProvider({
+    nats,
+    identity: identity("provider"),
+    sign: async () => new Uint8Array(64),
+  });
+  const operationSubject =
+    `operation.v1.${encodeEventSubjectParameterToken("api")}.${
+      encodeEventSubjectParameterToken("deploy")
+    }.Run`;
+  await provider.offer(
+    msg({ data: new Uint8Array(), reply: "_INBOX.owner" }),
+    operationSubject,
+    { openId: "open-2", receiveMaxPayloadBytes: 1024 },
+    identity("owner"),
+    async () => {},
+    "operation-watch",
+  );
+  const offerJson = JSON.parse(new TextDecoder().decode(encodedOffers.at(-1)!));
+  assertEquals(offerJson.kind, "operation-watch");
+  assertEquals(offerJson.baseSubject, operationSubject);
 });

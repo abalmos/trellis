@@ -126,6 +126,11 @@ impl<T> ConsumerCore<T> {
         self.received_seq.fetch_add(1, Ordering::AcqRel);
     }
 
+    /// Release credit for a verified frame that is not handed to the application.
+    pub(crate) fn release_filtered(&self) {
+        self.consumed_seq.fetch_add(1, Ordering::AcqRel);
+    }
+
     /// Return whether a committed failure was already yielded.
     pub(crate) fn reported_error(&self) -> bool {
         self.error_reported.load(Ordering::Acquire)
@@ -306,6 +311,18 @@ impl<T> LiveSubscription<T> {
         let receipt = self.control.begin_close().await;
         Ok(receipt)
     }
+
+    /// Map or filter application items while retaining the owning handle.
+    pub(crate) fn map_items<U, F>(self, map: F) -> LiveMappedSubscription<T, U, F>
+    where
+        F: FnMut(T) -> LiveMapDecision<U>,
+    {
+        LiveMappedSubscription {
+            inner: self,
+            map,
+            _item: std::marker::PhantomData,
+        }
+    }
 }
 
 impl<T> Drop for LiveSubscription<T> {
@@ -317,6 +334,61 @@ impl<T> Drop for LiveSubscription<T> {
         self.control.schedule_local_drop_cleanup();
         self.core.discard_queue();
         self._drain.abort();
+    }
+}
+
+/// Outcome of one mapped live item.
+pub(crate) enum LiveMapDecision<U> {
+    /// Expose this item to the application.
+    Emit(U),
+    /// Drop the item after its credit was released.
+    Skip,
+    /// Stop iteration and cancel the underlying observation.
+    Complete,
+}
+
+/// Internal mapping adapter that forwards close, Drop, and cancellation.
+pub(crate) struct LiveMappedSubscription<T, U, F> {
+    inner: LiveSubscription<T>,
+    map: F,
+    _item: std::marker::PhantomData<fn(T) -> U>,
+}
+
+impl<T, U, F> LiveMappedSubscription<T, U, F> {
+    /// Explicitly close the underlying observation.
+    pub async fn close(&mut self) -> Result<LiveCloseReceipt, TrellisClientError> {
+        self.inner.close().await
+    }
+
+    /// Return the committed terminal outcome of the underlying observation.
+    pub async fn closed(&self) -> LiveEnd {
+        self.inner.closed().await
+    }
+}
+
+impl<T, U, F> Stream for LiveMappedSubscription<T, U, F>
+where
+    F: FnMut(T) -> LiveMapDecision<U> + Unpin,
+{
+    type Item = Result<U, TrellisClientError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        loop {
+            match Pin::new(&mut this.inner).poll_next(cx) {
+                Poll::Ready(Some(Ok(item))) => match (this.map)(item) {
+                    LiveMapDecision::Emit(item) => return Poll::Ready(Some(Ok(item))),
+                    LiveMapDecision::Skip => continue,
+                    LiveMapDecision::Complete => {
+                        this.inner.cancellation.cancel();
+                        return Poll::Ready(None);
+                    }
+                },
+                Poll::Ready(Some(Err(error))) => return Poll::Ready(Some(Err(error))),
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
     }
 }
 

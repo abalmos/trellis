@@ -1,16 +1,18 @@
-//! Router integration for live Feed routes.
+//! Router integration for live Feed and Operation watch routes.
 //!
-//! A live-capable Feed route answers one bounded opening request with a signed
-//! offer and hands ownership of the reservation to the connection's live
-//! session manager. It never enters an infinite reply loop and never starts a
-//! domain source before the delivery-path challenge round trip completes.
+//! A live-capable Feed or Operation watch route answers one bounded opening
+//! request with a signed offer and hands ownership of the reservation to the
+//! connection's live session manager. It never enters an infinite reply loop
+//! and never starts a domain source before the delivery-path challenge round
+//! trip completes.
 //!
+use bytes::Bytes;
 use futures_util::StreamExt;
 
 use trellis_protocol::{
-    derive_live_data_subject, derive_live_observe_wildcard_subject, ApiSurfaceKind, LiveErrorCode,
-    LiveOfferLimits, LiveSessionKind, PermissionAction, PermissionAtom, PermissionTarget,
-    OPEN_RESERVATION_MS,
+    derive_live_data_subject, derive_live_observe_wildcard_subject, ApiSurfaceKind, FeedOpenKind,
+    LiveErrorCode, LiveOfferLimits, LiveSessionKind, PermissionAction, PermissionAtom,
+    PermissionTarget, OPEN_RESERVATION_MS,
 };
 
 use crate::client::TrellisClient;
@@ -201,6 +203,92 @@ pub(crate) struct FeedOpeningMeta {
     pub receive_max_payload_bytes: u64,
 }
 
+/// Inputs for one provider Operation watch opening.
+pub(crate) struct OperationWatchOpenInputs {
+    pub base_subject: String,
+    #[expect(dead_code)]
+    pub provider_instance_id: String,
+    pub provider_deployment_id: String,
+}
+
+/// The consumer's verified Operation watch opening for one provider session.
+pub(crate) struct OperationWatchOpenRequest {
+    pub request: RequestContext,
+    pub inputs: OperationWatchOpenInputs,
+    pub opening: OperationWatchOpening,
+    pub cancellation: crate::live::LiveCancellation,
+}
+
+/// Parse and validate one Operation watch opening body.
+///
+/// # Errors
+///
+/// Returns a validation error for a malformed envelope, an unsupported
+/// protocol, or an invalid observation nonce.
+pub(crate) fn parse_operation_watch_open(
+    payload: &[u8],
+) -> Result<OperationWatchOpening, ServerError> {
+    trellis_protocol::validate_open_body(payload).map_err(|error| ServerError::Validation {
+        issues: Box::new(vec![ValidationIssue {
+            path: String::new(),
+            message: error.to_string(),
+        }]),
+    })?;
+    let open: trellis_protocol::OperationWatchOpen =
+        serde_json::from_slice(payload).map_err(|error| ServerError::Validation {
+            issues: Box::new(vec![ValidationIssue {
+                path: String::new(),
+                message: format!("Invalid JSON: {error}"),
+            }]),
+        })?;
+    if open.observation.format != trellis_protocol::LIVE_VERSION {
+        return Err(ServerError::Validation {
+            issues: Box::new(vec![ValidationIssue {
+                path: "/observation/format".to_owned(),
+                message: "unsupported live protocol version".to_owned(),
+            }]),
+        });
+    }
+    if open.observation.kind != FeedOpenKind::Open {
+        return Err(ServerError::Validation {
+            issues: Box::new(vec![ValidationIssue {
+                path: "/observation/type".to_owned(),
+                message: "operation watch opening must carry the open discriminator".to_owned(),
+            }]),
+        });
+    }
+    trellis_protocol::parse_nonce(&open.observation.open_id, ["openId"]).map_err(|error| {
+        ServerError::Validation {
+            issues: Box::new(vec![ValidationIssue {
+                path: "/observation/openId".to_owned(),
+                message: error.to_string(),
+            }]),
+        }
+    })?;
+    if open.operation_id.is_empty() {
+        return Err(ServerError::Validation {
+            issues: Box::new(vec![ValidationIssue {
+                path: "/operationId".to_owned(),
+                message: "operation watch omitted its durable operation id".to_owned(),
+            }]),
+        });
+    }
+    Ok(OperationWatchOpening {
+        open_id: open.observation.open_id,
+        receive_max_payload_bytes: open.observation.receive_max_payload_bytes,
+        operation_id: open.operation_id,
+        include_updates: open.include_updates.unwrap_or(false),
+    })
+}
+
+/// One parsed Operation watch opening.
+pub(crate) struct OperationWatchOpening {
+    pub open_id: String,
+    pub receive_max_payload_bytes: u64,
+    pub operation_id: String,
+    pub include_updates: bool,
+}
+
 /// Adapt one generated Feed handler stream into the engine's source items.
 ///
 /// Each encoded event is emitted as one application value and a normal stream
@@ -222,8 +310,33 @@ where
     }))
 }
 
+/// Adapt one Operation watch frame stream into the engine's source items.
+///
+/// Each snapshot or update JSON object is emitted as one application value and
+/// a normal stream completion becomes the engine's explicit `End` item.
+pub(crate) fn source_from_watch_frames<S>(
+    stream: S,
+) -> std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<SourceItem, String>> + Send>>
+where
+    S: futures_util::Stream<Item = Result<Bytes, ServerError>> + Send + 'static,
+{
+    Box::pin(stream.map(|item| {
+        match item {
+            Ok(frame) => serde_json::from_slice(&frame)
+                .map(SourceItem::Value)
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        }
+    }))
+}
+
 /// One reserved provider Feed open ready to return its offer.
 pub(crate) struct ReservedFeed {
+    pub prepared: LivePreparedResponse,
+}
+
+/// One reserved provider Operation watch open ready to return its offer.
+pub(crate) struct ReservedOperationWatch {
     pub prepared: LivePreparedResponse,
 }
 
@@ -390,6 +503,176 @@ where
         .await
         .map_err(|code| ServerError::Nats(format!("live control subscription failed: {code:?}")))?;
     Ok(ReservedFeed {
+        prepared: LivePreparedResponse {
+            offer,
+            headers,
+            manager: std::sync::Arc::clone(manager),
+            request_id,
+        },
+    })
+}
+
+/// Reserve one Operation watch session, publish its activation challenge task,
+/// and build the signed offer reply.
+///
+/// # Errors
+///
+/// Returns a setup error when the manager is unavailable, the transport epoch
+/// changed, admission is exhausted, or the offer cannot be authenticated.
+pub(crate) async fn reserve_operation_watch<D, F>(
+    client: &TrellisClient,
+    manager: &std::sync::Arc<LiveSessionManager>,
+    request: &OperationWatchOpenRequest,
+    source_factory: F,
+) -> Result<ReservedOperationWatch, ServerError>
+where
+    D: super::operations::OperationDescriptor,
+    F: FnOnce() -> std::pin::Pin<
+            Box<dyn futures_util::Stream<Item = Result<SourceItem, String>> + Send>,
+        > + Send
+        + 'static,
+{
+    let context = &request.request;
+    let inputs = &request.inputs;
+    let opening = &request.opening;
+    let cancellation = request.cancellation.clone();
+    manager.is_available().map_err(|unavailable| {
+        ServerError::Nats(format!("live manager unavailable: {unavailable:?}"))
+    })?;
+    let caller = context
+        .caller
+        .as_ref()
+        .ok_or_else(|| ServerError::RequestDenied {
+            subject: context.subject.clone(),
+            session_key: context.session_key.clone().unwrap_or_default(),
+        })?;
+    let request_id = context.request_id.clone().ok_or_else(|| {
+        ServerError::Nats("operation watch request is missing a request id".to_owned())
+    })?;
+    let own_context_digest = client
+        .authorization_context_digest()
+        .map_err(|error| ServerError::Nats(error.to_string()))?;
+
+    let consumer = PinnedPeerIdentity {
+        connection_id: caller.connection_id.clone(),
+        session_key: caller.session_key.clone(),
+        principal_id: caller.principal_id.clone(),
+        participant_id: caller.participant_id.clone(),
+        deployment_id: caller.deployment_id.clone(),
+        instance_id: caller.instance_id.clone(),
+    };
+    let action_name = D::KEY.split_once('.').map_or(D::KEY, |(_, action)| action);
+    let observer_permission = PermissionAtom::new(
+        PermissionTarget::api_surface(D::API_ID, ApiSurfaceKind::Operation, action_name.to_owned())
+            .map_err(|error| ServerError::Nats(error.to_string()))?,
+        PermissionAction::Observe,
+    )
+    .map_err(|error| ServerError::Nats(error.to_string()))?;
+    let own_guard = LiveAuthorityGuard::retain(
+        client.authorization_provider(),
+        &own_context_digest,
+        LiveGuardRequirement::LocalProvider,
+    )
+    .await
+    .map_err(|lost| ServerError::Nats(format!("provider authority unavailable: {lost:?}")))?;
+    let caller_guard = LiveAuthorityGuard::retain(
+        client.authorization_provider(),
+        &caller.context_digest,
+        LiveGuardRequirement::Observer(observer_permission),
+    )
+    .await
+    .map_err(|lost| ServerError::Nats(format!("caller authority unavailable: {lost:?}")))?;
+    let negotiated = trellis_protocol::negotiate_max_data_body_bytes(
+        opening.receive_max_payload_bytes,
+        client.nats().max_payload() as u64,
+    )
+    .map_err(|error| ServerError::Validation {
+        issues: Box::new(vec![ValidationIssue {
+            path: "/observation/receiveMaxPayloadBytes".to_owned(),
+            message: error.to_string(),
+        }]),
+    })?;
+    let canonical_open_hash =
+        trellis_protocol::logical_open_hash(&trellis_protocol::LogicalOpenIdentity {
+            kind: LiveSessionKind::OperationWatch,
+            base_subject: inputs.base_subject.clone(),
+            open_id: opening.open_id.clone(),
+            consumer_connection_id: consumer.connection_id.clone(),
+            consumer_session_key: trellis_protocol::encode_subject_token(&consumer.session_key),
+            consumer_principal_id: consumer.principal_id.clone(),
+            consumer_participant_id: consumer.participant_id.clone(),
+            receive_max_payload_bytes: opening.receive_max_payload_bytes,
+            feed_input: None,
+            operation_id: Some(opening.operation_id.clone()),
+            include_updates: Some(opening.include_updates),
+        })
+        .map_err(|error| ServerError::Nats(error.to_string()))?;
+    let now_ms = crate::client::now_iat_seconds() * 1_000;
+    let open_request = ProviderOpenRequest {
+        kind: LiveSessionKind::OperationWatch,
+        base_subject: inputs.base_subject.clone(),
+        open_id: opening.open_id.clone(),
+        consumer: consumer.clone(),
+        consumer_max_payload_bytes: opening.receive_max_payload_bytes,
+        canonical_open_hash,
+    };
+    let (session, permit) = ProviderSessionRecord::reserve(
+        manager,
+        &open_request,
+        &inputs.provider_deployment_id,
+        negotiated,
+        now_ms,
+    )
+    .await
+    .map_err(|code| ServerError::Nats(format!("live reservation rejected: {code:?}")))?;
+    let limits = LiveOfferLimits {
+        max_data_body_bytes: negotiated,
+        window_frames: trellis_protocol::WINDOW_FRAMES,
+        window_bytes: trellis_protocol::WINDOW_BYTES,
+        reservation_ms: OPEN_RESERVATION_MS,
+        heartbeat_interval_ms: trellis_protocol::HEARTBEAT_INTERVAL_MS,
+        peer_inactivity_ms: trellis_protocol::PEER_INACTIVITY_MS,
+        consumer_stall_ms: trellis_protocol::CONSUMER_STALL_MS,
+    };
+    let record = std::sync::Arc::new(ProviderSessionRecord {
+        session: std::sync::Arc::clone(&session),
+        manager: std::sync::Arc::downgrade(manager),
+        permit: std::sync::Mutex::new(Some(permit)),
+        own_guard,
+        caller_guard,
+        source_factory: std::sync::Mutex::new(Some(Box::new(source_factory))),
+        cleanup: std::sync::Mutex::new(Vec::new()),
+        terminal: std::sync::Mutex::new(None),
+        cancellation: cancellation.clone(),
+        source_started: std::sync::atomic::AtomicBool::new(false),
+        max_data_body_bytes: negotiated,
+    });
+    manager.insert_provider_session(session.session_id.clone(), std::sync::Arc::clone(&record));
+    let offer = record
+        .offer_body(
+            &request_id,
+            &client
+                .own_pinned_identity()
+                .map_err(|error| ServerError::Nats(error.to_string()))?,
+            &consumer,
+            limits,
+            negotiated,
+        )
+        .map_err(|code| ServerError::Nats(format!("offer build failed: {code:?}")))?;
+    // Authenticate the exact offer bytes with the provider's live proof.
+    let headers = crate::service::live_router::sign_live_offer(
+        client.auth(),
+        &own_context_digest,
+        &context.reply_to.clone().unwrap_or_default(),
+        &offer,
+    )
+    .map_err(|error| ServerError::Nats(error.to_string()))?;
+    // Install the owner-control subscription before the offer is published so
+    // an immediate activation cannot be lost.
+    spawn_session_drivers(client.nats(), std::sync::Arc::clone(&record), negotiated)
+        .await
+        .map_err(|code| ServerError::Nats(format!("live control subscription failed: {code:?}")))?;
+    Ok(ReservedOperationWatch {
         prepared: LivePreparedResponse {
             offer,
             headers,

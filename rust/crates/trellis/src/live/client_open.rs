@@ -25,7 +25,13 @@ use super::types::{LiveCancellation, LiveEnd, LiveEndReason};
 pub(crate) struct ClientOpen<'a> {
     pub kind: LiveSessionKind,
     pub api_id: &'a str,
+    /// Descriptor/binding-derived route the signed offer must echo.
     pub base_subject: &'a str,
+    /// NATS subject the opening request is published on.
+    ///
+    /// Feeds publish on `base_subject`. Operation watch publishes on the
+    /// operation control subject while the offer still binds `base_subject`.
+    pub publish_subject: &'a str,
     pub body: Bytes,
     pub open_id: String,
     pub receive_max_payload_bytes: u64,
@@ -56,7 +62,7 @@ pub(crate) async fn open_client_session(
     provider: &AuthorizationProviderCache,
     open: ClientOpen<'_>,
 ) -> Result<PreparedClientSession, TrellisClientError> {
-    let subject = open.base_subject.to_owned();
+    let subject = open.publish_subject.to_owned();
     let reply = format!(
         "{}.{}",
         client.inbox_prefix(),
@@ -208,11 +214,7 @@ async fn verify_offer(
             "offer control subject is not canonical for this session".into(),
         ));
     }
-    if offer.base_subject != open.base_subject {
-        return Err(TrellisClientError::FeedProtocol(
-            "offer base subject does not match the opening route".into(),
-        ));
-    }
+    verify_offer_identity(open, &offer)?;
     // The selected deployment must match the consumer's installed binding.
     let selected = provider
         .provider_deployment_id(open.api_id)
@@ -237,7 +239,6 @@ async fn verify_offer(
             "unsupported live offer kind".into(),
         ));
     }
-    let _ = open.kind;
     let _ = client;
     Ok(PreparedClientSession {
         max_data_body_bytes: offer.limits.max_data_body_bytes,
@@ -263,6 +264,44 @@ pub(crate) async fn install_feed_handle<D>(
 where
     D: crate::generated::FeedDescriptor,
     D::Event: crate::generated::Codec + Send + 'static,
+{
+    install_prepared_handle(client, prepared, |value| {
+        <D::Event as crate::generated::Codec>::decode(value)
+            .map(Some)
+            .map_err(|error| TrellisClientError::Codec(error.to_string()))
+    })
+    .await
+}
+
+/// Install one prepared Operation watch observation as an owned public handle.
+///
+/// Data frames are JSON snapshot/event envelopes decoded by `decode`. A `None`
+/// result skips the frame (keepalive) after releasing credit.
+///
+/// # Errors
+///
+/// Returns a setup error when the data subscription cannot be flushed or the
+/// consumer admission bound is reached.
+pub(crate) async fn install_operation_watch_handle<T, F>(
+    client: &crate::client::TrellisClient,
+    prepared: PreparedClientSession,
+    decode: F,
+) -> Result<crate::live::subscription::LiveSubscription<T>, TrellisClientError>
+where
+    T: Send + 'static,
+    F: Fn(serde_json::Value) -> Result<Option<T>, TrellisClientError> + Send + 'static,
+{
+    install_prepared_handle(client, prepared, decode).await
+}
+
+async fn install_prepared_handle<T, F>(
+    client: &crate::client::TrellisClient,
+    prepared: PreparedClientSession,
+    decode: F,
+) -> Result<crate::live::subscription::LiveSubscription<T>, TrellisClientError>
+where
+    T: Send + 'static,
+    F: Fn(serde_json::Value) -> Result<Option<T>, TrellisClientError> + Send + 'static,
 {
     let manager = client.live_manager().ok_or_else(|| {
         TrellisClientError::Bootstrap("live manager is unavailable for this connection".into())
@@ -302,14 +341,7 @@ where
     })?;
     let cancellation = LiveCancellation::new();
     let pump = ConsumerPump::new(core.clone(), control.clone(), cancellation.clone());
-    let drain = pump.spawn(
-        client.nats(),
-        prepared.offer.data_subject.clone(),
-        |value| {
-            <D::Event as crate::generated::Codec>::decode(value)
-                .map_err(|error| TrellisClientError::Codec(error.to_string()))
-        },
-    );
+    let drain = pump.spawn(client.nats(), prepared.offer.data_subject.clone(), decode);
     Ok(crate::live::subscription::LiveSubscription::new(
         core,
         drain,
@@ -318,6 +350,24 @@ where
         permit,
         provider_guard,
     ))
+}
+
+/// Reject an offer whose route or session kind does not match the open.
+fn verify_offer_identity(
+    open: &ClientOpen<'_>,
+    offer: &LiveOffer,
+) -> Result<(), TrellisClientError> {
+    if offer.base_subject != open.base_subject {
+        return Err(TrellisClientError::FeedProtocol(
+            "offer base subject does not match the opening route".into(),
+        ));
+    }
+    if offer.session_kind != open.kind {
+        return Err(TrellisClientError::FeedProtocol(
+            "offer session kind does not match the opening kind".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Build one `open-error`-shaped setup failure from a raw body.
@@ -372,7 +422,7 @@ impl<T> ConsumerPump<T> {
     ) -> tokio::task::JoinHandle<()>
     where
         T: Send + 'static,
-        F: Fn(serde_json::Value) -> Result<T, TrellisClientError> + Send + 'static,
+        F: Fn(serde_json::Value) -> Result<Option<T>, TrellisClientError> + Send + 'static,
     {
         tokio::spawn(async move {
             tokio::select! {
@@ -500,7 +550,7 @@ impl<T> ConsumerPump<T> {
                                 }
                                 next_expected = seq + 1;
                                 match decode(data.value.clone()) {
-                                    Ok(value) => {
+                                    Ok(Some(value)) => {
                                         let encoded_len =
                                             serde_json::to_vec(&data.value).map_or(0, |bytes| bytes.len() as u64);
                                         if !self.core.admit(super::subscription::AdmittedItem {
@@ -515,10 +565,16 @@ impl<T> ConsumerPump<T> {
                                         }
                                         self.core.record_received();
                                     }
-                                    Err(_) => {
+                                    Ok(None) => {
+                                        // Keepalive and other filtered frames still
+                                        // occupy sequence space and release credit.
+                                        self.core.record_received();
+                                        self.core.release_filtered();
+                                    }
+                                    Err(error) => {
                                         self.core.commit_end(consumer_failure(
                                             LiveErrorCode::ProtocolError,
-                                            "live payload did not decode",
+                                            error.to_string(),
                                         ));
                                         return;
                                     }
@@ -648,3 +704,106 @@ fn verify_provider_frame(
 }
 
 static LIVE_INBOX_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+#[cfg(test)]
+mod tests {
+    use super::{verify_offer_identity, ClientOpen};
+    use bytes::Bytes;
+    use trellis_protocol::{
+        LiveOffer, LiveOfferConsumer, LiveOfferKind, LiveOfferLimits, LiveOfferProvider,
+        LiveSessionKind, HEARTBEAT_INTERVAL_MS, OPEN_RESERVATION_MS, PEER_INACTIVITY_MS,
+        WINDOW_BYTES, WINDOW_FRAMES,
+    };
+
+    fn offer(kind: LiveSessionKind, base_subject: &str) -> LiveOffer {
+        LiveOffer {
+            format: trellis_protocol::LIVE_VERSION.into(),
+            kind: LiveOfferKind::Offer,
+            session_kind: kind,
+            open_id: "open".into(),
+            request_id: "req".into(),
+            session_id: "session".into(),
+            base_subject: base_subject.into(),
+            data_subject: "live.v1.data.A.B.C".into(),
+            control_subject: format!("{base_subject}.observe.A.C"),
+            provider: LiveOfferProvider {
+                connection_id: "P".into(),
+                session_key: "K".into(),
+                principal_id: "pr".into(),
+                participant_id: "pa".into(),
+                deployment_id: "dep".into(),
+                instance_id: "inst".into(),
+            },
+            consumer: LiveOfferConsumer {
+                connection_id: "C".into(),
+                session_key: "KC".into(),
+                principal_id: "pru".into(),
+                participant_id: "pau".into(),
+            },
+            limits: LiveOfferLimits {
+                max_data_body_bytes: 1_044_480,
+                window_frames: WINDOW_FRAMES,
+                window_bytes: WINDOW_BYTES,
+                reservation_ms: OPEN_RESERVATION_MS,
+                heartbeat_interval_ms: HEARTBEAT_INTERVAL_MS,
+                peer_inactivity_ms: PEER_INACTIVITY_MS,
+                consumer_stall_ms: trellis_protocol::CONSUMER_STALL_MS,
+            },
+        }
+    }
+
+    fn open<'a>(
+        kind: LiveSessionKind,
+        base_subject: &'a str,
+        publish_subject: &'a str,
+    ) -> ClientOpen<'a> {
+        ClientOpen {
+            kind,
+            api_id: "api@v1",
+            base_subject,
+            publish_subject,
+            body: Bytes::new(),
+            open_id: "open".into(),
+            receive_max_payload_bytes: 1024,
+        }
+    }
+
+    #[test]
+    fn feed_open_publishes_on_the_same_base_subject() {
+        let base = "feed.v1.Watch";
+        let open = open(LiveSessionKind::Feed, base, base);
+        verify_offer_identity(&open, &offer(LiveSessionKind::Feed, base)).expect("feed offer");
+    }
+
+    #[test]
+    fn operation_watch_offer_binds_the_operation_route_not_control() {
+        let base = "operation.v1.Billing.Refund";
+        let publish = "operation.v1.Billing.Refund.control";
+        let open = open(LiveSessionKind::OperationWatch, base, publish);
+        verify_offer_identity(&open, &offer(LiveSessionKind::OperationWatch, base))
+            .expect("operation watch offer");
+    }
+
+    #[test]
+    fn operation_watch_rejects_control_subject_as_offer_base() {
+        let base = "operation.v1.Billing.Refund";
+        let publish = "operation.v1.Billing.Refund.control";
+        let open = open(LiveSessionKind::OperationWatch, base, publish);
+        let error = verify_offer_identity(&open, &offer(LiveSessionKind::OperationWatch, publish))
+            .expect_err("control is not the offer base");
+        assert!(error.to_string().contains("base subject"));
+    }
+
+    #[test]
+    fn operation_watch_rejects_feed_session_kind() {
+        let base = "operation.v1.Billing.Refund";
+        let open = open(
+            LiveSessionKind::OperationWatch,
+            base,
+            "operation.v1.Billing.Refund.control",
+        );
+        let error = verify_offer_identity(&open, &offer(LiveSessionKind::Feed, base))
+            .expect_err("kind must match");
+        assert!(error.to_string().contains("session kind"));
+    }
+}

@@ -1041,12 +1041,8 @@ where
     pub async fn watch(
         &self,
     ) -> Result<
-        futures_util::stream::BoxStream<
-            'a,
-            Result<
-                crate::client::OperationEvent<D::Progress, D::Output, serde_json::Value>,
-                crate::client::TrellisClientError,
-            >,
+        crate::live::subscription::LiveSubscription<
+            crate::client::OperationEvent<D::Progress, D::Output, serde_json::Value>,
         >,
         crate::client::TrellisClientError,
     > {

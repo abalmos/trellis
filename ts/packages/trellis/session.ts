@@ -26,7 +26,7 @@ import {
 } from "./participant_runtime/api.ts";
 import type { Codec } from "./generated.ts";
 import { encodeEventSubjectParameterToken } from "./helpers.ts";
-import { openLiveFeed } from "./live/client_open.ts";
+import { openLiveFeed, openLiveOperationWatch } from "./live/client_open.ts";
 import { LiveFeedProvider, parseLiveOpen } from "./live/provider.ts";
 import type { LiveSubscription } from "./live/subscription.ts";
 import { LiveStreamError } from "./live/types.ts";
@@ -1413,6 +1413,12 @@ export type RuntimeOperationControlRequest =
     action: "watch";
     operationId: string;
     includeUpdates?: boolean;
+    observation?: {
+      format: string;
+      type: string;
+      openId: string;
+      receiveMaxPayloadBytes: number;
+    };
   }
   | {
     action: "signal";
@@ -3568,11 +3574,11 @@ export class Trellis<
           ? AsyncResult.from(Promise.resolve(err(error)))
           : this.#requestJson(subject, body as JsonValue, route);
       },
-      watchJson: (subject, body) => {
+      watchJson: (subject, body, decodeEvent) => {
         const error = unavailable?.();
         return error
           ? AsyncResult.from(Promise.resolve(err(error)))
-          : this.#watchJson(subject, body as JsonValue);
+          : this.#watchJson(subject, body as JsonValue, decodeEvent);
       },
       putTransfer: (
         grant: SendTransferGrant,
@@ -5522,142 +5528,98 @@ export class Trellis<
     })());
   }
 
-  #watchJson(
+  #watchJson<T>(
     subject: string,
     body: JsonValue,
+    decodeEvent: (value: unknown) => T | undefined,
   ): AsyncResult<
-    AsyncIterable<Result<JsonValue, TransportError | UnexpectedError>>,
+    LiveSubscription<T>,
     TransportError | UnexpectedError
   > {
     return AsyncResult.from((async () => {
-      const payload = JSON.stringify(body);
-      const inbox = createInbox(this.#inboxPrefix);
-      const authHeaders = await this.createRequestProof(
-        subject,
-        payload,
-        inbox,
-      );
-
-      const headers = natsHeaders();
-      headers.set("proof", authHeaders.proof);
-      headers.set("iat", String(authHeaders.iat));
-      headers.set("request-id", authHeaders.requestId);
-      headers.set("authorization-context", authHeaders.contextDigest);
-      headers.set("session-key", this.#auth.sessionKey);
-
-      const sub = this.#nats.subscribe(inbox);
-
-      try {
-        this.#nats.publish(subject, payload, {
-          headers,
-          reply: inbox,
-        });
-      } catch (cause) {
-        sub.unsubscribe();
+      const record = body && typeof body === "object" && !Array.isArray(body)
+        ? body as { operationId?: unknown; includeUpdates?: unknown }
+        : undefined;
+      if (typeof record?.operationId !== "string") {
         const error = createTransportError({
           code: "trellis.watch.failed",
-          message: "Trellis could not start the operation watch.",
-          hint:
-            "Retry watching the operation. If it keeps failing, reconnect to Trellis and try again.",
-          cause,
+          message: "Operation watch requires a durable operation id.",
+          hint: "Retry watching the operation with a valid operation id.",
           context: { subject },
         });
         recordRuntimeError(error, {
           surface: "operation",
           direction: "client",
           operation: "watchJson",
-          phase: "request_send",
+          phase: "request_encoding",
         });
         return err(error);
       }
-
-      const iterator = sub[Symbol.asyncIterator]();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      let first: IteratorResult<Msg>;
-      try {
-        first = await Promise.race([
-          iterator.next(),
-          new Promise<never>((_, reject) => {
-            timer = setTimeout(
-              () => reject(new Error("operation watch setup timed out")),
-              this.timeout,
-            );
-          }),
-        ]);
-      } catch (cause) {
-        sub.unsubscribe();
+      if (!subject.endsWith(".control")) {
         const error = createTransportError({
           code: "trellis.watch.failed",
-          message: "Trellis could not start the operation watch.",
-          hint:
-            "Retry watching the operation. If it keeps failing, reconnect to Trellis and try again.",
-          cause,
+          message: "Operation watch must open on the control route.",
+          hint: "Use the operation control subject for watch.",
           context: { subject },
         });
         recordRuntimeError(error, {
           surface: "operation",
           direction: "client",
           operation: "watchJson",
-          phase: "response_wait",
+          phase: "request_encoding",
         });
         return err(error);
-      } finally {
-        if (timer !== undefined) clearTimeout(timer);
       }
-
-      return ok((async function* () {
-        try {
-          let next = first;
-          while (!next.done) {
-            const msg = next.value;
-            if (msg.headers?.get("status") === "error") {
-              const error = createTransportError({
-                code: "trellis.watch.failed",
-                message: "Trellis stopped the operation watch.",
-                hint:
-                  "Retry watching the operation. If it keeps happening, reconnect to Trellis and try again.",
-                context: { subject, frame: msg.string() },
-              });
-              recordRuntimeError(error, {
-                surface: "operation",
-                direction: "client",
-                operation: "watchJson",
-                phase: "remote_error",
-              });
-              yield err(error);
-              next = await iterator.next();
-              continue;
-            }
-
-            const json = safeJson(msg).take();
-            if (isErr(json)) {
-              const error = createTransportError({
-                code: "trellis.watch.invalid_response",
-                message: "Trellis returned an invalid watch update.",
-                hint:
-                  "Retry watching the operation. If it keeps happening, reconnect to Trellis and try again.",
-                cause: json.error.cause,
-                context: { subject },
-              });
-              recordRuntimeError(error, {
-                surface: "operation",
-                direction: "client",
-                operation: "watchJson",
-                phase: "response_decoding",
-              });
-              yield err(error);
-              next = await iterator.next();
-              continue;
-            }
-
-            yield ok(json);
-            next = await iterator.next();
-          }
-        } finally {
-          await iterator.return?.();
-          sub.unsubscribe();
-        }
-      })());
+      const operationSubject = subject.slice(0, -".control".length);
+      const cache = this.#auth.authorizationProviderCache;
+      try {
+        const subscription = await openLiveOperationWatch(
+          {
+            nats: this.#nats,
+            inboxPrefix: this.#inboxPrefix,
+            timeoutMs: this.timeout,
+            sessionKey: this.#auth.sessionKey,
+            live: this.connection.live,
+            createRequestProof: (s, p, r) => this.createRequestProof(s, p, r),
+            resolveContext: cache
+              ? (digest) => cache.resolveContext(digest)
+              : undefined,
+            decodeEvent,
+          },
+          operationSubject,
+          subject,
+          {
+            operationId: record.operationId,
+            includeUpdates: record.includeUpdates === true,
+          },
+        );
+        return ok(subscription);
+      } catch (cause) {
+        const error = cause instanceof LiveStreamError
+          ? createTransportError({
+            code: cause.codeString(),
+            message: cause.message,
+            hint:
+              "Retry watching the operation. If it keeps failing, check Trellis runtime health.",
+            cause,
+            context: { subject, operationId: record.operationId },
+          })
+          : createTransportError({
+            code: "trellis.watch.failed",
+            message: "Trellis could not start the operation watch.",
+            hint:
+              "Retry watching the operation. If it keeps failing, reconnect to Trellis and try again.",
+            cause,
+            context: { subject, operationId: record.operationId },
+          });
+        recordRuntimeError(error, {
+          surface: "operation",
+          direction: "client",
+          operation: "watchJson",
+          phase: "handshake",
+        });
+        return err(error);
+      }
     })());
   }
 }

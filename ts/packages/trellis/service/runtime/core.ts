@@ -30,10 +30,16 @@ import {
   OperationAlreadyTerminalError,
   OperationNotFoundError,
   TransferError,
+  TransportError,
   type TrellisErrorInstance,
   UnexpectedError,
   ValidationError,
 } from "../../errors/index.ts";
+import { LiveFeedProvider } from "../../live/provider.ts";
+import {
+  parseOperationWatchOpen,
+  runDelayedOperationSource,
+} from "../../live/operation_source.ts";
 import type { LoggerLike } from "../../globals.ts";
 import { serviceRuntimeLogger } from "./logger.ts";
 import {
@@ -1350,17 +1356,6 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     }
     this.#mountedOperationControls.add(controlSubject);
 
-    const publishFrame = async (reply: string, frame: unknown) => {
-      await this.#nats.publish(reply, JSON.stringify(frame));
-    };
-
-    const publishSnapshot = async (
-      reply: string,
-      snapshot: RuntimeOperationSnapshot,
-    ) => {
-      await publishFrame(reply, { kind: "snapshot", snapshot });
-    };
-
     const respondControlError = (msg: Msg, error: Error | BaseError) => {
       const trellisError = error instanceof BaseError
         ? error
@@ -1379,6 +1374,15 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       queue: routeQueueGroup(controlSubject),
     });
     void (async () => {
+      let liveProvider: LiveFeedProvider | undefined;
+      try {
+        liveProvider = await this.#createOperationLiveProvider(ctx);
+      } catch (error) {
+        this.#log.warn(
+          { error, operation: String(operation) },
+          "Operation live observation unavailable",
+        );
+      }
       for await (const msg of controlSub) {
         const request = safeJson(msg).take();
         if (isErr(request)) {
@@ -1468,173 +1472,72 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
           );
           continue;
         }
-        const snapshot = runtime.snapshot;
         if (control.action === "watch") {
-          if (msg.reply) {
-            const reply = msg.reply;
-            const updateSub = control.includeUpdates
-              ? this.#nats.subscribe(
-                `${ctx.subject}.updates.${control.operationId}`,
-              )
-              : undefined;
-            void (async () => {
-              let ownerEpoch = 0;
-              let updateSequence = 0;
-              let revision = runtime.revision;
-              const durableWatch = (await (await this.operationStoreHandle())
-                .watch(
-                  control.operationId,
-                ).orThrow())[Symbol.asyncIterator]();
-              if (updateSub) await this.#nats.flush();
-              await publishSnapshot(reply, runtime.snapshot);
-              const updates = updateSub
-                ? (async () => {
-                  for await (const updateMsg of updateSub) {
-                    try {
-                      const cache = this.auth.authorizationProviderCache;
-                      if (!cache) throw new Error("authorization unavailable");
-                      await cache.resolveContext(value.caller.contextDigest);
-                    } catch {
-                      updateSub.unsubscribe();
-                      await durableWatch.return?.();
-                      break;
-                    }
-                    const providerAuthorization =
-                      await verifyLocalAuthorization({
-                        kind: "request",
-                        cache: this.auth.authorizationProviderCache,
-                        message: updateMsg,
-                        permission: undefined,
-                        requiredCapabilities: [],
-                        identityOnly: true,
-                      });
-                    const provider = providerAuthorization.take();
-                    if (isErr(provider)) continue;
-                    const decoded = safeJson(updateMsg).take();
-                    if (
-                      isErr(decoded) || !decoded ||
-                      typeof decoded !== "object" || Array.isArray(decoded)
-                    ) continue;
-                    const envelope = decoded as Record<string, unknown>;
-                    const current = await this.loadOperationRecord(
-                      control.operationId,
-                    );
-                    const executor = envelope.ownerExecutorId;
-                    const connectionId = envelope.ownerConnectionId;
-                    const epoch = typeof envelope.ownerEpoch === "string" &&
-                        CANONICAL_POSITIVE_INTEGER.test(envelope.ownerEpoch)
-                      ? Number(envelope.ownerEpoch)
-                      : NaN;
-                    const sequence = typeof envelope.sequence === "string" &&
-                        CANONICAL_POSITIVE_INTEGER.test(envelope.sequence)
-                      ? Number(envelope.sequence)
-                      : NaN;
-                    const parsedUpdate = this.#decodeOperationValue(
-                      ctx,
-                      "update",
-                      envelope.update,
-                    ).take();
-                    if (
-                      isErr(parsedUpdate) ||
-                      typeof executor !== "string" ||
-                      typeof connectionId !== "string" ||
-                      typeof envelope.occurredAt !== "string" ||
-                      envelope.operationId !== control.operationId ||
-                      envelope.apiId !== current?.apiId ||
-                      envelope.operation !== current?.operation ||
-                      envelope.deploymentId !== this.#operationDeploymentId ||
-                      !current ||
-                      !this.#matchesOperationRoute(
-                        current,
-                        operation,
-                        ctx,
-                        value.caller,
-                      ) || current.snapshot.state === "completed" ||
-                      current.snapshot.state === "failed" ||
-                      current.snapshot.state === "cancelled" ||
-                      current.cancelRequestedAt ||
-                      Date.parse(current.leaseExpiresAt) <= Date.now() ||
-                      current.ownerEpoch !== epoch ||
-                      current.ownerInstanceId !== executor ||
-                      current.ownerConnectionId !== connectionId ||
-                      provider.participantId !== this.contractId ||
-                      provider.deploymentId !== this.#operationDeploymentId ||
-                      provider.connectionId !== current.ownerConnectionId ||
-                      !Number.isSafeInteger(epoch) ||
-                      !Number.isSafeInteger(sequence) ||
-                      epoch < ownerEpoch ||
-                      (epoch === ownerEpoch && sequence <= updateSequence)
-                    ) continue;
-                    ownerEpoch = epoch;
-                    updateSequence = sequence;
-                    const wireUpdate = this.#encodeOperationValue(
-                      ctx,
-                      "update",
-                      parsedUpdate,
-                    ).take();
-                    if (isErr(wireUpdate)) continue;
-                    await publishFrame(reply, {
-                      kind: "event",
-                      sequence: current.sequence,
-                      event: {
-                        type: "update",
-                        update: wireUpdate,
-                        snapshot: current.snapshot,
-                      },
-                    });
-                  }
-                })()
-                : Promise.resolve();
-              try {
-                for (;;) {
-                  const next = await durableWatch.next();
-                  if (next.done) break;
-                  const changed = next.value;
-                  const durable = changed.take();
-                  if (isErr(durable)) throw durable.error;
-                  if (!durable.value) break;
-                  if (durable.value.revision <= revision) continue;
-                  revision = durable.value.revision;
-                  if (
-                    !this.#matchesOperationRoute(
-                      durable.value,
+          const opening = parseOperationWatchOpen(request);
+          if (!opening) {
+            respondControlError(
+              msg,
+              new TransportError({
+                code: "trellis.live.invalid_request",
+                message:
+                  "Operation watch requires a live observation envelope.",
+                hint: "Use the live Operation watch client.",
+              }),
+            );
+            continue;
+          }
+          if (!liveProvider) {
+            respondControlError(
+              msg,
+              new AuthError({ reason: "authorization_unavailable" }),
+            );
+            continue;
+          }
+          try {
+            await liveProvider.offer(
+              msg,
+              ctx.subject,
+              opening.observation,
+              {
+                connectionId: value.caller.connectionId,
+                sessionKey: value.caller.sessionKey,
+                principalId: value.caller.principalId,
+                participantId: value.caller.participantId,
+                deploymentId: value.caller.deploymentId ?? "",
+                instanceId: value.caller.instanceId ?? "",
+                contextDigest: value.caller.contextDigest,
+              },
+              async (session) => {
+                await runDelayedOperationSource(
+                  session,
+                  async ({ emit, signal }) => {
+                    await this.#runOperationWatchSource({
                       operation,
                       ctx,
-                      value.caller,
-                    )
-                  ) break;
-                  try {
-                    const cache = this.auth.authorizationProviderCache;
-                    if (!cache) throw new Error("authorization unavailable");
-                    await cache.resolveContext(value.caller.contextDigest);
-                  } catch {
-                    break;
-                  }
-                  await publishSnapshot(reply, durable.value.snapshot);
-                  if (
-                    durable.value.snapshot.state === "completed" ||
-                    durable.value.snapshot.state === "failed" ||
-                    durable.value.snapshot.state === "cancelled"
-                  ) break;
-                }
-              } finally {
-                updateSub?.unsubscribe();
-                await updates;
-              }
-            })().catch((error) => {
-              if (!this.#nats.isClosed()) {
-                this.#log.warn(
-                  { error, operation: String(operation) },
-                  "Operation watch stopped",
+                      operationId: opening.operationId,
+                      includeUpdates: opening.includeUpdates,
+                      caller: value.caller,
+                      emit,
+                      signal,
+                    });
+                  },
                 );
-              }
-            });
+              },
+              "operation-watch",
+            );
+          } catch (cause) {
+            respondControlError(
+              msg,
+              cause instanceof Error ? cause : new Error(String(cause)),
+            );
           }
           continue;
         }
 
         if (control.action === "get") {
-          msg.respond(JSON.stringify({ kind: "snapshot", snapshot }));
+          msg.respond(
+            JSON.stringify({ kind: "snapshot", snapshot: runtime.snapshot }),
+          );
           continue;
         }
 
@@ -1736,6 +1639,250 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
         );
       }
     })();
+  }
+
+  async #createOperationLiveProvider(
+    ctx: RegisteredRuntimeOperationDesc,
+  ): Promise<LiveFeedProvider | undefined> {
+    const cache = this.auth.authorizationProviderCache;
+    const digest = typeof this.auth.contextDigest === "function"
+      ? this.auth.contextDigest()
+      : this.auth.contextDigest;
+    if (!cache || !digest) return undefined;
+    const own = await cache.resolveContext(digest);
+    const provider = new LiveFeedProvider({
+      nats: this.#nats,
+      identity: {
+        connectionId: own.context.connectionId,
+        sessionKey: own.context.sessionKey,
+        principalId: own.context.principalId,
+        participantId: own.context.participantId,
+        deploymentId: own.context.deploymentId ?? "",
+        instanceId: own.context.instanceId ?? "",
+        contextDigest: own.contextDigest,
+      },
+      sign: async (bytes) => await this.auth.sign(bytes),
+    });
+    const observeSub = this.#nats.subscribe(
+      provider.wildcardSubject(ctx.subject),
+    );
+    void (async () => {
+      for await (const msg of observeSub) {
+        await provider.handleControl(msg, async (controlMsg) => {
+          const validated = await this.#authenticateOperationMessage(
+            controlMsg,
+            ctx,
+            false,
+            ctx.permissions?.observe,
+            ctx.observeCapabilities ?? [],
+          );
+          return !isErr(validated.take());
+        });
+      }
+    })();
+    return provider;
+  }
+
+  async #runOperationWatchSource(args: {
+    operation: string;
+    ctx: RegisteredRuntimeOperationDesc;
+    operationId: string;
+    includeUpdates: boolean;
+    caller: VerifiedCaller;
+    emit: (value: unknown) => Promise<void>;
+    signal: AbortSignal;
+  }): Promise<void> {
+    const {
+      operation,
+      ctx,
+      operationId,
+      includeUpdates,
+      caller,
+      emit,
+      signal,
+    } = args;
+    if (signal.aborted) throw new Error("operation watch aborted");
+
+    const updateSub = includeUpdates
+      ? this.#nats.subscribe(`${ctx.subject}.updates.${operationId}`)
+      : undefined;
+    const durableWatch = (await (await this.operationStoreHandle())
+      .watch(operationId)
+      .orThrow())[Symbol.asyncIterator]();
+    const stop = () => {
+      updateSub?.unsubscribe();
+      void durableWatch.return?.();
+    };
+    signal.addEventListener("abort", stop, { once: true });
+
+    try {
+      if (updateSub) await this.#nats.flush();
+      const current = await this.#resolveOperation(operationId);
+      if (
+        !current ||
+        !this.#matchesOperationRoute(current, operation, ctx, caller)
+      ) {
+        throw this.#operationNotFoundError(operationId);
+      }
+      await emit({ kind: "snapshot", snapshot: current.snapshot });
+      if (
+        current.snapshot.state === "completed" ||
+        current.snapshot.state === "failed" ||
+        current.snapshot.state === "cancelled"
+      ) {
+        return;
+      }
+
+      let ownerEpoch = 0;
+      let updateSequence = 0;
+      let revision = current.revision;
+      const updates = updateSub
+        ? (async () => {
+          for await (const updateMsg of updateSub) {
+            if (signal.aborted) break;
+            try {
+              const cache = this.auth.authorizationProviderCache;
+              if (!cache) throw new Error("authorization unavailable");
+              await cache.resolveContext(caller.contextDigest);
+            } catch {
+              stop();
+              break;
+            }
+            const providerAuthorization = await verifyLocalAuthorization({
+              kind: "request",
+              cache: this.auth.authorizationProviderCache,
+              message: updateMsg,
+              permission: undefined,
+              requiredCapabilities: [],
+              identityOnly: true,
+            });
+            const provider = providerAuthorization.take();
+            if (isErr(provider)) continue;
+            const decoded = safeJson(updateMsg).take();
+            if (
+              isErr(decoded) || !decoded ||
+              typeof decoded !== "object" || Array.isArray(decoded)
+            ) continue;
+            const envelope = decoded as Record<string, unknown>;
+            const latest = await this.loadOperationRecord(operationId);
+            const executor = envelope.ownerExecutorId;
+            const connectionId = envelope.ownerConnectionId;
+            const epoch = typeof envelope.ownerEpoch === "string" &&
+                CANONICAL_POSITIVE_INTEGER.test(envelope.ownerEpoch)
+              ? Number(envelope.ownerEpoch)
+              : NaN;
+            const sequence = typeof envelope.sequence === "string" &&
+                CANONICAL_POSITIVE_INTEGER.test(envelope.sequence)
+              ? Number(envelope.sequence)
+              : NaN;
+            const parsedUpdate = this.#decodeOperationValue(
+              ctx,
+              "update",
+              envelope.update,
+            ).take();
+            if (
+              isErr(parsedUpdate) ||
+              typeof executor !== "string" ||
+              typeof connectionId !== "string" ||
+              typeof envelope.occurredAt !== "string" ||
+              envelope.operationId !== operationId ||
+              envelope.apiId !== latest?.apiId ||
+              envelope.operation !== latest?.operation ||
+              envelope.deploymentId !== this.#operationDeploymentId ||
+              !latest ||
+              !this.#matchesOperationRoute(
+                latest,
+                operation,
+                ctx,
+                caller,
+              ) || latest.snapshot.state === "completed" ||
+              latest.snapshot.state === "failed" ||
+              latest.snapshot.state === "cancelled" ||
+              latest.cancelRequestedAt ||
+              Date.parse(latest.leaseExpiresAt) <= Date.now() ||
+              latest.ownerEpoch !== epoch ||
+              latest.ownerInstanceId !== executor ||
+              latest.ownerConnectionId !== connectionId ||
+              provider.participantId !== this.contractId ||
+              provider.deploymentId !== this.#operationDeploymentId ||
+              provider.connectionId !== latest.ownerConnectionId ||
+              !Number.isSafeInteger(epoch) ||
+              !Number.isSafeInteger(sequence) ||
+              epoch < ownerEpoch ||
+              (epoch === ownerEpoch && sequence <= updateSequence)
+            ) continue;
+            ownerEpoch = epoch;
+            updateSequence = sequence;
+            const wireUpdate = this.#encodeOperationValue(
+              ctx,
+              "update",
+              parsedUpdate,
+            ).take();
+            if (isErr(wireUpdate)) continue;
+            await emit({
+              kind: "event",
+              sequence: latest.sequence,
+              event: {
+                type: "update",
+                update: wireUpdate,
+                snapshot: latest.snapshot,
+              },
+            });
+          }
+        })()
+        : Promise.resolve();
+
+      try {
+        for (;;) {
+          if (signal.aborted) throw new Error("operation watch aborted");
+          const next = await durableWatch.next();
+          if (next.done) {
+            throw new Error("operation watch source ended");
+          }
+          const changed = next.value;
+          const durable = changed.take();
+          if (isErr(durable)) throw durable.error;
+          if (!durable.value) {
+            throw new Error("operation watch source ended");
+          }
+          if (durable.value.revision <= revision) continue;
+          revision = durable.value.revision;
+          if (
+            !this.#matchesOperationRoute(
+              durable.value,
+              operation,
+              ctx,
+              caller,
+            )
+          ) {
+            throw new Error("operation watch source ended");
+          }
+          try {
+            const cache = this.auth.authorizationProviderCache;
+            if (!cache) throw new Error("authorization unavailable");
+            await cache.resolveContext(caller.contextDigest);
+          } catch {
+            throw new Error("authorization unavailable");
+          }
+          await emit({
+            kind: "snapshot",
+            snapshot: durable.value.snapshot,
+          });
+          if (
+            durable.value.snapshot.state === "completed" ||
+            durable.value.snapshot.state === "failed" ||
+            durable.value.snapshot.state === "cancelled"
+          ) {
+            return;
+          }
+        }
+      } finally {
+        stop();
+        await updates;
+      }
+    } finally {
+      signal.removeEventListener("abort", stop);
+    }
   }
 
   mountRuntime(

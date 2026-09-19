@@ -1993,6 +1993,7 @@ impl TrellisClient {
             kind: trellis_protocol::LiveSessionKind::Feed,
             api_id: D::API_ID,
             base_subject: &base_subject,
+            publish_subject: &base_subject,
             body: Bytes::from(serde_json::to_vec(&body)?),
             open_id,
             receive_max_payload_bytes: self.nats.max_payload() as u64,
@@ -2099,62 +2100,6 @@ impl OperationTransport for TrellisClient {
         TrellisClient::request_json_value(self, &subject, &body).await
     }
 
-    async fn watch_json_value<'a>(
-        &'a self,
-        subject: String,
-        body: Value,
-    ) -> Result<BoxStream<'a, Result<Value, TrellisClientError>>, TrellisClientError> {
-        let payload = Bytes::from(serde_json::to_vec(&body)?);
-        let nats = self.nats();
-        let inbox = nats.new_inbox();
-        let headers = self.signed_headers(&subject, &inbox, &payload)?;
-        let mut subscriber = timeout(
-            std::time::Duration::from_millis(self.timeout_ms),
-            nats.subscribe(inbox.clone()),
-        )
-        .await
-        .map_err(|_| TrellisClientError::Timeout)?
-        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-
-        timeout(
-            std::time::Duration::from_millis(self.timeout_ms),
-            nats.publish_with_reply_and_headers(subject, inbox, headers, payload),
-        )
-        .await
-        .map_err(|_| TrellisClientError::Timeout)?
-        .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-
-        let first = timeout(
-            std::time::Duration::from_millis(self.timeout_ms),
-            subscriber.next(),
-        )
-        .await
-        .map_err(|_| TrellisClientError::Timeout)?
-        .ok_or_else(|| TrellisClientError::NatsRequest("operation watch closed".to_owned()))?;
-        let first = decode_watch_message(first)?;
-        let first_terminal = is_terminal_event(&first);
-
-        let stream = stream::once(async move { Ok(first) }).chain(stream::try_unfold(
-            (subscriber, first_terminal),
-            |(mut subscriber, done)| async move {
-                if done {
-                    return Ok(None);
-                }
-
-                match subscriber.next().await {
-                    Some(message) => {
-                        let event = decode_watch_message(message)?;
-                        let terminal = is_terminal_event(&event);
-                        Ok(Some((event, (subscriber, terminal))))
-                    }
-                    None => Ok(None),
-                }
-            },
-        ));
-
-        Ok(Box::pin(stream) as BoxStream<'a, Result<Value, TrellisClientError>>)
-    }
-
     async fn put_upload_transfer(
         &self,
         grant: UploadTransferGrant,
@@ -2209,17 +2154,6 @@ fn decode_json_message(message: async_nats::Message) -> Result<Value, TrellisCli
     }
 
     Ok(serde_json::from_slice(&message.payload)?)
-}
-
-fn decode_watch_message(message: async_nats::Message) -> Result<Value, TrellisClientError> {
-    decode_json_message(message)
-}
-
-fn is_terminal_event(event: &Value) -> bool {
-    matches!(
-        event.get("type").and_then(Value::as_str),
-        Some("completed" | "failed" | "cancelled")
-    )
 }
 
 fn event_consumer_config(

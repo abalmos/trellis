@@ -17,6 +17,9 @@ import type { LiveSessionManager } from "./manager.ts";
 
 export const LIVE_VERSION = "trellis.live.v1";
 
+/** Live session kind advertised on a signed offer. */
+export type LiveSessionKind = "feed" | "operation-watch";
+
 export type LiveProof = {
   proof: string;
   iat: number;
@@ -38,11 +41,12 @@ export type LiveOpenHost<T> = {
   resolveContext?: (
     digest: string,
   ) => Promise<{ context: { sessionKey: string } }>;
-  decodeEvent: (value: unknown) => T;
+  decodeEvent: (value: unknown) => T | undefined;
 };
 
 type LiveOfferWire = {
   type: string;
+  kind?: LiveSessionKind;
   openId: string;
   requestId: string;
   sessionId: string;
@@ -97,16 +101,12 @@ async function request(
   }
 }
 
-/** Open one live session and return a prepared handle. First next() activates. */
+/** Open one live Feed session and return a prepared handle. First next() activates. */
 export async function openLiveFeed<T>(
   host: LiveOpenHost<T>,
   subject: string,
   inputJson: string,
 ): Promise<LiveSubscription<T>> {
-  if (!host.live.isAvailable()) {
-    throw new LiveStreamError("disconnected", "live manager is unavailable");
-  }
-  const permit = host.live.admitConsumer();
   const openId = liveGenerateNonce();
   const maxPayload = Number(host.nats.info?.max_payload ?? 1_048_576);
   const body = JSON.stringify({
@@ -116,8 +116,62 @@ export async function openLiveFeed<T>(
     receiveMaxPayloadBytes: maxPayload,
     input: JSON.parse(inputJson),
   });
-  const response = await request(host, subject, body);
-  const offer = await verifyOffer(host, subject, openId, response);
+  return await openLiveSession(host, subject, subject, "feed", body, openId);
+}
+
+/**
+ * Open one Operation-watch live session on the existing control route.
+ * Offer `baseSubject` is the operation route, not `.control`.
+ */
+export async function openLiveOperationWatch<T>(
+  host: LiveOpenHost<T>,
+  operationSubject: string,
+  controlSubject: string,
+  args: { operationId: string; includeUpdates?: boolean },
+): Promise<LiveSubscription<T>> {
+  const openId = liveGenerateNonce();
+  const maxPayload = Number(host.nats.info?.max_payload ?? 1_048_576);
+  const body = JSON.stringify({
+    action: "watch",
+    operationId: args.operationId,
+    ...(args.includeUpdates ? { includeUpdates: true } : {}),
+    observation: {
+      format: LIVE_VERSION,
+      type: "open",
+      openId,
+      receiveMaxPayloadBytes: maxPayload,
+    },
+  });
+  return await openLiveSession(
+    host,
+    controlSubject,
+    operationSubject,
+    "operation-watch",
+    body,
+    openId,
+  );
+}
+
+async function openLiveSession<T>(
+  host: LiveOpenHost<T>,
+  requestSubject: string,
+  expectedBaseSubject: string,
+  expectedKind: LiveSessionKind,
+  body: string,
+  openId: string,
+): Promise<LiveSubscription<T>> {
+  if (!host.live.isAvailable()) {
+    throw new LiveStreamError("disconnected", "live manager is unavailable");
+  }
+  const permit = host.live.admitConsumer();
+  const response = await request(host, requestSubject, body);
+  const offer = await verifyOffer(
+    host,
+    expectedBaseSubject,
+    openId,
+    expectedKind,
+    response,
+  );
   const core = new ConsumerCore<T>(offer.sessionId);
   const cancellation = new LiveCancellation();
   const seq = { n: 0 };
@@ -151,6 +205,7 @@ async function verifyOffer(
   host: LiveOpenHost<unknown>,
   baseSubject: string,
   openId: string,
+  expectedKind: LiveSessionKind,
   response: Msg,
 ): Promise<LiveOfferWire> {
   const value = JSON.parse(new TextDecoder().decode(response.data)) as
@@ -163,6 +218,12 @@ async function verifyOffer(
     throw new LiveStreamError(
       value.code ?? "invalid_request",
       `live open rejected with '${value.code ?? value.type}'`,
+    );
+  }
+  if (value.kind !== expectedKind) {
+    throw new LiveStreamError(
+      "protocol_error",
+      "offer session kind does not match",
     );
   }
   if (value.openId !== openId) {
@@ -283,8 +344,10 @@ async function runPump<T>(
       if (frame.sessionId !== offer.sessionId) continue;
       if (frame.type === "data") {
         try {
+          const value = host.decodeEvent(frame.value);
+          if (value === undefined) continue;
           core.admit({
-            value: host.decodeEvent(frame.value),
+            value,
             encodedLen: message.data.length,
           });
         } catch (error) {

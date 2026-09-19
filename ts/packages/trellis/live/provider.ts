@@ -13,7 +13,7 @@ import {
   liveParseControl,
   liveServerProofDigest,
 } from "./protocol.ts";
-import { LIVE_VERSION } from "./client_open.ts";
+import { LIVE_VERSION, type LiveSessionKind } from "./client_open.ts";
 import type { LiveControlWire } from "./protocol.ts";
 
 const WINDOW_FRAMES = 64;
@@ -110,6 +110,7 @@ export class LiveFeedProvider {
       emit: (value: unknown) => Promise<void>;
       signal: AbortSignal;
     }) => Promise<void>,
+    kind: LiveSessionKind = "feed",
   ): Promise<void> {
     const sessionId = liveGenerateNonce();
     const dataSubject = liveDataSubject(
@@ -172,7 +173,7 @@ export class LiveFeedProvider {
     const offer = {
       format: LIVE_VERSION,
       type: "offer",
-      kind: "feed",
+      kind,
       openId: open.openId,
       requestId: msg.headers?.get("request-id") ?? "",
       sessionId,

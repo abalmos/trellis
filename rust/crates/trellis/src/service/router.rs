@@ -617,6 +617,15 @@ impl Router {
         let update_schema_json = D::UPDATE_SCHEMA_JSON;
         let subject = self.descriptor_subject("operation", D::API_ID, D::KEY, D::SUBJECT);
         let handler_subject = subject.clone();
+        let live_owner = Arc::clone(&self.live_owner);
+        let provider_deployment_id = self
+            .provider_deployment_id
+            .clone()
+            .unwrap_or_else(|| "unbound-deployment".to_owned());
+        let provider_instance_id = self
+            .provider_instance_id
+            .clone()
+            .unwrap_or_else(|| "unbound-instance".to_owned());
         let caller_capabilities = self.descriptor_capabilities(D::CALLER_CAPABILITIES);
         let observe_capabilities = self.descriptor_capabilities(D::OBSERVE_CAPABILITIES);
         let cancel_capabilities = self.descriptor_capabilities(D::CANCEL_CAPABILITIES);
@@ -681,21 +690,23 @@ impl Router {
                     let watch = Arc::clone(&watch);
                     let cancel = Arc::clone(&cancel);
                     let signal = Arc::clone(&signal);
+                    let live_owner = live_owner.clone();
+                    let provider_deployment_id = provider_deployment_id.clone();
+                    let provider_instance_id = provider_instance_id.clone();
                     let subject = handler_subject.clone();
-                    let request = serde_json::from_slice::<OperationControlRequest>(&payload)
-                        .map_err(ServerError::Json);
                     Box::pin(async move {
-                        let request = request?;
+                        let request = serde_json::from_slice::<OperationControlRequest>(&payload)
+                            .map_err(ServerError::Json)?;
                         tracing::debug!(
                             subject = %subject,
                             action = %request.action,
                             operation_id = %request.operation_id,
                             "operation control request"
                         );
-                        let frames = match request.action.as_str() {
-                            "get" => HandlerResponse::Frames(vec![snapshot_frame::<D>(
+                        match request.action.as_str() {
+                            "get" => Ok(HandlerResponse::Frames(vec![snapshot_frame::<D>(
                                 get.get(ctx, request.operation_id).await?,
-                            )?]),
+                            )?])),
                             "watch" => {
                                 let include_updates = request.include_updates.unwrap_or(false);
                                 if include_updates && update_schema_json.is_none() {
@@ -704,16 +715,59 @@ impl Router {
                                         action: "watch:updates".to_string(),
                                     });
                                 }
-                                HandlerResponse::Stream(watch_response_stream::<D, D::Update>(
-                                    watch.watch(ctx, request.operation_id),
-                                    include_updates,
-                                    update_schema_json,
-                                ))
+                                let owner = live_owner
+                                    .read()
+                                    .ok()
+                                    .and_then(|owner| owner.clone())
+                                    .ok_or_else(|| {
+                                        ServerError::Nats(format!(
+                                            "operation route '{subject}' has no live provider owner"
+                                        ))
+                                    })?;
+                                let opening =
+                                    crate::service::live_router::parse_operation_watch_open(
+                                        &payload,
+                                    )?;
+                                let include_updates = opening.include_updates;
+                                let cancellation = crate::live::LiveCancellation::new();
+                                let factory_watch = Arc::clone(&watch);
+                                let factory_ctx = ctx.clone();
+                                let factory_operation_id = opening.operation_id.clone();
+                                let source_factory = move || {
+                                    crate::service::live_router::source_from_watch_frames(
+                                        watch_response_stream::<D, D::Update>(
+                                            factory_watch
+                                                .watch(factory_ctx, factory_operation_id),
+                                            include_updates,
+                                            update_schema_json,
+                                        ),
+                                    )
+                                };
+                                let reserved = crate::service::live_router::reserve_operation_watch::<
+                                    D,
+                                    _,
+                                >(
+                                    owner.client(),
+                                    owner.manager()?,
+                                    &crate::service::live_router::OperationWatchOpenRequest {
+                                        request: ctx,
+                                        inputs: crate::service::live_router::OperationWatchOpenInputs {
+                                            base_subject: subject,
+                                            provider_instance_id,
+                                            provider_deployment_id,
+                                        },
+                                        opening,
+                                        cancellation,
+                                    },
+                                    source_factory,
+                                )
+                                .await?;
+                                Ok(HandlerResponse::LivePrepared(Box::new(reserved.prepared)))
                             }
                             "cancel" if D::CANCELABLE => {
-                                HandlerResponse::Frames(vec![snapshot_frame::<D>(
+                                Ok(HandlerResponse::Frames(vec![snapshot_frame::<D>(
                                     cancel.cancel(ctx, request.operation_id).await?,
-                                )?])
+                                )?]))
                             }
                             "signal" => {
                                 let signal_name = request.signal.ok_or_else(|| {
@@ -739,19 +793,16 @@ impl Router {
                                         format!("failed to serialize signal schema: {e}")
                                     ))?;
                                 validate_input_schema(&signal_schema_str, signal_value)?;
-                                HandlerResponse::Frames(vec![signal_frame::<D>(
+                                Ok(HandlerResponse::Frames(vec![signal_frame::<D>(
                                     signal.signal(ctx, request.operation_id, signal_name, request.input)
                                         .await?,
-                                )?])
+                                )?]))
                             }
-                            action => {
-                                return Err(ServerError::InvalidOperationControlAction {
-                                    subject,
-                                    action: action.to_string(),
-                                })
-                            }
-                        };
-                        Ok(frames)
+                            action => Err(ServerError::InvalidOperationControlAction {
+                                subject,
+                                action: action.to_string(),
+                            }),
+                        }
                     })
                 },
             ),
@@ -1079,7 +1130,7 @@ where
 #[cfg(test)]
 mod tests {
 
-    use futures_util::{stream, StreamExt};
+    use futures_util::stream;
 
     use super::*;
 
@@ -1177,17 +1228,11 @@ mod tests {
                 Bytes::from_static(br#"{"action":"watch","operationId":"op-1"}"#),
                 context(),
             )
-            .await
-            .expect("open default watch");
-        let HandlerResponse::Stream(mut stream) = response else {
-            panic!("watch should stream");
-        };
-        let frame = stream.next().await.expect("terminal frame").expect("frame");
-        assert_eq!(
-            serde_json::from_slice::<Value>(&frame).unwrap()["snapshot"]["state"],
-            "completed"
+            .await;
+        assert!(
+            matches!(response, Err(ServerError::Nats(message)) if message.contains("live provider owner")),
+            "a watch route without a live owner must fail closed, not stream"
         );
-        assert!(stream.next().await.is_none());
 
         for payload in [
             br#"{"action":"cancel","operationId":"op-1"}"#.as_slice(),
