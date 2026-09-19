@@ -290,8 +290,11 @@ Deno.test("generated TypeScript caller reaches Rust provider", async () => {
         }).orThrow();
         let update = (await watched.next()).value;
         while (update?.type !== "update") update = (await watched.next()).value;
-        assert(update);
-        assertEquals(update.update.value, "transient");
+        assert(update?.type === "update");
+        assertEquals(
+          (update.update as typeof transientProgress).value,
+          "transient",
+        );
         assertEquals(update.update, transientProgress);
         const afterUpdate = await resumedLive.get().orThrow();
         assert(afterUpdate.revision >= signal.snapshot.revision);
@@ -877,7 +880,7 @@ Deno.test("generated runtime workflows", async (t) => {
                       }`,
                     );
                   }
-                  assert(update);
+                  assert(update?.type === "update");
                   assertEquals(update.update, transientProgress);
                 }
               } finally {

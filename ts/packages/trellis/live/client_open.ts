@@ -164,41 +164,46 @@ async function openLiveSession<T>(
     throw new LiveStreamError("disconnected", "live manager is unavailable");
   }
   const permit = host.live.admitConsumer();
-  const response = await request(host, requestSubject, body);
-  const offer = await verifyOffer(
-    host,
-    expectedBaseSubject,
-    openId,
-    expectedKind,
-    response,
-  );
-  const core = new ConsumerCore<T>(offer.sessionId);
-  const cancellation = new LiveCancellation();
-  const seq = { n: 0 };
-  const closeExchange = cancellation.cancelled().then(async () => {
-    try {
-      await sendControl(host, offer, {
-        format: LIVE_VERSION,
-        type: "control",
-        sessionId: offer.sessionId,
-        controlSeq: String(++seq.n),
-        action: "close",
-        reason: "cancelled",
-        receivedSeq: String(core.receivedSeq()),
-        consumedSeq: String(core.consumedSeq()),
-      });
-    } catch {
-      // Close is best-effort once the local handle is gone.
-    }
-  });
-  const subscription = new LiveSubscription(
-    core,
-    cancellation,
-    permit,
-    closeExchange,
-  );
-  void runPump(host, core, cancellation, offer, seq);
-  return subscription;
+  try {
+    const response = await request(host, requestSubject, body);
+    const offer = await verifyOffer(
+      host,
+      expectedBaseSubject,
+      openId,
+      expectedKind,
+      response,
+    );
+    const core = new ConsumerCore<T>(offer.sessionId);
+    const cancellation = new LiveCancellation();
+    const seq = { n: 0 };
+    const closeExchange = cancellation.cancelled().then(async () => {
+      try {
+        await sendControl(host, offer, {
+          format: LIVE_VERSION,
+          type: "control",
+          sessionId: offer.sessionId,
+          controlSeq: String(++seq.n),
+          action: "close",
+          reason: "cancelled",
+          receivedSeq: String(core.receivedSeq()),
+          consumedSeq: String(core.consumedSeq()),
+        });
+      } catch {
+        // Close is best-effort once the local handle is gone.
+      }
+    });
+    const subscription = new LiveSubscription(
+      core,
+      cancellation,
+      permit,
+      closeExchange,
+    );
+    void runPump(host, core, cancellation, offer, seq);
+    return subscription;
+  } catch (cause) {
+    permit[Symbol.dispose]();
+    throw cause;
+  }
 }
 
 async function verifyOffer(

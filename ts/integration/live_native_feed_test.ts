@@ -403,6 +403,100 @@ Deno.test("NX06 source starts once per session", async () => {
   });
 });
 
+Deno.test("NX09 reconnect opens a new Watch without reviving the old session", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const identity = await runtime.registerService({
+      name: "nx09-feed-provider",
+      contract: participants.Provider.participant,
+    });
+    const service = await TrellisService.connect({
+      trellisUrl: runtime.trellisUrl,
+      participant: participants.Provider.participant,
+      seed: identity.seed,
+    }).orThrow();
+    let starts = 0;
+    await service.handleWatch(async ({ emit, signal }) => {
+      starts += 1;
+      await emit({ value: `gen-${starts}` }).orThrow();
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          resolve();
+          return;
+        }
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+    const serviceExit = service.wait();
+    const firstCaller = await runtime.connectClient({
+      name: "nx09-caller-a",
+      contract: participants.Caller.participant,
+    });
+    try {
+      const first = await firstCaller.watch({}).orThrow();
+      const firstIterator = first[Symbol.asyncIterator]();
+      assertEquals((await firstIterator.next()).value?.value, "gen-1");
+      await firstCaller.connection.close();
+      const leftover = await Promise.race([
+        firstIterator.next().then((item) => item.done === true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_000)),
+      ]);
+      assert(leftover, "closed connection must end the old iterator");
+      const secondCaller = await runtime.connectClient({
+        name: "nx09-caller-b",
+        contract: participants.Caller.participant,
+      });
+      try {
+        const second = await secondCaller.watch({}).orThrow();
+        const secondIterator = second[Symbol.asyncIterator]();
+        assertEquals((await secondIterator.next()).value?.value, "gen-2");
+        await secondIterator.return?.();
+      } finally {
+        await secondCaller.connection.close();
+      }
+    } finally {
+      await firstCaller.connection.close();
+      await service.stop();
+      await serviceExit;
+    }
+  });
+});
+
+Deno.test("NX10 setup timeout releases consumer admission", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const identity = await runtime.registerService({
+      name: "nx10-feed-provider",
+      contract: participants.Provider.participant,
+    });
+    const service = await TrellisService.connect({
+      trellisUrl: runtime.trellisUrl,
+      participant: participants.Provider.participant,
+      seed: identity.seed,
+    }).orThrow();
+    const serviceExit = service.wait();
+    const caller = await runtime.connectClient({
+      name: "nx10-caller",
+      contract: participants.Caller.participant,
+    });
+    try {
+      const missing = await caller.watch({});
+      assert(missing.isErr(), "watch without a handler must fail setup");
+      await service.handleWatch(async ({ emit }) => {
+        await emit({ value: "nx10" }).orThrow();
+      });
+      const feed = await caller.watch({}).orThrow();
+      assertEquals(
+        (await feed[Symbol.asyncIterator]().next()).value?.value,
+        "nx10",
+      );
+      await feed[Symbol.asyncIterator]().return?.();
+    } finally {
+      await caller.connection.close();
+      await service.stop();
+      await serviceExit;
+    }
+  });
+});
+
 Deno.test("NX08 consumer drop does not throw", async () => {
   await withTrellisRuntime(async (runtime) => {
     const identity = await runtime.registerService({

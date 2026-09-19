@@ -85,8 +85,10 @@ impl LiveProviderOwner {
 
 /// Inputs for one provider Feed opening.
 pub(crate) struct FeedOpenInputs {
+    #[expect(dead_code, reason = "identity retained for live open diagnostics")]
     pub api_id: String,
     pub base_subject: String,
+    #[expect(dead_code, reason = "identity retained for live open diagnostics")]
     pub provider_instance_id: String,
     pub provider_deployment_id: String,
 }
@@ -732,6 +734,7 @@ pub(crate) fn sign_live_offer(
 /// # Errors
 ///
 /// Returns an error for an invalid subject or connection id.
+#[expect(dead_code, reason = "subject helper for live route diagnostics")]
 pub(crate) fn owner_control_wildcard(
     base_subject: &str,
     provider_connection_id: &str,
@@ -744,6 +747,7 @@ pub(crate) fn owner_control_wildcard(
 /// # Errors
 ///
 /// Returns an error for an invalid connection id or session id.
+#[expect(dead_code, reason = "subject helper for live route diagnostics")]
 pub(crate) fn data_subject(
     provider_connection_id: &str,
     consumer_connection_id: &str,
@@ -754,6 +758,7 @@ pub(crate) fn data_subject(
 
 /// Return whether one parsed opening body is a live open envelope.
 #[must_use]
+#[expect(dead_code, reason = "opening discriminator for live route diagnostics")]
 pub(crate) fn is_live_open_body(payload: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|value| {
         value.get("format").and_then(|format| format.as_str())
@@ -764,12 +769,14 @@ pub(crate) fn is_live_open_body(payload: &[u8]) -> bool {
 
 /// Map one authority loss into a setup rejection.
 #[must_use]
+#[expect(dead_code, reason = "authority mapping for live route diagnostics")]
 pub(crate) fn authority_rejection(lost: &LiveAuthorityLost) -> ServerError {
     ServerError::Nats(format!("live authority unavailable: {lost:?}"))
 }
 
 /// Map one wire error into a setup rejection.
 #[must_use]
+#[expect(dead_code, reason = "wire mapping for live route diagnostics")]
 pub(crate) fn wire_rejection(code: LiveErrorCode) -> ServerError {
     ServerError::Nats(format!("live open rejected: {code:?}"))
 }

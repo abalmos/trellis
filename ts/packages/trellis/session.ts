@@ -3261,7 +3261,11 @@ export class Trellis<
         // Feed cleanup must not depend on optional telemetry.
       }
     };
-    const closeOnNats = () => finish("unavailable");
+    let subscription: FeedSubscription<TEvent> | undefined;
+    const closeOnNats = () => {
+      subscription?.close();
+      finish("unavailable");
+    };
     return AsyncResult.from(
       (async (): Promise<Result<FeedSubscription<TEvent>, BaseError>> => {
         const payload = encodeRuntimeSchema(descriptor.input, input).take();
@@ -3300,7 +3304,7 @@ export class Trellis<
         }
         try {
           const cache = this.#auth.authorizationProviderCache;
-          const subscription = await openLiveFeed(
+          subscription = await openLiveFeed(
             {
               nats: this.#nats,
               inboxPrefix: this.#inboxPrefix,
@@ -3324,7 +3328,7 @@ export class Trellis<
             payload,
           );
           const abort = () => {
-            subscription.close();
+            subscription?.close();
             finish("cancelled");
           };
           opts?.signal?.addEventListener("abort", abort, { once: true });
@@ -3339,7 +3343,7 @@ export class Trellis<
             // The acknowledged subscription remains owned even without telemetry.
           }
           const _ = route;
-          return ok(subscription);
+          return ok(subscription!);
         } catch (cause) {
           const error = cause instanceof LiveStreamError
             ? createTransportError({
