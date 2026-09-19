@@ -27,6 +27,10 @@ import {
 } from "./participant_runtime/api.ts";
 import type { Codec } from "./generated.ts";
 import { encodeEventSubjectParameterToken } from "./helpers.ts";
+import { openLiveFeed } from "./live/client_open.ts";
+import { LiveFeedProvider, parseLiveOpen } from "./live/provider.ts";
+import type { LiveSubscription } from "./live/subscription.ts";
+import { LiveStreamError } from "./live/types.ts";
 import type { ParticipantKvMetadata } from "./participant_runtime/metadata.ts";
 import type { EventConsumerResourceBinding } from "./participant_runtime/schemas.ts";
 import type { StaticDecode } from "typebox";
@@ -1725,7 +1729,7 @@ export type FeedSubscribeOpts = {
   signal?: AbortSignal;
 };
 
-export type FeedSubscription<TEvent> = AsyncIterable<TEvent>;
+export type FeedSubscription<TEvent> = LiveSubscription<TEvent>;
 
 export type FeedInputBuilder<TInput, TEvent> = {
   input(input: TInput): {
@@ -3263,11 +3267,6 @@ export class Trellis<
           "trellis.side": "client",
           "trellis.reason": reason,
         });
-        const span = trace.getTracer("@qlever-llc/trellis").startSpan(
-          "trellis.feed.close",
-          { attributes: { "trellis.route": route, "trellis.reason": reason } },
-        );
-        span.end();
       } catch {
         // Feed cleanup must not depend on optional telemetry.
       }
@@ -3285,7 +3284,6 @@ export class Trellis<
           });
           return payload;
         }
-
         const subject = this.template(
           descriptor.subject,
           input as Record<string, unknown>,
@@ -3299,13 +3297,6 @@ export class Trellis<
           });
           return subject;
         }
-
-        const inbox = createInbox(this.#inboxPrefix);
-        const authHeaders = await this.createRequestProof(
-          subject,
-          payload,
-          inbox,
-        );
         if (opts?.signal?.aborted) {
           setupReason = "cancelled";
           const error = createTransportError({
@@ -3315,269 +3306,76 @@ export class Trellis<
             hint: "Retry the subscription if the feed is still needed.",
             context: { feed, subject },
           });
-          recordRuntimeError(error, {
-            surface: "feed",
-            direction: "client",
-            operation: feed,
-            phase: "handshake",
-          });
           return err(error);
         }
-        const headers = natsHeaders();
-        headers.set("proof", authHeaders.proof);
-        headers.set("iat", String(authHeaders.iat));
-        headers.set("request-id", authHeaders.requestId);
-        headers.set("authorization-context", authHeaders.contextDigest);
-        headers.set("session-key", this.#auth.sessionKey);
-        injectTraceContext(createNatsHeaderCarrier(headers));
-
-        const sub = this.#nats.subscribe(inbox);
-        const iterator = sub[Symbol.asyncIterator]();
-        let feedId: string | undefined;
-        let cancelRequested = false;
-        let cancelSent = false;
-        let controlSubject: string | undefined;
-        const cancel = async () => {
-          cancelRequested = true;
-          if (
-            cancelSent || controlSubject === undefined || feedId === undefined
-          ) return;
-          cancelSent = true;
-          try {
-            const cancelPayload = JSON.stringify({
-              _trellisFeedCancel: inbox,
-              feedId,
-            });
-            const auth = await this.createRequestProof(
-              controlSubject,
-              cancelPayload,
-              inbox,
-            );
-            const cancelHeaders = natsHeaders();
-            cancelHeaders.set("proof", auth.proof);
-            cancelHeaders.set("iat", String(auth.iat));
-            cancelHeaders.set("request-id", auth.requestId);
-            cancelHeaders.set("authorization-context", auth.contextDigest);
-            cancelHeaders.set("session-key", this.#auth.sessionKey);
-            injectTraceContext(createNatsHeaderCarrier(cancelHeaders));
-            this.#nats.publish(controlSubject, cancelPayload, {
-              headers: cancelHeaders,
-              reply: inbox,
-            });
-          } catch {
-            // Best effort: the transport may already be closing with the feed.
-          }
-        };
-        const abort = () => {
-          sub.unsubscribe();
-          void cancel();
-          finish("cancelled");
-        };
-        opts?.signal?.addEventListener("abort", abort, { once: true });
-
         try {
-          this.#nats.publish(subject, payload, { headers, reply: inbox });
-        } catch (cause) {
-          opts?.signal?.removeEventListener("abort", abort);
-          sub.unsubscribe();
-          await cancel();
-          const error = createTransportError({
-            code: "trellis.feed.subscribe_failed",
-            message: "Trellis could not subscribe to the feed.",
-            hint:
-              "Retry the subscription. If it keeps failing, check Trellis runtime health.",
-            cause,
-            context: { feed, subject },
-          });
-          recordRuntimeError(error, {
-            surface: "feed",
-            direction: "client",
-            operation: feed,
-            phase: "request_send",
-          });
-          return err(error);
-        }
-
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        let abortHandler: (() => void) | undefined;
-        const handshakePromises: Array<
-          Promise<IteratorResult<Msg> | "aborted" | "timeout">
-        > = [
-          iterator.next(),
-          new Promise<"timeout">((resolve) => {
-            timeoutId = setTimeout(() => resolve("timeout"), this.timeout);
-          }),
-        ];
-        const signal = opts?.signal;
-        if (signal) {
-          handshakePromises.push(
-            new Promise<"aborted">((resolve) => {
-              abortHandler = () => resolve("aborted");
-              signal.addEventListener("abort", abortHandler, { once: true });
-            }),
-          );
-        }
-
-        const firstFrame = await Promise.race(handshakePromises);
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
-        if (signal && abortHandler) {
-          signal.removeEventListener("abort", abortHandler);
-        }
-        if (firstFrame === "timeout" || firstFrame === "aborted") {
-          setupReason = firstFrame === "aborted" ? "cancelled" : "unavailable";
-          opts?.signal?.removeEventListener("abort", abort);
-          sub.unsubscribe();
-          await cancel();
-          const error = createTransportError({
-            code: firstFrame === "timeout"
-              ? "trellis.feed.subscribe_timeout"
-              : "trellis.feed.subscribe_aborted",
-            message: firstFrame === "timeout"
-              ? "Trellis did not receive a feed acknowledgement."
-              : "The feed subscription was aborted before Trellis acknowledged it.",
-            hint: firstFrame === "timeout"
-              ? "Check that the target service is running and has the current deployment digest, then retry."
-              : "Retry the subscription if the feed is still needed.",
-            context: { feed, subject },
-          });
-          recordRuntimeError(error, {
-            surface: "feed",
-            direction: "client",
-            operation: feed,
-            phase: "handshake",
-          });
-          return err(error);
-        }
-        if (firstFrame.done) {
-          setupReason = "unavailable";
-          opts?.signal?.removeEventListener("abort", abort);
-          sub.unsubscribe();
-          await cancel();
-          const error = createTransportError({
-            code: "trellis.feed.subscribe_closed",
-            message: "Trellis closed the feed before acknowledging it.",
-            hint:
-              "Retry the subscription. If it keeps failing, check Trellis runtime health.",
-            context: { feed, subject },
-          });
-          recordRuntimeError(error, {
-            surface: "feed",
-            direction: "client",
-            operation: feed,
-            phase: "handshake",
-          });
-          return err(error);
-        }
-        const firstMessage = firstFrame.value;
-        controlSubject = firstMessage.headers?.get("feed-control-subject");
-        feedId = firstMessage.headers?.get("feed-id");
-        if (cancelRequested) await cancel();
-        if (firstMessage.headers?.get("status") === "error") {
-          opts?.signal?.removeEventListener("abort", abort);
-          sub.unsubscribe();
-          await cancel();
-          const error = createTransportError({
-            code: "trellis.feed.failed",
-            message: "Trellis rejected the feed subscription.",
-            hint:
-              "Retry the subscription. If it keeps failing, check Trellis runtime health and permissions.",
-            context: { feed, subject, frame: firstMessage.string() },
-          });
-          recordRuntimeError(error, {
-            surface: "feed",
-            direction: "client",
-            operation: feed,
-            phase: "remote_error",
-          });
-          return err(error);
-        }
-        const firstEvent = firstMessage.headers?.get("feed-status") === "ready"
-          ? undefined
-          : firstMessage;
-
-        const eventSchema = descriptor.event;
-        owned = true;
-        this.#feedClosers.add(closeOnNats);
-        try {
-          recordCatalogUpDown("trellis.feed.active", 1, {
-            "trellis.side": "client",
-          });
-          counted = true;
-          const span = trace.getTracer("@qlever-llc/trellis").startSpan(
-            "trellis.feed.open",
+          const cache = this.#auth.authorizationProviderCache;
+          const subscription = await openLiveFeed(
             {
-              attributes: { "trellis.route": route, "trellis.side": "client" },
+              nats: this.#nats,
+              inboxPrefix: this.#inboxPrefix,
+              timeoutMs: this.timeout,
+              sessionKey: this.#auth.sessionKey,
+              live: this.connection.live,
+              createRequestProof: (s, p, r) => this.createRequestProof(s, p, r),
+              resolveContext: cache
+                ? (digest) => cache.resolveContext(digest)
+                : undefined,
+              decodeEvent: (value) => {
+                const parsed = parseRuntimeSchema(
+                  descriptor.event,
+                  value as JsonValue,
+                ).take();
+                if (isErr(parsed)) throw parsed.error;
+                return parsed as TEvent;
+              },
             },
+            subject,
+            payload,
           );
-          span.end();
-        } catch {
-          // The acknowledged subscription remains owned even without telemetry.
-        }
-        if (opts?.signal?.aborted) finish("cancelled");
-        return ok((async function* () {
-          let closeReason: "complete" | "cancelled" | "error" = "cancelled";
+          const abort = () => {
+            subscription.close();
+            finish("cancelled");
+          };
+          opts?.signal?.addEventListener("abort", abort, { once: true });
+          owned = true;
+          this.#feedClosers.add(closeOnNats);
           try {
-            const parseFeedFrame = (msg: Msg): TEvent => {
-              if (msg.headers?.get("status") === "error") {
-                const error = createTransportError({
-                  code: "trellis.feed.failed",
-                  message: "Trellis stopped the feed.",
-                  hint:
-                    "Retry the subscription. If it keeps failing, check Trellis runtime health.",
-                  context: { feed, subject, frame: msg.string() },
-                });
-                recordRuntimeError(error, {
-                  surface: "feed",
-                  direction: "client",
-                  operation: feed,
-                  phase: "remote_error",
-                });
-                throw error;
-              }
-              const json = safeJson(msg).take();
-              if (isErr(json)) {
-                recordRuntimeError(json.error, {
-                  surface: "feed",
-                  direction: "client",
-                  operation: feed,
-                  phase: "event_decoding",
-                });
-                throw json.error;
-              }
-              const parsed = parseRuntimeSchema(eventSchema, json).take();
-              if (isErr(parsed)) {
-                recordRuntimeError(parsed.error, {
-                  surface: "feed",
-                  direction: "client",
-                  operation: feed,
-                  phase: "event_validation",
-                });
-                throw parsed.error;
-              }
-              return parsed as TEvent;
-            };
-            if (firstEvent) yield parseFeedFrame(firstEvent);
-            while (true) {
-              const next = await iterator.next();
-              if (next.done) {
-                closeReason = "complete";
-                break;
-              }
-              yield parseFeedFrame(next.value);
-            }
-          } catch (error) {
-            closeReason = "error";
-            throw error;
-          } finally {
-            opts?.signal?.removeEventListener("abort", abort);
-            try {
-              sub.unsubscribe();
-              await cancel();
-            } finally {
-              finish(opts?.signal?.aborted ? "cancelled" : closeReason);
-            }
+            recordCatalogUpDown("trellis.feed.active", 1, {
+              "trellis.side": "client",
+            });
+            counted = true;
+          } catch {
+            // The acknowledged subscription remains owned even without telemetry.
           }
-        })());
+          const _ = route;
+          return ok(subscription);
+        } catch (cause) {
+          const error = cause instanceof LiveStreamError
+            ? createTransportError({
+              code: `trellis.live.${cause.code}`,
+              message: cause.message,
+              hint:
+                "Retry the subscription. If it keeps failing, check Trellis runtime health.",
+              cause,
+              context: { feed, subject },
+            })
+            : createTransportError({
+              code: "trellis.feed.subscribe_failed",
+              message: "Trellis could not subscribe to the feed.",
+              hint:
+                "Retry the subscription. If it keeps failing, check Trellis runtime health.",
+              cause,
+              context: { feed, subject },
+            });
+          recordRuntimeError(error, {
+            surface: "feed",
+            direction: "client",
+            operation: feed,
+            phase: "handshake",
+          });
+          return err(error);
+        }
       })().finally(() => {
         if (!owned) finish(setupReason);
       }),
@@ -3593,12 +3391,34 @@ export class Trellis<
   ): Promise<void> {
     const subject = this.template(descriptor.subject, {}, true).take();
     if (isErr(subject)) throw subject.error;
+    const cache = this.#auth.authorizationProviderCache;
+    if (!cache) {
+      throw createTransportError({
+        code: "trellis.feed.listen_failed",
+        message: "Trellis could not listen for feed requests.",
+        hint: "Provider authorization cache is required for live feeds.",
+        context: { feed, subject },
+      });
+    }
+    const own = await cache.resolveContext(this.#contextDigest());
+    const provider = new LiveFeedProvider({
+      nats: this.#nats,
+      identity: {
+        connectionId: own.context.connectionId,
+        sessionKey: own.context.sessionKey,
+        principalId: own.context.principalId,
+        participantId: own.context.participantId,
+        deploymentId: own.context.deploymentId ?? "",
+        instanceId: own.context.instanceId ?? "",
+        contextDigest: own.contextDigest,
+      },
+      sign: async (digest) => await this.#auth.sign(digest),
+    });
     let sub: ReturnType<NatsConnection["subscribe"]>;
     let controlSub: ReturnType<NatsConnection["subscribe"]>;
-    const controlSubject = feedControlSubject(subject, this.#feedOwnerId);
     try {
       sub = this.#nats.subscribe(subject, { queue: routeQueueGroup(subject) });
-      controlSub = this.#nats.subscribe(controlSubject);
+      controlSub = this.#nats.subscribe(provider.wildcardSubject(subject));
     } catch (cause) {
       const error = createTransportError({
         code: "trellis.feed.listen_failed",
@@ -3616,56 +3436,127 @@ export class Trellis<
       });
       throw error;
     }
-    const task = AsyncResult.try(async () => {
-      for await (const msg of sub) {
-        void (async () => {
-          try {
-            const result = await this.#processFeedMessage(
-              feed,
-              descriptor,
-              msg,
-              handler,
-            );
-            const value = result.take();
-            if (isErr(value)) {
-              this.#respondWithError(msg, value.error);
-            }
-          } catch (cause) {
-            const error = annotateHandlerBoundaryError(cause, {
-              feed,
-              requestId: msg.headers?.get("request-id"),
-              service: this.name,
-              contractId: this.contractId,
-              contractDigest: this.contractDigest,
-              traceId: traceIdFromTraceparent(msg.headers?.get("traceparent")),
-            });
-            recordRuntimeError(error, {
-              surface: "feed",
-              direction: "server",
-              operation: feed,
-              phase: "handler_throw",
-            });
-            this.#respondWithError(msg, error);
-          }
-        })();
-      }
-    });
-    this.#tasks.add(`feed:${feed}`, task);
     this.#tasks.add(
-      `feed:${feed}:control`,
+      `feed:${feed}`,
       AsyncResult.try(async () => {
-        for await (const msg of controlSub) {
-          const result = await this.#processFeedMessage(
+        for await (const msg of sub) {
+          void this.#acceptLiveFeedOpen(
             feed,
             descriptor,
             msg,
             handler,
+            provider,
           );
-          const value = result.take();
-          if (isErr(value)) this.#respondWithError(msg, value.error);
         }
       }),
     );
+    this.#tasks.add(
+      `feed:${feed}:control`,
+      AsyncResult.try(async () => {
+        for await (const msg of controlSub) {
+          await provider.handleControl(msg);
+        }
+      }),
+    );
+  }
+
+  async #acceptLiveFeedOpen<TInput, TEvent>(
+    feed: string,
+    descriptor: FeedDesc,
+    msg: Msg,
+    handler: (
+      context: FeedHandlerContext<TInput, TEvent>,
+    ) => unknown | Promise<unknown>,
+    provider: LiveFeedProvider,
+  ): Promise<void> {
+    try {
+      const opening = parseLiveOpen(msg.data);
+      if (!opening) {
+        this.#respondWithError(
+          msg,
+          createTransportError({
+            code: "trellis.live.invalid_request",
+            message: "Feed opening is not a live open envelope.",
+            hint: "Use the live Feed client.",
+            context: { feed },
+          }),
+        );
+        return;
+      }
+      const caller = await this.#authenticateFeedRequest({
+        msg,
+        permission: descriptor.permission,
+        requiredCapabilities: descriptor.subscribeCapabilities,
+      });
+      const callerValue = caller.take();
+      if (isErr(callerValue)) {
+        this.#respondWithError(msg, callerValue.error);
+        return;
+      }
+      if (callerValue.type !== "verified") {
+        this.#respondWithError(
+          msg,
+          new AuthError({ reason: "feed_creator_identity_required" }),
+        );
+        return;
+      }
+      const parsed = parseRuntimeSchema(
+        descriptor.input,
+        opening.input as JsonValue,
+      )
+        .take();
+      if (isErr(parsed)) {
+        this.#respondWithError(msg, parsed.error);
+        return;
+      }
+      const subject = this.template(descriptor.subject, {}, true).take();
+      if (isErr(subject)) {
+        this.#respondWithError(msg, subject.error);
+        return;
+      }
+      await provider.offer(
+        msg,
+        subject,
+        {
+          openId: opening.openId,
+          receiveMaxPayloadBytes: opening.receiveMaxPayloadBytes,
+        },
+        {
+          connectionId: callerValue.connectionId,
+          sessionKey: callerValue.sessionKey,
+          principalId: callerValue.principalId,
+          participantId: callerValue.participantId,
+          deploymentId: callerValue.deploymentId ?? "",
+          instanceId: callerValue.instanceId ?? "",
+          contextDigest: callerValue.contextDigest,
+        },
+        async ({ emit, signal }) => {
+          await handler({
+            input: parsed as TInput,
+            caller: callerValue,
+            signal,
+            emit: (event: TEvent) =>
+              AsyncResult.from((async () => {
+                const payload = encodeRuntimeSchema(descriptor.event, event)
+                  .take();
+                if (isErr(payload)) return payload;
+                await emit(JSON.parse(payload));
+                return ok(undefined);
+              })()),
+          });
+        },
+      );
+    } catch (cause) {
+      const error = annotateHandlerBoundaryError(cause, {
+        feed,
+        requestId: msg.headers?.get("request-id"),
+        service: this.name,
+        contractId: this.contractId,
+        contractDigest: this.contractDigest,
+        traceId: traceIdFromTraceparent(msg.headers?.get("traceparent")),
+      });
+      this.#respondWithError(msg, error);
+    }
   }
 
   async #processFeedMessage<TInput, TEvent>(

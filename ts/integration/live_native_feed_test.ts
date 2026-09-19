@@ -1,3 +1,4 @@
+import { TrellisService } from "@qlever-llc/trellis/service";
 import { assert } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 
@@ -176,6 +177,103 @@ Deno.test("NX03 empty finite Watch completes with no frames", async () => {
     } finally {
       if (!exited) Deno.kill(-process.pid, "SIGTERM");
       await status;
+    }
+  });
+});
+
+Deno.test("L2 TypeScript caller receives rust Watch over live open", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const identity = await runtime.registerService({
+      name: "rust",
+      contract: participants.OperationProvider.participant,
+    });
+    const process = new Deno.Command("setsid", {
+      args: rustFixtureCommand("trellis-runtime-acceptance"),
+      env: {
+        TRELLIS_URL: runtime.trellisUrl,
+        TRELLIS_IDENTITY_SEED: identity.seed,
+        CARGO_TARGET_DIR: fromFileUrl(
+          new URL("../../rust/target", import.meta.url),
+        ),
+      },
+      stdout: "inherit",
+      stderr: "inherit",
+    }).spawn();
+    let exited = false;
+    const status = process.status.then((value) => {
+      exited = true;
+      return value;
+    });
+    try {
+      const client = await runtime.connectClient({
+        name: "l2-ts-caller",
+        contract: participants.Caller.participant,
+      });
+      await runtime.waitFor(async () => {
+        if (exited) {
+          throw new Error(
+            `Rust provider exited: ${JSON.stringify(await status)}`,
+          );
+        }
+        const result = await client.echo({ value: "from TypeScript" }, {
+          timeout: 1000,
+        });
+        return result.isOk();
+      }, { timeoutMs: 120_000 });
+      const feed = await client.watch({}).orThrow();
+      const iterator = feed[Symbol.asyncIterator]();
+      const first = await iterator.next();
+      assert(
+        String((first.value as { value?: string } | undefined)?.value ?? "")
+          .includes("rust-feed"),
+        `unexpected first frame: ${JSON.stringify(first)}`,
+      );
+      await iterator.return?.();
+    } finally {
+      if (!exited) Deno.kill(-process.pid, "SIGTERM");
+      await status;
+    }
+  });
+});
+
+Deno.test("L3 TypeScript provider serves Watch over live open", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const identity = await runtime.registerService({
+      name: "ts-feed-provider",
+      contract: participants.Provider.participant,
+    });
+    const service = await TrellisService.connect({
+      trellisUrl: runtime.trellisUrl,
+      participant: participants.Provider.participant,
+      seed: identity.seed,
+    }).orThrow();
+    await service.handleWatch(async ({ emit, signal }) => {
+      await emit({ value: "ts-feed-1" }).orThrow();
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          resolve();
+          return;
+        }
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+    const serviceExit = service.wait();
+    try {
+      const caller = await runtime.connectClient({
+        name: "l3-ts-caller",
+        contract: participants.Caller.participant,
+      });
+      const feed = await caller.watch({}).orThrow();
+      const first = await feed[Symbol.asyncIterator]().next();
+      assert(
+        (first.value as { value?: string } | undefined)?.value === "ts-feed-1",
+        `unexpected first frame: ${JSON.stringify(first)}`,
+      );
+      await feed[Symbol.asyncIterator]().return?.();
+      await caller.connection.close();
+    } finally {
+      await service.stop();
+      await serviceExit;
     }
   });
 });

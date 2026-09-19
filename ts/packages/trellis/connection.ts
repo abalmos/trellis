@@ -1,5 +1,6 @@
 import type { NatsConnection } from "@nats-io/nats-core";
 import { logger as noopLogger, type LoggerLike } from "./globals.ts";
+import { LiveSessionManager } from "./live/manager.ts";
 import { trackConnection } from "./telemetry/lifecycle.ts";
 
 /** Identifies the Trellis runtime that owns a connection. */
@@ -155,6 +156,7 @@ export class TrellisConnection {
   #stopped = false;
   #telemetry?: ReturnType<typeof trackConnection>;
   #telemetryUsable = false;
+  readonly live = new LiveSessionManager();
 
   /** Creates a Trellis connection lifecycle handle. */
   constructor(options: TrellisConnectionOptions) {
@@ -263,6 +265,7 @@ export class TrellisConnection {
 
   /** Closes the underlying transport and publishes a terminal closed status. */
   async close(): Promise<void> {
+    this.live.stop();
     this.stopObserving();
     try {
       await this.#closeTransport();
@@ -288,10 +291,16 @@ export class TrellisConnection {
     }
 
     if (status.phase === "closed" || status.phase === "error") {
+      this.live.stop();
       this.#telemetry?.transition("terminal", "terminal");
-    } else if (status.phase !== "connected" && this.#telemetryUsable) {
-      this.#telemetryUsable = false;
-      this.#telemetry?.transition("suspended", "disconnect");
+    } else if (status.phase === "connected") {
+      this.live.resume();
+    } else {
+      this.live.suspend();
+      if (this.#telemetryUsable) {
+        this.#telemetryUsable = false;
+        this.#telemetry?.transition("suspended", "disconnect");
+      }
     }
 
     this.#status = status;
