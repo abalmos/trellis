@@ -109,7 +109,6 @@ type TrellisServiceRuntimeOpts<TA extends RuntimeApi> =
     version?: string;
     operationDeploymentId?: string;
     operationConnectionId?: string;
-    feedOwnerId?: string;
   };
 
 export type TrellisServiceRuntimeFor<TA extends RuntimeApi = RuntimeApi> =
@@ -332,7 +331,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     if (opts?.operationDeploymentId) {
       this.setOperationDeploymentId(opts.operationDeploymentId);
     }
-    if (opts?.feedOwnerId) this.setFeedOwnerId(opts.feedOwnerId);
+
     this.#nats = nats;
     this.#version = opts?.version;
     this.#log = (opts?.log ?? serviceRuntimeLogger).child({

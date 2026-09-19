@@ -20,7 +20,6 @@ import type {
 } from "./participant.ts";
 import {
   boundApiSubject,
-  feedControlSubject,
   type PermissionAtom as DescriptorPermissionAtom,
   routeQueueGroup,
   type RuntimeApi,
@@ -1546,8 +1545,6 @@ export type RequestOpts = {
   signal?: AbortSignal;
 };
 
-const FEED_CANCEL_TOMBSTONE_MS = 30_000;
-const MAX_FEED_CANCEL_TOMBSTONES = 1_024;
 const MAX_OPERATION_INPUT_BYTES = 256 * 1024;
 const MAX_OPERATION_PROGRESS_BYTES = 64 * 1024;
 const MAX_OPERATION_OUTPUT_BYTES = 512 * 1024;
@@ -2468,18 +2465,10 @@ export class Trellis<
   #onSessionNotFound?: () => MaybePromise<void>;
   #operationStore?: Promise<TypedKV<DurableOperationRecord>>;
   #operationDeploymentId?: string;
-  #feedOwnerId: string;
   #eventConsumers: RuntimeEventConsumers;
   #apiBindings: Readonly<Record<string, unknown>>;
   #durableEventLoops = new Map<string, DurableEventConsumerLoop<TA>>();
   #durableEventListenersStopped = false;
-  #activeFeeds = new Map<string, {
-    controller: AbortController;
-    feedId: string;
-    principalId: string;
-    participantId: string;
-  }>();
-  #pendingFeedCancels = new Map<string, ReturnType<typeof setTimeout>>();
   #feedClosers = new Set<() => void>();
   #resourceGeneration: () => number;
   #resourceAvailability: (name: string) => boolean;
@@ -2506,7 +2495,6 @@ export class Trellis<
     });
     this.#js = jetstream(this.#nats);
     this.#auth = auth as TrellisAuth;
-    this.#feedOwnerId = auth.sessionKey;
     this.#inboxPrefix = inboxPrefix;
     this.api = (api ?? EMPTY_TRELLIS_API) as TA;
     this.#log = (opts?.log ?? logger).child({ lib: "trellis" });
@@ -2787,10 +2775,6 @@ export class Trellis<
 
   protected setOperationDeploymentId(id: string): void {
     this.#operationDeploymentId = id;
-  }
-
-  protected setFeedOwnerId(id: string): void {
-    this.#feedOwnerId = id;
   }
 
   async loadOperationRecord(
@@ -3454,7 +3438,15 @@ export class Trellis<
       `feed:${feed}:control`,
       AsyncResult.try(async () => {
         for await (const msg of controlSub) {
-          await provider.handleControl(msg);
+          await provider.handleControl(msg, async (controlMsg) => {
+            const caller = await this.#authenticateFeedRequest({
+              msg: controlMsg,
+              permission: descriptor.permission,
+              requiredCapabilities: descriptor.subscribeCapabilities,
+            });
+            const callerValue = caller.take();
+            return !isErr(callerValue) && callerValue.type === "verified";
+          });
         }
       }),
     );
@@ -3556,271 +3548,6 @@ export class Trellis<
         traceId: traceIdFromTraceparent(msg.headers?.get("traceparent")),
       });
       this.#respondWithError(msg, error);
-    }
-  }
-
-  async #processFeedMessage<TInput, TEvent>(
-    feed: string,
-    descriptor: FeedDesc,
-    msg: Msg,
-    handler: (
-      context: FeedHandlerContext<TInput, TEvent>,
-    ) => unknown | Promise<unknown>,
-  ): Promise<Result<void, BaseError>> {
-    const json = safeJson(msg).take();
-    if (isErr(json)) {
-      recordRuntimeError(json.error, {
-        surface: "feed",
-        direction: "server",
-        operation: feed,
-        phase: "request_decoding",
-      });
-      return json;
-    }
-    const caller = await this.#authenticateFeedRequest({
-      msg,
-      permission: descriptor.permission,
-      requiredCapabilities: descriptor.subscribeCapabilities,
-    });
-    const callerValue = caller.take();
-    if (isErr(callerValue)) {
-      recordRuntimeError(callerValue.error, {
-        surface: "feed",
-        direction: "server",
-        operation: feed,
-        phase: "auth",
-      });
-      return callerValue;
-    }
-    const cancelReply = json && typeof json === "object" &&
-        !Array.isArray(json) && Object.keys(json).length === 2 &&
-        typeof (json as Record<string, unknown>)._trellisFeedCancel ===
-          "string" &&
-        typeof (json as Record<string, unknown>).feedId === "string"
-      ? (json as Record<string, string>)._trellisFeedCancel
-      : undefined;
-    if (cancelReply !== undefined) {
-      if (cancelReply !== msg.reply) {
-        return err(
-          new AuthError({
-            reason: "reply_subject_mismatch",
-            context: { expected: msg.reply, actual: cancelReply },
-          }),
-        );
-      }
-      const active = this.#activeFeeds.get(cancelReply);
-      const controlFeedId = (json as Record<string, string>).feedId;
-      if (
-        !active || active.feedId !== controlFeedId ||
-        msg.subject !==
-          feedControlSubject(
-            descriptor.subject,
-            this.#feedOwnerId,
-            controlFeedId,
-          ) ||
-        callerValue.type !== "verified" ||
-        active.principalId !== callerValue.principalId ||
-        active.participantId !== callerValue.participantId
-      ) {
-        return err(
-          new AuthError({
-            reason: "feed_control_denied",
-            context: { feed, feedId: controlFeedId },
-          }),
-        );
-      }
-      active.controller.abort();
-      if (this.#activeFeeds.delete(cancelReply)) return ok(undefined);
-      const previous = this.#pendingFeedCancels.get(cancelReply);
-      if (previous !== undefined) clearTimeout(previous);
-      if (
-        previous !== undefined ||
-        this.#pendingFeedCancels.size < MAX_FEED_CANCEL_TOMBSTONES
-      ) {
-        const timeout = setTimeout(() => {
-          this.#pendingFeedCancels.delete(cancelReply);
-        }, FEED_CANCEL_TOMBSTONE_MS);
-        this.#pendingFeedCancels.set(cancelReply, timeout);
-      }
-      return ok(undefined);
-    }
-    const parsed = parseRuntimeSchema(descriptor.input, json).take();
-    if (isErr(parsed)) {
-      recordRuntimeError(parsed.error, {
-        surface: "feed",
-        direction: "server",
-        operation: feed,
-        phase: "input_validation",
-      });
-      return parsed;
-    }
-    if (!msg.reply) {
-      const error = new UnexpectedError({
-        context: { feed, reason: "missing_reply" },
-      });
-      recordRuntimeError(error, {
-        surface: "feed",
-        direction: "server",
-        operation: feed,
-        phase: "handshake",
-      });
-      return err(error);
-    }
-    const pendingCancel = this.#pendingFeedCancels.get(msg.reply);
-    if (pendingCancel !== undefined) {
-      clearTimeout(pendingCancel);
-      this.#pendingFeedCancels.delete(msg.reply);
-      return ok(undefined);
-    }
-    const controller = new AbortController();
-    if (callerValue.type !== "verified") {
-      return err(new AuthError({ reason: "feed_creator_identity_required" }));
-    }
-    const feedId = crypto.randomUUID();
-    this.#activeFeeds.get(msg.reply)?.controller.abort();
-    this.#activeFeeds.set(msg.reply, {
-      controller,
-      feedId,
-      principalId: callerValue.principalId,
-      participantId: callerValue.participantId,
-    });
-    const route = trellisRoute("rpc", feed);
-    let ended = false;
-    let counted = false;
-    let endReason: "complete" | "error" = "complete";
-    const finish = (
-      reason: "complete" | "cancelled" | "revoked" | "unavailable" | "error",
-    ) => {
-      if (ended) return;
-      ended = true;
-      this.#feedClosers.delete(closeOnNats);
-      try {
-        if (counted) {
-          recordCatalogUpDown("trellis.feed.active", -1, {
-            "trellis.side": "server",
-          });
-        }
-        recordCatalogCounter("trellis.feed.ends", 1, {
-          "trellis.side": "server",
-          "trellis.reason": reason,
-        });
-        const span = trace.getTracer("@qlever-llc/trellis").startSpan(
-          "trellis.feed.close",
-          { attributes: { "trellis.route": route, "trellis.reason": reason } },
-        );
-        span.end();
-      } catch {
-        // Optional telemetry cannot change a feed handler's result.
-      }
-    };
-    const closeOnNats = () => finish("unavailable");
-    this.#feedClosers.add(closeOnNats);
-    controller.signal.addEventListener("abort", () => finish("cancelled"), {
-      once: true,
-    });
-    try {
-      recordCatalogUpDown("trellis.feed.active", 1, {
-        "trellis.side": "server",
-      });
-      counted = true;
-      const span = trace.getTracer("@qlever-llc/trellis").startSpan(
-        "trellis.feed.open",
-        { attributes: { "trellis.route": route, "trellis.side": "server" } },
-      );
-      span.end();
-    } catch {
-      // The registered handler remains owned even without telemetry.
-    }
-    try {
-      const readyHeaders = natsHeaders();
-      readyHeaders.set("feed-status", "ready");
-      readyHeaders.set("feed-id", feedId);
-      readyHeaders.set(
-        "feed-control-subject",
-        feedControlSubject(descriptor.subject, this.#feedOwnerId, feedId),
-      );
-      this.#nats.publish(msg.reply, new Uint8Array(), {
-        headers: readyHeaders,
-      });
-      if (controller.signal.aborted) return ok(undefined);
-
-      const handlerResult = await handler({
-        input: parsed as TInput,
-        caller: callerValue,
-        signal: controller.signal,
-        emit: (event: TEvent) =>
-          AsyncResult.from((async () => {
-            const payload = encodeRuntimeSchema(descriptor.event, event).take();
-            if (isErr(payload)) {
-              recordRuntimeError(payload.error, {
-                surface: "feed",
-                direction: "server",
-                operation: feed,
-                phase: "event_encoding",
-              });
-              return payload;
-            }
-            if (!msg.reply) {
-              const error = new UnexpectedError({
-                context: { feed, reason: "missing_reply" },
-              });
-              recordRuntimeError(error, {
-                surface: "feed",
-                direction: "server",
-                operation: feed,
-                phase: "event_publish",
-              });
-              return err(error);
-            }
-            try {
-              this.#nats.publish(msg.reply, payload);
-            } catch (cause) {
-              const error = new UnexpectedError({
-                cause,
-                context: { feed },
-              });
-              recordRuntimeError(error, {
-                surface: "feed",
-                direction: "server",
-                operation: feed,
-                phase: "event_publish",
-              });
-              return err(error);
-            }
-            return ok(undefined);
-          })()),
-      });
-      const handlerOutcome = isResultLike(handlerResult)
-        ? handlerResult.take()
-        : handlerResult;
-      if (isErr(handlerOutcome)) {
-        endReason = "error";
-        const error = annotateHandlerBoundaryError(handlerOutcome.error, {
-          feed,
-          requestId: msg.headers?.get("request-id"),
-          service: this.name,
-          contractId: this.contractId,
-          contractDigest: this.contractDigest,
-          traceId: traceIdFromTraceparent(msg.headers?.get("traceparent")),
-        });
-        recordRuntimeError(error, {
-          surface: "feed",
-          direction: "server",
-          operation: feed,
-          phase: "handler_result",
-        });
-        return err(error);
-      }
-      return ok(undefined);
-    } catch (cause) {
-      endReason = "error";
-      throw cause;
-    } finally {
-      if (this.#activeFeeds.get(msg.reply)?.controller === controller) {
-        this.#activeFeeds.delete(msg.reply);
-      }
-      finish(endReason);
-      controller.abort();
     }
   }
 

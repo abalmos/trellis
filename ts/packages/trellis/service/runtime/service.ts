@@ -1254,7 +1254,6 @@ export async function createConnectedService<
       },
       operationDeploymentId: args.healthIdentity?.deploymentId,
       operationConnectionId: args.operationConnectionId,
-      feedOwnerId: args.healthIdentity?.instanceId ?? ulid(),
     },
   );
 

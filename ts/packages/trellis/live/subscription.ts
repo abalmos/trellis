@@ -87,45 +87,53 @@ export class LiveSubscription<T> implements AsyncIterable<T> {
   readonly #cancellation: LiveCancellation;
   #activated = false;
   #permit: { [Symbol.dispose](): void } | undefined;
+  readonly #closeExchange: Promise<void>;
 
   constructor(
     core: ConsumerCore<T>,
     cancellation: LiveCancellation,
     permit?: { [Symbol.dispose](): void },
+    closeExchange: Promise<void> = Promise.resolve(),
   ) {
     this.#core = core;
     this.#cancellation = cancellation;
     this.#permit = permit;
+    this.#closeExchange = closeExchange;
   }
 
   async *[Symbol.asyncIterator](): AsyncGenerator<T, void, unknown> {
     this.#activated = true;
     this.#core.notifyStart();
-    while (true) {
-      if (this.#cancellation.aborted) {
-        this.#core.discardQueue();
-        return;
-      }
-      const end = this.#core.committedEnd();
-      if (end && !end.isComplete()) {
-        this.#core.discardQueue();
-        if (end.error && !this.#core.reportedError()) {
-          this.#core.markErrorReported();
-          throw end.error;
+    try {
+      while (true) {
+        if (this.#cancellation.aborted) {
+          this.#core.discardQueue();
+          return;
         }
-        return;
+        const end = this.#core.committedEnd();
+        if (end && !end.isComplete()) {
+          this.#core.discardQueue();
+          if (end.error && !this.#core.reportedError()) {
+            this.#core.markErrorReported();
+            throw end.error;
+          }
+          return;
+        }
+        if (this.#core.drainComplete()) return;
+        const item = this.#core.consume();
+        if (item) {
+          yield item.value;
+          continue;
+        }
+        if (this.#core.drainComplete()) return;
+        await new Promise<void>((resolve) => {
+          this.#core.setWaker(resolve);
+          if (this.#core.hasQueued() || this.#core.committedEnd()) resolve();
+        });
       }
-      if (this.#core.drainComplete()) return;
-      const item = this.#core.consume();
-      if (item) {
-        yield item.value;
-        continue;
-      }
-      if (this.#core.drainComplete()) return;
-      await new Promise<void>((resolve) => {
-        this.#core.setWaker(resolve);
-        if (this.#core.hasQueued() || this.#core.committedEnd()) resolve();
-      });
+    } finally {
+      this.close();
+      await this.#closeExchange;
     }
   }
 
@@ -146,6 +154,7 @@ export class LiveSubscription<T> implements AsyncIterable<T> {
 
   async [Symbol.asyncDispose](): Promise<void> {
     this.close();
+    await this.#closeExchange;
   }
 
   get activated(): boolean {

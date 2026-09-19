@@ -1,5 +1,5 @@
 import { TrellisService } from "@qlever-llc/trellis/service";
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
 
 import { participants } from "../../integration/fixtures/runtime/packages/runtime-trellis/index.js";
@@ -295,5 +295,149 @@ Deno.test("NX02 rust console client receives Health Watch", async () => {
       "health login ",
       "health watch complete",
     );
+  });
+});
+
+Deno.test("NX05 two TypeScript callers abort one other continues", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const identity = await runtime.registerService({
+      name: "nx05-feed-provider",
+      contract: participants.Provider.participant,
+    });
+    const service = await TrellisService.connect({
+      trellisUrl: runtime.trellisUrl,
+      participant: participants.Provider.participant,
+      seed: identity.seed,
+    }).orThrow();
+    let cancelled = 0;
+    let nextFeed = 0;
+    await service.handleWatch(async ({ emit, signal }) => {
+      const feed = ++nextFeed;
+      let frame = 0;
+      while (!signal.aborted) {
+        await emit({ value: `feed-${feed}-${++frame}` }).orThrow();
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      cancelled += 1;
+    });
+    const serviceExit = service.wait();
+    const firstCaller = await runtime.connectClient({
+      name: "nx05-caller-a",
+      contract: participants.Caller.participant,
+    });
+    const secondCaller = await runtime.connectClient({
+      name: "nx05-caller-b",
+      contract: participants.Caller.participant,
+    });
+    const firstAbort = new AbortController();
+    const secondAbort = new AbortController();
+    try {
+      const first = await firstCaller.watch({}, { signal: firstAbort.signal })
+        .orThrow();
+      const second = await secondCaller.watch({}, {
+        signal: secondAbort.signal,
+      })
+        .orThrow();
+      const firstIterator = first[Symbol.asyncIterator]();
+      const secondIterator = second[Symbol.asyncIterator]();
+      assert((await firstIterator.next()).value?.value.startsWith("feed-"));
+      assert((await secondIterator.next()).value?.value.startsWith("feed-"));
+      firstAbort.abort();
+      await firstIterator.return?.();
+      await firstCaller.connection.close();
+      await runtime.waitFor(() => cancelled === 1);
+      assert((await secondIterator.next()).value?.value.startsWith("feed-"));
+      assertEquals(cancelled, 1);
+    } finally {
+      firstAbort.abort();
+      secondAbort.abort();
+      await firstCaller.connection.close();
+      await secondCaller.connection.close();
+      await service.stop();
+      await serviceExit;
+    }
+  });
+});
+
+Deno.test("NX06 source starts once per session", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const identity = await runtime.registerService({
+      name: "nx06-feed-provider",
+      contract: participants.Provider.participant,
+    });
+    const service = await TrellisService.connect({
+      trellisUrl: runtime.trellisUrl,
+      participant: participants.Provider.participant,
+      seed: identity.seed,
+    }).orThrow();
+    let starts = 0;
+    await service.handleWatch(async ({ emit, signal }) => {
+      starts += 1;
+      await emit({ value: `start-${starts}` }).orThrow();
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          resolve();
+          return;
+        }
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+    const serviceExit = service.wait();
+    const caller = await runtime.connectClient({
+      name: "nx06-caller",
+      contract: participants.Caller.participant,
+    });
+    try {
+      const first = await caller.watch({}).orThrow();
+      const second = await caller.watch({}).orThrow();
+      await first[Symbol.asyncIterator]().next();
+      await second[Symbol.asyncIterator]().next();
+      assertEquals(starts, 2);
+      await first[Symbol.asyncIterator]().return?.();
+      await second[Symbol.asyncIterator]().return?.();
+    } finally {
+      await caller.connection.close();
+      await service.stop();
+      await serviceExit;
+    }
+  });
+});
+
+Deno.test("NX08 consumer drop does not throw", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const identity = await runtime.registerService({
+      name: "nx08-feed-provider",
+      contract: participants.Provider.participant,
+    });
+    const service = await TrellisService.connect({
+      trellisUrl: runtime.trellisUrl,
+      participant: participants.Provider.participant,
+      seed: identity.seed,
+    }).orThrow();
+    await service.handleWatch(async ({ emit, signal }) => {
+      await emit({ value: "nx08-1" }).orThrow();
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) {
+          resolve();
+          return;
+        }
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+    const serviceExit = service.wait();
+    const caller = await runtime.connectClient({
+      name: "nx08-caller",
+      contract: participants.Caller.participant,
+    });
+    try {
+      const feed = await caller.watch({}).orThrow();
+      const iterator = feed[Symbol.asyncIterator]();
+      await iterator.next();
+      await iterator.return?.();
+      await caller.connection.close();
+    } finally {
+      await service.stop();
+      await serviceExit;
+    }
   });
 });

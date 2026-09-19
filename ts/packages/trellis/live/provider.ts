@@ -212,7 +212,15 @@ export class LiveFeedProvider {
     await publishSigned(this.#host, msg.reply, jsonBytes(offer), msg.reply);
   }
 
-  async handleControl(msg: Msg): Promise<void> {
+  async handleControl(
+    msg: Msg,
+    authenticate?: (msg: Msg) => Promise<boolean>,
+  ): Promise<void> {
+    if (!msg.reply || !msg.headers) return;
+    const proof = msg.headers.get("proof");
+    const contextDigest = msg.headers.get("authorization-context");
+    const sessionKey = msg.headers.get("session-key");
+    if (!proof || !contextDigest || !sessionKey) return;
     let control: LiveControlWire;
     try {
       control = liveParseControl(msg.data);
@@ -221,6 +229,9 @@ export class LiveFeedProvider {
     }
     const session = this.#sessions.get(control.sessionId);
     if (!session) return;
+    if (sessionKey !== session.consumer.sessionKey) return;
+    if (contextDigest !== session.consumer.contextDigest) return;
+    if (authenticate && !(await authenticate(msg))) return;
     if (control.action === "activate") {
       session.phase = "activating";
       const body = jsonBytes({

@@ -120,8 +120,30 @@ export async function openLiveFeed<T>(
   const offer = await verifyOffer(host, subject, openId, response);
   const core = new ConsumerCore<T>(offer.sessionId);
   const cancellation = new LiveCancellation();
-  const subscription = new LiveSubscription(core, cancellation, permit);
-  void runPump(host, core, cancellation, offer, subject);
+  const seq = { n: 0 };
+  const closeExchange = cancellation.cancelled().then(async () => {
+    try {
+      await sendControl(host, offer, {
+        format: LIVE_VERSION,
+        type: "control",
+        sessionId: offer.sessionId,
+        controlSeq: String(++seq.n),
+        action: "close",
+        reason: "cancelled",
+        receivedSeq: String(core.receivedSeq()),
+        consumedSeq: String(core.consumedSeq()),
+      });
+    } catch {
+      // Close is best-effort once the local handle is gone.
+    }
+  });
+  const subscription = new LiveSubscription(
+    core,
+    cancellation,
+    permit,
+    closeExchange,
+  );
+  void runPump(host, core, cancellation, offer, seq);
   return subscription;
 }
 
@@ -218,7 +240,7 @@ async function runPump<T>(
   core: ConsumerCore<T>,
   cancellation: LiveCancellation,
   offer: LiveOfferWire,
-  _openSubject: string,
+  seq: { n: number },
 ): Promise<void> {
   await Promise.race([core.start.promise, cancellation.cancelled()]);
   if (cancellation.aborted) return;
@@ -228,12 +250,12 @@ async function runPump<T>(
       format: LIVE_VERSION,
       type: "control",
       sessionId: offer.sessionId,
-      controlSeq: "1",
+      controlSeq: String(++seq.n),
       action: "activate",
       receivedSeq: "0",
       consumedSeq: "0",
     });
-    let controlSeq = 1;
+    void cancellation.cancelled().then(() => data.unsubscribe());
     for await (const message of data) {
       if (cancellation.aborted) return;
       const headers = message.headers;
@@ -277,12 +299,11 @@ async function runPump<T>(
           return;
         }
       } else if (frame.type === "challenge") {
-        controlSeq += 1;
         await sendControl(host, offer, {
           format: LIVE_VERSION,
           type: "control",
           sessionId: offer.sessionId,
-          controlSeq: String(controlSeq),
+          controlSeq: String(++seq.n),
           action: "pulse",
           challengeId: frame.challengeId,
           receivedSeq: String(core.receivedSeq()),
