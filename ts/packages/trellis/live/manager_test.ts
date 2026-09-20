@@ -1,9 +1,12 @@
 import { assertEquals, assertThrows } from "@std/assert";
 
+import { liveConstants } from "../auth/protocol_wasm.ts";
 import { LiveSessionManager } from "./manager.ts";
 
+const MAX_CONSUMERS = liveConstants().maxConsumerSessions;
+
 Deno.test("NX09 same-epoch resume keeps generation; reconnect does not revive", () => {
-  const live = new LiveSessionManager(2);
+  const live = new LiveSessionManager();
   assertEquals(live.generation(), 1);
   assertEquals(live.isAvailable(), true);
   const first = live.admitConsumer();
@@ -28,11 +31,14 @@ Deno.test("NX09 same-epoch resume keeps generation; reconnect does not revive", 
 });
 
 Deno.test("NX10 failed setup releases the consumer permit", () => {
-  const live = new LiveSessionManager(1);
-  const permit = live.admitConsumer();
-  assertEquals(live.consumerCount(), 1);
+  const live = new LiveSessionManager();
+  const permits = Array.from(
+    { length: MAX_CONSUMERS },
+    () => live.admitConsumer(),
+  );
+  assertEquals(live.consumerCount(), MAX_CONSUMERS);
   assertThrows(() => live.admitConsumer());
-  permit[Symbol.dispose]();
+  for (const permit of permits) permit[Symbol.dispose]();
   assertEquals(live.consumerCount(), 0);
   const again = live.admitConsumer();
   again[Symbol.dispose]();

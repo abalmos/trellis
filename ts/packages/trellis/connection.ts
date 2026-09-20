@@ -99,6 +99,7 @@ const EMPTY_AVAILABILITY: TrellisAvailability = Object.freeze({
 const installAvailability = Symbol("installAvailability");
 const attachTelemetry = Symbol("attachTelemetry");
 const transitionTelemetry = Symbol("transitionTelemetry");
+const terminalTelemetry = Symbol("terminalTelemetry");
 const disposeTelemetry = Symbol("disposeTelemetry");
 
 type ConnectionTelemetryHandle = ReturnType<typeof trackConnection>;
@@ -229,6 +230,12 @@ export class TrellisConnection {
     this.#telemetry?.transition(state, reason);
   }
 
+  [terminalTelemetry](): void {
+    this.live.stop();
+    this.#telemetryUsable = false;
+    this.#telemetry?.transition("terminal", "terminal");
+  }
+
   [disposeTelemetry](): void {
     this.#telemetry?.dispose();
     this.#telemetry = undefined;
@@ -275,6 +282,7 @@ export class TrellisConnection {
       }
       this.setStatus(createStatus(this.#status.kind, "closed"));
     } catch (error) {
+      this[terminalTelemetry]();
       this.setStatus(createStatus(this.#status.kind, "error", { error }));
       throw error;
     } finally {
@@ -290,11 +298,13 @@ export class TrellisConnection {
       return;
     }
 
-    if (status.phase === "closed" || status.phase === "error") {
-      this.live.stop();
-      this.#telemetry?.transition("terminal", "terminal");
+    if (status.phase === "closed") {
+      this[terminalTelemetry]();
     } else if (status.phase === "connected") {
       this.live.resume();
+    } else if (status.phase === "error") {
+      // A diagnostic transport error is not a terminal authority decision:
+      // keep the current usable/suspended observation and live ownership.
     } else {
       this.live.suspend();
       if (this.#telemetryUsable) {
@@ -411,6 +421,7 @@ export function observeTrellisConnection(
       if (stopped) return;
       if (closedError instanceof Error) {
         logTransportClosed(options, closedError);
+        connection[terminalTelemetry]();
         connection.setStatus(createStatus(options.kind, "error", {
           ...baseTransport,
           error: closedError,
@@ -424,6 +435,7 @@ export function observeTrellisConnection(
       closedFailure = error;
       if (stopped) return;
       logTransportClosed(options, error);
+      connection[terminalTelemetry]();
       connection.setStatus(createStatus(options.kind, "error", {
         ...baseTransport,
         error,
@@ -446,8 +458,8 @@ export function observeNatsTrellisConnection(
     lifecycleLog: options.lifecycleLog,
     availability: options.availability,
     onTransportEvent: options.onTransportEvent,
+    telemetry: options.telemetry,
   });
-  connection[attachTelemetry](options.telemetry);
   void options.nc.closed().then(
     () => connection[disposeTelemetry](),
     () => connection[disposeTelemetry](),

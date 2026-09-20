@@ -665,6 +665,7 @@ async function provider(
     throw new Error("unexpected issuer fetch");
   },
   installed?: AuthorizationContextCache,
+  now: () => number = () => policy.nowUnixSeconds,
 ) {
   const cache = installed ?? await installedCache(issuerFetch);
   const value = await AuthorizationProviderCache.attach(
@@ -672,7 +673,7 @@ async function provider(
     cache.bundle().authorizationRegistry,
     "_INBOX.test",
     cache,
-    { now: () => policy.nowUnixSeconds },
+    { now },
   );
   value.start();
   await value.waitReady();
@@ -1495,18 +1496,21 @@ Deno.test("provider coverage gauge follows the retained own and peer installatio
       "own:covered": 1,
       "own:unavailable": 0,
       "peer:covered": 0,
+      "peer:unavailable": 0,
     });
     await value.resolveContext(peerDigest);
     assertEquals(await coverage(), {
       "own:covered": 1,
       "own:unavailable": 0,
       "peer:covered": 1,
+      "peer:unavailable": 0,
     });
     value.observeConnectionPhase("disconnected");
     assertEquals(await coverage(), {
       "own:covered": 0,
       "own:unavailable": 1,
       "peer:covered": 0,
+      "peer:unavailable": 0,
     });
     value.observeConnectionPhase("connected");
     await value.waitReady();
@@ -1515,10 +1519,85 @@ Deno.test("provider coverage gauge follows the retained own and peer installatio
       "own:covered": 1,
       "own:unavailable": 0,
       "peer:covered": 0,
+      "peer:unavailable": 0,
     });
   } finally {
     value.stop();
     await coverageMeterProvider.shutdown();
+    metrics.disable();
+  }
+});
+Deno.test("provider coverage gauge marks a retained peer unavailable before eviction", async () => {
+  const exporter = new InMemoryMetricExporter(
+    AggregationTemporality.CUMULATIVE,
+  );
+  const meterProvider = new MeterProvider({
+    readers: [
+      new PeriodicExportingMetricReader({
+        exporter,
+        exportIntervalMillis: 60_000,
+      }),
+    ],
+  });
+  metrics.setGlobalMeterProvider(meterProvider);
+  let now = policy.nowUnixSeconds;
+  const installed = await installedCache();
+  const [peerDigest, peerContext] = await signedContext("peer-unavailable");
+  const registry: Registry = {
+    contexts: new Map([
+      [chain.contextDigest, chain.contextCanonicalJson],
+      [peerDigest, peerContext],
+    ]),
+    reads: [],
+  };
+  const value = await provider(registry, undefined, installed, () => now);
+  const coverage = async () => {
+    await meterProvider.forceFlush();
+    const points = exporter.getMetrics().at(-1)?.scopeMetrics
+      .flatMap((scope) => scope.metrics)
+      .find((metric) =>
+        metric.descriptor.name === "trellis.auth.coverage.count"
+      )
+      ?.dataPoints ?? [];
+    return Object.fromEntries(
+      points.map((point) => [
+        `${point.attributes["trellis.kind"]}:${
+          point.attributes["trellis.state"]
+        }`,
+        point.value,
+      ]),
+    );
+  };
+  try {
+    await value.waitReady();
+    await value.retainOwnContext();
+    await value.resolveContext(peerDigest);
+    assertEquals(await coverage(), {
+      "own:covered": 1,
+      "own:unavailable": 0,
+      "peer:covered": 1,
+      "peer:unavailable": 0,
+    });
+    // Advance the controllable clock past the retained peer's validity: it
+    // stays indexed but is reported unavailable instead of covered.
+    now = policy.nowUnixSeconds + 10_000_000;
+    assertEquals(await coverage(), {
+      "own:covered": 0,
+      "own:unavailable": 1,
+      "peer:covered": 0,
+      "peer:unavailable": 1,
+    });
+    // Removing the source (evicting the cache) returns unavailable to zero.
+    value.stop();
+    assertEquals(await coverage(), {
+      "own:covered": 0,
+      "own:unavailable": 0,
+      "peer:covered": 0,
+      "peer:unavailable": 0,
+    });
+  } finally {
+    value.stop();
+    await meterProvider.shutdown();
     metrics.disable();
   }
 });

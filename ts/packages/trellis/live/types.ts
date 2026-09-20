@@ -39,6 +39,13 @@ export class LiveEnd {
   }
 }
 
+/** Bounded receipt describing the outcome of an explicit close. */
+export type LiveCloseReceipt = {
+  readonly end: LiveEnd;
+  readonly remote: "confirmed" | "unconfirmed" | "not-required";
+  readonly cleanup: "complete" | "incomplete" | "unknown";
+};
+
 /** Cloneable cancellation for one live source scope. */
 export class LiveCancellation {
   #aborted = false;

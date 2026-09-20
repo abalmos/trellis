@@ -83,12 +83,14 @@ export function trackConnection(kind: ConnectionKind): {
   };
 }
 
-const coverageSources = new Set<() => { own: boolean; peer: number }>();
+const coverageSources = new Set<
+  () => { own: boolean; peerCovered: number; peerUnavailable: number }
+>();
 let coverageGaugeProvider: MeterProvider | undefined;
 
 /** Registers a read-only, synchronously sampled provider coverage source. */
 export function trackCoverage(
-  source: () => { own: boolean; peer: number },
+  source: () => { own: boolean; peerCovered: number; peerUnavailable: number },
 ): () => void {
   coverageGaugeProvider = ensureObservableGauge(
     coverageGaugeProvider,
@@ -97,12 +99,14 @@ export function trackCoverage(
     (observer) => {
       let own = 0;
       let unavailable = 0;
-      let peer = 0;
+      let peerCovered = 0;
+      let peerUnavailable = 0;
       for (const source of coverageSources) {
         const snapshot = source();
         own += Number(snapshot.own);
         unavailable += Number(!snapshot.own);
-        peer += snapshot.peer;
+        peerCovered += snapshot.peerCovered;
+        peerUnavailable += snapshot.peerUnavailable;
       }
       observer.observe(own, {
         "trellis.kind": "own",
@@ -112,9 +116,13 @@ export function trackCoverage(
         "trellis.kind": "own",
         "trellis.state": "unavailable",
       });
-      observer.observe(peer, {
+      observer.observe(peerCovered, {
         "trellis.kind": "peer",
         "trellis.state": "covered",
+      });
+      observer.observe(peerUnavailable, {
+        "trellis.kind": "peer",
+        "trellis.state": "unavailable",
       });
     },
   );

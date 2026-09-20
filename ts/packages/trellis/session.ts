@@ -3314,7 +3314,13 @@ export class Trellis<
               createRequestProof: (s, p, r) => this.createRequestProof(s, p, r),
               resolveContext: cache
                 ? (digest) => cache.resolveContext(digest)
-                : undefined,
+                : () =>
+                  Promise.reject(
+                    new LiveStreamError(
+                      "authorization_unavailable",
+                      "provider authorization cache is required for live observations",
+                    ),
+                  ),
               decodeEvent: (value) => {
                 const parsed = parseRuntimeSchema(
                   descriptor.event,
@@ -3342,6 +3348,22 @@ export class Trellis<
           } catch {
             // The acknowledged subscription remains owned even without telemetry.
           }
+          // The owned live handle is the single cleanup owner: record exactly one
+          // end and decrement active when it closes, including return() before
+          // the first next().
+          void subscription.closed.then((end) => {
+            const reason = end.reason === "complete"
+              ? "complete"
+              : end.reason === "cancelled" || end.reason === "local_shutdown"
+              ? "cancelled"
+              : end.reason === "disconnected" || end.reason === "peer_lost"
+              ? "unavailable"
+              : end.reason === "authorization_lost" ||
+                  end.reason === "binding_changed"
+              ? "revoked"
+              : "error";
+            finish(reason);
+          });
           const _ = route;
           return ok(subscription!);
         } catch (cause) {
@@ -5587,7 +5609,13 @@ export class Trellis<
             createRequestProof: (s, p, r) => this.createRequestProof(s, p, r),
             resolveContext: cache
               ? (digest) => cache.resolveContext(digest)
-              : undefined,
+              : () =>
+                Promise.reject(
+                  new LiveStreamError(
+                    "authorization_unavailable",
+                    "provider authorization cache is required for live observations",
+                  ),
+                ),
             decodeEvent,
           },
           operationSubject,

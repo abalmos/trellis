@@ -128,18 +128,19 @@ Deno.test("live control and frame parsing is strict across the shared bridge", (
 
   const frame =
     `{"format":"trellis.live.v1","type":"challenge","sessionId":"${session}","challengeId":"${session}","lastSentSeq":"0"}`;
-  const parsedFrame = liveParseFrame(utf8(frame));
+  const parsedFrame = liveParseFrame(utf8(frame), 1_048_576);
   assertEquals(parsedFrame.type, "challenge");
   assertThrows(() =>
     liveParseFrame(
       utf8(frame.replace('"lastSentSeq":"0"', '"lastSentSeq":"00"')),
+      1_048_576,
     )
   );
   const end =
     `{"format":"trellis.live.v1","type":"end","sessionId":"${session}","finalSeq":"1","terminal":{"reason":"complete","error":null}}`;
-  assertEquals(liveParseFrame(utf8(end)).type, "end");
+  assertEquals(liveParseFrame(utf8(end), 1_048_576).type, "end");
   assertThrows(() =>
-    liveParseFrame(utf8(end.replace('"complete"', '"peer_lost"')))
+    liveParseFrame(utf8(end.replace('"complete"', '"peer_lost"')), 1_048_576)
   );
 });
 

@@ -8,7 +8,6 @@ import { assertEquals } from "@std/assert";
 import { encodeEventSubjectParameterToken } from "../helpers.ts";
 import { base64urlEncode } from "../auth/utils.ts";
 import { LIVE_VERSION } from "./client_open.ts";
-import { liveGenerateNonce } from "./protocol.ts";
 import { LiveFeedProvider, type LiveProviderIdentity } from "./provider.ts";
 
 function digest(kind: string): string {
@@ -52,10 +51,10 @@ function msg(args: {
 }
 
 Deno.test("NX04 unsigned and foreign control are dropped without reflection", async () => {
-  const encodedOffers: Uint8Array[] = [];
+  const published: { subject: string; data: Uint8Array }[] = [];
   const nats = {
-    publish(_subject: string, data?: Uint8Array) {
-      if (data) encodedOffers.push(data);
+    publish(subject: string, data?: Uint8Array) {
+      if (data) published.push({ subject, data });
     },
     info: { max_payload: 1_048_576 },
   } as unknown as NatsConnection;
@@ -69,16 +68,20 @@ Deno.test("NX04 unsigned and foreign control are dropped without reflection", as
   await provider.offer(
     msg({ data: new Uint8Array(), reply: "_INBOX.owner" }),
     BASE_SUBJECT,
-    { openId: "open-1", receiveMaxPayloadBytes: 1024 },
+    { openId: "open-1", receiveMaxPayloadBytes: 1_048_576 },
     owner,
     async () => {
       sourceStarts += 1;
     },
   );
-  const offerJson = JSON.parse(new TextDecoder().decode(encodedOffers.at(-1)!));
+  const offerJson = JSON.parse(
+    new TextDecoder().decode(published.at(-1)!.data),
+  );
   assertEquals(offerJson.kind, "feed");
   const sessionId = offerJson.sessionId as string;
-  const closeBody = new TextEncoder().encode(JSON.stringify({
+  const encode = (value: unknown) =>
+    new TextEncoder().encode(JSON.stringify(value));
+  const closeBody = encode({
     format: LIVE_VERSION,
     type: "control",
     sessionId,
@@ -87,50 +90,84 @@ Deno.test("NX04 unsigned and foreign control are dropped without reflection", as
     reason: "cancelled",
     receivedSeq: "0",
     consumedSeq: "0",
-  }));
-  const pulseBody = new TextEncoder().encode(JSON.stringify({
-    format: LIVE_VERSION,
-    type: "control",
-    sessionId,
-    controlSeq: "1",
-    action: "pulse",
-    challengeId: liveGenerateNonce(),
-    receivedSeq: "0",
-    consumedSeq: "0",
-  }));
+  });
+  const allow = async () => true;
 
-  await provider.handleControl(msg({ data: closeBody }));
-  await provider.handleControl(msg({
-    data: closeBody,
-    reply: "_INBOX.attacker",
-    headers: natsHeaders(),
-  }));
+  await provider.handleControl(msg({ data: closeBody }), allow);
+  await provider.handleControl(
+    msg({
+      data: closeBody,
+      reply: "_INBOX.attacker",
+      headers: natsHeaders(),
+    }),
+    allow,
+  );
   const foreign = natsHeaders();
   foreign.set("proof", "not-a-proof");
   foreign.set("authorization-context", "attacker-digest");
   foreign.set("session-key", "attacker-session");
-  await provider.handleControl(msg({
-    data: closeBody,
-    reply: "_INBOX.attacker",
-    headers: foreign,
-  }));
+  await provider.handleControl(
+    msg({
+      data: closeBody,
+      reply: "_INBOX.attacker",
+      headers: foreign,
+    }),
+    allow,
+  );
   assertEquals(sourceStarts, 0);
 
   const ownerHeaders = natsHeaders();
   ownerHeaders.set("proof", "owner-proof");
   ownerHeaders.set("authorization-context", owner.contextDigest);
   ownerHeaders.set("session-key", owner.sessionKey);
-  await provider.handleControl(msg({
-    data: pulseBody,
-    reply: "_INBOX.owner",
-    headers: ownerHeaders,
-  }));
+  const activateBody = encode({
+    format: LIVE_VERSION,
+    type: "control",
+    sessionId,
+    controlSeq: "1",
+    action: "activate",
+    receivedSeq: "0",
+    consumedSeq: "0",
+  });
+  await provider.handleControl(
+    msg({
+      data: activateBody,
+      reply: "_INBOX.owner",
+      headers: ownerHeaders,
+    }),
+    allow,
+  );
+  const challenge = published
+    .map((frame) => JSON.parse(new TextDecoder().decode(frame.data)))
+    .find((value) => value.type === "challenge");
+  assertEquals(typeof challenge.challengeId, "string");
+  const pulseBody = encode({
+    format: LIVE_VERSION,
+    type: "control",
+    sessionId,
+    controlSeq: "2",
+    action: "pulse",
+    challengeId: challenge.challengeId,
+    receivedSeq: "0",
+    consumedSeq: "0",
+  });
+  await provider.handleControl(
+    msg({
+      data: pulseBody,
+      reply: "_INBOX.owner",
+      headers: ownerHeaders,
+    }),
+    allow,
+  );
   assertEquals(sourceStarts, 1);
-  await provider.handleControl(msg({
-    data: pulseBody,
-    reply: "_INBOX.owner",
-    headers: ownerHeaders,
-  }));
+  await provider.handleControl(
+    msg({
+      data: pulseBody,
+      reply: "_INBOX.owner",
+      headers: ownerHeaders,
+    }),
+    allow,
+  );
   assertEquals(sourceStarts, 1);
 });
 
@@ -147,14 +184,13 @@ Deno.test("operation-watch offers advertise operation-watch kind", async () => {
     identity: identity("provider"),
     sign: async () => new Uint8Array(64),
   });
-  const operationSubject =
-    `operation.v1.${encodeEventSubjectParameterToken("api")}.${
-      encodeEventSubjectParameterToken("deploy")
-    }.Run`;
+  const operationSubject = `operation.v1.${
+    encodeEventSubjectParameterToken("api")
+  }.${encodeEventSubjectParameterToken("deploy")}.Run`;
   await provider.offer(
     msg({ data: new Uint8Array(), reply: "_INBOX.owner" }),
     operationSubject,
-    { openId: "open-2", receiveMaxPayloadBytes: 1024 },
+    { openId: "open-2", receiveMaxPayloadBytes: 1_048_576 },
     identity("owner"),
     async () => {},
     "operation-watch",

@@ -184,13 +184,19 @@ export class AuthorizationProviderCache {
         : this.#contexts.get(installedDigest);
       const ownCovered = !!own && this.#ownUsable && current(own) &&
         (this.#ownEntry === own || this.#cache.hasCandidate());
-      let peer = 0;
+      let peerCovered = 0;
+      let peerUnavailable = 0;
       for (const entry of this.#contexts.values()) {
-        if (entry !== own && entry !== this.#ownEntry && current(entry)) {
-          peer += 1;
+        if (entry === own || entry === this.#ownEntry) {
+          continue;
+        }
+        if (current(entry)) {
+          peerCovered += 1;
+        } else {
+          peerUnavailable += 1;
         }
       }
-      return { own: ownCovered, peer };
+      return { own: ownCovered, peerCovered, peerUnavailable };
     });
   }
 

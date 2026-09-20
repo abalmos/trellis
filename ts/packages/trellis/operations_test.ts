@@ -28,11 +28,18 @@ function completedWatch<T>(
   onDispose?: () => void,
 ): LiveSubscription<T> {
   const core = new ConsumerCore<T>("watch");
+  core.setPhase("draining");
   core.admit({ value, encodedLen: 1 });
-  core.commitEnd(new LiveEnd("complete"));
+  core.setPendingEnd(new LiveEnd("complete"));
   return new LiveSubscription(
     core,
     new LiveCancellation(),
+    () =>
+      Promise.resolve({
+        end: new LiveEnd("cancelled"),
+        remote: "not-required",
+        cleanup: "unknown",
+      }),
     onDispose ? { [Symbol.dispose]: onDispose } : undefined,
   );
 }

@@ -1262,7 +1262,7 @@ function beginObservedWatch<
       }
     })();
 
-    return ok({ task, close, closed: subscription.closed() });
+    return ok({ task, close, closed: subscription.closed });
   })());
 }
 

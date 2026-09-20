@@ -105,13 +105,21 @@ Deno.test("numeric connection and coverage sources survive first collection and 
   const provider = new MeterProvider({ readers: [reader] });
   metrics.setGlobalMeterProvider(provider);
   const first = trackConnection("user");
-  const stopFirst = trackCoverage(() => ({ own: false, peer: 0 }));
+  const stopFirst = trackCoverage(() => ({
+    own: false,
+    peerCovered: 0,
+    peerUnavailable: 0,
+  }));
   await provider.forceFlush();
   first.dispose();
   stopFirst();
   const second = trackConnection("service");
   second.transition("usable", "connected");
-  const stopSecond = trackCoverage(() => ({ own: true, peer: 2 }));
+  const stopSecond = trackCoverage(() => ({
+    own: true,
+    peerCovered: 2,
+    peerUnavailable: 0,
+  }));
   await provider.forceFlush();
   const samples =
     exporter.getMetrics().at(-1)?.scopeMetrics.flatMap((scope) =>
@@ -136,7 +144,8 @@ Deno.test("numeric connection and coverage sources survive first collection and 
   );
   assertEquals(
     points("trellis.auth.coverage.count").some((point) =>
-      point.attributes["trellis.kind"] === "peer" && point.value === 2
+      point.attributes["trellis.kind"] === "peer" &&
+      point.attributes["trellis.state"] === "covered" && point.value === 2
     ),
     true,
   );
@@ -248,8 +257,25 @@ Deno.test("production connection owner publishes usable, suspended, resumed, and
         ),
         true,
       );
-      // A terminal transport error keeps the terminal state until disposal.
-      stream.push({ type: "error", error: new Error("terminal") });
+      // A diagnostic transport error is not a terminal authority decision:
+      // the semantic count stays usable until a real close disposes it.
+      stream.push({ type: "error", error: new Error("diagnostic") });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const diagnostic = await states();
+      assertEquals(
+        diagnostic.some(([participantKind, state, value]) =>
+          participantKind === kind && state === "usable" && value === 1
+        ),
+        true,
+      );
+      assertEquals(
+        diagnostic.some(([participantKind, state, value]) =>
+          participantKind === kind && state === "terminal" && value === 1
+        ),
+        false,
+      );
+      // A real close still records terminal exactly once.
+      stream.resolveClosed();
       await new Promise((resolve) => setTimeout(resolve, 0));
       const terminal = await states();
       assertEquals(
