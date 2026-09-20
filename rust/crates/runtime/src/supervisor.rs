@@ -760,6 +760,17 @@ async fn run_owned(
     // Readiness stays false until built-in live providers have finished their
     // bootstrap, so callers never begin work against half-started routes.
     let http_ready = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Register the OS shutdown signal before the HTTP listener becomes
+    // observable. A host can connect to the bound port immediately, so a
+    // SIGTERM delivered during startup must already be observed cooperatively
+    // instead of terminating the process with its runtime lease held.
+    let shutdown = crate::shutdown::shutdown_signal();
+    tokio::pin!(shutdown);
+    std::future::poll_fn(|cx| {
+        let _ = std::future::Future::poll(shutdown.as_mut(), cx);
+        std::task::Poll::Ready(())
+    })
+    .await;
     let listener = match crate::bind_http_listener(&context.config).await {
         Ok(listener) => listener,
         Err(error) => {
@@ -786,8 +797,6 @@ async fn run_owned(
     // providers are still bootstrapping. Observe that signal from the first
     // serve poll so the stop stays cooperative and runtime ownership is
     // released instead of the process being terminated with its lease held.
-    let shutdown = crate::shutdown::shutdown_signal();
-    tokio::pin!(shutdown);
     let mut signalled_during_bootstrap = false;
     let bootstrap_result: Result<(), RuntimeError> = tokio::select! {
         result = bootstrap_live_providers(&context) => result,
@@ -1175,7 +1184,7 @@ mod tests {
         let mut handles = Vec::new();
 
         let readiness = crate::telemetry::snapshots::ComponentReadiness::default();
-        let mut signal = std::future::ready(());
+        let signal = std::future::ready(());
         tokio::pin!(signal);
         let (result, server_finished, cause) = wait_for_runtime_event(
             server.as_mut(),
@@ -1202,7 +1211,7 @@ mod tests {
         }];
 
         let readiness = crate::telemetry::snapshots::ComponentReadiness::default();
-        let mut signal = std::future::ready(());
+        let signal = std::future::ready(());
         tokio::pin!(signal);
         let (result, server_finished, cause) = wait_for_runtime_event(
             server.as_mut(),

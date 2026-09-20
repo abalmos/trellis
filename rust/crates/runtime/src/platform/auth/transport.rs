@@ -1043,3 +1043,516 @@ mod tests {
         assert!(subscribe.is_empty());
     }
 }
+
+/// Real-broker verification of reply-permission expiry/count independence and
+/// static live-namespace isolation (work-order §4, BT01–BT03).
+#[cfg(test)]
+mod nats_reply_permission_tests {
+    use std::collections::BTreeMap;
+    use std::net::TcpListener;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+    use futures_util::StreamExt;
+    use trellis_local_nats::{ManagedNatsServer, NatsBinarySource, NatsOutput, NatsServerBinary};
+    use trellis_protocol::{
+        ApiSurfaceKind, AuthorizationPrincipalKind, GrantOwnerKind, GrantSet, ParticipantKind,
+        PermissionAction, PermissionAtom, PermissionTarget, UnsignedAuthorizationContext,
+    };
+    use trellis_rs::client::AuthorizationApiBinding;
+
+    use super::compile_transport_permissions;
+    use crate::platform::auth::{
+        domain::ParticipantBindingState,
+        evidence::{
+            ActionRuntimeProjection, ApiRuntimeProjection, ParticipantRuntimeProjection,
+            RuntimeActionKind,
+        },
+        AuthorizationRegistryBinding, ParticipantBindingRecord, TransportPermissions,
+    };
+
+    const API_ID: &str = "fieldops.sites@v1";
+    const PROVIDER_CONNECTION: &str = "sites-connection";
+    const CONSUMER_CONNECTION: &str = "caller-connection";
+    const CONSUMER_SESSION_KEY: &str = "caller-session-key";
+    const PROVIDER_DEPLOYMENT: &str = "sites-deployment";
+    const SESSION_ID: &str = "AAECAwQFBgcICQoLDA0ODw";
+
+    fn api_projection() -> ApiRuntimeProjection {
+        ApiRuntimeProjection {
+            digest: "d".repeat(43),
+            major: 1,
+            actions: BTreeMap::from([(
+                "feed:Watch".to_owned(),
+                ActionRuntimeProjection {
+                    kind: RuntimeActionKind::Feed,
+                    upload: false,
+                    download: false,
+                    event_parameter_count: 0,
+                },
+            )]),
+            capabilities: BTreeMap::new(),
+        }
+    }
+
+    fn binding(participant_id: &str, path: &str, implements: bool) -> ParticipantBindingRecord {
+        let api = api_projection();
+        ParticipantBindingRecord {
+            participant_id: participant_id.to_owned(),
+            participant_kind: ParticipantKind::Service,
+            participant_digest: "1".repeat(43),
+            needs_digest: "2".repeat(43),
+            package_digest: "3".repeat(43),
+            evidence_digest: "4".repeat(43),
+            participant_path: path.to_owned(),
+            projection: ParticipantRuntimeProjection {
+                participant_id: participant_id.to_owned(),
+                participant_kind: ParticipantKind::Service,
+                display_name: participant_id.to_owned(),
+                implemented_apis: if implements {
+                    BTreeMap::from([(API_ID.to_owned(), api.clone())])
+                } else {
+                    BTreeMap::new()
+                },
+                referenced_apis: if implements {
+                    BTreeMap::new()
+                } else {
+                    BTreeMap::from([(API_ID.to_owned(), api)])
+                },
+                resources: BTreeMap::new(),
+                required_grants: GrantSet::new(Vec::new()),
+                optional_grant_bundles: BTreeMap::new(),
+                required_capabilities: Vec::new(),
+                optional_capability_definitions: BTreeMap::new(),
+                companion_participant_id: None,
+                companion_participant_kind: None,
+                companion_required: false,
+            },
+            resolved_at: 0,
+            state: ParticipantBindingState::Resolved,
+            error: None,
+        }
+    }
+
+    fn context(
+        connection_id: &str,
+        session_key: &str,
+        participant_id: &str,
+        inbox_prefix: String,
+        grants: GrantSet,
+        deployment: Option<&str>,
+        instance: Option<&str>,
+    ) -> UnsignedAuthorizationContext {
+        UnsignedAuthorizationContext {
+            format: "trellis.auth.v1".to_owned(),
+            issuer_key_id: "issuer".to_owned(),
+            connection_id: connection_id.to_owned(),
+            session_key: session_key.to_owned(),
+            principal_id: format!("principal.{connection_id}"),
+            principal_kind: if deployment.is_some() {
+                AuthorizationPrincipalKind::Service
+            } else {
+                AuthorizationPrincipalKind::User
+            },
+            participant_id: participant_id.to_owned(),
+            owner_kind: GrantOwnerKind::Deployment,
+            owner_id: "deployment".to_owned(),
+            grant_revision: 1,
+            identity_key_id: None,
+            login_session_id: None,
+            deployment_id: deployment.map(str::to_owned),
+            instance_id: instance.map(str::to_owned),
+            inbox_prefix,
+            issued_at: 0,
+            not_before: 0,
+            expires_at: i64::MAX,
+            grants,
+            platform_privileges: Vec::new(),
+            extensions: serde_json::Map::new(),
+            critical: Vec::new(),
+        }
+    }
+
+    fn compiled_permissions() -> (TransportPermissions, TransportPermissions) {
+        let api_bindings = BTreeMap::from([(
+            API_ID.to_owned(),
+            AuthorizationApiBinding {
+                provider_deployment_id: PROVIDER_DEPLOYMENT.to_owned(),
+            },
+        )]);
+        let registry = AuthorizationRegistryBinding {
+            context_bucket: "contexts".to_owned(),
+        };
+        let provider = compile_transport_permissions(
+            &context(
+                PROVIDER_CONNECTION,
+                "sites-session-key",
+                "fieldops.Sites",
+                "_INBOX.sites".to_owned(),
+                GrantSet::new(Vec::new()),
+                Some(PROVIDER_DEPLOYMENT),
+                Some("sites-instance"),
+            ),
+            &binding("fieldops.Sites", "Sites", true),
+            &[],
+            &api_bindings,
+            &registry,
+        )
+        .expect("provider permissions compile");
+
+        let consumer_token = URL_SAFE_NO_PAD.encode(CONSUMER_CONNECTION.as_bytes());
+        let subscribe_atom = PermissionAtom::new(
+            PermissionTarget::api_surface(API_ID, ApiSurfaceKind::Feed, "Watch").unwrap(),
+            PermissionAction::Subscribe,
+        )
+        .unwrap();
+        let consumer = compile_transport_permissions(
+            &context(
+                CONSUMER_CONNECTION,
+                CONSUMER_SESSION_KEY,
+                "fieldops.Caller",
+                format!("_INBOX.{consumer_token}"),
+                GrantSet::new(vec![subscribe_atom]),
+                None,
+                None,
+            ),
+            &binding("fieldops.Caller", "Caller", false),
+            &[],
+            &api_bindings,
+            &registry,
+        )
+        .expect("consumer permissions compile");
+        (provider, consumer)
+    }
+
+    fn nats_list(subjects: &[String]) -> String {
+        let items: Vec<String> = subjects.iter().map(|s| format!("\"{s}\"")).collect();
+        format!("[{}]", items.join(", "))
+    }
+
+    fn free_port() -> u16 {
+        TcpListener::bind("127.0.0.1:0")
+            .expect("bind ephemeral port")
+            .local_addr()
+            .expect("local addr")
+            .port()
+    }
+
+    /// Reuse an already-installed pinned binary when present; otherwise download it
+    /// into a private cache directory.
+    fn resolve_pinned_binary() -> PathBuf {
+        let name = format!(
+            "nats-server-v{}",
+            trellis_local_nats::pinned_version().expect("pinned nats version")
+        );
+        let mut candidates = Vec::new();
+        if let Some(dir) = std::env::var_os("TRELLIS_CACHE_DIR") {
+            candidates.push(PathBuf::from(dir).join(&name));
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            let home = PathBuf::from(home);
+            candidates.push(home.join(".cache/trellis").join(&name));
+            candidates.push(home.join(".cache/trellis-test").join(&name));
+        }
+        for candidate in candidates {
+            if candidate.is_file() {
+                if let Ok(path) =
+                    NatsServerBinary::resolve(&NatsBinarySource::Path(candidate), None)
+                {
+                    return path;
+                }
+            }
+        }
+        let cache = std::env::temp_dir().join("trellis-v2-nats-cache");
+        std::fs::create_dir_all(&cache).expect("private nats cache dir");
+        NatsServerBinary::resolve(&NatsBinarySource::DownloadPinned, Some(&cache))
+            .expect("download pinned nats-server")
+    }
+
+    struct TestBroker {
+        server: ManagedNatsServer,
+        url: String,
+        _dir: tempfile::TempDir,
+    }
+
+    impl TestBroker {
+        fn start(response_allowance: &str) -> Self {
+            let (provider, consumer) = compiled_permissions();
+            let dir = tempfile::tempdir().expect("temp dir");
+            let config_path = dir.path().join("nats.conf");
+            let nats_port = free_port();
+            let http_port = free_port();
+            let ws_port = free_port();
+            let config = format!(
+                "port: {nats_port}\nhttp_port: {http_port}\nwebsocket {{ port: {ws_port}, no_tls: true }}\n\
+                 authorization {{\n  users: [\n\
+                 {{ user: \"provider\", password: \"pw\", permissions: {{ publish: {provider_publish}, subscribe: {provider_subscribe}, allow_responses: {response_allowance} }} }},\n\
+                 {{ user: \"consumer\", password: \"pw\", permissions: {{ publish: {consumer_publish}, subscribe: {consumer_subscribe} }} }}\n\
+                 ]\n}}\n",
+                provider_publish = nats_list(&provider.publish),
+                provider_subscribe = nats_list(&provider.subscribe),
+                consumer_publish = nats_list(&consumer.publish),
+                consumer_subscribe = nats_list(&consumer.subscribe),
+            );
+            std::fs::write(&config_path, config).expect("write config");
+            let binary = resolve_pinned_binary();
+            let pid_file = dir.path().join("nats.pid");
+            let log_path = dir.path().join("nats.log");
+            let server = match ManagedNatsServer::start(
+                &binary,
+                &config_path,
+                nats_port,
+                http_port,
+                ws_port,
+                &pid_file,
+                &NatsOutput::Log {
+                    path: log_path.clone(),
+                    mirror: false,
+                },
+            ) {
+                Ok(server) => server,
+                Err(error) => {
+                    let config = std::fs::read_to_string(&config_path).unwrap_or_default();
+                    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+                    panic!(
+                        "start nats-server: {error}\n--- config ---\n{config}\n--- log ---\n{log}"
+                    );
+                }
+            };
+            let url = server.url();
+            Self {
+                server,
+                url,
+                _dir: dir,
+            }
+        }
+    }
+
+    impl Drop for TestBroker {
+        fn drop(&mut self) {
+            let _ = self.server.stop();
+        }
+    }
+
+    type Errors = Arc<Mutex<Vec<String>>>;
+
+    async fn connect(url: &str, user: &str) -> (async_nats::Client, Errors) {
+        let errors: Errors = Arc::new(Mutex::new(Vec::new()));
+        let sink = errors.clone();
+        let client =
+            async_nats::ConnectOptions::with_user_and_password(user.to_owned(), "pw".to_owned())
+                .event_callback(move |event| {
+                    let sink = sink.clone();
+                    async move {
+                        sink.lock().unwrap().push(format!("{event}"));
+                    }
+                })
+                .connect(url)
+                .await
+                .expect("connect to broker");
+        (client, errors)
+    }
+
+    fn feed_base() -> String {
+        trellis_protocol::derive_bound_feed_subject(API_ID, PROVIDER_DEPLOYMENT, "Watch")
+            .expect("feed subject")
+    }
+
+    fn live_subject() -> String {
+        trellis_protocol::derive_live_data_subject(
+            PROVIDER_CONNECTION,
+            CONSUMER_CONNECTION,
+            SESSION_ID,
+        )
+        .expect("live subject")
+    }
+
+    async fn next_within<T: Send + 'static>(
+        receiver: &mut (impl futures_util::Stream<Item = T> + Unpin),
+        label: &str,
+    ) -> T {
+        tokio::time::timeout(Duration::from_secs(5), receiver.next())
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for {label}"))
+            .unwrap_or_else(|| panic!("stream ended waiting for {label}"))
+    }
+
+    async fn error_mentioning(errors: &Errors, needle: &str) -> bool {
+        for _ in 0..100 {
+            if errors.lock().unwrap().iter().any(|e| e.contains(needle)) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn bt01_response_expiry_is_independent_of_the_large_count_allowance() {
+        let broker = TestBroker::start("{ max: 65535, expires: \"250ms\" }");
+        let (provider, _provider_errors) = connect(&broker.url, "provider").await;
+        let (consumer, _consumer_errors) = connect(&broker.url, "consumer").await;
+        let consumer_inbox = format!(
+            "_INBOX.{}",
+            URL_SAFE_NO_PAD.encode(CONSUMER_CONNECTION.as_bytes())
+        );
+        let mut requests = provider.subscribe(feed_base()).await.unwrap();
+        let mut replies = consumer
+            .subscribe(format!("{consumer_inbox}.*"))
+            .await
+            .unwrap();
+        let mut live = consumer.subscribe(live_subject()).await.unwrap();
+        provider.flush().await.unwrap();
+        consumer.flush().await.unwrap();
+
+        let reply = format!("{consumer_inbox}.r1");
+        assert!(
+            !compiled_permissions().1.publish.contains(&reply),
+            "no static grant may already permit the response inbox"
+        );
+        consumer
+            .publish_with_reply(feed_base(), reply.clone(), b"req".to_vec().into())
+            .await
+            .unwrap();
+        let request = next_within(&mut requests, "request").await;
+        assert_eq!(request.reply.as_deref(), Some(reply.as_str()));
+
+        provider
+            .publish(reply.clone(), b"ok".to_vec().into())
+            .await
+            .unwrap();
+        let received = next_within(&mut replies, "first reply").await;
+        assert_eq!(received.payload.as_ref(), b"ok");
+
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        provider
+            .publish(reply.clone(), b"late".to_vec().into())
+            .await
+            .unwrap();
+        assert!(
+            error_mentioning(&_provider_errors, "Permissions Violation").await,
+            "expired response subject must be denied"
+        );
+
+        provider
+            .publish(live_subject(), b"live".to_vec().into())
+            .await
+            .unwrap();
+        let frame = next_within(&mut live, "live frame").await;
+        assert_eq!(frame.payload.as_ref(), b"live");
+
+        let reply2 = format!("{consumer_inbox}.r2");
+        consumer
+            .publish_with_reply(feed_base(), reply2.clone(), b"req2".to_vec().into())
+            .await
+            .unwrap();
+        let request2 = next_within(&mut requests, "second request").await;
+        assert_eq!(request2.reply.as_deref(), Some(reply2.as_str()));
+        provider
+            .publish(reply2, b"ok2".to_vec().into())
+            .await
+            .unwrap();
+        let second = next_within(&mut replies, "second reply").await;
+        assert_eq!(second.payload.as_ref(), b"ok2");
+    }
+
+    #[tokio::test]
+    async fn bt02_response_count_is_independent_of_static_live_delivery() {
+        let broker = TestBroker::start("{ max: 3, expires: \"60s\" }");
+        let (provider, provider_errors) = connect(&broker.url, "provider").await;
+        let (consumer, _consumer_errors) = connect(&broker.url, "consumer").await;
+        let consumer_inbox = format!(
+            "_INBOX.{}",
+            URL_SAFE_NO_PAD.encode(CONSUMER_CONNECTION.as_bytes())
+        );
+        let mut requests = provider.subscribe(feed_base()).await.unwrap();
+        let mut replies = consumer
+            .subscribe(format!("{consumer_inbox}.*"))
+            .await
+            .unwrap();
+        let mut live = consumer.subscribe(live_subject()).await.unwrap();
+        provider.flush().await.unwrap();
+        consumer.flush().await.unwrap();
+
+        let reply = format!("{consumer_inbox}.count");
+        consumer
+            .publish_with_reply(feed_base(), reply.clone(), b"req".to_vec().into())
+            .await
+            .unwrap();
+        let _ = next_within(&mut requests, "request").await;
+
+        for marker in [b"one".as_slice(), b"two".as_slice(), b"three".as_slice()] {
+            provider
+                .publish(reply.clone(), marker.to_vec().into())
+                .await
+                .unwrap();
+        }
+        for expected in [b"one".as_slice(), b"two".as_slice(), b"three".as_slice()] {
+            let frame = next_within(&mut replies, "counted reply").await;
+            assert_eq!(frame.payload.as_ref(), expected);
+        }
+        provider
+            .publish(reply.clone(), b"four".to_vec().into())
+            .await
+            .unwrap();
+        assert!(
+            error_mentioning(&provider_errors, "Permissions Violation").await,
+            "the fourth response must be denied within the 60s allowance"
+        );
+
+        for index in 0..65u32 {
+            provider
+                .publish(
+                    live_subject(),
+                    format!("marker-{index}").into_bytes().into(),
+                )
+                .await
+                .unwrap();
+        }
+        for index in 0..65u32 {
+            let frame = next_within(&mut live, "live marker").await;
+            assert_eq!(frame.payload.as_ref(), format!("marker-{index}").as_bytes());
+        }
+    }
+
+    #[tokio::test]
+    async fn bt03_static_namespaces_are_isolated() {
+        let broker = TestBroker::start("{ max: 65535, expires: \"60s\" }");
+        let (provider, provider_errors) = connect(&broker.url, "provider").await;
+        let (consumer, consumer_errors) = connect(&broker.url, "consumer").await;
+
+        let other_consumer = format!("_INBOX.{}", URL_SAFE_NO_PAD.encode(b"other-connection"));
+        let _denied_subscription = consumer.subscribe(format!("{other_consumer}.>")).await;
+        assert!(
+            error_mentioning(&consumer_errors, "Permissions Violation").await,
+            "a consumer must not subscribe to another consumer's inbox"
+        );
+
+        let foreign_live = trellis_protocol::derive_live_data_subject(
+            "other-provider",
+            CONSUMER_CONNECTION,
+            SESSION_ID,
+        )
+        .unwrap();
+        provider
+            .publish(foreign_live, b"x".to_vec().into())
+            .await
+            .unwrap();
+        assert!(
+            error_mentioning(&provider_errors, "Permissions Violation").await,
+            "a provider must not publish under another provider's live prefix"
+        );
+
+        consumer
+            .publish(live_subject(), b"x".to_vec().into())
+            .await
+            .unwrap();
+        assert!(
+            error_mentioning(&consumer_errors, "Permissions Violation").await,
+            "a non-provider must not publish live data"
+        );
+    }
+}
