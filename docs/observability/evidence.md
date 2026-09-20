@@ -86,12 +86,9 @@ export OTEL_TRACES_SAMPLER=always_on
 export OTEL_METRIC_EXPORT_INTERVAL=1000
 export OTEL_BSP_SCHEDULE_DELAY=100
 export TRELLIS_OBS_CAPTURE_ENDPOINT=http://127.0.0.1:4318
-export TRELLIS_OBS_PROMETHEUS_URL=http://127.0.0.1:9464/metrics
 
 deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \
   --filter 'collector enabled'
-deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \
-  --filter 'durable attempt links'
 deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \
   --filter 'TS service connection observes'
 deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \

@@ -123,34 +123,40 @@ Rules:
 #### Feeds
 
 Feeds expose caller-visible live views that are authorized by the owning
-service. They are request/reply streams: a caller requests a feed with typed
-input, and the service emits typed frames to the caller's reply inbox.
+service. A feed is an **ephemeral live observation session**, not an indefinite
+request/reply stream: a caller sends one bounded opening request, and after a
+delivery-path activation round trip the service emits typed frames on a signed,
+connection-scoped live data subject. Liveness, cumulative credit, and closure
+travel as signed owner-directed controls.
 
-Subject naming:
-
-```text
-feeds.v1.<Domain>.<LiveView>
-```
-
-Examples:
+Contract-owned subject naming (deployment-bound route plus runtime-derived
+session subjects):
 
 ```text
-feeds.v1.Device.Events
-feeds.v1.Audit.Feed
-feeds.v1.Inspection.Updates
+feed.v1.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
+<base>.observe.<b64(providerConnectionId)>.<sessionId>
+live.v1.data.<b64(providerConnectionId)>.<b64(consumerConnectionId)>.<sessionId>
 ```
 
 Rules:
 
 - use feeds when normal apps need reactive UI updates filtered by application
-  authorization, such as devices visible to the logged-in user
-- feed subjects are request subjects, not raw event subjects
+  authorization
+- feed opening routes are request/reply request subjects; live delivery is a
+  signed, descriptor-derived subject, not a raw event subject and not the
+  opening reply inbox
 - the service owns fine-grained authorization against the authenticated caller,
-  feed input, and every emitted frame
+  feed input, and every emitted frame; every provider-origin frame is
+  authenticated as the negotiated provider over its actual subject and bytes
 - normal apps that use feeds do not receive raw `events.v1.*` subscribe
   permissions for the backing domain events
 - feeds are live streams, not durable operations; use operations when the caller
   needs resumable workflow state or terminal completion
+- an Operation observation uses the same live transport but never owns or
+  cancels durable execution
+
+See `core/live-observation-sessions.md` for the full ownership, credit,
+liveness, and closure contract.
 
 #### RPCs
 

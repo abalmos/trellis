@@ -74,6 +74,34 @@ Heartbeat behavior:
   `Health.Inspect`, and `Health.Metrics`, then uses `Health.Watch` as a
   post-commit invalidation feed
 
+### Live Observation Telemetry
+
+The live-observation contract requires Feeds and Operation watchers to be
+observed as live sessions through bounded instruments in both languages:
+`trellis.live.sessions` (phase
+`prepared`/`activating`/`active`/`draining`/`closing`), `trellis.live.ends`,
+`trellis.live.handshake.duration`, `trellis.live.buffered.bytes`,
+`trellis.live.frames`, `trellis.live.rejections`, and
+`trellis.live.cleanup.pending`, alongside the existing `trellis.feed.active` and
+`trellis.feed.ends`. They must move on the manager's real lifecycle transitions,
+not telemetry-only callbacks: a provider becomes active when activation commits
+and a consumer when its first pulse acknowledgement verifies; prepared or failed
+offers are not active executions; and a session ends exactly once per committed
+terminal outcome. A running Operation with zero observers retains one unchanged
+execution lifetime, and opening or closing a watcher never changes Operation
+execution counts. `trellis.live.cleanup.pending` decrements only on actual
+source termination, so a zero active-session gauge with nonzero pending is still
+a visible leak. Until the `trellis.live.*` families are emitted, the existing
+`trellis.feed.active` and `trellis.feed.ends` families remain the published Feed
+lifecycle signal.
+
+Labels stay bounded: `trellis.live.kind` (`feed`/`operation_watch`),
+`trellis.side` (`consumer`/`provider`), `trellis.phase`, fixed `reason` and
+rejection codes, and `sent`/`received` direction. Raw subjects, session and
+Operation IDs, principal or deployment identities, digests, inputs, and
+free-form error strings are never metric dimensions. Telemetry never keeps a
+session alive and never closes a healthy one.
+
 ### Runtime Health And Events Views
 
 The Rust runtime has first-class `health` and `events` subsystems. In all-in-one
