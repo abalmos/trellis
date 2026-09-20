@@ -10,8 +10,7 @@ use bytes::Bytes;
 use trellis_protocol::{
     LiveControl, LiveControlAck, LiveControlAckAction, LiveControlError, LiveDataFrame,
     LiveEndFrame, LiveEndReason, LiveErrorCode, LiveOfferKind, LiveSessionKind, LiveSessionState,
-    U64s, WireTerminal, CLEANUP_GRACE_MS, CONSUMER_STALL_MS, HEARTBEAT_INTERVAL_MS,
-    OPEN_RESERVATION_MS, PEER_INACTIVITY_MS, WINDOW_BYTES, WINDOW_FRAMES,
+    U64s, WireTerminal, CLEANUP_GRACE_MS, WINDOW_BYTES, WINDOW_FRAMES,
 };
 
 use super::authority::{LiveAuthorityLost, PinnedPeerIdentity};
@@ -52,9 +51,11 @@ pub(crate) struct ProviderSession {
     pub control_subject: String,
     pub consumer: PinnedPeerIdentity,
     pub phase: Mutex<ProviderPhase>,
-    pub reservation_deadline: std::time::Instant,
+    /// The single outstanding challenge's nonce and exact `lastSentSeq`.
+    ///
+    /// Timing (retry/heartbeat/peer deadlines) lives in [`super::deadlines`];
+    /// this holds only the values needed to re-publish the same challenge.
     pub challenge: Mutex<Option<ChallengeState>>,
-    pub last_fresh_pulse_ms: AtomicU64,
     pub highest_sent: AtomicU64,
     pub highest_received: AtomicU64,
     pub highest_consumed: AtomicU64,
@@ -81,12 +82,14 @@ pub(crate) struct ProviderSessionSubjects {
 }
 
 /// One outstanding delivery-path challenge.
+///
+/// Timing is owned by [`super::deadlines`]; only the identifying nonce and the
+/// exact `lastSentSeq` captured when the challenge was generated live here, so a
+/// retry re-publishes byte-identical liveness evidence.
 #[derive(Clone, Debug)]
 pub(crate) struct ChallengeState {
     pub challenge_id: String,
     pub last_sent_seq: u64,
-    pub answered: bool,
-    pub last_published_ms: u64,
 }
 
 impl ProviderSession {
@@ -117,10 +120,7 @@ impl ProviderSession {
             control_subject,
             consumer,
             phase: Mutex::new(ProviderPhase::Offered),
-            reservation_deadline: std::time::Instant::now()
-                + std::time::Duration::from_millis(OPEN_RESERVATION_MS),
             challenge: Mutex::new(None),
-            last_fresh_pulse_ms: AtomicU64::new(0),
             highest_sent: AtomicU64::new(0),
             highest_received: AtomicU64::new(0),
             highest_consumed: AtomicU64::new(0),
@@ -144,10 +144,12 @@ impl ProviderSession {
         }
     }
 
-    /// Return whether the reservation deadline has elapsed.
+    /// Return whether the credit window has no outstanding frames.
     #[must_use]
-    pub(crate) fn reservation_elapsed(&self) -> bool {
-        std::time::Instant::now() >= self.reservation_deadline
+    pub(crate) fn outstanding_empty(&self) -> bool {
+        self.outstanding
+            .lock()
+            .is_ok_and(|outstanding| outstanding.is_empty())
     }
 
     pub(crate) fn wake_credit(&self) {
@@ -221,50 +223,6 @@ impl ProviderSession {
         drop(outstanding);
         self.wake_credit();
         Ok(())
-    }
-
-    /// Return whether the consumer has stalled with outstanding data.
-    #[must_use]
-    pub(crate) fn consumer_stalled(&self, now_ms: u64) -> bool {
-        let has_outstanding = self
-            .outstanding
-            .lock()
-            .is_ok_and(|outstanding| !outstanding.is_empty());
-        if !has_outstanding {
-            return false;
-        }
-        let last_progress = self.last_fresh_pulse_ms.load(Ordering::Acquire);
-        now_ms.saturating_sub(last_progress) >= CONSUMER_STALL_MS
-    }
-
-    /// Return whether the pinned peer has been silent past the inactivity bound.
-    #[must_use]
-    pub(crate) fn peer_inactive(&self, now_ms: u64) -> bool {
-        let last = self.last_fresh_pulse_ms.load(Ordering::Acquire);
-        last > 0 && now_ms.saturating_sub(last) >= PEER_INACTIVITY_MS
-    }
-
-    /// Commit one accepted fresh pulse and extend the inactivity deadline once.
-    pub(crate) fn commit_fresh_pulse(&self, challenge_id: &str, now_ms: u64) -> bool {
-        let Ok(mut challenge) = self.challenge.lock() else {
-            return false;
-        };
-        let Some(current) = challenge.as_mut() else {
-            return false;
-        };
-        if current.challenge_id != challenge_id || current.answered {
-            return false;
-        }
-        current.answered = true;
-        self.last_fresh_pulse_ms.store(now_ms, Ordering::Release);
-        true
-    }
-
-    /// Return the next heartbeat deadline relative to the last fresh pulse.
-    #[must_use]
-    pub(crate) fn heartbeat_due(&self, now_ms: u64) -> bool {
-        let last = self.last_fresh_pulse_ms.load(Ordering::Acquire);
-        last > 0 && now_ms.saturating_sub(last) >= HEARTBEAT_INTERVAL_MS
     }
 }
 

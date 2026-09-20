@@ -9,15 +9,16 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use trellis_protocol::{
     derive_live_data_subject, LiveErrorCode, LiveFrame, LiveOffer, LiveOfferKind, LiveSessionKind,
-    ACK_MAX_DELAY_MS, OPEN_RESERVATION_MS,
+    OPEN_RESERVATION_MS,
 };
 
 use crate::client::{AuthorizationProviderCache, TrellisClientError};
 
 use super::authority::{LiveAuthorityGuard, LiveGuardRequirement, PinnedPeerIdentity};
+use super::deadlines::{DeadlineAction, LiveDeadlines};
 use super::subscription::{
-    activate_control, consumer_failure, credit_control, end_ack_control, peer_inactivity,
-    pulse_control, ConsumerControl, ConsumerCore, ConsumerPhase,
+    activate_control, consumer_failure, credit_control, end_ack_control, pulse_control,
+    ConsumerControl, ConsumerCore, ConsumerPhase,
 };
 use super::types::{LiveCancellation, LiveEnd, LiveEndReason};
 
@@ -340,7 +341,12 @@ where
         TrellisClientError::AuthorizationUnavailable(format!("provider guard: {lost:?}"))
     })?;
     let cancellation = LiveCancellation::new();
-    let pump = ConsumerPump::new(core.clone(), control.clone(), cancellation.clone());
+    let pump = ConsumerPump::new(
+        core.clone(),
+        control.clone(),
+        cancellation.clone(),
+        prepared.max_data_body_bytes,
+    );
     let drain = pump.spawn(client.nats(), prepared.offer.data_subject.clone(), decode);
     Ok(crate::live::subscription::LiveSubscription::new(
         core,
@@ -386,11 +392,20 @@ pub(crate) fn reservation_budget() -> Duration {
     Duration::from_millis(OPEN_RESERVATION_MS)
 }
 
+/// Sleep until an optional deadline; wait forever when none is scheduled.
+async fn wait_until(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
+
 /// One live data pump over a verified prepared session.
 pub(crate) struct ConsumerPump<T> {
     core: Arc<ConsumerCore<T>>,
     control: Arc<ConsumerControl>,
     cancellation: LiveCancellation,
+    max_data_body_bytes: u64,
 }
 
 impl<T> ConsumerPump<T> {
@@ -400,15 +415,21 @@ impl<T> ConsumerPump<T> {
         core: Arc<ConsumerCore<T>>,
         control: Arc<ConsumerControl>,
         cancellation: LiveCancellation,
+        max_data_body_bytes: u64,
     ) -> Self {
         Self {
             core,
             control,
             cancellation,
+            max_data_body_bytes,
         }
     }
 
     /// Run activation then the data/control loop until a terminal outcome.
+    ///
+    /// The consumer becomes ACTIVE only after a matching pulse acknowledgement
+    /// verifies; ordinary data or a stale challenge never renews liveness. The
+    /// monotonic deadline owner supplies peer, credit and draining deadlines.
     ///
     /// # Errors
     ///
@@ -429,6 +450,8 @@ impl<T> ConsumerPump<T> {
                 _ = self.core.start.notified() => {}
                 _ = self.cancellation.cancelled() => return,
             }
+            let session_id = self.core.session_id.clone();
+            let mut deadlines = LiveDeadlines::prepared(tokio::time::Instant::now());
             let mut subscription = match nats.subscribe(data_subject).await {
                 Ok(subscription) => subscription,
                 Err(_) => {
@@ -447,74 +470,126 @@ impl<T> ConsumerPump<T> {
                 return;
             }
             self.core.set_phase(ConsumerPhase::Activating);
-            let session_id = self.core.session_id.clone();
-            let control_seq = self.control.next_control_seq();
-            let Ok(ack) = self
-                .control
-                .send_control(&activate_control(&session_id), control_seq)
-                .await
-            else {
-                self.core.commit_end(consumer_failure(
-                    LiveErrorCode::Disconnected,
-                    "activation control could not be sent",
-                ));
-                return;
-            };
-            if ack.state == trellis_protocol::LiveSessionState::Closed {
-                self.core.commit_end(consumer_failure(
-                    LiveErrorCode::SetupTimeout,
-                    "live session closed during activation",
-                ));
-                return;
-            }
-            self.core.set_phase(ConsumerPhase::Active);
-            let mut next_expected: u64 = 1;
-            let mut last_peer_activity = tokio::time::Instant::now();
-            let activation_deadline = tokio::time::Instant::now() + reservation_budget();
-            let mut credit_tick =
-                tokio::time::interval(std::time::Duration::from_millis(ACK_MAX_DELAY_MS));
-            credit_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            let mut last_credit_sent: u64 = 0;
-            let provider_guard: Option<super::authority::LiveAuthorityGuard> = None;
-            let _ = provider_guard;
+
+            // Activation: bounded fresh-proof retries within the reservation.
+            let reservation_deadline = tokio::time::Instant::now() + reservation_budget();
+            let activate = activate_control(&session_id);
+            let activate_seq = self.control.next_control_seq();
             loop {
-                tokio::select! {
+                let attempt = tokio::select! {
                     _ = self.cancellation.cancelled() => {
                         self.core.discard_queue();
                         self.core.commit_end(LiveEnd::new(LiveEndReason::Cancelled, None));
                         return;
                     }
-                    _ = tokio::time::sleep_until(activation_deadline), if self.core.phase() == ConsumerPhase::Activating => {
+                    result = self.control.send_control(&activate, activate_seq) => result,
+                };
+                match attempt {
+                    Ok(ack) if ack.state != trellis_protocol::LiveSessionState::Closed => break,
+                    Ok(_) => {
+                        self.core.commit_end(consumer_failure(
+                            LiveErrorCode::SetupTimeout,
+                            "live session closed during activation",
+                        ));
+                        return;
+                    }
+                    Err(_) if tokio::time::Instant::now() < reservation_deadline => continue,
+                    Err(_) => {
                         self.core.commit_end(consumer_failure(
                             LiveErrorCode::SetupTimeout,
                             "live activation did not complete within the reservation",
                         ));
                         return;
                     }
-                    _ = credit_tick.tick() => {
-                        // Send accumulated consumption credit; a fully consumed
-                        // idle stream still acks its position so the provider
-                        // can release window state.
-                        let received = self.core.received_seq();
+                }
+            }
+
+            let mut next_expected: u64 = 1;
+            let mut last_credit_sent: u64 = 0;
+            loop {
+                if self.core.committed_end().is_some() {
+                    return;
+                }
+                if matches!(self.core.phase(), ConsumerPhase::Draining) {
+                    // The data subscription and peer pulse work are stopped;
+                    // only the bounded local drain and its stall deadline remain.
+                    let next = deadlines.next_due();
+                    tokio::select! {
+                        _ = self.cancellation.cancelled() => {
+                            self.core.discard_queue();
+                            self.core.commit_end(LiveEnd::new(LiveEndReason::Cancelled, None));
+                            return;
+                        }
+                        _ = wait_until(next) => {
+                            if deadlines.evaluate(tokio::time::Instant::now())
+                                == Some(DeadlineAction::ConsumerStalled)
+                            {
+                                self.core.discard_queue();
+                                self.core.commit_end(consumer_failure(
+                                    LiveErrorCode::ConsumerSlow,
+                                    "live draining queue was not consumed",
+                                ));
+                            }
+                        }
+                        _ = self.core.end_notify.notified() => {}
+                    }
+                    return;
+                }
+                let next = deadlines.next_due();
+                tokio::select! {
+                    _ = self.cancellation.cancelled() => {
+                        self.core.discard_queue();
+                        self.core.commit_end(LiveEnd::new(LiveEndReason::Cancelled, None));
+                        return;
+                    }
+                    _ = self.core.credit_notify.notified() => {
                         let consumed = self.core.consumed_seq();
                         if consumed > last_credit_sent {
-                            last_credit_sent = consumed;
-                            let control_seq = self.control.next_control_seq();
-                            let _ = self
-                                .control
-                                .send_control(
-                                    &credit_control(&session_id, control_seq, received, consumed),
-                                    control_seq,
-                                )
-                                .await;
+                            deadlines.note_consumption(
+                                tokio::time::Instant::now(),
+                                consumed - last_credit_sent,
+                            );
                         }
-                        // Provider inactivity: a silent pinned peer is lost.
-                        if last_peer_activity.elapsed() >= peer_inactivity() {
-                            self.core.commit_end(consumer_failure(
-                                LiveErrorCode::PeerLost,
-                                "live provider silent past the inactivity bound",
-                            ));
-                            return;
+                    }
+                    _ = wait_until(next) => {
+                        let now = tokio::time::Instant::now();
+                        match deadlines.evaluate(now) {
+                            Some(DeadlineAction::ReservationExpired) => {
+                                self.core.commit_end(consumer_failure(
+                                    LiveErrorCode::SetupTimeout,
+                                    "live activation did not complete within the reservation",
+                                ));
+                                return;
+                            }
+                            Some(DeadlineAction::PeerInactive) => {
+                                self.core.commit_end(consumer_failure(
+                                    LiveErrorCode::PeerLost,
+                                    "live provider silent past the inactivity bound",
+                                ));
+                                return;
+                            }
+                            Some(DeadlineAction::CreditDue) => {
+                                let received = self.core.received_seq();
+                                let consumed = self.core.consumed_seq();
+                                deadlines.credit_sent();
+                                if consumed > last_credit_sent {
+                                    last_credit_sent = consumed;
+                                    let control_seq = self.control.next_control_seq();
+                                    let _ = self
+                                        .control
+                                        .send_control(
+                                            &credit_control(
+                                                &session_id,
+                                                control_seq,
+                                                received,
+                                                consumed,
+                                            ),
+                                            control_seq,
+                                        )
+                                        .await;
+                                }
+                            }
+                            _ => {}
                         }
                     }
                     message = subscription.next() => {
@@ -527,13 +602,15 @@ impl<T> ConsumerPump<T> {
                         };
                         // Frames must authenticate against the pinned provider
                         // before they influence state; garbage is discarded.
-                        let Ok(frame) = trellis_protocol::parse_live_frame(&message.payload) else {
+                        let Ok(frame) = trellis_protocol::parse_live_frame(
+                            &message.payload,
+                            self.max_data_body_bytes,
+                        ) else {
                             continue;
                         };
                         if !verify_provider_frame(&self.control, &message, &frame) {
                             continue;
                         }
-                        last_peer_activity = tokio::time::Instant::now();
                         match &frame {
                             LiveFrame::Data(data) => {
                                 let seq = data.seq.get();
@@ -552,7 +629,9 @@ impl<T> ConsumerPump<T> {
                                 match decode(data.value.clone()) {
                                     Ok(Some(value)) => {
                                         let encoded_len =
-                                            serde_json::to_vec(&data.value).map_or(0, |bytes| bytes.len() as u64);
+                                            serde_json::to_vec(&data.value).map_or(0, |bytes| {
+                                                bytes.len() as u64
+                                            });
                                         if !self.core.admit(super::subscription::AdmittedItem {
                                             value,
                                             encoded_len,
@@ -589,19 +668,34 @@ impl<T> ConsumerPump<T> {
                                     return;
                                 }
                                 let control_seq = self.control.next_control_seq();
-                                let _ = self
-                                    .control
-                                    .send_control(
-                                        &pulse_control(
-                                            &session_id,
-                                            control_seq,
-                                            &challenge.challenge_id,
-                                            self.core.received_seq(),
-                                            self.core.consumed_seq(),
-                                        ),
-                                        control_seq,
-                                    )
-                                    .await;
+                                let pulse = pulse_control(
+                                    &session_id,
+                                    control_seq,
+                                    &challenge.challenge_id,
+                                    self.core.received_seq(),
+                                    self.core.consumed_seq(),
+                                );
+                                let ack = tokio::select! {
+                                    _ = self.cancellation.cancelled() => {
+                                        self.core.discard_queue();
+                                        self.core.commit_end(LiveEnd::new(LiveEndReason::Cancelled, None));
+                                        return;
+                                    }
+                                    result = self.control.send_control(&pulse, control_seq) => result,
+                                };
+                                // Only a matching, authenticated pulse ack commits
+                                // activation or renews the fresh-round-trip clock.
+                                if let Ok(ack) = ack {
+                                    if ack.state == trellis_protocol::LiveSessionState::Active {
+                                        let now = tokio::time::Instant::now();
+                                        if matches!(self.core.phase(), ConsumerPhase::Activating) {
+                                            deadlines.commit_active(now, false);
+                                            self.core.set_phase(ConsumerPhase::Active);
+                                        } else {
+                                            deadlines.fresh_round_trip(now, false);
+                                        }
+                                    }
+                                }
                             }
                             LiveFrame::End(end) => {
                                 if end.final_seq.get() != self.core.received_seq() {
@@ -641,10 +735,12 @@ impl<T> ConsumerPump<T> {
                                 if end.is_complete() {
                                     self.core.set_pending_end(end);
                                     self.core.set_phase(ConsumerPhase::Draining);
+                                    deadlines.begin_draining();
+                                    deadlines.data_admitted(tokio::time::Instant::now());
                                 } else {
                                     self.core.commit_end(end);
+                                    return;
                                 }
-                                return;
                             }
                         }
                     }

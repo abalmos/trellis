@@ -11,6 +11,7 @@ use std::sync::{Arc, Weak};
 
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
+use tokio::time::Instant;
 
 use trellis_protocol::{
     LiveControl, LiveControlAck, LiveEndReason, LiveErrorCode, LiveSessionKind, LiveSessionState,
@@ -18,13 +19,14 @@ use trellis_protocol::{
 };
 
 use super::authority::{LiveAuthorityGuard, LiveAuthorityLost, PinnedPeerIdentity};
+use super::deadlines::{DeadlineAction, LiveDeadlines};
 use super::manager::{LiveSessionManager, ProviderPermit};
 use super::provider::{
     bounded_message, challenge_frame, control_ack, control_error, data_frame, end_frame,
     provider_failure, receipt_for, terminal_from_end, ProviderPhase, ProviderReservationIdentity,
     ProviderSession, ProviderSessionSubjects,
 };
-use super::types::{CloseCleanupState, LiveEnd, LiveStreamError};
+use super::types::{feed_end_reason, CloseCleanupState, LiveEnd, LiveStreamError};
 
 /// One accepted opening request ready to reserve a session.
 pub(crate) struct ProviderOpenRequest {
@@ -68,6 +70,14 @@ pub(crate) struct ProviderSessionRecord {
     pub cancellation: super::types::LiveCancellation,
     pub source_started: AtomicBool,
     pub max_data_body_bytes: u64,
+    /// Single monotonic deadline owner for this session.
+    pub deadlines: std::sync::Mutex<LiveDeadlines>,
+    /// Wakes the session timer when a deadline changes.
+    pub deadline_notify: tokio::sync::Notify,
+    /// Guards one-time closure and receipt recording.
+    pub finished: AtomicBool,
+    /// Server-side Feed ownership and its single end observation.
+    pub feed: std::sync::Mutex<Option<crate::telemetry::lifecycle::FeedGuard>>,
 }
 
 impl ProviderSessionRecord {
@@ -216,31 +226,47 @@ impl ProviderSessionRecord {
     pub(crate) async fn handle_control(
         &self,
         control: &LiveControl,
-        now_ms: u64,
+        now: Instant,
     ) -> Result<ControlOutcome, LiveErrorCode> {
         match control {
             LiveControl::Activate(_) => {
-                if !matches!(
-                    self.session.phase(),
-                    ProviderPhase::Offered | ProviderPhase::Activating
-                ) {
+                let phase = self.session.phase();
+                if !matches!(phase, ProviderPhase::Offered | ProviderPhase::Activating) {
                     return Err(LiveErrorCode::StaleControl);
                 }
-                self.session.set_phase(ProviderPhase::Activating);
+                // A duplicate activate re-delivers the same outstanding challenge
+                // rather than minting a second nonce.
+                if matches!(phase, ProviderPhase::Activating) {
+                    let existing = self
+                        .session
+                        .challenge
+                        .lock()
+                        .ok()
+                        .and_then(|challenge| challenge.clone());
+                    if let Some(challenge) = existing {
+                        return Ok(ControlOutcome {
+                            state: LiveSessionState::Activating,
+                            terminal: None,
+                            cleanup: None,
+                            challenge: Some(challenge.challenge_id),
+                            start_source: false,
+                        });
+                    }
+                }
                 let challenge_id =
                     trellis_protocol::generate_nonce().map_err(|_| LiveErrorCode::ProtocolError)?;
-                let last_sent_seq = self
-                    .session
-                    .highest_sent
-                    .load(std::sync::atomic::Ordering::Acquire);
+                let last_sent_seq = self.session.highest_sent.load(Ordering::Acquire);
+                self.session.set_phase(ProviderPhase::Activating);
                 if let Ok(mut challenge) = self.session.challenge.lock() {
                     *challenge = Some(super::provider::ChallengeState {
                         challenge_id: challenge_id.clone(),
                         last_sent_seq,
-                        answered: false,
-                        last_published_ms: now_ms,
                     });
                 }
+                self.with_deadlines(|deadlines| {
+                    deadlines.begin_activating(now, challenge_id.clone());
+                });
+                self.deadline_changed();
                 Ok(ControlOutcome {
                     state: LiveSessionState::Activating,
                     terminal: None,
@@ -250,27 +276,45 @@ impl ProviderSessionRecord {
                 })
             }
             LiveControl::Pulse(pulse) => {
-                let committed = self.session.commit_fresh_pulse(&pulse.challenge_id, now_ms);
-                if !committed {
+                let activating = matches!(self.session.phase(), ProviderPhase::Activating);
+                let accepted = self
+                    .with_deadlines(|deadlines| {
+                        if deadlines.outstanding_challenge() != Some(pulse.challenge_id.as_str()) {
+                            return false;
+                        }
+                        if activating {
+                            deadlines.commit_active(now, true);
+                        } else {
+                            deadlines.fresh_round_trip(now, true);
+                        }
+                        true
+                    })
+                    .unwrap_or(false);
+                if !accepted {
                     return Err(LiveErrorCode::InvalidChallenge);
                 }
-                let first_active = !matches!(self.session.phase(), ProviderPhase::Active);
-                if first_active {
+                if let Ok(mut challenge) = self.session.challenge.lock() {
+                    *challenge = None;
+                }
+                if activating {
                     self.session.set_phase(ProviderPhase::Active);
                 }
-                self.session
-                    .apply_credit(pulse.received_seq.get(), pulse.consumed_seq.get())?;
+                self.apply_credit_and_note(
+                    pulse.received_seq.get(),
+                    pulse.consumed_seq.get(),
+                    now,
+                )?;
+                self.deadline_changed();
                 Ok(ControlOutcome {
                     state: LiveSessionState::Active,
                     terminal: None,
                     cleanup: None,
                     challenge: None,
-                    start_source: first_active && !self.source_started.swap(true, Ordering::AcqRel),
+                    start_source: activating && !self.source_started.swap(true, Ordering::AcqRel),
                 })
             }
             LiveControl::Ack(ack) => {
-                self.session
-                    .apply_credit(ack.received_seq.get(), ack.consumed_seq.get())?;
+                self.apply_credit_and_note(ack.received_seq.get(), ack.consumed_seq.get(), now)?;
                 Ok(ControlOutcome {
                     state: current_state(self.session.phase()),
                     terminal: None,
@@ -283,12 +327,13 @@ impl ProviderSessionRecord {
                 self.session
                     .apply_credit(close.received_seq.get(), close.consumed_seq.get())
                     .ok();
-                self.session.set_phase(ProviderPhase::Closing);
+                self.commit_end(LiveEnd::new(LiveEndReason::Cancelled, None));
+                self.begin_close(now);
                 let cleanup = self.run_owned_cleanup().await;
-                self.session.set_phase(ProviderPhase::Closed);
+                let outcome = self.finish_closed(now, cleanup).await;
                 Ok(ControlOutcome {
                     state: LiveSessionState::Closed,
-                    terminal: Some(terminal_from_end(&self.committed_end())),
+                    terminal: Some(terminal_from_end(&outcome)),
                     cleanup: Some(match cleanup {
                         CloseCleanupState::Complete => trellis_protocol::CleanupStatus::Complete,
                         _ => trellis_protocol::CleanupStatus::Incomplete,
@@ -301,11 +346,13 @@ impl ProviderSessionRecord {
                 self.session
                     .apply_credit(ack.received_seq.get(), ack.consumed_seq.get())
                     .ok();
-                self.session.set_phase(ProviderPhase::Closed);
+                self.commit_end(LiveEnd::new(LiveEndReason::Cancelled, None));
+                self.begin_close(now);
                 let cleanup = self.run_owned_cleanup().await;
+                let outcome = self.finish_closed(now, cleanup).await;
                 Ok(ControlOutcome {
                     state: LiveSessionState::Closed,
-                    terminal: Some(terminal_from_end(&self.committed_end())),
+                    terminal: Some(terminal_from_end(&outcome)),
                     cleanup: Some(match cleanup {
                         CloseCleanupState::Complete => trellis_protocol::CleanupStatus::Complete,
                         _ => trellis_protocol::CleanupStatus::Incomplete,
@@ -408,11 +455,11 @@ impl ProviderSessionRecord {
         if message.subject.as_str() != self.session.control_subject {
             return;
         }
-        let now_ms = crate::client::now_iat_seconds() * 1_000;
+        let now = Instant::now();
         let request_id = headers
             .get("request-id")
             .map_or_else(String::new, ToString::to_string);
-        match self.handle_control(&control, now_ms).await {
+        match self.handle_control(&control, now).await {
             Ok(outcome) => {
                 let ack = ack_for(&self.session, &control, &request_id, &outcome);
                 let Ok(body) = serde_json::to_vec(&ack) else {
@@ -421,13 +468,30 @@ impl ProviderSessionRecord {
                 let Ok(signed) = self.signed_headers(reply.as_str(), &body) else {
                     return;
                 };
-                let _ = nats
+                // Only a successfully handed-off signed acknowledgement permits
+                // the source to start (R11). A failed handoff closes the
+                // reservation instead of starting a source on a later retry.
+                if nats
                     .publish_with_headers(reply, signed, Bytes::from(body))
-                    .await;
+                    .await
+                    .is_err()
+                {
+                    self.commit_end(provider_failure(
+                        LiveErrorCode::PeerLost,
+                        "activation acknowledgement could not be handed off",
+                    ));
+                    self.begin_close(now);
+                    let cleanup = self.run_owned_cleanup().await;
+                    let _ = self.finish_closed(now, cleanup).await;
+                    return;
+                }
                 if let Some(challenge_id) = outcome.challenge.as_ref() {
                     let _ = publish_challenge(self, nats, challenge_id).await;
                 }
                 if outcome.start_source {
+                    if let Ok(mut feed) = self.feed.lock() {
+                        *feed = Some(crate::telemetry::lifecycle::FeedGuard::acquire("server"));
+                    }
                     if let Ok(source) = take_source(&self.source_factory) {
                         let driver_record = Arc::clone(self);
                         let driver_nats = nats.clone();
@@ -446,9 +510,6 @@ impl ProviderSessionRecord {
                         });
                     }
                 }
-                if outcome.state == LiveSessionState::Closed {
-                    self.finish_closed(now_ms).await;
-                }
             }
             Err(code) => {
                 let error = error_for(&self.session, &control, &request_id, code);
@@ -465,37 +526,184 @@ impl ProviderSessionRecord {
         }
     }
 
-    pub(crate) async fn finish_closed(&self, now_ms: u64) {
-        let cleanup = self.run_owned_cleanup().await;
+    pub(crate) async fn finish_closed(&self, now: Instant, cleanup: CloseCleanupState) -> LiveEnd {
+        if self.finished.swap(true, Ordering::AcqRel) {
+            return self.committed_end();
+        }
+        let now_ms = crate::client::now_iat_seconds() * 1_000;
         let receipt = self.tombstone(cleanup, now_ms);
+        self.with_deadlines(|deadlines| deadlines.closed(now));
+        self.deadline_changed();
         if let Ok(manager) = self.manager() {
             manager.insert_receipt(receipt);
             manager.remove_provider_session(&self.session.session_id);
         }
-    }
-
-    pub(crate) async fn run_liveness_tick(&self, nats: &async_nats::Client) -> bool {
-        let now_ms = crate::client::now_iat_seconds() * 1_000;
-        if self.session.reservation_elapsed() {
-            self.commit_end(LiveEnd::new(
-                trellis_protocol::LiveEndReason::SetupTimeout,
-                None,
-            ));
-            self.session.set_phase(ProviderPhase::Closing);
-            self.finish_closed(now_ms).await;
-            return true;
-        }
-        if matches!(self.session.phase(), ProviderPhase::Activating) {
-            let challenge = self.session.challenge.lock().ok().and_then(|challenge| {
-                challenge
-                    .as_ref()
-                    .map(|challenge| challenge.challenge_id.clone())
-            });
-            if let Some(challenge_id) = challenge {
-                let _ = publish_challenge(self, nats, &challenge_id).await;
+        let reason = feed_end_reason(self.committed_end().reason());
+        if let Ok(mut feed) = self.feed.lock() {
+            match feed.as_mut() {
+                Some(guard) => guard.finish(reason),
+                None => crate::telemetry::lifecycle::record_feed_end("server", reason),
             }
         }
-        false
+        self.committed_end()
+    }
+
+    /// Lock the deadline owner and apply one transition.
+    fn with_deadlines<R>(&self, f: impl FnOnce(&mut LiveDeadlines) -> R) -> Option<R> {
+        self.deadlines
+            .lock()
+            .ok()
+            .map(|mut deadlines| f(&mut deadlines))
+    }
+
+    /// Wake the session timer after a deadline changed.
+    fn deadline_changed(&self) {
+        self.deadline_notify.notify_one();
+    }
+
+    /// Return the next deadline for the session timer, if any.
+    #[must_use]
+    pub(crate) fn next_deadline(&self) -> Option<Instant> {
+        self.deadlines
+            .lock()
+            .ok()
+            .and_then(|deadlines| deadlines.next_due())
+    }
+
+    /// Apply one accepted credit cursor and refresh the stall/liveness clocks.
+    fn apply_credit_and_note(
+        &self,
+        received: u64,
+        consumed: u64,
+        now: Instant,
+    ) -> Result<(), LiveErrorCode> {
+        let before = self.session.highest_consumed.load(Ordering::Acquire);
+        self.session.apply_credit(received, consumed)?;
+        let after = self.session.highest_consumed.load(Ordering::Acquire);
+        let advanced = after > before;
+        self.with_deadlines(|deadlines| {
+            if advanced {
+                deadlines.note_stall_reset(now);
+            }
+            if self.session.outstanding_empty() {
+                deadlines.outstanding_cleared();
+            }
+        });
+        self.deadline_changed();
+        Ok(())
+    }
+
+    /// Enter the bounded close exchange.
+    pub(crate) fn begin_close(&self, now: Instant) {
+        self.session.set_phase(ProviderPhase::Closing);
+        self.with_deadlines(|deadlines| deadlines.begin_closing(now));
+        self.deadline_changed();
+    }
+
+    /// Record that one application frame became outstanding.
+    pub(crate) fn note_data_admitted(&self, now: Instant) {
+        self.with_deadlines(|deadlines| deadlines.data_admitted(now));
+        self.deadline_changed();
+    }
+
+    /// Evaluate and perform one due deadline action.
+    ///
+    /// Returns `true` when the session finished and its timer should stop. The
+    /// driver performs the action and then recomputes the next due event.
+    pub(crate) async fn evaluate_deadlines(self: &Arc<Self>, nats: &async_nats::Client) -> bool {
+        let now = Instant::now();
+        let action = self
+            .deadlines
+            .lock()
+            .ok()
+            .and_then(|deadlines| deadlines.evaluate(now));
+        match action {
+            None => false,
+            Some(DeadlineAction::ReservationExpired) => {
+                self.commit_end(LiveEnd::new(LiveEndReason::SetupTimeout, None));
+                self.begin_close(now);
+                let cleanup = self.run_owned_cleanup().await;
+                let _ = self.finish_closed(now, cleanup).await;
+                true
+            }
+            Some(DeadlineAction::ChallengeRetry) => {
+                let challenge = self
+                    .session
+                    .challenge
+                    .lock()
+                    .ok()
+                    .and_then(|challenge| challenge.clone());
+                if let Some(challenge) = challenge {
+                    let _ = publish_challenge(self, nats, &challenge.challenge_id).await;
+                }
+                self.with_deadlines(|deadlines| deadlines.rearm_challenge_retry(now));
+                self.deadline_changed();
+                false
+            }
+            Some(DeadlineAction::ChallengeDue) => {
+                let Ok(challenge_id) = trellis_protocol::generate_nonce() else {
+                    self.commit_end(provider_failure(
+                        LiveErrorCode::ProtocolError,
+                        "challenge nonce unavailable",
+                    ));
+                    self.begin_close(now);
+                    let cleanup = self.run_owned_cleanup().await;
+                    let _ = self.finish_closed(now, cleanup).await;
+                    return true;
+                };
+                let last_sent_seq = self.session.highest_sent.load(Ordering::Acquire);
+                if let Ok(mut challenge) = self.session.challenge.lock() {
+                    *challenge = Some(super::provider::ChallengeState {
+                        challenge_id: challenge_id.clone(),
+                        last_sent_seq,
+                    });
+                }
+                self.with_deadlines(|deadlines| {
+                    deadlines.begin_challenge(now, challenge_id.clone())
+                });
+                self.deadline_changed();
+                let _ = publish_challenge(self, nats, &challenge_id).await;
+                false
+            }
+            Some(DeadlineAction::PeerInactive) => {
+                self.commit_end(provider_failure(
+                    LiveErrorCode::PeerLost,
+                    "live consumer silent past the inactivity bound",
+                ));
+                self.begin_close(now);
+                let cleanup = self.run_owned_cleanup().await;
+                let _ = self.finish_closed(now, cleanup).await;
+                true
+            }
+            Some(DeadlineAction::ConsumerStalled) => {
+                self.commit_end(provider_failure(
+                    LiveErrorCode::ConsumerSlow,
+                    "live consumer did not consume outstanding data",
+                ));
+                self.begin_close(now);
+                let cleanup = self.run_owned_cleanup().await;
+                let _ = self.finish_closed(now, cleanup).await;
+                true
+            }
+            Some(DeadlineAction::CloseExchangeElapsed) => {
+                self.session.set_phase(ProviderPhase::Closing);
+                let cleanup = self.run_owned_cleanup().await;
+                let _ = self.finish_closed(now, cleanup).await;
+                true
+            }
+            Some(DeadlineAction::CreditDue) => {
+                // The provider never schedules consumer credit; clear a stale
+                // deadline so the timer cannot spin on a past instant.
+                self.with_deadlines(|deadlines| deadlines.credit_sent());
+                self.deadline_changed();
+                false
+            }
+            Some(DeadlineAction::CleanupGraceElapsed) => {
+                self.with_deadlines(|deadlines| deadlines.mark_cleanup_grace_elapsed());
+                self.deadline_changed();
+                false
+            }
+        }
     }
 }
 
@@ -655,7 +863,7 @@ pub(crate) async fn drive_source<S>(
                     trellis_protocol::LiveEndReason::Cancelled,
                     None,
                 ));
-                session.set_phase(ProviderPhase::Closed);
+                record.begin_close(Instant::now());
                 return;
             }
             item = source.next() => item,
@@ -664,7 +872,7 @@ pub(crate) async fn drive_source<S>(
             let terminal = terminal_from_end(&LiveEnd::complete());
             let _ = publish_end(&record, &nats, terminal).await;
             record.commit_end(LiveEnd::complete());
-            session.set_phase(ProviderPhase::Closed);
+            record.begin_close(Instant::now());
             return;
         };
         match item {
@@ -681,7 +889,10 @@ pub(crate) async fn drive_source<S>(
                     match publish_data_frame(&record, &nats, value.clone(), max_data_body_bytes)
                         .await
                     {
-                        Ok(_) => break,
+                        Ok(_) => {
+                            record.note_data_admitted(Instant::now());
+                            break;
+                        }
                         Err(LiveErrorCode::ResourceExhausted) => {
                             tokio::select! {
                                 _ = cancellation.cancelled() => {
@@ -689,7 +900,7 @@ pub(crate) async fn drive_source<S>(
                                         trellis_protocol::LiveEndReason::Cancelled,
                                         None,
                                     ));
-                                    session.set_phase(ProviderPhase::Closed);
+                                    record.begin_close(Instant::now());
                                     return;
                                 }
                                 _ = session.credit.notified() => {}
@@ -698,7 +909,7 @@ pub(crate) async fn drive_source<S>(
                         Err(code) => {
                             let end = provider_failure(code, "live publication failed");
                             record.commit_end(end);
-                            session.set_phase(ProviderPhase::Closing);
+                            record.begin_close(Instant::now());
                             return;
                         }
                     }
@@ -708,7 +919,7 @@ pub(crate) async fn drive_source<S>(
                 let terminal = terminal_from_end(&LiveEnd::complete());
                 let _ = publish_end(&record, &nats, terminal).await;
                 record.commit_end(LiveEnd::complete());
-                session.set_phase(ProviderPhase::Closed);
+                record.begin_close(Instant::now());
                 return;
             }
             Err(message) => {
@@ -716,7 +927,7 @@ pub(crate) async fn drive_source<S>(
                 let terminal = terminal_from_end(&end);
                 let _ = publish_end(&record, &nats, terminal).await;
                 record.commit_end(end);
-                session.set_phase(ProviderPhase::Closing);
+                record.begin_close(Instant::now());
                 return;
             }
         }

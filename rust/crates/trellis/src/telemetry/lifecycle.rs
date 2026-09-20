@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 use opentelemetry::KeyValue;
 
 use super::instruments::{
-    add_updown, record_family_duration, DurationFamily, ObservationRegistration, UpDownFamily,
+    add_counter, add_updown, record_family_duration, CounterFamily, DurationFamily,
+    ObservationRegistration, UpDownFamily,
 };
 
 /// Duration observation for one synchronous or asynchronous unit of work.
@@ -147,6 +148,48 @@ impl Drop for InflightGuard {
     }
 }
 
+/// Owns one Feed's active count and records its single bounded end.
+pub struct FeedGuard {
+    side: &'static str,
+    _inflight: InflightGuard,
+    ended: bool,
+}
+
+/// Records one Feed end with its bounded reason for the given side.
+pub fn record_feed_end(side: &'static str, reason: &'static str) {
+    add_counter(
+        CounterFamily::FeedEnds,
+        1,
+        &[
+            KeyValue::new("trellis.side", side),
+            KeyValue::new("trellis.reason", reason),
+        ],
+    );
+}
+
+impl FeedGuard {
+    /// Counts one active Feed on the given side until the guard is released.
+    pub fn acquire(side: &'static str) -> Self {
+        Self {
+            side,
+            _inflight: InflightGuard::acquire(
+                UpDownFamily::FeedActive,
+                vec![KeyValue::new("trellis.side", side)],
+            ),
+            ended: false,
+        }
+    }
+
+    /// Records the end once with a bounded reason; later calls are ignored.
+    pub fn finish(&mut self, reason: &'static str) {
+        if self.ended {
+            return;
+        }
+        self.ended = true;
+        record_feed_end(self.side, reason);
+    }
+}
+
 #[cfg(test)]
 mod registry_tests {
     use super::*;
@@ -212,6 +255,62 @@ mod tests {
             vec![KeyValue::new("trellis.route", "_unknown")],
         );
         guard.release();
+    }
+
+    #[tokio::test]
+    async fn feed_guard_records_provider_ownership_and_one_bounded_end() {
+        let _lock = crate::telemetry::capture::meter_test_lock().await;
+        let capture = crate::telemetry::capture::process_capture();
+        let before: f64 = capture
+            .points_for("trellis.feed.ends")
+            .iter()
+            .map(|point| point.value)
+            .sum();
+        {
+            let mut feed = FeedGuard::acquire("server");
+            capture.flush();
+            let all = capture.points();
+            assert!(
+                all.iter().any(|point| point.name == "trellis.feed.active"
+                    && point.value == 1.0
+                    && point
+                        .attributes
+                        .iter()
+                        .any(|(key, value)| key == "trellis.side" && value == "server")),
+                "expected an active server Feed sample: {all:?}"
+            );
+            feed.finish("complete");
+            // A repeated finish must not record a second end.
+            feed.finish("complete");
+        }
+        capture.flush();
+        let ends: Vec<_> = capture
+            .points_for("trellis.feed.ends")
+            .into_iter()
+            .filter(|point| {
+                point
+                    .attributes
+                    .iter()
+                    .any(|(key, value)| key == "trellis.side" && value == "server")
+            })
+            .collect();
+        assert_eq!(
+            ends.iter().map(|point| point.value).sum::<f64>() - before,
+            1.0
+        );
+        assert!(ends.iter().all(|point| {
+            point
+                .attributes
+                .iter()
+                .any(|(key, value)| key == "trellis.reason" && value == "complete")
+        }));
+        assert!(
+            !capture
+                .points_for("trellis.feed.active")
+                .iter()
+                .any(|point| point.value > 0.0),
+            "dropping the guard must release the active count"
+        );
     }
 }
 

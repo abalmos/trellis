@@ -19,8 +19,8 @@ use crate::client::TrellisClient;
 use crate::live::authority::{
     LiveAuthorityGuard, LiveAuthorityLost, LiveGuardRequirement, PinnedPeerIdentity,
 };
+use crate::live::deadlines::LiveDeadlines;
 use crate::live::manager::LiveSessionManager;
-use crate::live::provider::cleanup_grace;
 use crate::live::provider_engine::{ProviderOpenRequest, ProviderSessionRecord, SourceItem};
 use crate::service::error::{ServerError, ValidationIssue};
 use crate::service::request_loop::LivePreparedResponse;
@@ -478,6 +478,10 @@ where
         cancellation: cancellation.clone(),
         source_started: std::sync::atomic::AtomicBool::new(false),
         max_data_body_bytes: negotiated,
+        deadlines: std::sync::Mutex::new(LiveDeadlines::reserved(tokio::time::Instant::now())),
+        deadline_notify: tokio::sync::Notify::new(),
+        finished: std::sync::atomic::AtomicBool::new(false),
+        feed: std::sync::Mutex::new(None),
     });
     manager.insert_provider_session(session.session_id.clone(), std::sync::Arc::clone(&record));
     let offer = record
@@ -648,6 +652,10 @@ where
         cancellation: cancellation.clone(),
         source_started: std::sync::atomic::AtomicBool::new(false),
         max_data_body_bytes: negotiated,
+        deadlines: std::sync::Mutex::new(LiveDeadlines::reserved(tokio::time::Instant::now())),
+        deadline_notify: tokio::sync::Notify::new(),
+        finished: std::sync::atomic::AtomicBool::new(false),
+        feed: std::sync::Mutex::new(None),
     });
     manager.insert_provider_session(session.session_id.clone(), std::sync::Arc::clone(&record));
     let offer = record
@@ -684,7 +692,11 @@ where
     })
 }
 
-/// Spawn the per-session liveness timer. Owner-control is drained by the route dispatcher.
+/// Spawn the per-session monotonic timer that owns live deadline policy.
+///
+/// Owner-control messages are drained by the route dispatcher; this task only
+/// evaluates the session's deadline owner, so it has no fixed polling period
+/// and no relation to the cleanup grace constant.
 pub(crate) async fn spawn_session_drivers(
     nats: async_nats::Client,
     record: std::sync::Arc<ProviderSessionRecord>,
@@ -694,10 +706,19 @@ pub(crate) async fn spawn_session_drivers(
         .await
         .map_err(|_| LiveErrorCode::Disconnected)?;
     tokio::spawn(async move {
-        let mut challenge_interval = tokio::time::interval(cleanup_grace());
         loop {
-            challenge_interval.tick().await;
-            if record.run_liveness_tick(&nats).await {
+            let next = record.next_deadline();
+            tokio::select! {
+                () = async {
+                    match next {
+                        Some(deadline) => tokio::time::sleep_until(deadline).await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {}
+                () = record.deadline_notify.notified() => continue,
+                () = record.cancellation.cancelled() => return,
+            }
+            if record.evaluate_deadlines(&nats).await {
                 return;
             }
         }

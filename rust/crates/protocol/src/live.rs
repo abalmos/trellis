@@ -1383,12 +1383,21 @@ pub struct LiveEndFrame {
 
 /// Parse one strict JSON provider data-channel frame.
 ///
+/// Raw input is pre-bounded by the larger of the negotiated application-data
+/// limit and the protocol-control limit, then the tighter control limit is
+/// applied to CHALLENGE/END and the negotiated limit to DATA. Opening requests
+/// are bounded separately by [`validate_open_body`]; a DATA body may legally
+/// exceed [`MAX_OPEN_BODY_BYTES`] when the negotiated window permits it.
+///
 /// # Errors
 ///
-/// Returns [`ProtocolError::Live`] for malformed JSON, unknown fields, an
-/// unsupported format, or an invalid nonce/counter.
-pub fn parse_live_frame(raw: &[u8]) -> Result<LiveFrame, ProtocolError> {
-    validate_open_body(raw)?;
+/// Returns [`ProtocolError::Live`] for an oversize body, malformed JSON, unknown
+/// fields, an unsupported format, or an invalid nonce/counter.
+pub fn parse_live_frame(raw: &[u8], max_data_body_bytes: u64) -> Result<LiveFrame, ProtocolError> {
+    let pre_bound = max_data_body_bytes.max(MAX_CONTROL_BODY_BYTES as u64);
+    if raw.is_empty() || raw.len() as u64 > pre_bound {
+        return Err(body_too_large());
+    }
     let value: Value = serde_json::from_slice(raw)?;
     let format = value
         .get("format")
@@ -1402,9 +1411,24 @@ pub fn parse_live_frame(raw: &[u8]) -> Result<LiveFrame, ProtocolError> {
         ));
     }
     let frame = match value.get("type").and_then(Value::as_str) {
-        Some("data") => LiveFrame::Data(serde_json::from_value(value)?),
-        Some("challenge") => LiveFrame::Challenge(serde_json::from_value(value)?),
-        Some("end") => LiveFrame::End(serde_json::from_value(value)?),
+        Some("data") => {
+            if raw.len() as u64 > max_data_body_bytes {
+                return Err(body_too_large());
+            }
+            LiveFrame::Data(serde_json::from_value(value)?)
+        }
+        Some("challenge") => {
+            if raw.len() > MAX_CONTROL_BODY_BYTES {
+                return Err(body_too_large());
+            }
+            LiveFrame::Challenge(serde_json::from_value(value)?)
+        }
+        Some("end") => {
+            if raw.len() > MAX_CONTROL_BODY_BYTES {
+                return Err(body_too_large());
+            }
+            LiveFrame::End(serde_json::from_value(value)?)
+        }
         _ => {
             return Err(live_error(
                 LiveProtocolErrorCode::InvalidFormat,
@@ -1427,6 +1451,15 @@ pub fn parse_live_frame(raw: &[u8]) -> Result<LiveFrame, ProtocolError> {
         }
     }
     Ok(frame)
+}
+
+/// Build one bounded frame-body error.
+fn body_too_large() -> ProtocolError {
+    live_error(
+        LiveProtocolErrorCode::BodyTooLarge,
+        ["body"],
+        "frame body must be non-empty and within its protocol limit",
+    )
 }
 
 /// Derive the exact live delivery subject for one observation.
@@ -2061,20 +2094,49 @@ mod tests {
             r#"{{"format":"{LIVE_VERSION}","type":"challenge","sessionId":"{session}","challengeId":"{session}","lastSentSeq":"0"}}"#
         );
         assert!(matches!(
-            parse_live_frame(challenge.as_bytes()).unwrap(),
+            parse_live_frame(challenge.as_bytes(), WINDOW_BYTES).unwrap(),
             LiveFrame::Challenge(_)
         ));
         let end = format!(
             r#"{{"format":"{LIVE_VERSION}","type":"end","sessionId":"{session}","finalSeq":"3","terminal":{{"reason":"complete","error":null}}}}"#
         );
         assert!(matches!(
-            parse_live_frame(end.as_bytes()).unwrap(),
+            parse_live_frame(end.as_bytes(), WINDOW_BYTES).unwrap(),
             LiveFrame::End(_)
         ));
         let invalid = format!(
             r#"{{"format":"{LIVE_VERSION}","type":"end","sessionId":"{session}","finalSeq":"3","terminal":{{"reason":"peer_lost","error":null}}}}"#
         );
-        assert!(parse_live_frame(invalid.as_bytes()).is_err());
+        assert!(parse_live_frame(invalid.as_bytes(), WINDOW_BYTES).is_err());
+    }
+
+    #[test]
+    fn data_frames_use_the_negotiated_limit_not_the_opening_limit() {
+        let session = URL_SAFE_NO_PAD.encode([7u8; 16]);
+        // A legal DATA body above MAX_OPEN_BODY_BYTES must parse when the
+        // negotiated window permits it, while CHALLENGE/END stay at the
+        // protocol-control limit.
+        let big = "x".repeat(MAX_OPEN_BODY_BYTES + 512);
+        let data = format!(
+            r#"{{"format":"{LIVE_VERSION}","type":"data","sessionId":"{session}","seq":"1","value":"{big}"}}"#
+        );
+        assert!(data.len() > MAX_OPEN_BODY_BYTES);
+        assert!(matches!(
+            parse_live_frame(data.as_bytes(), WINDOW_BYTES).unwrap(),
+            LiveFrame::Data(_)
+        ));
+        assert!(parse_live_frame(data.as_bytes(), (data.len() - 1) as u64).is_err());
+        assert_eq!(
+            parse_live_frame(data.as_bytes(), data.len() as u64)
+                .unwrap()
+                .session_id(),
+            session
+        );
+        let oversized_challenge = format!(
+            r#"{{"format":"{LIVE_VERSION}","type":"challenge","sessionId":"{session}","challengeId":"{session}","lastSentSeq":"0","pad":"{}"}}"#,
+            "x".repeat(MAX_CONTROL_BODY_BYTES)
+        );
+        assert!(parse_live_frame(oversized_challenge.as_bytes(), WINDOW_BYTES).is_err());
     }
 
     #[test]

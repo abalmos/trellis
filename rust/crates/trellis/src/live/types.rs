@@ -6,6 +6,19 @@ use tokio::sync::watch;
 
 pub use trellis_protocol::{LiveEndReason, LiveErrorCode};
 
+/// Bounded `trellis.reason` value for one committed Feed terminal.
+pub(crate) fn feed_end_reason(reason: LiveEndReason) -> &'static str {
+    use LiveEndReason::*;
+    match reason {
+        Complete => "complete",
+        Cancelled | LocalShutdown => "cancelled",
+        Disconnected | PeerLost => "unavailable",
+        AuthorizationLost | BindingChanged => "revoked",
+        SetupTimeout | ConsumerSlow | DeliveryGap | SourceError | ProtocolError
+        | ResourceExhausted => "error",
+    }
+}
+
 /// One bounded live failure envelope surfaced to application code.
 #[derive(Clone, Debug)]
 pub struct LiveStreamError {

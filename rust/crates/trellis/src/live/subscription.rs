@@ -18,8 +18,8 @@ use trellis_protocol::{
 
 use super::authority::{LiveAuthorityGuard, LiveAuthorityLost};
 use super::types::{
-    end_reason_for_code, CloseCleanupState, CloseRemoteState, LiveCancellation, LiveCloseReceipt,
-    LiveEnd, LiveStreamError,
+    end_reason_for_code, feed_end_reason, CloseCleanupState, CloseRemoteState, LiveCancellation,
+    LiveCloseReceipt, LiveEnd, LiveStreamError,
 };
 use crate::client::TrellisClientError;
 
@@ -61,6 +61,8 @@ pub(crate) struct ConsumerCore<T> {
     /// A verified remote normal end, pending until the queue drains.
     pub(crate) pending_end: Mutex<Option<LiveEnd>>,
     pub(crate) start: tokio::sync::Notify,
+    /// Wakes the control pump when the application consumes an item.
+    pub(crate) credit_notify: tokio::sync::Notify,
 }
 
 impl<T> ConsumerCore<T> {
@@ -80,6 +82,7 @@ impl<T> ConsumerCore<T> {
             error_reported: AtomicBool::new(false),
             pending_end: Mutex::new(None),
             start: tokio::sync::Notify::new(),
+            credit_notify: tokio::sync::Notify::new(),
         }
     }
 
@@ -226,6 +229,7 @@ impl<T> ConsumerCore<T> {
             self.queued_bytes
                 .fetch_sub(item.encoded_len, Ordering::AcqRel);
             self.consumed_seq.fetch_add(1, Ordering::AcqRel);
+            self.credit_notify.notify_one();
         }
         item
     }
@@ -254,6 +258,7 @@ pub struct LiveSubscription<T> {
     pub(crate) activated: bool,
     pub(crate) _permit: super::manager::ConsumerPermit,
     pub(crate) _provider_guard: super::authority::LiveAuthorityGuard,
+    _feed: crate::telemetry::lifecycle::FeedGuard,
 }
 
 impl<T> LiveSubscription<T> {
@@ -279,6 +284,7 @@ impl<T> LiveSubscription<T> {
             activated: false,
             _permit: permit,
             _provider_guard: provider_guard,
+            _feed: crate::telemetry::lifecycle::FeedGuard::acquire("client"),
         }
     }
 
@@ -327,6 +333,10 @@ impl<T> LiveSubscription<T> {
 
 impl<T> Drop for LiveSubscription<T> {
     fn drop(&mut self) {
+        self._feed.finish(match self.core.committed_end() {
+            Some(end) => feed_end_reason(end.reason()),
+            None => "cancelled",
+        });
         // Synchronous local fence: no new yields, no new scheduling. Remote
         // cleanup is best-effort through the control owner's runtime handle.
         self.core.cancelled.store(true, Ordering::Release);
@@ -420,8 +430,13 @@ impl<T> Stream for LiveSubscription<T> {
                 return Poll::Ready(None);
             }
         }
-        if let Some(item) = this.core.consume() {
-            return Poll::Ready(Some(Ok(item.value)));
+        if matches!(
+            this.core.phase(),
+            ConsumerPhase::Active | ConsumerPhase::Draining
+        ) {
+            if let Some(item) = this.core.consume() {
+                return Poll::Ready(Some(Ok(item.value)));
+            }
         }
         if this.core.drain_complete().is_some() {
             return Poll::Ready(None);
@@ -429,7 +444,11 @@ impl<T> Stream for LiveSubscription<T> {
         if let Ok(mut slot) = this.core.waker.lock() {
             *slot = Some(cx.waker().clone());
         }
-        if this.core.has_queued() || this.core.committed_end().is_some() {
+        if matches!(
+            this.core.phase(),
+            ConsumerPhase::Active | ConsumerPhase::Draining
+        ) && (this.core.has_queued() || this.core.committed_end().is_some())
+        {
             cx.waker().wake_by_ref();
         }
         Poll::Pending

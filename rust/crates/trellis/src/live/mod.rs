@@ -12,6 +12,7 @@
 
 pub(crate) mod authority;
 pub(crate) mod client_open;
+pub(crate) mod deadlines;
 pub(crate) mod manager;
 
 pub use manager::LiveSessionManager;

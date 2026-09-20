@@ -50,6 +50,7 @@ url = "2.5.8"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+tokio = { workspace = true, features = ["test-util"] }
 trellis-test = { path = "../trellis-test" }
 trellis-local-nats = { path = "../local-nats" }
 trellis-bootstrap = { path = "../bootstrap" }

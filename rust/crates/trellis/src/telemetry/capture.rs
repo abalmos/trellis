@@ -126,7 +126,8 @@ fn collect_resource_metrics(resource_metrics: &ResourceMetrics, points: &mut Vec
         for metric in scope.metrics() {
             match metric.data() {
                 AggregatedMetrics::F64(data) => record_f64(metric.name(), data, points),
-                AggregatedMetrics::U64(_) | AggregatedMetrics::I64(_) => {}
+                AggregatedMetrics::U64(data) => record_u64(metric.name(), data, points),
+                AggregatedMetrics::I64(data) => record_i64(metric.name(), data, points),
             }
         }
     }
@@ -166,4 +167,50 @@ fn record_f64(name: &str, data: &MetricData<f64>, points: &mut Vec<CollectedPoin
         }
         MetricData::ExponentialHistogram(_) => {}
     }
+}
+
+macro_rules! record_integer_points {
+    ($name:expr, $data:expr, $points:expr) => {{
+        match $data {
+            MetricData::Gauge(gauge) => {
+                for point in gauge.data_points() {
+                    $points.push(CollectedPoint {
+                        name: $name.to_owned(),
+                        attributes: string_attributes(point.attributes().cloned()),
+                        value: point.value() as f64,
+                        count: 1,
+                    });
+                }
+            }
+            MetricData::Sum(sum) => {
+                for point in sum.data_points() {
+                    $points.push(CollectedPoint {
+                        name: $name.to_owned(),
+                        attributes: string_attributes(point.attributes().cloned()),
+                        value: point.value() as f64,
+                        count: 1,
+                    });
+                }
+            }
+            MetricData::Histogram(histogram) => {
+                for point in histogram.data_points() {
+                    $points.push(CollectedPoint {
+                        name: $name.to_owned(),
+                        attributes: string_attributes(point.attributes().cloned()),
+                        value: point.sum() as f64,
+                        count: point.count(),
+                    });
+                }
+            }
+            MetricData::ExponentialHistogram(_) => {}
+        }
+    }};
+}
+
+fn record_u64(name: &str, data: &MetricData<u64>, points: &mut Vec<CollectedPoint>) {
+    record_integer_points!(name, data, points);
+}
+
+fn record_i64(name: &str, data: &MetricData<i64>, points: &mut Vec<CollectedPoint>) {
+    record_integer_points!(name, data, points);
 }

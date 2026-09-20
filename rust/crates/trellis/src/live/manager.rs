@@ -396,12 +396,15 @@ impl LiveSessionManager {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let now_ms = crate::client::now_iat_seconds() * 1_000;
         let _ = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             futures_util::future::join_all(sessions.iter().map(|record| async {
                 record.cancellation.cancel();
-                record.finish_closed(now_ms).await;
+                record.begin_close(tokio::time::Instant::now());
+                let cleanup = record.run_owned_cleanup().await;
+                let _ = record
+                    .finish_closed(tokio::time::Instant::now(), cleanup)
+                    .await;
             })),
         )
         .await;

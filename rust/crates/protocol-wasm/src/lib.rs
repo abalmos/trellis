@@ -377,9 +377,17 @@ pub fn live_parse_control(raw: &[u8]) -> Result<String, JsError> {
 }
 
 /// Parse one strict JSON provider data-channel frame and return its projection.
+///
+/// `max_data_body_bytes` is the negotiated application-data body limit; DATA is
+/// bounded by it while CHALLENGE/END use the tighter protocol-control limit.
 #[wasm_bindgen]
-pub fn live_parse_frame(raw: &[u8]) -> Result<String, JsError> {
-    let frame = trellis_protocol::parse_live_frame(raw)
+pub fn live_parse_frame(raw: &[u8], max_data_body_bytes: f64) -> Result<String, JsError> {
+    if !max_data_body_bytes.is_finite() || max_data_body_bytes < 0.0 {
+        return Err(JsError::new(
+            "max data body limit must be a finite nonnegative number",
+        ));
+    }
+    let frame = trellis_protocol::parse_live_frame(raw, max_data_body_bytes as u64)
         .map_err(|error| JsError::new(&error.to_string()))?;
     let projection = match &frame {
         trellis_protocol::LiveFrame::Data(body) => serde_json::to_value(body),
@@ -388,6 +396,98 @@ pub fn live_parse_frame(raw: &[u8]) -> Result<String, JsError> {
     }
     .map_err(|error| JsError::new(&error.to_string()))?;
     serde_json::to_string(&projection).map_err(|error| JsError::new(&error.to_string()))
+}
+
+/// Parse one strict signed provider offer and return its canonical projection.
+#[wasm_bindgen]
+pub fn live_parse_offer(raw: &[u8]) -> Result<String, JsError> {
+    trellis_protocol::validate_control_body(raw)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let value: serde_json::Value =
+        serde_json::from_slice(raw).map_err(|error| JsError::new(&error.to_string()))?;
+    if value.get("type").and_then(|kind| kind.as_str()) != Some("offer") {
+        return Err(JsError::new("live offer carries an unknown discriminant"));
+    }
+    let offer: trellis_protocol::LiveOffer =
+        serde_json::from_value(value).map_err(|error| JsError::new(&error.to_string()))?;
+    serde_json::to_string(&offer).map_err(|error| JsError::new(&error.to_string()))
+}
+
+/// Parse one strict signed control response and return its tagged projection.
+#[wasm_bindgen]
+pub fn live_parse_control_response(raw: &[u8]) -> Result<String, JsError> {
+    trellis_protocol::validate_control_body(raw)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let value: serde_json::Value =
+        serde_json::from_slice(raw).map_err(|error| JsError::new(&error.to_string()))?;
+    let projection = match value.get("type").and_then(|kind| kind.as_str()) {
+        Some("control-ack") => {
+            let ack: trellis_protocol::LiveControlAck =
+                serde_json::from_value(value).map_err(|error| JsError::new(&error.to_string()))?;
+            serde_json::json!({ "kind": "ack", "body": ack })
+        }
+        Some("control-error") => {
+            let error: trellis_protocol::LiveControlError =
+                serde_json::from_value(value).map_err(|error| JsError::new(&error.to_string()))?;
+            serde_json::json!({ "kind": "error", "body": error })
+        }
+        _ => {
+            return Err(JsError::new(
+                "live control response carries an unknown discriminant",
+            ));
+        }
+    };
+    serde_json::to_string(&projection).map_err(|error| JsError::new(&error.to_string()))
+}
+
+/// Return the shared live timing, window and admission constants as JSON.
+#[wasm_bindgen]
+pub fn live_constants() -> Result<String, JsError> {
+    use trellis_protocol::{
+        ACK_FRAME_THRESHOLD, ACK_MAX_DELAY_MS, CHALLENGE_RETRY_MS, CLEANUP_GRACE_MS,
+        CLOSE_EXCHANGE_MS, CLOSE_RETRY_MS, CONSUMER_STALL_MS, CONTROL_TIMEOUT_MS,
+        HEARTBEAT_INTERVAL_MS, MAX_CONSUMER_SESSIONS, MAX_CONTROL_BODY_BYTES, MAX_OPEN_BODY_BYTES,
+        MAX_PROVIDER_SESSIONS, MAX_PROVIDER_SESSIONS_PER_CALLER, MAX_TOMBSTONES,
+        OPEN_RESERVATION_MS, PEER_INACTIVITY_MS, PROTOCOL_HEADER_RESERVE_BYTES, TOMBSTONE_MS,
+        WINDOW_BYTES, WINDOW_FRAMES,
+    };
+    let value = serde_json::json!({
+        "openReservationMs": OPEN_RESERVATION_MS,
+        "controlTimeoutMs": CONTROL_TIMEOUT_MS,
+        "heartbeatIntervalMs": HEARTBEAT_INTERVAL_MS,
+        "challengeRetryMs": CHALLENGE_RETRY_MS,
+        "peerInactivityMs": PEER_INACTIVITY_MS,
+        "consumerStallMs": CONSUMER_STALL_MS,
+        "ackMaxDelayMs": ACK_MAX_DELAY_MS,
+        "ackFrameThreshold": ACK_FRAME_THRESHOLD,
+        "windowFrames": WINDOW_FRAMES,
+        "windowBytes": WINDOW_BYTES,
+        "maxOpenBodyBytes": MAX_OPEN_BODY_BYTES,
+        "maxControlBodyBytes": MAX_CONTROL_BODY_BYTES,
+        "headerReserveBytes": PROTOCOL_HEADER_RESERVE_BYTES,
+        "cleanupGraceMs": CLEANUP_GRACE_MS,
+        "closeExchangeMs": CLOSE_EXCHANGE_MS,
+        "closeRetryMs": CLOSE_RETRY_MS,
+        "tombstoneMs": TOMBSTONE_MS,
+        "maxProviderSessions": MAX_PROVIDER_SESSIONS,
+        "maxProviderSessionsPerCaller": MAX_PROVIDER_SESSIONS_PER_CALLER,
+        "maxConsumerSessions": MAX_CONSUMER_SESSIONS,
+        "maxTombstones": MAX_TOMBSTONES,
+    });
+    serde_json::to_string(&value).map_err(|error| JsError::new(&error.to_string()))
+}
+
+/// Compute the negotiated DATA body limit from both peers' max payloads.
+#[wasm_bindgen]
+pub fn live_negotiate_max_data_body_bytes(consumer: f64, provider: f64) -> Result<f64, JsError> {
+    if !consumer.is_finite() || !provider.is_finite() || consumer < 0.0 || provider < 0.0 {
+        return Err(JsError::new(
+            "max payloads must be finite nonnegative numbers",
+        ));
+    }
+    trellis_protocol::negotiate_max_data_body_bytes(consumer as u64, provider as u64)
+        .map(|value| value as f64)
+        .map_err(|error| JsError::new(&error.to_string()))
 }
 
 /// Derive the exact live delivery subject for one observation.
