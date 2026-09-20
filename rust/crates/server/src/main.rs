@@ -400,14 +400,24 @@ async fn run(policy: StartupPolicy) -> miette::Result<()> {
                 prepare_directory(&managed_paths.cache)?;
             }
             info!(log = %managed_paths.log.display(), "starting managed NATS");
+            // Managed listeners follow the authored bundle's nats.conf so an
+            // operator-selected port (or a host already using 4222) is honored.
+            let authored_nats =
+                fs::read_to_string(managed_paths.source.join("nats.conf")).unwrap_or_default();
+            let (nats_port, monitor_port, websocket_port) =
+                trellis_bootstrap::parse_nats_listen_ports(&authored_nats).unwrap_or((
+                    NATS_PORT,
+                    NATS_HTTP_PORT,
+                    NATS_WS_PORT,
+                ));
             let server = LocalNats::builder()
                 .binary(source.clone())
                 .source(managed_paths.source)
                 .state(managed_paths.state)
                 .ports(LocalNatsPorts {
-                    nats: NATS_PORT,
-                    monitor: NATS_HTTP_PORT,
-                    websocket: NATS_WS_PORT,
+                    nats: nats_port,
+                    monitor: monitor_port,
+                    websocket: websocket_port,
                 })
                 .cache_dir(managed_paths.cache)
                 .pid_file(managed_paths.pid)

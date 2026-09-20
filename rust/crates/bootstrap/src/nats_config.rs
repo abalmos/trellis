@@ -2,19 +2,24 @@ use crate::types::{GeneratedMetadata, NatsBootstrapNames};
 
 /// Render the local development NATS server config.
 #[must_use]
-pub fn render_nats_config(server_name: &str) -> String {
+pub fn render_nats_config(
+    server_name: &str,
+    nats_port: u16,
+    monitor_port: u16,
+    websocket_port: u16,
+) -> String {
     format!(
         r#"server_name: {server_name}
 
-listen: 0.0.0.0:4222
-http: 0.0.0.0:8222
+listen: 0.0.0.0:{nats_port}
+http: 0.0.0.0:{monitor_port}
 
 authorization {{
   timeout: "30s"
 }}
 
 websocket {{
-  listen: 0.0.0.0:8080
+  listen: 0.0.0.0:{websocket_port}
   no_tls: true
 }}
 
@@ -25,6 +30,46 @@ jetstream {{
 include ./jwt.conf
 "#
     )
+}
+
+/// Parse the native, monitoring, and websocket listen ports from an authored `nats.conf`.
+///
+/// Returns `None` when any of the three listeners is missing or malformed so callers can
+/// fall back to their own defaults.
+#[must_use]
+pub fn parse_nats_listen_ports(config: &str) -> Option<(u16, u16, u16)> {
+    let mut nats = None;
+    let mut monitor = None;
+    let mut websocket = None;
+    let mut in_websocket = false;
+    for line in config.lines() {
+        let line = line.trim();
+        if line == "websocket {" {
+            in_websocket = true;
+            continue;
+        }
+        if in_websocket && line == "}" {
+            in_websocket = false;
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("listen:") {
+            let port = parse_listen_port(value)?;
+            if in_websocket {
+                websocket = Some(port);
+            } else {
+                nats = Some(port);
+            }
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("http:") {
+            monitor = Some(parse_listen_port(value)?);
+        }
+    }
+    Some((nats?, monitor?, websocket?))
+}
+
+fn parse_listen_port(value: &str) -> Option<u16> {
+    value.trim().rsplit(':').next()?.trim().parse().ok()
 }
 
 /// Render the local development NATS server config with host-path JetStream store and JWT config.

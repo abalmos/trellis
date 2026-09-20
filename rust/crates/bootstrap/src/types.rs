@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 
 use crate::{
-    DEFAULT_AUTH_ACCOUNT, DEFAULT_NATS_SERVER_URL, DEFAULT_NATS_WEBSOCKET_URL,
-    DEFAULT_OPERATOR_NAME, DEFAULT_PUBLIC_ORIGIN, DEFAULT_SYSTEM_ACCOUNT, DEFAULT_TRELLIS_ACCOUNT,
-    DEFAULT_TRELLIS_NAME, DEFAULT_TRELLIS_PORT,
+    DEFAULT_AUTH_ACCOUNT, DEFAULT_NATS_MONITOR_PORT, DEFAULT_NATS_PORT, DEFAULT_NATS_SERVER_URL,
+    DEFAULT_NATS_WEBSOCKET_PORT, DEFAULT_NATS_WEBSOCKET_URL, DEFAULT_OPERATOR_NAME,
+    DEFAULT_PUBLIC_ORIGIN, DEFAULT_SYSTEM_ACCOUNT, DEFAULT_TRELLIS_ACCOUNT, DEFAULT_TRELLIS_NAME,
+    DEFAULT_TRELLIS_PORT,
 };
 
 /// Shared NATS bootstrap names.
@@ -34,10 +35,27 @@ impl Default for NatsBootstrapNames {
 }
 
 /// Shared NATS bootstrap configuration.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NatsBootstrapConfig {
     /// NATS bootstrap names.
     pub names: NatsBootstrapNames,
+    /// Native NATS listen port written to `nats.conf`.
+    pub nats_port: u16,
+    /// NATS HTTP monitoring port written to `nats.conf`.
+    pub monitor_port: u16,
+    /// Browser websocket listen port written to `nats.conf`.
+    pub websocket_port: u16,
+}
+
+impl Default for NatsBootstrapConfig {
+    fn default() -> Self {
+        Self {
+            names: NatsBootstrapNames::default(),
+            nats_port: DEFAULT_NATS_PORT,
+            monitor_port: DEFAULT_NATS_MONITOR_PORT,
+            websocket_port: DEFAULT_NATS_WEBSOCKET_PORT,
+        }
+    }
 }
 
 /// Options for generating a NATS bootstrap directory.

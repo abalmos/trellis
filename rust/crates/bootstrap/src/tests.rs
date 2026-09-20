@@ -367,7 +367,7 @@ fn trellis_options_use_shared_defaults() {
 
 #[test]
 fn nats_config_uses_rendered_server_name() {
-    let config = render_nats_config("trellis");
+    let config = render_nats_config("trellis", 4222, 8222, 8080);
 
     assert!(config.contains("server_name: trellis"));
     assert!(config.contains("listen: 0.0.0.0:4222"));
@@ -377,6 +377,15 @@ fn nats_config_uses_rendered_server_name() {
     assert!(config.contains("no_tls: true"));
     assert!(config.contains("store_dir: /data"));
     assert!(config.contains("include ./jwt.conf"));
+    assert_eq!(parse_nats_listen_ports(&config), Some((4222, 8222, 8080)));
+    assert_eq!(parse_nats_listen_ports("server_name: trellis"), None);
+}
+
+#[test]
+fn nats_config_render_round_trips_custom_ports() {
+    let config = render_nats_config("trellis", 4322, 8322, 8180);
+
+    assert_eq!(parse_nats_listen_ports(&config), Some((4322, 8322, 8180)));
 }
 
 #[test]
@@ -406,7 +415,7 @@ fn local_nats_config_uses_host_paths() {
 
 #[test]
 fn container_nats_config_keeps_public_bindings() {
-    let config = render_nats_config("trellis");
+    let config = render_nats_config("trellis", 4222, 8222, 8080);
 
     assert!(config.contains("listen: 0.0.0.0:4222"));
     assert!(config.contains("http: 0.0.0.0:8222"));

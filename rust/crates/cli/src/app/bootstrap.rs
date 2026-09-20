@@ -31,9 +31,21 @@ fn init_config_command(format: OutputFormat, args: &InitConfigArgs) -> miette::R
     options.force = args.force;
     options.runtime.name = args.name.clone();
     options.runtime.trellis_port = args.trellis_port;
-    options.runtime.nats_server_url = args.nats_server_url.clone();
-    options.runtime.nats_websocket_url = args.nats_websocket_url.clone();
-    options.runtime.public_origin = args.public_origin.clone();
+    options.runtime.nats_server_url = args
+        .nats_server_url
+        .clone()
+        .unwrap_or_else(|| format!("nats://127.0.0.1:{}", args.nats_port));
+    options.runtime.nats_websocket_url = args
+        .nats_websocket_url
+        .clone()
+        .unwrap_or_else(|| format!("ws://localhost:{}", args.nats_ws_port));
+    options.runtime.public_origin = args
+        .public_origin
+        .clone()
+        .unwrap_or_else(|| format!("http://localhost:{}", args.trellis_port));
+    options.nats.nats_port = args.nats_port;
+    options.nats.monitor_port = args.nats_monitor_port;
+    options.nats.websocket_port = args.nats_ws_port;
     options.nats.names.operator_name = args.operator_name.clone();
     options.nats.names.system_account = args.system_account.clone();
     options.nats.names.auth_account = args.auth_account.clone();

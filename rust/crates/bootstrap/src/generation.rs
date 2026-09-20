@@ -27,7 +27,12 @@ fn generate_nats_bootstrap_inner(
     create_layout(&options.out)?;
     fs::write(
         options.out.join("nats.conf"),
-        render_nats_config(&resolved_server_name(&options.config.names, trellis_name)),
+        render_nats_config(
+            &resolved_server_name(&options.config.names, trellis_name),
+            options.config.nats_port,
+            options.config.monitor_port,
+            options.config.websocket_port,
+        ),
     )?;
     let material = generate_nats_material(&options.config.names)?;
     write_nats_material(&options.out, &material)?;
