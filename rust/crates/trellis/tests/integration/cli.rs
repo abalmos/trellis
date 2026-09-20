@@ -16,10 +16,6 @@ use trellis_local_nats::{
 };
 use ulid::Ulid;
 
-/// NATS client port of the server-managed nats-server.
-const NATS_PORT: u16 = 4222;
-/// All three ports the managed config listens on: NATS, HTTP monitor, websocket.
-const MANAGED_PORTS: [u16; 3] = [4222, 8222, 8080];
 /// Deliberately bogus NATS URLs baked into the bundle so managed mode's endpoint
 /// override is observable: nothing listens on these, yet the report must be valid.
 const BOGUS_NATS_URL: &str = "nats://127.0.0.1:4999";
@@ -285,6 +281,12 @@ async fn cli_server_managed_nats() {
     fs::set_permissions(&cache_dir, fs::Permissions::from_mode(0o700))
         .expect("make managed-NATS cache dir private");
     let runtime_port = free_port();
+    // Managed listeners follow the authored bundle's ports, so pick free ports
+    // instead of relying on the conventional 4222/8222/8080 defaults.
+    let nats_port = free_port();
+    let monitor_port = free_port();
+    let ws_port = free_port();
+    let managed_ports = [nats_port, monitor_port, ws_port];
 
     // 1. `trellis init config` renders the bundle the managed server expects, with
     //    deliberately bogus NATS URLs so the managed endpoint override is observable.
@@ -298,6 +300,12 @@ async fn cli_server_managed_nats() {
             bundle.to_str().expect("UTF-8 bundle path"),
             "--trellis-port",
             &runtime_port.to_string(),
+            "--nats-port",
+            &nats_port.to_string(),
+            "--nats-monitor-port",
+            &monitor_port.to_string(),
+            "--nats-ws-port",
+            &ws_port.to_string(),
             "--nats-server-url",
             BOGUS_NATS_URL,
             "--nats-websocket-url",
@@ -389,7 +397,7 @@ async fn cli_server_managed_nats() {
         .parse::<i32>()
         .expect("parse pid");
     wait_until(
-        || MANAGED_PORTS.iter().all(|port| port_accepts(*port)),
+        || managed_ports.iter().all(|port| port_accepts(*port)),
         &mut child,
         &run_stderr,
         "all managed ports to accept connections",
@@ -424,7 +432,7 @@ async fn cli_server_managed_nats() {
         "managed nats-server (pid {managed_pid}) is still alive after shutdown"
     );
     assert!(
-        !MANAGED_PORTS.iter().any(|port| port_accepts(*port)),
+        !managed_ports.iter().any(|port| port_accepts(*port)),
         "managed ports still accept connections after shutdown"
     );
     let nats_log = effective_root.join("logs/nats-server.log");
@@ -524,7 +532,7 @@ async fn cli_server_managed_nats() {
         "check left a managed nats-server pid file behind"
     );
     assert!(
-        !port_accepts(NATS_PORT),
+        !port_accepts(nats_port),
         "managed nats-server is still accepting connections after check"
     );
 
@@ -536,7 +544,11 @@ async fn cli_server_managed_nats() {
         .binary(NatsBinarySource::Path(binary))
         .source(bundle.join("nats"))
         .state(workdir.0.join("external-nats-state"))
-        .ports(LocalNatsPorts::default())
+        .ports(LocalNatsPorts {
+            nats: nats_port,
+            monitor: monitor_port,
+            websocket: ws_port,
+        })
         .pid_file(&external_pid_file)
         .output(NatsOutput::Log {
             path: workdir.0.join("external-nats-server.log"),
@@ -553,8 +565,8 @@ async fn cli_server_managed_nats() {
         .expect("connect to external NATS");
     let jetstream = jetstream::new(nats);
     let external_config = config_toml
-        .replace(BOGUS_NATS_URL, &format!("nats://127.0.0.1:{NATS_PORT}"))
-        .replace(BOGUS_WS_URL, "ws://localhost:8080");
+        .replace(BOGUS_NATS_URL, &format!("nats://127.0.0.1:{nats_port}"))
+        .replace(BOGUS_WS_URL, &format!("ws://localhost:{ws_port}"));
     fs::write(&config_path, external_config).expect("write external NATS config");
 
     for (name, subjects, max_messages_per_subject, discard_new_per_subject) in [
@@ -778,7 +790,7 @@ async fn cli_server_managed_nats() {
         log_tail(&external_stderr)
     );
     assert!(
-        port_accepts(NATS_PORT),
+        port_accepts(nats_port),
         "external mode must not stop a nats-server it did not spawn"
     );
     assert!(

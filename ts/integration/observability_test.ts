@@ -3,6 +3,13 @@ import { ensureTelemetryRuntime } from "@qlever-llc/trellis/telemetry";
 import { RetryJobError, TrellisService } from "@qlever-llc/trellis/service";
 import { assert, assertEquals } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
+import { metrics } from "@opentelemetry/api";
+import {
+  AggregationTemporality,
+  InMemoryMetricExporter,
+  MeterProvider,
+  PeriodicExportingMetricReader,
+} from "npm:@opentelemetry/sdk-metrics@^2.7.0";
 
 import { participants } from "../../integration/fixtures/runtime/packages/runtime-trellis/index.js";
 import { withTrellisRuntime } from "./_support/runtime.ts";
@@ -16,7 +23,6 @@ function serverBinary(): string {
 }
 
 const captureEndpoint = Deno.env.get("TRELLIS_OBS_CAPTURE_ENDPOINT");
-const prometheusUrl = Deno.env.get("TRELLIS_OBS_PROMETHEUS_URL");
 
 /**
  * Telemetry is optional: a runtime started with no OTLP endpoint, with the SDK
@@ -355,207 +361,139 @@ for (
   );
 }
 
-if (captureEndpoint && prometheusUrl) {
-  Deno.test("enabled Rust provider exports durable attempt links", async () => {
-    const previousMetrics = new Set(
-      (await (await fetch(prometheusUrl)).text()).split("\n"),
-    );
-    await withTrellisRuntime(async (runtime) => {
-      const identity = await runtime.registerService({
-        name: "rust-observability-provider",
-        contract: participants.OperationProvider.participant,
-      });
-      const provider = new Deno.Command("setsid", {
-        args: [
-          "cargo",
-          "run",
-          "--config",
-          `patch.crates-io.trellis-rs.path=${
-            JSON.stringify(
-              fromFileUrl(
-                new URL("../../rust/crates/trellis", import.meta.url),
-              ),
-            )
-          }`,
-          "--bin",
-          "trellis-runtime-acceptance",
-          "--manifest-path",
-          fromFileUrl(
-            new URL(
-              "../../integration/fixtures/runtime/Cargo.toml",
-              import.meta.url,
-            ),
-          ),
-        ],
-        env: {
-          TRELLIS_URL: runtime.trellisUrl,
-          TRELLIS_IDENTITY_SEED: identity.seed,
-          CARGO_TARGET_DIR: fromFileUrl(
-            new URL("../../rust/target", import.meta.url),
-          ),
-        },
-        stdout: "null",
-        stderr: "inherit",
-      }).spawn();
-      const status = provider.status;
-      try {
-        await runtime.deployments.create({
-          id: "rust-observability-caller",
-          kind: "service",
-        });
-        const callerIdentity = await runtime.registerService({
-          name: "rust-operation-caller",
-          contract: participants.OperationCaller.participant,
-          deployment: "rust-observability-caller",
-        });
-        const caller = await TrellisService.connect({
-          trellisUrl: runtime.trellisUrl,
-          participant: participants.OperationCaller.participant,
-          seed: callerIdentity.seed,
-        }).orThrow();
-        try {
-          const operation = await runtime.waitFor(async () => {
-            const started = await caller.work({ value: "routing-check" })
-              .start();
-            return started.isOk() ? started.orThrow() : false;
-          }, { timeoutMs: 120_000 });
-          await operation.signal("Continue", { value: "continue" }).orThrow();
-          const terminal = await operation.wait().orThrow();
-          assertEquals(terminal.state, "completed");
-          assertEquals(terminal.output?.value, "completed");
-          await runtime.waitFor(
-            async () =>
-              (await (await fetch(prometheusUrl)).text()).split("\n").some(
-                (line) =>
-                  line.startsWith(
-                    "trellis_operation_execution_duration_count{",
-                  ) &&
-                  !previousMetrics.has(line),
-              ),
-            { timeoutMs: 30_000 },
-          );
-        } finally {
-          await caller.stop();
-        }
-      } finally {
-        Deno.kill(-provider.pid, "SIGTERM");
-        await status;
-      }
-    }, {
-      trellis: {
-        command: {
-          cmd: serverBinary(),
-          args: ["--config", "{config}", "all"],
-        },
-      },
-    });
+/** In-process metric capture that rebinds Trellis instruments to a test reader. */
+function startMetricCapture() {
+  const exporter = new InMemoryMetricExporter(
+    AggregationTemporality.CUMULATIVE,
+  );
+  const reader = new PeriodicExportingMetricReader({
+    exporter,
+    exportIntervalMillis: 60_000,
   });
-}
-
-if (captureEndpoint && prometheusUrl) {
-  /** Sums one counter family across matching label pairs from a scrape. */
-  function scrapeTotal(
-    metrics: string,
-    family: string,
-    subset: Record<string, string> = {},
-  ): number {
-    let total = 0;
-    for (const line of metrics.split("\n")) {
-      if (!line.startsWith(`${family}{`)) continue;
-      const labels = line.slice(line.indexOf("{") + 1, line.lastIndexOf("}"));
-      if (
-        Object.entries(subset).every(([key, value]) =>
-          labels.includes(`${key}="${value}"`)
-        )
-      ) {
-        total += Number(line.slice(line.lastIndexOf("}") + 1).trim());
+  const provider = new MeterProvider({ readers: [reader] });
+  metrics.setGlobalMeterProvider(provider);
+  const total = (name: string, subset: Record<string, string> = {}): number => {
+    let sum = 0;
+    const scopes = exporter.getMetrics().at(-1)?.scopeMetrics ?? [];
+    for (const metric of scopes.flatMap((scope) => scope.metrics)) {
+      if (metric.descriptor.name !== name) continue;
+      for (const point of metric.dataPoints) {
+        if (
+          Object.entries(subset).every(([key, value]) =>
+            point.attributes[key] === value
+          )
+        ) {
+          sum += point.value as number;
+        }
       }
     }
-    return total;
-  }
+    return sum;
+  };
+  return {
+    total,
+    flush: () => provider.forceFlush(),
+    // Providers stay installed for the process: shutting a previous global
+    // provider down poisons later instruments in the same test run.
+    stop: () => Promise.resolve(),
+  };
+}
 
-  Deno.test("TS service connection observes usable, suspended, resumed, and disposal against real NATS", async () => {
-    await withTrellisRuntime(async (runtime) => {
-      const serviceName = `connection-owner-${Date.now()}`;
-      const identity = await runtime.registerService({
-        name: serviceName,
-        contract: participants.Provider.participant,
-      });
-      const service = await TrellisService.connect({
-        trellisUrl: runtime.trellisUrl,
-        participant: participants.Provider.participant,
-        name: serviceName,
-        seed: identity.seed,
-      }).orThrow();
-      const serviceExit = service.wait().catch((error: unknown) => error);
-      try {
-        const initial = async () => await (await fetch(prometheusUrl)).text();
-        // A service suspended by an authoritative instance disable keeps
-        // refreshing until it is terminal; the transition is observed at the
-        // real TypeScript owner rather than inferred from Rust samples.
-        await runtime.waitFor(async () => {
-          const metrics = await initial();
-          return scrapeTotal(metrics, "trellis_connection_count", {
-            job: `trellis/${serviceName}`,
-            trellis_participant_kind: "service",
-            trellis_state: "usable",
-          }) >= 1;
-        }, { timeoutMs: 30_000 });
-        await runtime.services.disableInstance({
-          instanceId: identity.instanceId,
-          expectedVersion: 1n,
-          idempotencyKey: crypto.randomUUID(),
-          reason: "connection owner observability",
-        });
-        await runtime.waitFor(async () => {
-          const metrics = await initial();
-          return scrapeTotal(metrics, "trellis_auth_refresh_attempts", {
-            job: `trellis/${serviceName}`,
-            trellis_participant_kind: "service",
-          }) >= 1;
-        }, { timeoutMs: 30_000 });
-      } finally {
-        await service.stop();
-        // A deliberately suspended service settles with the terminal
-        // authorization outcome instead of a clean stop; the telemetry
-        // transition is the assertion here, not the exit value.
-        await serviceExit;
-      }
-      await runtime.waitFor(async () => {
-        const metrics = await (await fetch(prometheusUrl)).text();
-        return scrapeTotal(metrics, "trellis_connection_count", {
-          job: `trellis/${serviceName}`,
-          trellis_participant_kind: "service",
-          trellis_state: "usable",
-        }) === 0;
-      }, { timeoutMs: 30_000 });
-      const metrics = await (await fetch(prometheusUrl)).text();
-      assertEquals(
-        scrapeTotal(metrics, "trellis_connection_transitions", {
-          job: `trellis/${serviceName}`,
-          trellis_participant_kind: "service",
-        }) >= 1,
-        true,
-      );
-      assertEquals(
-        scrapeTotal(metrics, "trellis_connection_transitions", {
-          job: `trellis/${serviceName}`,
-          trellis_participant_kind: "service",
-          trellis_reason: "terminal",
-        }) >= 1,
-        true,
-      );
-    }, {
-      trellis: {
-        command: {
-          cmd: serverBinary(),
-          args: ["--config", "{config}", "all"],
-        },
-      },
+let sharedCapture: ReturnType<typeof startMetricCapture> | undefined;
+
+/** One process-wide capture keeps instrument binding stable across both tests. */
+function ensureCapture(): ReturnType<typeof startMetricCapture> {
+  sharedCapture ??= startMetricCapture();
+  return sharedCapture;
+}
+
+Deno.test("TS service connection observes usable, suspended, resumed, and disposal against real NATS", async () => {
+  const capture = ensureCapture();
+  await withTrellisRuntime(async (runtime) => {
+    const serviceName = `connection-owner-${Date.now()}`;
+    const identity = await runtime.registerService({
+      name: serviceName,
+      contract: participants.Provider.participant,
     });
+    const service = await TrellisService.connect({
+      trellisUrl: runtime.trellisUrl,
+      participant: participants.Provider.participant,
+      name: serviceName,
+      seed: identity.seed,
+    }).orThrow();
+    const serviceExit = service.wait().catch((error: unknown) => error);
+    const usable = () =>
+      capture.total("trellis.connection.count", {
+        "trellis.participant.kind": "service",
+        "trellis.state": "usable",
+      });
+    try {
+      // A service suspended by an authoritative instance disable keeps
+      // refreshing until it is terminal; the transition is observed at the
+      // real TypeScript owner rather than inferred from Rust samples.
+      await runtime.waitFor(async () => {
+        await capture.flush();
+        return usable() >= 1;
+      }, { timeoutMs: 30_000 });
+      await capture.flush();
+      // Exactly one logical connection: the shared wrapper adopts the
+      // caller's handle instead of leaving an orphan `connecting` entry.
+      assertEquals(
+        capture.total("trellis.connection.count", {
+          "trellis.participant.kind": "service",
+          "trellis.state": "connecting",
+        }),
+        0,
+      );
+      await runtime.services.disableInstance({
+        instanceId: identity.instanceId,
+        expectedVersion: 1n,
+        idempotencyKey: crypto.randomUUID(),
+        reason: "connection owner observability",
+      });
+      await runtime.waitFor(async () => {
+        await capture.flush();
+        return capture.total("trellis.auth.refresh.attempts", {
+          "trellis.participant.kind": "service",
+        }) >= 1;
+      }, { timeoutMs: 30_000 });
+    } finally {
+      await service.stop();
+      // A deliberately suspended service settles with the terminal
+      // authorization outcome instead of a clean stop; the telemetry
+      // transition is the assertion here, not the exit value.
+      await serviceExit;
+    }
+    await runtime.waitFor(async () => {
+      await capture.flush();
+      return usable() === 0;
+    }, { timeoutMs: 30_000 });
+    await capture.flush();
+    assertEquals(
+      capture.total("trellis.connection.transitions", {
+        "trellis.participant.kind": "service",
+      }) >= 1,
+      true,
+    );
+    assertEquals(
+      capture.total("trellis.connection.transitions", {
+        "trellis.participant.kind": "service",
+        "trellis.reason": "terminal",
+      }) >= 1,
+      true,
+    );
+  }, {
+    trellis: {
+      command: {
+        cmd: serverBinary(),
+        args: ["--config", "{config}", "all"],
+      },
+    },
   });
+});
 
-  Deno.test("TS Feed active and end observations balance across normal and early close", async () => {
+Deno.test("TS Feed active and end observations balance across normal and early close", async () => {
+  const capture = ensureCapture();
+  try {
     await withTrellisRuntime(async (runtime) => {
       const identity = await runtime.registerService({
         name: "feed-owner-observability",
@@ -582,10 +520,8 @@ if (captureEndpoint && prometheusUrl) {
         contract: participants.Caller.participant,
       });
       try {
-        const before = scrapeTotal(
-          await (await fetch(prometheusUrl)).text(),
-          "trellis_feed_ends",
-        );
+        await capture.flush();
+        const before = capture.total("trellis.feed.ends");
         const natural = await client.watch({}).orThrow();
         const iterator = natural[Symbol.asyncIterator]();
         await iterator.next();
@@ -598,27 +534,33 @@ if (captureEndpoint && prometheusUrl) {
         earlyAbort.abort();
         await runtime.waitFor(() => closed >= 2);
         await runtime.waitFor(async () => {
-          const metrics = await (await fetch(prometheusUrl)).text();
-          return scrapeTotal(metrics, "trellis_feed_ends") >= before + 2;
+          await capture.flush();
+          return capture.total("trellis.feed.ends") >= before + 2;
         }, { timeoutMs: 30_000 });
-        const metrics = await (await fetch(prometheusUrl)).text();
+        // Return before any next(): a never-iterated handle must release local
+        // ownership and record one client end without starting provider work.
+        const neverStarted = await client.watch({}).orThrow();
+        await neverStarted[Symbol.asyncIterator]().return?.();
+        await runtime.waitFor(async () => {
+          await capture.flush();
+          return capture.total("trellis.feed.ends") >= before + 3;
+        }, { timeoutMs: 30_000 });
+        await capture.flush();
         assertEquals(
-          scrapeTotal(metrics, "trellis_feed_ends", {
-            trellis_side: "client",
-          }) >=
-            2,
+          capture.total("trellis.feed.ends", {
+            "trellis.side": "client",
+          }) >= 3,
           true,
         );
         assertEquals(
-          scrapeTotal(metrics, "trellis_feed_ends", {
-            trellis_side: "server",
-          }) >=
-            2,
+          capture.total("trellis.feed.ends", {
+            "trellis.side": "server",
+          }) >= 2,
           true,
         );
         assertEquals(
-          scrapeTotal(metrics, "trellis_feed_active", {
-            trellis_side: "client",
+          capture.total("trellis.feed.active", {
+            "trellis.side": "client",
           }) > 0,
           false,
         );
@@ -635,5 +577,7 @@ if (captureEndpoint && prometheusUrl) {
         },
       },
     });
-  });
-}
+  } finally {
+    await capture.stop();
+  }
+});

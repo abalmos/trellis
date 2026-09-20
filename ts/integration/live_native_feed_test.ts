@@ -438,7 +438,9 @@ Deno.test("NX09 reconnect opens a new Watch without reviving the old session", a
       await firstCaller.connection.close();
       const leftover = await Promise.race([
         firstIterator.next().then((item) => item.done === true),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 2_000)),
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), 2_000)
+        ),
       ]);
       assert(leftover, "closed connection must end the old iterator");
       const secondCaller = await runtime.connectClient({

@@ -126,3 +126,48 @@ device AgentDevice {
     }
   }
 }
+
+model LiveProbeKey {
+  runId: string;
+  streamId: string;
+}
+
+model LiveProbeRelease {
+  runId: string;
+  streamId: string;
+  throughIndex: int64;
+  finish: bool;
+  payloadBytes?: uint32;
+  paddingBytes?: uint32;
+}
+
+model LiveProbeFrame {
+  runId: string;
+  streamId: string;
+  sourceGeneration: int64;
+  index: int64;
+  payload: bytes;
+  padding: string;
+}
+
+model LiveProbeStatus {
+  starts: int64;
+  active: int64;
+  cleanups: int64;
+  emitted: int64;
+}
+
+api liveprobe@v1 {
+  title "Live observation acceptance";
+  description "Case-owned source control and observed source lifetime.";
+  rpc Inspect { input LiveProbeKey; output LiveProbeStatus; }
+  rpc Release { input LiveProbeRelease; output LiveProbeStatus; }
+  feed Watch { input LiveProbeKey; event LiveProbeFrame; }
+  capabilities { public { allows { rpc Inspect; rpc Release; feed Watch; } } }
+}
+
+service LiveProbeProvider { implements liveprobe; }
+
+app LiveProbeCaller {
+  use liveprobe { rpc Inspect; rpc Release; feed Watch; }
+}
