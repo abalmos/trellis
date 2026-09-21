@@ -170,6 +170,8 @@ pub struct AuthorizationProviderCache {
     context_resolves: Arc<AtomicU64>,
     access_clock: Arc<AtomicU64>,
     coverage_probe: Arc<CoverageProbe>,
+    /// Wakes retained live guards when coverage, revocation or epoch state moves.
+    live_changes: Arc<tokio::sync::broadcast::Sender<()>>,
 }
 
 impl AuthorizationProviderCache {
@@ -345,6 +347,7 @@ impl AuthorizationProviderCache {
             context_resolves: Arc::new(AtomicU64::new(0)),
             access_clock: Arc::new(AtomicU64::new(0)),
             coverage_probe,
+            live_changes: Arc::new(tokio::sync::broadcast::channel(64).0),
         })
     }
 
@@ -381,6 +384,7 @@ impl AuthorizationProviderCache {
         *self.own_lease.lock().map_err(|_| {
             TrellisClientError::AuthorizationUnavailable("own context lease lock poisoned".into())
         })? = Some(lease);
+        self.notify_live_changes();
         tracing::info!(
             context_digest = digest,
             transport_epoch = expected_epoch,
@@ -402,11 +406,17 @@ impl AuthorizationProviderCache {
                     let epoch = self.epoch();
                     let connected = self.health()?.healthy;
                     let mut state = self.write_state()?;
+                    let before = state.contexts.len();
                     state.contexts.retain(|_, entry| {
                         entry.leases.load(Ordering::Acquire) > 0
                             || (connected && entry.epoch == epoch && entry.covered.load(Ordering::Acquire))
                     });
                     state.revocations.retain(|_, (_, expires_at)| *expires_at > now);
+                    let changed = state.contexts.len() != before;
+                    drop(state);
+                    if changed {
+                        self.notify_live_changes();
+                    }
                 }
             }
         }
@@ -476,6 +486,16 @@ impl AuthorizationProviderCache {
 
     pub(crate) fn epoch(&self) -> u64 {
         self.nats.statistics().connects.load(Ordering::Acquire)
+    }
+
+    /// Subscribe to local coverage/revocation changes that can invalidate a
+    /// retained live guard. Lagged receivers observe a change and re-check.
+    pub(crate) fn subscribe_live_changes(&self) -> tokio::sync::broadcast::Receiver<()> {
+        self.live_changes.subscribe()
+    }
+
+    fn notify_live_changes(&self) {
+        let _ = self.live_changes.send(());
     }
 
     #[cfg(feature = "runtime-internals")]
@@ -896,6 +916,7 @@ impl AuthorizationProviderCache {
             watch_covered,
             watch_digest,
             revocation_deadline,
+            self.live_changes.clone(),
         ));
         let mut verifications = CachedVerifications::default();
         if historical {
@@ -1047,6 +1068,7 @@ async fn observe_context_revocation(
     watch_covered: Arc<AtomicBool>,
     watch_digest: String,
     revocation_deadline: i64,
+    live_changes: Arc<tokio::sync::broadcast::Sender<()>>,
 ) {
     let entry = watch.next().await;
     let revoked_at = match entry {
@@ -1108,6 +1130,9 @@ async fn observe_context_revocation(
     if revoked_at.is_none() && !was_current_entry {
         return;
     }
+    // Wake retained live guards so a quiet session fences without waiting for
+    // the next frame or a timer tick.
+    let _ = live_changes.send(());
     if let (Some(own), Some(transition)) = (&own, transition.as_ref()) {
         if own
             .stored_context_digest()
@@ -1346,6 +1371,7 @@ mod wire_tests {
             covered.clone(),
             "digest".into(),
             2_000,
+            Arc::new(tokio::sync::broadcast::channel(4).0),
         )
         .await;
 
@@ -1658,6 +1684,7 @@ mod retired_watch_tests {
             covered,
             digest.to_owned(),
             now_seconds() + 3_600,
+            Arc::new(tokio::sync::broadcast::channel(4).0),
         )
         .await;
     }

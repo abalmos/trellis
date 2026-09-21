@@ -146,6 +146,8 @@ pub enum DurationFamily {
     AuthCallout,
     /// One contract analysis flow.
     ContractAnalysis,
+    /// One live observation activation handshake.
+    LiveHandshake,
 }
 
 impl DurationFamily {
@@ -171,6 +173,7 @@ impl DurationFamily {
             Self::AuthFlow => "trellis.auth.flow.duration",
             Self::AuthCallout => "trellis.auth.callout.duration",
             Self::ContractAnalysis => "trellis.contract.analysis.duration",
+            Self::LiveHandshake => "trellis.live.handshake.duration",
         }
     }
 
@@ -181,7 +184,8 @@ impl DurationFamily {
             | Self::OperationExecution
             | Self::EventProcess
             | Self::Transfer
-            | Self::Cli => &LONG_DURATION_BOUNDARIES,
+            | Self::Cli
+            | Self::LiveHandshake => &LONG_DURATION_BOUNDARIES,
             _ => &DURATION_BOUNDARIES,
         }
     }
@@ -206,6 +210,12 @@ pub enum CounterFamily {
     DeadLetterTransitions,
     /// Feed stream terminations.
     FeedEnds,
+    /// Live observation session local terminal commits.
+    LiveEnds,
+    /// Admitted outgoing and verified incoming live session frames.
+    LiveFrames,
+    /// Rejected live session messages by fixed reason category.
+    LiveRejections,
     /// Actual transmitted/received transfer payload bytes.
     TransferWireBytes,
     /// Existing singleton lease actions.
@@ -228,6 +238,9 @@ impl CounterFamily {
             Self::DeliveryDispositions => "trellis.delivery.dispositions",
             Self::DeadLetterTransitions => "trellis.dlq.transitions",
             Self::FeedEnds => "trellis.feed.ends",
+            Self::LiveEnds => "trellis.live.ends",
+            Self::LiveFrames => "trellis.live.frames",
+            Self::LiveRejections => "trellis.live.rejections",
             Self::TransferWireBytes => "trellis.transfer.wire.bytes",
             Self::RuntimeLeaseEvents => "trellis.runtime.lease.events",
             Self::SnapshotErrors => "trellis.snapshot.errors",
@@ -244,6 +257,9 @@ impl CounterFamily {
             Self::JobLeaseEvents | Self::RuntimeLeaseEvents => "{event}",
             Self::OperationOwnershipEvents => "{event}",
             Self::FeedEnds => "{subscription}",
+            Self::LiveEnds => "{session}",
+            Self::LiveFrames => "{frame}",
+            Self::LiveRejections => "{message}",
             Self::TransferWireBytes => "By",
             Self::RpcClientAttempts => "{attempt}",
             Self::AuthRefreshAttempts => "{attempt}",
@@ -262,6 +278,12 @@ pub enum UpDownFamily {
     OperationActive,
     /// Open feed subscriptions.
     FeedActive,
+    /// Live observation sessions by current phase.
+    LiveSessions,
+    /// Retained live serialized payload bytes.
+    LiveBufferedBytes,
+    /// Owned live cleanup that exceeded the shared grace.
+    LiveCleanupPending,
 }
 
 impl UpDownFamily {
@@ -271,6 +293,9 @@ impl UpDownFamily {
             Self::RpcServerInflight => "trellis.rpc.server.inflight",
             Self::OperationActive => "trellis.operation.active",
             Self::FeedActive => "trellis.feed.active",
+            Self::LiveSessions => "trellis.live.sessions",
+            Self::LiveBufferedBytes => "trellis.live.buffered.bytes",
+            Self::LiveCleanupPending => "trellis.live.cleanup.pending",
         }
     }
 
@@ -280,6 +305,9 @@ impl UpDownFamily {
             Self::RpcServerInflight => "{request}",
             Self::OperationActive => "{execution}",
             Self::FeedActive => "{subscription}",
+            Self::LiveSessions => "{session}",
+            Self::LiveBufferedBytes => "By",
+            Self::LiveCleanupPending => "{source}",
         }
     }
 }

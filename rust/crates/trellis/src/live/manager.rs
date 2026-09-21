@@ -32,6 +32,8 @@ pub(crate) struct ClosedReceipt {
     pub owner_token: String,
     pub base_subject: String,
     pub reason: LiveEndReason,
+    /// Bounded terminal error code, when the committed end carried one.
+    pub error_code: Option<LiveErrorCode>,
     pub cleanup: CloseCleanupState,
     pub final_seq: u64,
     pub expires_at_ms: u64,
@@ -115,8 +117,9 @@ pub struct LiveSessionManager {
     consumer_sessions: AtomicU64,
     tombstones: Mutex<Vec<ClosedReceipt>>,
     owner_controls: RwLock<Vec<OwnerControlRegistration>>,
-    /// Live authority guards retained by active sessions, keyed by digest.
-    retained_guards: Mutex<HashMap<String, LiveAuthorityGuard>>,
+    /// Caller-authority guards retained for the receipt window, keyed by
+    /// session id, so a closed session's control retry can be authenticated.
+    closed_guards: Mutex<HashMap<String, Arc<LiveAuthorityGuard>>>,
     /// Provider sessions owned by this manager, keyed by session id.
     provider_sessions: Mutex<HashMap<String, Arc<ProviderSessionRecord>>>,
 }
@@ -152,7 +155,7 @@ impl LiveSessionManager {
             consumer_sessions: AtomicU64::new(0),
             tombstones: Mutex::new(Vec::new()),
             owner_controls: RwLock::new(Vec::new()),
-            retained_guards: Mutex::new(HashMap::new()),
+            closed_guards: Mutex::new(HashMap::new()),
             provider_sessions: Mutex::new(HashMap::new()),
         })
     }
@@ -295,6 +298,8 @@ impl LiveSessionManager {
                 };
                 if let Some(record) = manager.provider_session(&session_id) {
                     record.dispatch_control(&nats, message).await;
+                } else {
+                    manager.dispatch_closed_receipt(&message).await;
                 }
             }
         });
@@ -310,51 +315,28 @@ impl LiveSessionManager {
         Ok(())
     }
 
-    /// Retain a live authority guard for an active session.
-    ///
-    /// # Errors
-    ///
-    /// Returns the typed [`LiveAuthorityLost`] reason when the exact covered
-    /// evidence cannot be retained.
-    pub(crate) async fn retain_guard(
+    /// Record one closed-session receipt and its caller guard in the bounded
+    /// LRU shared by both maps.
+    pub(crate) fn insert_receipt(
         &self,
-        cache: &crate::client::AuthorizationProviderCache,
-        digest: &str,
-        requirement: super::authority::LiveGuardRequirement,
-    ) -> Result<(), LiveAuthorityLost> {
-        let guard = LiveAuthorityGuard::retain(cache, digest, requirement).await?;
-        self.retained_guards
-            .lock()
-            .map_err(|_| LiveAuthorityLost::CoverageUnknown)?
-            .insert(digest.to_owned(), guard);
-        Ok(())
-    }
-
-    /// Check every retained guard without network access.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first typed [`LiveAuthorityLost`] reason.
-    pub(crate) fn check_retained_guard(&self, digest: &str) -> Result<(), LiveAuthorityLost> {
-        let guards = self
-            .retained_guards
-            .lock()
-            .map_err(|_| LiveAuthorityLost::CoverageUnknown)?;
-        match guards.get(digest) {
-            Some(guard) => guard.check_now(),
-            None => Err(LiveAuthorityLost::CoverageLost),
-        }
-    }
-
-    /// Record one closed-session receipt in the bounded LRU.
-    pub(crate) fn insert_receipt(&self, receipt: ClosedReceipt) {
+        receipt: ClosedReceipt,
+        caller_guard: Arc<LiveAuthorityGuard>,
+    ) {
         let Ok(mut tombstones) = self.tombstones.lock() else {
             return;
         };
         tombstones.retain(|existing| existing.session_id != receipt.session_id);
+        let session_id = receipt.session_id.clone();
         tombstones.push(receipt);
         if tombstones.len() > MAX_TOMBSTONES {
-            tombstones.remove(0);
+            let evicted = tombstones.remove(0);
+            if let Ok(mut guards) = self.closed_guards.lock() {
+                guards.remove(&evicted.session_id);
+            }
+        }
+        drop(tombstones);
+        if let Ok(mut guards) = self.closed_guards.lock() {
+            guards.insert(session_id, caller_guard);
         }
     }
 
@@ -368,6 +350,143 @@ impl LiveSessionManager {
             .iter()
             .find(|receipt| receipt.session_id == session_id && receipt.expires_at_ms > now_ms)
             .cloned()
+    }
+
+    /// Return the retained caller guard for one receipt window, if unexpired.
+    #[must_use]
+    pub(crate) fn receipt_guard(
+        &self,
+        session_id: &str,
+        now_ms: u64,
+    ) -> Option<Arc<LiveAuthorityGuard>> {
+        self.receipt(session_id, now_ms)?;
+        self.closed_guards
+            .lock()
+            .ok()
+            .and_then(|guards| guards.get(session_id).cloned())
+    }
+
+    /// Answer one control retry for a closed session from its receipt.
+    ///
+    /// The request is authenticated through the receipt window's retained
+    /// caller guard before anything is signed or published. Only close/end-ack
+    /// retries receive a closed acknowledgement; other controls receive a
+    /// bounded `session_not_found`.
+    pub(crate) async fn dispatch_closed_receipt(&self, message: &async_nats::Message) {
+        let Some(reply) = message.reply.clone() else {
+            return;
+        };
+        let Some(headers) = message.headers.as_ref() else {
+            return;
+        };
+        let Ok(control) = trellis_protocol::parse_live_control(&message.payload) else {
+            return;
+        };
+        let now_ms = crate::client::now_iat_seconds() * 1_000;
+        let Some(guard) = self.receipt_guard(control.session_id(), now_ms) else {
+            return;
+        };
+        if guard
+            .verify_control_request(
+                message.subject.as_str(),
+                reply.as_str(),
+                &message.payload,
+                headers,
+            )
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let Some(receipt) = self.receipt(control.session_id(), now_ms) else {
+            return;
+        };
+        let request_id = headers
+            .get("request-id")
+            .map_or_else(String::new, ToString::to_string);
+        let body = match &control {
+            trellis_protocol::LiveControl::Close(_) | trellis_protocol::LiveControl::EndAck(_) => {
+                let ack = trellis_protocol::LiveControlAck {
+                    format: trellis_protocol::LIVE_VERSION.to_owned(),
+                    kind: trellis_protocol::LiveOfferKind::ControlAck,
+                    session_id: receipt.session_id.clone(),
+                    control_seq: control.control_seq(),
+                    request_id,
+                    action: match &control {
+                        trellis_protocol::LiveControl::Close(_) => {
+                            trellis_protocol::LiveControlAckAction::Close
+                        }
+                        _ => trellis_protocol::LiveControlAckAction::EndAck,
+                    },
+                    state: trellis_protocol::LiveSessionState::Closed,
+                    accepted_received_seq: trellis_protocol::U64s::new(receipt.final_seq),
+                    accepted_consumed_seq: trellis_protocol::U64s::new(receipt.final_seq),
+                    terminal: Some(trellis_protocol::WireTerminal {
+                        reason: receipt.reason,
+                        error: receipt
+                            .error_code
+                            .map(|code| trellis_protocol::WireTerminalError {
+                                code,
+                                message: String::new(),
+                                trace_id: None,
+                            }),
+                    }),
+                    cleanup: Some(match receipt.cleanup {
+                        CloseCleanupState::Complete => trellis_protocol::CleanupStatus::Complete,
+                        _ => trellis_protocol::CleanupStatus::Incomplete,
+                    }),
+                };
+                serde_json::to_vec(&ack).ok()
+            }
+            _ => {
+                let error = trellis_protocol::LiveControlError {
+                    format: trellis_protocol::LIVE_VERSION.to_owned(),
+                    kind: trellis_protocol::LiveOfferKind::ControlError,
+                    session_id: receipt.session_id.clone(),
+                    control_seq: control.control_seq(),
+                    request_id,
+                    code: LiveErrorCode::SessionNotFound,
+                };
+                serde_json::to_vec(&error).ok()
+            }
+        };
+        let Some(body) = body else {
+            return;
+        };
+        let Ok(headers) = self.signed_reply_headers(reply.as_str(), &body) else {
+            return;
+        };
+        let _ = self
+            .nats
+            .publish_with_headers(reply, headers, bytes::Bytes::from(body))
+            .await;
+    }
+
+    /// Sign one provider reply with the manager's current retained context.
+    fn signed_reply_headers(
+        &self,
+        subject: &str,
+        body: &[u8],
+    ) -> Result<async_nats::HeaderMap, LiveErrorCode> {
+        let digest = self
+            .contexts
+            .context_digest()
+            .map_err(|_| LiveErrorCode::AuthorizationUnavailable)?;
+        if digest.is_empty() {
+            return Err(LiveErrorCode::AuthorizationUnavailable);
+        }
+        let proof = trellis_protocol::sign_live_server_proof(
+            &digest,
+            subject,
+            body,
+            self.auth.live_signing_key(),
+        )
+        .map_err(|_| LiveErrorCode::AuthorizationUnavailable)?;
+        let mut headers = async_nats::HeaderMap::new();
+        headers.insert("authorization-context", digest.as_str());
+        headers.insert("session-key", self.auth.session_key.as_str());
+        headers.insert("trellis-live-proof", proof.as_str());
+        Ok(headers)
     }
 
     /// Stop the manager: fence new opens and release owner-control registrations.

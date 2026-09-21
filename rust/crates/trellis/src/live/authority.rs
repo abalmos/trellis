@@ -8,10 +8,19 @@
 //! revocation query through `.ok().flatten()` and only checks
 //! `health().is_ok()`, both of which can read as authorization success when the
 //! exact coverage is actually unknown.
+//!
+//! A valid, identity-preserving refresh on the same transport epoch replaces
+//! the retained lease without closing the session or resetting its sequence
+//! and credit state. Every loss that can stop a quiet session (revocation,
+//! lost coverage, expiry, epoch change) is observable through
+//! [`LiveAuthorityGuard::subscribe_changes`] and through
+//! [`LiveAuthorityGuard::check_now`].
 
-use std::sync::Arc;
+use std::sync::RwLock;
 
-use trellis_protocol::{LiveErrorCode, PermissionAtom, ProtocolError};
+use trellis_protocol::{
+    AuthorizationVerificationPolicy, LiveErrorCode, PermissionAtom, ProtocolError,
+};
 
 use crate::client::{
     AuthorizationContextLease, AuthorizationProviderCache, AuthorizationVerificationCore,
@@ -87,10 +96,20 @@ pub(crate) enum LiveGuardRequirement {
     PeerProvider { expected: PinnedPeerIdentity },
 }
 
+/// One validated replacement lease that has not been installed yet.
+///
+/// The candidate's lease is fully resolved and covered; the caller may verify
+/// one request against it before committing. Dropping an uncommitted candidate
+/// releases its lease.
+pub(crate) struct LiveAuthorityCandidate {
+    lease: AuthorizationContextLease,
+    identity: PinnedPeerIdentity,
+}
+
 /// One retained live-authority guard over an existing provider-cache lease.
 pub(crate) struct LiveAuthorityGuard {
     cache: AuthorizationProviderCache,
-    lease: AuthorizationContextLease,
+    lease: RwLock<AuthorizationContextLease>,
     expected_epoch: u64,
     identity: PinnedPeerIdentity,
     permission: Option<PermissionAtom>,
@@ -110,13 +129,7 @@ impl LiveAuthorityGuard {
         requirement: LiveGuardRequirement,
     ) -> Result<Self, LiveAuthorityLost> {
         let expected_epoch = cache.epoch();
-        let lease = cache
-            .retain_live_guard_lease(digest, expected_epoch)
-            .await
-            .map_err(|error| match error {
-                TrellisClientError::AuthorizationUnavailable(_) => LiveAuthorityLost::CoverageLost,
-                _ => LiveAuthorityLost::CoverageUnknown,
-            })?;
+        let lease = retain_live_lease(cache, digest, expected_epoch).await?;
         let identity = pinned_identity(&lease);
         let (permission, peer) = match requirement {
             LiveGuardRequirement::Observer(permission) => {
@@ -135,7 +148,7 @@ impl LiveAuthorityGuard {
         };
         Ok(Self {
             cache: cache.clone(),
-            lease,
+            lease: RwLock::new(lease),
             expected_epoch,
             identity,
             permission,
@@ -151,8 +164,18 @@ impl LiveAuthorityGuard {
 
     /// Return the retained context digest.
     #[must_use]
-    pub(crate) fn context_digest(&self) -> &str {
-        self.lease.context_digest()
+    pub(crate) fn context_digest(&self) -> String {
+        self.lease
+            .read()
+            .map_or_else(|_| String::new(), |lease| lease.context_digest().to_owned())
+    }
+
+    /// Return the retained context expiry in Unix seconds.
+    #[must_use]
+    pub(crate) fn expires_at_seconds(&self) -> i64 {
+        self.lease
+            .read()
+            .map_or(0, |lease| lease.signed_context().unsigned.expires_at)
     }
 
     /// Perform the synchronous local authority check.
@@ -164,6 +187,10 @@ impl LiveAuthorityGuard {
     ///
     /// Returns the precise [`LiveAuthorityLost`] reason, never a lossy boolean.
     pub(crate) fn check_now(&self) -> Result<(), LiveAuthorityLost> {
+        let lease = self
+            .lease
+            .read()
+            .map_err(|_| LiveAuthorityLost::CoverageUnknown)?;
         let health = self
             .cache
             .health()
@@ -171,20 +198,20 @@ impl LiveAuthorityGuard {
         if !health.healthy {
             return Err(LiveAuthorityLost::TransportUnavailable);
         }
-        if self.cache.epoch() != self.expected_epoch || self.lease.epoch() != self.expected_epoch {
+        if self.cache.epoch() != self.expected_epoch || lease.epoch() != self.expected_epoch {
             return Err(LiveAuthorityLost::EpochChanged);
         }
-        if !self.cache.live_guard_entry_is_covered(&self.lease) {
+        if !self.cache.live_guard_entry_is_covered(&lease) {
             return Err(LiveAuthorityLost::CoverageLost);
         }
-        match self.cache.revocation_time(self.context_digest()) {
+        match self.cache.revocation_time(lease.context_digest()) {
             // Recorded revocation evidence.
             Ok(Some(_)) => return Err(LiveAuthorityLost::Revoked),
             // Unknown coverage must fail closed, not read as cleared.
             Err(_) => return Err(LiveAuthorityLost::CoverageUnknown),
             Ok(None) => {}
         }
-        self.lease
+        lease
             .assert_current(
                 &self
                     .cache
@@ -192,7 +219,7 @@ impl LiveAuthorityGuard {
                     .map_err(|_| LiveAuthorityLost::CoverageUnknown)?,
             )
             .map_err(|_| LiveAuthorityLost::Expired)?;
-        if pinned_identity(&self.lease) != self.identity {
+        if pinned_identity(&lease) != self.identity {
             return Err(LiveAuthorityLost::IdentityChanged);
         }
         if let Some(expected) = &self.peer {
@@ -201,18 +228,97 @@ impl LiveAuthorityGuard {
             }
         }
         if let Some(permission) = &self.permission {
-            if !self.lease.allows(permission) {
+            if !lease.allows(permission) {
                 return Err(LiveAuthorityLost::PermissionLost);
             }
         }
         Ok(())
     }
 
+    /// Resolve and validate a replacement lease without installing it.
+    ///
+    /// The replacement must preserve the pinned identity, role requirement and
+    /// transport epoch; otherwise it is discarded and the current lease stays
+    /// in force.
+    ///
+    /// # Errors
+    ///
+    /// Returns the typed reason the replacement is not usable.
+    pub(crate) async fn prepare_replacement(
+        &self,
+        digest: &str,
+    ) -> Result<LiveAuthorityCandidate, LiveAuthorityLost> {
+        let lease = retain_live_lease(&self.cache, digest, self.expected_epoch).await?;
+        let identity = pinned_identity(&lease);
+        if identity != self.identity {
+            return Err(LiveAuthorityLost::IdentityChanged);
+        }
+        if let Some(expected) = &self.peer {
+            if &identity != expected {
+                return Err(LiveAuthorityLost::IdentityChanged);
+            }
+        }
+        if let Some(permission) = &self.permission {
+            if !lease.allows(permission) {
+                return Err(LiveAuthorityLost::PermissionLost);
+            }
+        }
+        Ok(LiveAuthorityCandidate { lease, identity })
+    }
+
+    /// Atomically install a prepared replacement on the same transport epoch.
+    ///
+    /// The old covered lease is released only after the new one is installed.
+    /// A committed terminal session never resurrects: callers must fence before
+    /// replacing when their own terminal state is already recorded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LiveAuthorityLost`] when the epoch or identity moved.
+    pub(crate) fn commit_replacement(
+        &self,
+        candidate: LiveAuthorityCandidate,
+    ) -> Result<(), LiveAuthorityLost> {
+        if self.cache.epoch() != self.expected_epoch
+            || candidate.lease.epoch() != self.expected_epoch
+        {
+            return Err(LiveAuthorityLost::EpochChanged);
+        }
+        if candidate.identity != self.identity {
+            return Err(LiveAuthorityLost::IdentityChanged);
+        }
+        let mut slot = self
+            .lease
+            .write()
+            .map_err(|_| LiveAuthorityLost::CoverageUnknown)?;
+        let old = std::mem::replace(&mut *slot, candidate.lease);
+        drop(slot);
+        drop(old);
+        Ok(())
+    }
+
+    /// Subscribe to local changes that can invalidate this guard.
+    ///
+    /// A receiver observes revocation, lost coverage and transport-epoch
+    /// movement without waiting for the next frame. Lagged receivers must
+    /// re-run [`Self::check_now`].
+    #[must_use]
+    pub(crate) fn subscribe_changes(&self) -> tokio::sync::broadcast::Receiver<()> {
+        self.cache.subscribe_live_changes()
+    }
+
     /// Authenticate one owner-control request against this retained caller.
+    ///
+    /// The pipeline is: current coverage, singleton headers, pinned session
+    /// key, caller reply boundary, then proof verification. An
+    /// identity-preserving caller context on the same transport epoch is
+    /// validated and committed before its control is applied.
+    ///
+    /// # Errors
     ///
     /// Unverified, foreign-reply, and mismatched-identity requests fail so the
     /// caller can drop them without reflection.
-    pub(crate) fn verify_control_request(
+    pub(crate) async fn verify_control_request(
         &self,
         subject: &str,
         reply: &str,
@@ -226,75 +332,123 @@ impl LiveAuthorityGuard {
             return Err(LiveErrorCode::PermissionDenied);
         }
         let context_digest = header_once(headers, "authorization-context")?;
-        if context_digest != self.context_digest() {
-            return Err(LiveErrorCode::PermissionDenied);
-        }
         let proof = header_once(headers, "proof")?;
         let request_id = header_once(headers, "request-id")?;
         let iat = header_once(headers, "iat")?
             .parse::<i64>()
             .map_err(|_| LiveErrorCode::InvalidRequest)?;
-        let prefix = self.lease.inbox_prefix();
+        let (current_digest, prefix) = {
+            let lease = self
+                .lease
+                .read()
+                .map_err(|_| LiveErrorCode::PermissionDenied)?;
+            (
+                lease.context_digest().to_owned(),
+                lease.inbox_prefix().to_owned(),
+            )
+        };
         if reply != prefix && !reply.starts_with(&format!("{prefix}.")) {
             return Err(LiveErrorCode::InvalidSubject);
         }
-        let required = match &self.permission {
-            Some(permission) => std::slice::from_ref(permission),
-            None => &[],
-        };
         let policy = self
             .cache
             .policy()
             .map_err(|_| LiveErrorCode::AuthorizationUnavailable)?;
+        let candidate = if context_digest != current_digest {
+            Some(
+                self.prepare_replacement(&context_digest)
+                    .await
+                    .map_err(|_| LiveErrorCode::PermissionDenied)?,
+            )
+        } else {
+            None
+        };
+        let verified = match candidate.as_ref() {
+            Some(candidate) => self.verify_request_against(
+                &candidate.lease,
+                &policy,
+                subject,
+                reply,
+                payload,
+                iat,
+                &request_id,
+                &proof,
+                &context_digest,
+            ),
+            None => {
+                let lease = self
+                    .lease
+                    .read()
+                    .map_err(|_| LiveErrorCode::PermissionDenied)?;
+                self.verify_request_against(
+                    &lease,
+                    &policy,
+                    subject,
+                    reply,
+                    payload,
+                    iat,
+                    &request_id,
+                    &proof,
+                    &context_digest,
+                )
+            }
+        };
+        verified?;
+        if let Some(candidate) = candidate {
+            self.commit_replacement(candidate)
+                .map_err(|_| LiveErrorCode::PermissionDenied)?;
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn verify_request_against(
+        &self,
+        lease: &AuthorizationContextLease,
+        policy: &AuthorizationVerificationPolicy,
+        subject: &str,
+        reply: &str,
+        payload: &[u8],
+        iat: i64,
+        request_id: &str,
+        proof: &str,
+        context_digest: &str,
+    ) -> Result<(), LiveErrorCode> {
+        let required = match &self.permission {
+            Some(permission) => std::slice::from_ref(permission),
+            None => &[],
+        };
         AuthorizationVerificationCore::new()
             .verify_request(RequestVerificationInput {
-                context: &self.lease,
-                context_digest: &context_digest,
+                context: lease,
+                context_digest,
                 subject,
                 payload,
                 iat,
-                request_id: &request_id,
+                request_id,
                 reply_subject: Some(reply),
-                proof: &proof,
-                policy: &policy,
+                proof,
+                policy,
                 required_permissions: required,
             })
             .map_err(|_| LiveErrorCode::PermissionDenied)?;
         Ok(())
     }
+}
 
-    /// Replace the guard's retained lease with a newer verified installation.
-    ///
-    /// The pinned identity, permission, and expected epoch must still hold; an
-    /// identity-preserving refresh on the same transport epoch does not close
-    /// the session or reset its sequence/credit state.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`LiveAuthorityLost`] when the replacement does not preserve the
-    /// session's pinned identity or required authority.
-    pub(crate) async fn replace(&mut self, digest: &str) -> Result<(), LiveAuthorityLost> {
-        let lease = self
-            .cache
-            .retain_live_guard_lease(digest, self.expected_epoch)
-            .await
-            .map_err(|_| LiveAuthorityLost::CoverageLost)?;
-        if pinned_identity(&lease) != self.identity {
-            return Err(LiveAuthorityLost::IdentityChanged);
-        }
-        if let Some(expected) = &self.peer {
-            if pinned_identity(&lease) != *expected {
-                return Err(LiveAuthorityLost::IdentityChanged);
-            }
-        }
-        if let Some(permission) = &self.permission {
-            if !lease.allows(permission) {
-                return Err(LiveAuthorityLost::PermissionLost);
-            }
-        }
-        self.lease = lease;
-        Ok(())
-    }
+/// Retain one covered lease, mapping cache failures to typed authority loss.
+async fn retain_live_lease(
+    cache: &AuthorizationProviderCache,
+    digest: &str,
+    expected_epoch: u64,
+) -> Result<AuthorizationContextLease, LiveAuthorityLost> {
+    cache
+        .retain_live_guard_lease(digest, expected_epoch)
+        .await
+        .map_err(|error| match error {
+            TrellisClientError::AuthorizationUnavailable(_) => LiveAuthorityLost::CoverageLost,
+            _ => LiveAuthorityLost::CoverageUnknown,
+        })
 }
 
 impl PinnedPeerIdentity {
@@ -316,35 +470,20 @@ fn pinned_identity(lease: &AuthorizationContextLease) -> PinnedPeerIdentity {
     PinnedPeerIdentity::from_signed(lease.signed_context())
 }
 
+/// Extract exactly one non-empty value for a security header.
+///
+/// Duplicate or ambiguous headers are rejected; a `get()` that ignores
+/// additional values is not singleton validation.
 fn header_once(headers: &async_nats::HeaderMap, name: &str) -> Result<String, LiveErrorCode> {
-    let value = headers
-        .get(name)
+    let mut values = headers.get_all(name);
+    let value = values
+        .next()
         .ok_or(LiveErrorCode::InvalidRequest)?
         .to_string();
-    if value.is_empty() {
+    if values.next().is_some() || value.is_empty() {
         return Err(LiveErrorCode::InvalidRequest);
     }
     Ok(value)
-}
-
-/// One retained guard pair for a session that both publishes and consumes.
-pub(crate) struct LiveAuthorityPair {
-    /// Guard over the session owner's own installation.
-    pub own: LiveAuthorityGuard,
-    /// Guard over the pinned peer's installation.
-    pub peer: LiveAuthorityGuard,
-}
-
-impl LiveAuthorityPair {
-    /// Check both guards, returning the first typed loss.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first [`LiveAuthorityLost`] reason from either side.
-    pub(crate) fn check_now(&self) -> Result<(), LiveAuthorityLost> {
-        self.own.check_now()?;
-        self.peer.check_now()
-    }
 }
 
 /// Map a protocol error into the closest authority-loss reason.
@@ -359,7 +498,28 @@ pub(crate) fn authority_loss_from_protocol(error: &ProtocolError) -> LiveAuthori
     }
 }
 
-/// Retained handle to the manager's authority listener registration.
-pub(crate) struct LiveAuthorityListener {
-    _registration: Arc<()>,
+#[cfg(test)]
+mod tests {
+    use super::header_once;
+
+    #[test]
+    fn duplicate_security_headers_are_rejected() {
+        let mut headers = async_nats::HeaderMap::new();
+        headers.append("session-key", "one");
+        assert!(header_once(&headers, "session-key").is_ok());
+        headers.append("session-key", "two");
+        assert!(
+            header_once(&headers, "session-key").is_err(),
+            "a duplicated security header must not be accepted"
+        );
+    }
+
+    #[test]
+    fn missing_and_empty_security_headers_are_rejected() {
+        let headers = async_nats::HeaderMap::new();
+        assert!(header_once(&headers, "session-key").is_err());
+        let mut headers = async_nats::HeaderMap::new();
+        headers.append("session-key", "");
+        assert!(header_once(&headers, "session-key").is_err());
+    }
 }

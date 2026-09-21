@@ -1989,6 +1989,17 @@ impl TrellisClient {
             "receiveMaxPayloadBytes": self.nats.max_payload() as u64,
             "input": encoded,
         });
+        let action_name = D::KEY.split_once('.').map_or(D::KEY, |(_, action)| action);
+        let permission = trellis_protocol::PermissionAtom::new(
+            trellis_protocol::PermissionTarget::api_surface(
+                D::API_ID,
+                trellis_protocol::ApiSurfaceKind::Feed,
+                action_name.to_owned(),
+            )
+            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?,
+            trellis_protocol::PermissionAction::Subscribe,
+        )
+        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
         let open = crate::live::client_open::ClientOpen {
             kind: trellis_protocol::LiveSessionKind::Feed,
             api_id: D::API_ID,
@@ -1997,6 +2008,7 @@ impl TrellisClient {
             body: Bytes::from(serde_json::to_vec(&body)?),
             open_id,
             receive_max_payload_bytes: self.nats.max_payload() as u64,
+            permission,
         };
         let prepared =
             crate::live::client_open::open_client_session(self, &self.authorization_provider, open)

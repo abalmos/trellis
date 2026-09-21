@@ -10,16 +10,17 @@ use std::task::{Context, Poll};
 use futures_util::{Stream, StreamExt};
 
 use trellis_protocol::{
-    LiveControl, LiveControlAck, LiveControlActivate, LiveControlClose, LiveControlCredit,
-    LiveControlEndAck, LiveControlPulse, LiveEndReason, LiveErrorCode, LiveFrame, LiveOffer, U64s,
-    ACK_FRAME_THRESHOLD, ACK_MAX_DELAY_MS, CHALLENGE_RETRY_MS, CLOSE_EXCHANGE_MS, CLOSE_RETRY_MS,
-    CONSUMER_STALL_MS, HEARTBEAT_INTERVAL_MS, PEER_INACTIVITY_MS, WINDOW_BYTES, WINDOW_FRAMES,
+    LiveControl, LiveControlAck, LiveControlAckAction, LiveControlActivate, LiveControlClose,
+    LiveControlCredit, LiveControlEndAck, LiveControlError, LiveControlPulse, LiveEndReason,
+    LiveErrorCode, LiveFrame, LiveOffer, U64s, ACK_FRAME_THRESHOLD, ACK_MAX_DELAY_MS,
+    CHALLENGE_RETRY_MS, CLOSE_EXCHANGE_MS, CLOSE_RETRY_MS, CONSUMER_STALL_MS,
+    HEARTBEAT_INTERVAL_MS, PEER_INACTIVITY_MS, WINDOW_BYTES, WINDOW_FRAMES,
 };
 
 use super::authority::{LiveAuthorityGuard, LiveAuthorityLost};
 use super::types::{
-    end_reason_for_code, feed_end_reason, CloseCleanupState, CloseRemoteState, LiveCancellation,
-    LiveCloseReceipt, LiveEnd, LiveStreamError,
+    end_reason_for_code, CloseCleanupState, CloseRemoteState, LiveCancellation, LiveCloseReceipt,
+    LiveEnd, LiveStreamError,
 };
 use crate::client::TrellisClientError;
 
@@ -27,6 +28,16 @@ use crate::client::TrellisClientError;
 pub(crate) struct AdmittedItem<T> {
     pub value: T,
     pub encoded_len: u64,
+}
+
+/// One ordered receive slot.
+///
+/// Received DATA occupies a slot in sequence order until it is handed to the
+/// application or deliberately filtered. A filtered slot behind an unread
+/// value cannot advance the consumed prefix past that value.
+pub(crate) enum Slot<T> {
+    Value(AdmittedItem<T>),
+    Filtered,
 }
 
 /// Consumer-visible session phase.
@@ -44,8 +55,8 @@ pub(crate) enum ConsumerPhase {
 pub(crate) struct ConsumerCore<T> {
     pub(crate) session_id: String,
     pub(crate) phase: Mutex<ConsumerPhase>,
-    /// Bounded application queue; count and encoded bytes stay within window.
-    pub(crate) queue: Mutex<VecDeque<AdmittedItem<T>>>,
+    /// Bounded ordered slot queue; count and encoded bytes stay within window.
+    pub(crate) queue: Mutex<VecDeque<Slot<T>>>,
     pub(crate) queued_bytes: AtomicU64,
     pub(crate) received_seq: AtomicU64,
     pub(crate) consumed_seq: AtomicU64,
@@ -63,12 +74,18 @@ pub(crate) struct ConsumerCore<T> {
     pub(crate) start: tokio::sync::Notify,
     /// Wakes the control pump when the application consumes an item.
     pub(crate) credit_notify: tokio::sync::Notify,
+    /// One telemetry owner for this endpoint's whole local lifetime.
+    pub(crate) telemetry: Mutex<super::telemetry::LiveTelemetryOwner>,
 }
 
 impl<T> ConsumerCore<T> {
-    pub(crate) fn new(session_id: String) -> Self {
+    pub(crate) fn new(session_id: String, kind: trellis_protocol::LiveSessionKind) -> Self {
         Self {
             session_id,
+            telemetry: Mutex::new(super::telemetry::LiveTelemetryOwner::new(
+                kind,
+                super::telemetry::LiveSide::Consumer,
+            )),
             phase: Mutex::new(ConsumerPhase::Prepared),
             queue: Mutex::new(VecDeque::new()),
             queued_bytes: AtomicU64::new(0),
@@ -129,9 +146,22 @@ impl<T> ConsumerCore<T> {
         self.received_seq.fetch_add(1, Ordering::AcqRel);
     }
 
-    /// Release credit for a verified frame that is not handed to the application.
-    pub(crate) fn release_filtered(&self) {
-        self.consumed_seq.fetch_add(1, Ordering::AcqRel);
+    /// Record credit for a verified frame that is deliberately filtered.
+    ///
+    /// The frame still occupies its ordered slot, so the consumed prefix cannot
+    /// advance past an earlier unread value. Returns `false` when the bounded
+    /// slot window cannot admit the marker.
+    pub(crate) fn release_filtered(&self) -> bool {
+        let Ok(mut queue) = self.queue.lock() else {
+            return false;
+        };
+        if queue.len() as u64 + 1 > WINDOW_FRAMES {
+            return false;
+        }
+        queue.push_back(Slot::Filtered);
+        drop(queue);
+        self.wake();
+        true
     }
 
     /// Return whether a committed failure was already yielded.
@@ -160,7 +190,21 @@ impl<T> ConsumerCore<T> {
 
     pub(crate) fn set_phase(&self, phase: ConsumerPhase) {
         if let Ok(mut current) = self.phase.lock() {
+            if *current == phase {
+                return;
+            }
             *current = phase;
+            drop(current);
+            if let Ok(mut telemetry) = self.telemetry.lock() {
+                match phase {
+                    ConsumerPhase::Prepared => telemetry.prepared(),
+                    ConsumerPhase::Activating => telemetry.activating(),
+                    ConsumerPhase::Active => telemetry.active(),
+                    ConsumerPhase::Draining => telemetry.draining(),
+                    ConsumerPhase::Closing => telemetry.closing(),
+                    ConsumerPhase::Closed => {}
+                }
+            }
         }
     }
 
@@ -170,9 +214,12 @@ impl<T> ConsumerCore<T> {
             return;
         };
         if slot.is_none() {
-            *slot = Some(end);
+            *slot = Some(end.clone());
             drop(slot);
             self.set_phase(ConsumerPhase::Closed);
+            if let Ok(mut telemetry) = self.telemetry.lock() {
+                telemetry.end(&end);
+            }
             self.end_notify.notify_waiters();
             self.wake();
         }
@@ -206,9 +253,12 @@ impl<T> ConsumerCore<T> {
         let Ok(mut queue) = self.queue.lock() else {
             return false;
         };
-        queue.push_back(item);
+        queue.push_back(Slot::Value(item));
         drop(queue);
         self.queued_bytes.fetch_add(encoded_len, Ordering::AcqRel);
+        if let Ok(telemetry) = self.telemetry.lock() {
+            telemetry.buffered(encoded_len as i64);
+        }
         self.wake();
         true
     }
@@ -217,21 +267,43 @@ impl<T> ConsumerCore<T> {
         self.queue.lock().is_ok_and(|queue| !queue.is_empty())
     }
 
-    /// Take one queued item and advance the consumed cursor.
+    /// Take the next application item, advancing the contiguous consumed
+    /// prefix across any filtered slots in front of it.
     pub(crate) fn consume(&self) -> Option<AdmittedItem<T>> {
-        let item = {
-            let Ok(mut queue) = self.queue.lock() else {
-                return None;
+        loop {
+            let slot = {
+                let Ok(mut queue) = self.queue.lock() else {
+                    return None;
+                };
+                queue.pop_front()
             };
-            queue.pop_front()
-        };
-        if let Some(item) = item.as_ref() {
-            self.queued_bytes
-                .fetch_sub(item.encoded_len, Ordering::AcqRel);
-            self.consumed_seq.fetch_add(1, Ordering::AcqRel);
-            self.credit_notify.notify_one();
+            match slot {
+                Some(Slot::Filtered) => {
+                    self.consumed_seq.fetch_add(1, Ordering::AcqRel);
+                    self.credit_notify.notify_one();
+                }
+                Some(Slot::Value(item)) => {
+                    self.queued_bytes
+                        .fetch_sub(item.encoded_len, Ordering::AcqRel);
+                    if let Ok(telemetry) = self.telemetry.lock() {
+                        telemetry.buffered(-(item.encoded_len as i64));
+                    }
+                    self.consumed_seq.fetch_add(1, Ordering::AcqRel);
+                    // Filtered markers behind this value need no application
+                    // handoff, so the contiguous consumed prefix may advance
+                    // across them immediately.
+                    if let Ok(mut queue) = self.queue.lock() {
+                        while matches!(queue.front(), Some(Slot::Filtered)) {
+                            queue.pop_front();
+                            self.consumed_seq.fetch_add(1, Ordering::AcqRel);
+                        }
+                    }
+                    self.credit_notify.notify_one();
+                    return Some(item);
+                }
+                None => return None,
+            }
         }
-        item
     }
 
     /// Discard every queued item without advancing the consumed cursor.
@@ -243,7 +315,27 @@ impl<T> ConsumerCore<T> {
             return;
         };
         queue.clear();
-        self.queued_bytes.store(0, Ordering::Release);
+        let released = self.queued_bytes.swap(0, Ordering::AcqRel);
+        drop(queue);
+        if released > 0 {
+            if let Ok(telemetry) = self.telemetry.lock() {
+                telemetry.buffered(-(released as i64));
+            }
+        }
+    }
+
+    /// Actual local cleanup completed; remove the session and release pending.
+    pub(crate) fn cleanup_finished(&self) {
+        if let Ok(mut telemetry) = self.telemetry.lock() {
+            telemetry.cleanup_finished();
+        }
+    }
+
+    /// Retained local cleanup exceeded the shared grace.
+    pub(crate) fn cleanup_exceeded_grace(&self) {
+        if let Ok(mut telemetry) = self.telemetry.lock() {
+            telemetry.cleanup_exceeded_grace();
+        }
     }
 }
 
@@ -253,12 +345,12 @@ pub struct LiveSubscription<T> {
     pub(crate) _drain: tokio::task::JoinHandle<()>,
     pub(crate) control: Arc<ConsumerControl>,
     pub(crate) cancellation: LiveCancellation,
-    pub(crate) closed_once: Arc<tokio::sync::Notify>,
     /// Set once the first poll installed the activation path.
     pub(crate) activated: bool,
-    pub(crate) _permit: super::manager::ConsumerPermit,
-    pub(crate) _provider_guard: super::authority::LiveAuthorityGuard,
-    _feed: crate::telemetry::lifecycle::FeedGuard,
+    /// Retained provider authority; a loss fences queued yields.
+    pub(crate) guard: Arc<super::authority::LiveAuthorityGuard>,
+    /// One shared close result for repeated close calls.
+    pub(crate) close_result: std::sync::Mutex<Option<LiveCloseReceipt>>,
 }
 
 impl<T> LiveSubscription<T> {
@@ -272,19 +364,16 @@ impl<T> LiveSubscription<T> {
         drain: tokio::task::JoinHandle<()>,
         control: Arc<ConsumerControl>,
         cancellation: LiveCancellation,
-        permit: super::manager::ConsumerPermit,
-        provider_guard: super::authority::LiveAuthorityGuard,
+        guard: Arc<super::authority::LiveAuthorityGuard>,
     ) -> Self {
         Self {
             core,
             _drain: drain,
             control,
             cancellation,
-            closed_once: Arc::new(tokio::sync::Notify::new()),
             activated: false,
-            _permit: permit,
-            _provider_guard: provider_guard,
-            _feed: crate::telemetry::lifecycle::FeedGuard::acquire("client"),
+            guard,
+            close_result: std::sync::Mutex::new(None),
         }
     }
 
@@ -312,9 +401,23 @@ impl<T> LiveSubscription<T> {
     }
 
     /// Explicitly close the observation and await the bounded close exchange.
+    ///
+    /// Repeated close calls share one exchange and receipt. The close keeps the
+    /// session's actual cursors, not hard-coded zeros.
     pub async fn close(&mut self) -> Result<LiveCloseReceipt, TrellisClientError> {
         self.cancellation.cancel();
-        let receipt = self.control.begin_close().await;
+        self.core.discard_queue();
+        self.core.wake();
+        if let Some(receipt) = self.close_result.lock().ok().and_then(|slot| slot.clone()) {
+            return Ok(receipt);
+        }
+        let receipt = self
+            .control
+            .begin_close(self.core.received_seq(), self.core.consumed_seq())
+            .await;
+        if let Ok(mut slot) = self.close_result.lock() {
+            *slot = Some(receipt.clone());
+        }
         Ok(receipt)
     }
 
@@ -333,16 +436,17 @@ impl<T> LiveSubscription<T> {
 
 impl<T> Drop for LiveSubscription<T> {
     fn drop(&mut self) {
-        self._feed.finish(match self.core.committed_end() {
-            Some(end) => feed_end_reason(end.reason()),
-            None => "cancelled",
-        });
-        // Synchronous local fence: no new yields, no new scheduling. Remote
-        // cleanup is best-effort through the control owner's runtime handle.
+        // Synchronous local fence: no new yields, no new scheduling, and every
+        // blocked waiter wakes before any asynchronous work is enqueued.
         self.core.cancelled.store(true, Ordering::Release);
         self.cancellation.cancel();
-        self.control.schedule_local_drop_cleanup();
         self.core.discard_queue();
+        self.core.wake();
+        // Remote cleanup is the ordinary signed bounded close exchange,
+        // enqueued only when a runtime is already available. Dropping the pump
+        // future immediately releases its admission and ingress.
+        self.control
+            .schedule_local_drop_cleanup(self.core.received_seq(), self.core.consumed_seq());
         self._drain.abort();
     }
 }
@@ -415,6 +519,13 @@ impl<T> Stream for LiveSubscription<T> {
             this.core.discard_queue();
             return Poll::Ready(None);
         }
+        if this.core.committed_end().is_none() && matches!(this.core.phase(), ConsumerPhase::Active)
+        {
+            if let Err(lost) = this.guard.check_now() {
+                this.core.discard_queue();
+                this.core.commit_end(authority_failure(&lost));
+            }
+        }
         if let Some(end) = this.core.committed_end() {
             if !end.is_complete() {
                 this.core.discard_queue();
@@ -435,6 +546,9 @@ impl<T> Stream for LiveSubscription<T> {
             ConsumerPhase::Active | ConsumerPhase::Draining
         ) {
             if let Some(item) = this.core.consume() {
+                // Handing out the last queued value commits a pending normal end
+                // immediately; the application need not poll once more.
+                let _ = this.core.drain_complete();
                 return Poll::Ready(Some(Ok(item.value)));
             }
         }
@@ -472,6 +586,9 @@ pub(crate) struct ConsumerControl {
     pub(crate) pinned_session_key: String,
     /// Provider identity tuple pinned at offer acceptance.
     pub(crate) pinned_identity: super::authority::PinnedPeerIdentity,
+    /// Retained provider authority for responses and identity-preserving
+    /// refresh replacement.
+    pub(crate) provider_guard: Arc<super::authority::LiveAuthorityGuard>,
     pub(crate) close_started: AtomicBool,
     pub(crate) last_control_seq: AtomicU64,
 }
@@ -488,7 +605,7 @@ impl ConsumerControl {
         &self,
         reply: &str,
         body: &[u8],
-    ) -> Result<async_nats::HeaderMap, TrellisClientError> {
+    ) -> Result<(async_nats::HeaderMap, String), TrellisClientError> {
         let context_digest = self
             .contexts
             .context_digest()
@@ -509,16 +626,38 @@ impl ConsumerControl {
         headers.insert("proof", proof.as_str());
         headers.insert("iat", iat.to_string().as_str());
         headers.insert("request-id", request_id.as_str());
-        Ok(headers)
+        Ok((headers, request_id))
     }
 }
 
 impl ConsumerControl {
-    pub(crate) fn schedule_local_drop_cleanup(&self) {
-        // Only schedule when a runtime is already available; Drop must never
-        // create one or block on async work.
-        let _ = tokio::runtime::Handle::try_current();
-        let _ = self.close_started.swap(true, Ordering::AcqRel);
+    /// Enqueue the ordinary signed bounded close exchange after a Drop fence.
+    ///
+    /// Drop never creates a runtime and never blocks. When a runtime is already
+    /// available the exact same signed close path used by `close()` runs on it.
+    pub(crate) fn schedule_local_drop_cleanup(&self, received: u64, consumed: u64) {
+        if self.close_started.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let control = ConsumerControl {
+            nats: self.nats.clone(),
+            auth: self.auth.clone(),
+            contexts: self.contexts.clone(),
+            inbox_prefix: self.inbox_prefix.clone(),
+            session_id: self.session_id.clone(),
+            control_subject: self.control_subject.clone(),
+            pinned_session_key: self.pinned_session_key.clone(),
+            pinned_identity: self.pinned_identity.clone(),
+            provider_guard: self.provider_guard.clone(),
+            close_started: AtomicBool::new(true),
+            last_control_seq: AtomicU64::new(self.last_control_seq.load(Ordering::Acquire)),
+        };
+        handle.spawn(async move {
+            let _ = control.begin_close(received, consumed).await;
+        });
     }
 
     /// Send one logical control and await its signed acknowledgement.
@@ -538,14 +677,19 @@ impl ConsumerControl {
             self.inbox_prefix,
             CONTROL_INBOX_COUNTER.fetch_add(1, Ordering::Relaxed)
         );
-        let headers = self.signed_headers(&reply, &body)?;
+        let (headers, request_id) = self.signed_headers(&reply, &body)?;
         let mut subscriber = self
             .nats
             .subscribe(reply.clone())
             .await
             .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
         self.nats
-            .publish_with_reply_and_headers(self.control_subject.clone(), reply, headers, body)
+            .publish_with_reply_and_headers(
+                self.control_subject.clone(),
+                reply.clone(),
+                headers,
+                body,
+            )
             .await
             .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
         let response = tokio::time::timeout(
@@ -555,15 +699,62 @@ impl ConsumerControl {
         .await
         .map_err(|_| TrellisClientError::Timeout)?
         .ok_or(TrellisClientError::Timeout)?;
-        parse_control_response(self, &response)
+        if response.subject.as_str() != reply {
+            return Err(TrellisClientError::FeedProtocol(
+                "control reply arrived on a foreign subject".into(),
+            ));
+        }
+        self.reconcile_provider_context(&response).await?;
+        parse_control_response(self, &response, &request_id, control_seq, control.action())
+    }
+
+    /// Accept an identity-preserving provider context from one signed reply.
+    ///
+    /// The response proof is already bound to this digest and the pinned key;
+    /// this step retains exact coverage before the response is trusted.
+    async fn reconcile_provider_context(
+        &self,
+        response: &async_nats::Message,
+    ) -> Result<(), TrellisClientError> {
+        let digest = response
+            .headers
+            .as_ref()
+            .and_then(|headers| headers.get("authorization-context"))
+            .map(ToString::to_string)
+            .ok_or_else(|| {
+                TrellisClientError::FeedProtocol("control reply omitted context".into())
+            })?;
+        if digest == self.provider_guard.context_digest() {
+            return Ok(());
+        }
+        let candidate = self
+            .provider_guard
+            .prepare_replacement(&digest)
+            .await
+            .map_err(|lost| {
+                TrellisClientError::AuthorizationUnavailable(format!(
+                    "control reply context: {lost:?}"
+                ))
+            })?;
+        self.provider_guard
+            .commit_replacement(candidate)
+            .map_err(|lost| {
+                TrellisClientError::AuthorizationUnavailable(format!(
+                    "control reply context: {lost:?}"
+                ))
+            })?;
+        Ok(())
     }
 
     /// Send a bounded close exchange and report remote confirmation.
-    pub(crate) async fn begin_close(&self) -> LiveCloseReceipt {
+    ///
+    /// The exchange keeps the session's actual cursors and shares one absolute
+    /// five-second budget across every attempt and retry.
+    pub(crate) async fn begin_close(&self, received: u64, consumed: u64) -> LiveCloseReceipt {
         let end = LiveEnd::new(LiveEndReason::Cancelled, None);
         let _ = self.close_started.swap(true, Ordering::AcqRel);
         let cleanup = self
-            .retry_until_confirmed()
+            .retry_until_confirmed(received, consumed)
             .await
             .unwrap_or(CloseCleanupState::Unknown);
         let remote = if cleanup == CloseCleanupState::Unknown {
@@ -575,14 +766,16 @@ impl ConsumerControl {
     }
 
     /// Retry the same logical close within one total exchange budget.
-    async fn retry_until_confirmed(&self) -> Option<CloseCleanupState> {
+    async fn retry_until_confirmed(
+        &self,
+        received: u64,
+        consumed: u64,
+    ) -> Option<CloseCleanupState> {
         let deadline = tokio::time::Instant::now() + close_exchange();
         let control_seq = self
             .last_control_seq
             .load(Ordering::Acquire)
             .saturating_add(1);
-        let received = 0;
-        let consumed = 0;
         let control = close_control(
             &self.session_id,
             control_seq,
@@ -844,6 +1037,9 @@ pub(crate) fn validate_frame_sequence(
 pub(crate) fn parse_control_response(
     control: &ConsumerControl,
     message: &async_nats::Message,
+    expected_request_id: &str,
+    expected_control_seq: u64,
+    expected_action: &str,
 ) -> Result<LiveControlAck, TrellisClientError> {
     let headers = message
         .headers
@@ -881,26 +1077,50 @@ pub(crate) fn parse_control_response(
         Some("control-ack") => {
             let ack: LiveControlAck = serde_json::from_value(value)
                 .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
-            if ack.session_id != control.session_id {
+            if ack.session_id != control.session_id
+                || ack.control_seq.get() != expected_control_seq
+                || ack.request_id != expected_request_id
+                || !ack_action_matches(ack.action, expected_action)
+            {
                 return Err(TrellisClientError::FeedProtocol(
-                    "control reply session does not match".into(),
+                    "control reply does not answer this attempt".into(),
                 ));
             }
             Ok(ack)
         }
         Some("control-error") => {
-            let code = value
-                .get("code")
-                .and_then(|code| code.as_str())
-                .unwrap_or("protocol_error");
+            let error: LiveControlError = serde_json::from_value(value)
+                .map_err(|parse| TrellisClientError::FeedProtocol(parse.to_string()))?;
+            if error.session_id != control.session_id
+                || error.control_seq.get() != expected_control_seq
+                || error.request_id != expected_request_id
+            {
+                return Err(TrellisClientError::FeedProtocol(
+                    "control error does not answer this attempt".into(),
+                ));
+            }
             Err(TrellisClientError::FeedProtocol(format!(
-                "live control rejected with '{code}'"
+                "live control rejected with '{:?}'",
+                error.code
             )))
         }
         _ => Err(TrellisClientError::FeedProtocol(
             "unexpected live control response".into(),
         )),
     }
+}
+
+/// Return whether one acknowledgement action answers the sent logical action.
+#[must_use]
+fn ack_action_matches(action: LiveControlAckAction, expected: &str) -> bool {
+    matches!(
+        (action, expected),
+        (LiveControlAckAction::Activate, "activate")
+            | (LiveControlAckAction::Pulse, "pulse")
+            | (LiveControlAckAction::Ack, "ack")
+            | (LiveControlAckAction::Close, "close")
+            | (LiveControlAckAction::EndAck, "end-ack")
+    )
 }
 
 static CONTROL_INBOX_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -917,7 +1137,7 @@ mod tests {
 
     #[test]
     fn waker_recheck_does_not_consume_credit() {
-        let core = ConsumerCore::new("session".into());
+        let core = ConsumerCore::new("session".into(), trellis_protocol::LiveSessionKind::Feed);
         assert!(!core.has_queued());
         assert_eq!(core.consumed_seq(), 0);
         assert!(core.admit(AdmittedItem {
@@ -933,8 +1153,65 @@ mod tests {
     }
 
     #[test]
+    fn filtered_slot_holds_the_consumed_prefix() {
+        // G09: a filtered frame behind an unread value cannot advance the
+        // consumed prefix past that value.
+        let core = ConsumerCore::new("session".into(), trellis_protocol::LiveSessionKind::Feed);
+        assert!(core.admit(AdmittedItem {
+            value: 1_u8,
+            encoded_len: 10,
+        }));
+        assert!(core.release_filtered());
+        assert_eq!(core.consumed_seq(), 0);
+        let item = core.consume().expect("first value");
+        assert_eq!(item.value, 1);
+        assert_eq!(core.consumed_seq(), 2);
+        assert!(core.consume().is_none());
+    }
+
+    #[test]
+    fn last_handoff_commits_a_pending_normal_end() {
+        // G10: handing out the final queued value commits `complete` without
+        // another `next()` call.
+        let core = ConsumerCore::new("session".into(), trellis_protocol::LiveSessionKind::Feed);
+        assert!(core.admit(AdmittedItem {
+            value: 9_u8,
+            encoded_len: 4,
+        }));
+        core.set_pending_end(LiveEnd::complete());
+        assert!(core.committed_end().is_none());
+        let item = core.consume().expect("final value");
+        assert_eq!(item.value, 9);
+        let committed = core.drain_complete().expect("drain commits the end");
+        assert!(committed.is_complete());
+        assert!(core.committed_end().is_some_and(|end| end.is_complete()));
+    }
+
+    #[test]
+    fn seventy_thousand_transitions_cross_the_old_count_boundary() {
+        // T01: actual production sequence/credit transitions cross 65,535
+        // without wrap or reuse. No broker/crypto/serialization overhead.
+        let core = ConsumerCore::new("session".into(), trellis_protocol::LiveSessionKind::Feed);
+        for index in 1..=70_001_u64 {
+            assert!(core.admit(AdmittedItem {
+                value: index,
+                encoded_len: 8,
+            }));
+            if index % 4 == 0 {
+                assert!(core.release_filtered());
+            }
+            let item = core.consume().expect("queued item");
+            assert_eq!(item.value, index);
+        }
+        let extra = core.consume();
+        assert!(extra.is_none());
+        // Every value plus every filtered marker is accounted exactly once.
+        assert_eq!(core.consumed_seq(), 70_001 + 17_500);
+    }
+
+    #[test]
     fn abnormal_end_discards_queued_items() {
-        let core = ConsumerCore::new("session".into());
+        let core = ConsumerCore::new("session".into(), trellis_protocol::LiveSessionKind::Feed);
         assert!(core.admit(AdmittedItem {
             value: 1_u8,
             encoded_len: 1,

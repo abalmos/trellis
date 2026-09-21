@@ -471,7 +471,7 @@ where
         manager: std::sync::Arc::downgrade(manager),
         permit: std::sync::Mutex::new(Some(permit)),
         own_guard,
-        caller_guard,
+        caller_guard: std::sync::Arc::new(caller_guard),
         source_factory: std::sync::Mutex::new(Some(Box::new(source_factory))),
         cleanup: std::sync::Mutex::new(Vec::new()),
         terminal: std::sync::Mutex::new(None),
@@ -481,7 +481,17 @@ where
         deadlines: std::sync::Mutex::new(LiveDeadlines::reserved(tokio::time::Instant::now())),
         deadline_notify: tokio::sync::Notify::new(),
         finished: std::sync::atomic::AtomicBool::new(false),
-        feed: std::sync::Mutex::new(None),
+        telemetry: std::sync::Mutex::new(crate::live::telemetry::LiveTelemetryOwner::new_prepared(
+            session.kind,
+            crate::live::telemetry::LiveSide::Provider,
+        )),
+        output_lane: tokio::sync::Mutex::new(()),
+        source_task: std::sync::Mutex::new(None),
+        cleanup_driver_started: std::sync::atomic::AtomicBool::new(false),
+        cleanup_result: std::sync::Mutex::new(None),
+        control_receipt: std::sync::Mutex::new(None),
+        pending_close_ack: std::sync::Mutex::new(None),
+        end_sent: std::sync::atomic::AtomicBool::new(false),
     });
     manager.insert_provider_session(session.session_id.clone(), std::sync::Arc::clone(&record));
     let offer = record
@@ -645,7 +655,7 @@ where
         manager: std::sync::Arc::downgrade(manager),
         permit: std::sync::Mutex::new(Some(permit)),
         own_guard,
-        caller_guard,
+        caller_guard: std::sync::Arc::new(caller_guard),
         source_factory: std::sync::Mutex::new(Some(Box::new(source_factory))),
         cleanup: std::sync::Mutex::new(Vec::new()),
         terminal: std::sync::Mutex::new(None),
@@ -655,7 +665,17 @@ where
         deadlines: std::sync::Mutex::new(LiveDeadlines::reserved(tokio::time::Instant::now())),
         deadline_notify: tokio::sync::Notify::new(),
         finished: std::sync::atomic::AtomicBool::new(false),
-        feed: std::sync::Mutex::new(None),
+        telemetry: std::sync::Mutex::new(crate::live::telemetry::LiveTelemetryOwner::new_prepared(
+            session.kind,
+            crate::live::telemetry::LiveSide::Provider,
+        )),
+        output_lane: tokio::sync::Mutex::new(()),
+        source_task: std::sync::Mutex::new(None),
+        cleanup_driver_started: std::sync::atomic::AtomicBool::new(false),
+        cleanup_result: std::sync::Mutex::new(None),
+        control_receipt: std::sync::Mutex::new(None),
+        pending_close_ack: std::sync::Mutex::new(None),
+        end_sent: std::sync::atomic::AtomicBool::new(false),
     });
     manager.insert_provider_session(session.session_id.clone(), std::sync::Arc::clone(&record));
     let offer = record
@@ -706,8 +726,10 @@ pub(crate) async fn spawn_session_drivers(
         .await
         .map_err(|_| LiveErrorCode::Disconnected)?;
     tokio::spawn(async move {
+        let mut own_changes = record.own_guard.subscribe_changes();
+        let mut caller_changes = record.caller_guard.subscribe_changes();
         loop {
-            let next = record.next_deadline();
+            let next = earliest_deadline(record.next_deadline(), record.guard_deadline());
             tokio::select! {
                 () = async {
                     match next {
@@ -717,6 +739,16 @@ pub(crate) async fn spawn_session_drivers(
                 } => {}
                 () = record.deadline_notify.notified() => continue,
                 () = record.cancellation.cancelled() => return,
+                // Quiet sessions fence on revocation/coverage/epoch changes and
+                // on guard expiry without waiting for the next frame.
+                _ = own_changes.recv() => {}
+                _ = caller_changes.recv() => {}
+            }
+            if let Some(lost) = record.authority_lost() {
+                record.commit_end(crate::live::manager::authority_end(&lost));
+                record.begin_close(tokio::time::Instant::now());
+                record.spawn_close_driver(nats.clone());
+                return;
             }
             if record.evaluate_deadlines(&nats).await {
                 return;
@@ -724,6 +756,18 @@ pub(crate) async fn spawn_session_drivers(
         }
     });
     Ok(())
+}
+
+/// Return the earlier of two optional monotonic deadlines.
+fn earliest_deadline(
+    first: Option<tokio::time::Instant>,
+    second: Option<tokio::time::Instant>,
+) -> Option<tokio::time::Instant> {
+    match (first, second) {
+        (Some(first), Some(second)) => Some(first.min(second)),
+        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+        (None, None) => None,
+    }
 }
 
 /// Sign one provider-origin message with the provider's live proof.
@@ -779,7 +823,6 @@ pub(crate) fn data_subject(
 
 /// Return whether one parsed opening body is a live open envelope.
 #[must_use]
-#[expect(dead_code, reason = "opening discriminator for live route diagnostics")]
 pub(crate) fn is_live_open_body(payload: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|value| {
         value.get("format").and_then(|format| format.as_str())

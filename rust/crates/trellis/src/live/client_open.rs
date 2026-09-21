@@ -9,7 +9,7 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use trellis_protocol::{
     derive_live_data_subject, LiveErrorCode, LiveFrame, LiveOffer, LiveOfferKind, LiveSessionKind,
-    OPEN_RESERVATION_MS,
+    PermissionAtom, OPEN_RESERVATION_MS,
 };
 
 use crate::client::{AuthorizationProviderCache, TrellisClientError};
@@ -17,8 +17,8 @@ use crate::client::{AuthorizationProviderCache, TrellisClientError};
 use super::authority::{LiveAuthorityGuard, LiveGuardRequirement, PinnedPeerIdentity};
 use super::deadlines::{DeadlineAction, LiveDeadlines};
 use super::subscription::{
-    activate_control, consumer_failure, credit_control, end_ack_control, pulse_control,
-    ConsumerControl, ConsumerCore, ConsumerPhase,
+    activate_control, authority_failure, consumer_failure, credit_control, end_ack_control,
+    pulse_control, ConsumerControl, ConsumerCore, ConsumerPhase,
 };
 use super::types::{LiveCancellation, LiveEnd, LiveEndReason};
 
@@ -36,6 +36,9 @@ pub(crate) struct ClientOpen<'a> {
     pub body: Bytes,
     pub open_id: String,
     pub receive_max_payload_bytes: u64,
+    /// Exact descriptor-derived Subscribe or Observe permission the remote
+    /// provider's installed participant must hold for this route.
+    pub permission: PermissionAtom,
 }
 
 /// One verified prepared observation, before its first iteration.
@@ -44,6 +47,11 @@ pub(crate) struct PreparedClientSession {
     pub peer: PinnedPeerIdentity,
     pub max_data_body_bytes: u64,
     pub context_digest: String,
+    /// Absolute local opening/reservation deadline started before the opening
+    /// exchange. It does not restart when the first poll runs.
+    pub deadline: tokio::time::Instant,
+    /// Retained peer-provider authority established during verification.
+    pub provider_guard: LiveAuthorityGuard,
 }
 
 /// Outcome of one complete client open.
@@ -63,6 +71,16 @@ pub(crate) async fn open_client_session(
     provider: &AuthorizationProviderCache,
     open: ClientOpen<'_>,
 ) -> Result<PreparedClientSession, TrellisClientError> {
+    // The local reservation budget starts before the opening exchange and is
+    // never restarted by activation. The provider keeps its own independent
+    // allocation-relative deadline; no clock synchronization is assumed.
+    let deadline = tokio::time::Instant::now() + reservation_budget();
+    let step_timeout = || {
+        deadline
+            .min(tokio::time::Instant::now() + Duration::from_millis(client.timeout_ms().max(1)))
+    };
+    let consumer = client.own_pinned_identity()?;
+    let consumer_digest = client.authorization_context_digest()?;
     let subject = open.publish_subject.to_owned();
     let reply = format!(
         "{}.{}",
@@ -74,15 +92,13 @@ pub(crate) async fn open_client_session(
         .get("request-id")
         .map(ToString::to_string)
         .unwrap_or_default();
-    let mut subscriber = tokio::time::timeout(
-        Duration::from_millis(client.timeout_ms()),
-        client.nats().subscribe(reply.clone()),
-    )
-    .await
-    .map_err(|_| TrellisClientError::Timeout)?
-    .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
-    tokio::time::timeout(
-        Duration::from_millis(client.timeout_ms()),
+    let mut subscriber =
+        tokio::time::timeout_at(step_timeout(), client.nats().subscribe(reply.clone()))
+            .await
+            .map_err(|_| TrellisClientError::Timeout)?
+            .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
+    tokio::time::timeout_at(
+        step_timeout(),
         client
             .nats()
             .publish_with_reply_and_headers(subject, reply, headers, open.body.clone()),
@@ -91,23 +107,34 @@ pub(crate) async fn open_client_session(
     .map_err(|_| TrellisClientError::Timeout)?
     .map_err(|error| TrellisClientError::NatsRequest(error.to_string()))?;
 
-    let response = tokio::time::timeout(
-        Duration::from_millis(client.timeout_ms()),
-        subscriber.next(),
+    let response = tokio::time::timeout_at(step_timeout(), subscriber.next())
+        .await
+        .map_err(|_| TrellisClientError::Timeout)?
+        .ok_or(TrellisClientError::Timeout)?;
+
+    verify_offer(
+        client,
+        provider,
+        &open,
+        &request_id,
+        &response,
+        deadline,
+        &consumer,
+        &consumer_digest,
     )
     .await
-    .map_err(|_| TrellisClientError::Timeout)?
-    .ok_or(TrellisClientError::Timeout)?;
-
-    verify_offer(client, provider, &open, &request_id, &response).await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn verify_offer(
     client: &crate::client::TrellisClient,
     provider: &AuthorizationProviderCache,
     open: &ClientOpen<'_>,
     request_id: &str,
     response: &async_nats::Message,
+    deadline: tokio::time::Instant,
+    consumer: &PinnedPeerIdentity,
+    consumer_digest: &str,
 ) -> Result<PreparedClientSession, TrellisClientError> {
     trellis_protocol::validate_control_body(&response.payload)
         .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
@@ -115,8 +142,8 @@ async fn verify_offer(
         .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
     let kind = value.get("type").and_then(|kind| kind.as_str());
     if kind != Some("offer") {
-        // A signed open-error or a legacy finite envelope is surfaced as a
-        // setup failure; it is never interpreted as a session offer.
+        // A signed open-error or any non-offer body is a setup failure; it is
+        // never interpreted as a session offer.
         let code = value
             .get("code")
             .and_then(|code| code.as_str())
@@ -225,6 +252,37 @@ async fn verify_offer(
             "offer provider is not the selected deployment for this API".into(),
         ));
     }
+    // The independently selected binding is the evidence that this
+    // deployment's participant implements the API: bootstrap binds each API to
+    // a provider deployment that implements it. Deployment/provider contexts
+    // carry authority through admission-time materialization rather than
+    // context grants, so their atom list is not the right signal here. The
+    // locally retained consumer authority still requires the exact atom.
+    // Every advertised provider field must match the verified signed context;
+    // a valid signature does not authorize silently changing them later.
+    if peer.connection_id != offer.provider.connection_id
+        || peer.principal_id != offer.provider.principal_id
+        || peer.participant_id != offer.provider.participant_id
+        || peer.deployment_id.as_deref().unwrap_or("") != offer.provider.deployment_id
+        || peer.instance_id.as_deref().unwrap_or("") != offer.provider.instance_id
+    {
+        return Err(TrellisClientError::FeedProtocol(
+            "offer provider tuple does not match its verified context".into(),
+        ));
+    }
+    // The offered consumer tuple must be this opener's actual current local
+    // identity, resolved before the offer was accepted.
+    if consumer_digest.is_empty()
+        || consumer.connection_id != offer.consumer.connection_id
+        || consumer.principal_id != offer.consumer.principal_id
+        || consumer.participant_id != offer.consumer.participant_id
+        || trellis_protocol::encode_subject_token(&consumer.session_key)
+            != offer.consumer.session_key
+    {
+        return Err(TrellisClientError::FeedProtocol(
+            "offer consumer does not match the opening caller".into(),
+        ));
+    }
     let negotiated = trellis_protocol::negotiate_max_data_body_bytes(
         open.receive_max_payload_bytes,
         client.nats().max_payload() as u64,
@@ -240,12 +298,26 @@ async fn verify_offer(
             "unsupported live offer kind".into(),
         ));
     }
-    let _ = client;
+    // Retain the remote observer/provider evidence for the whole session, not
+    // just for the opening exchange. Every later frame must still satisfy it.
+    let provider_guard = LiveAuthorityGuard::retain(
+        provider,
+        &context_digest,
+        LiveGuardRequirement::PeerProvider {
+            expected: peer.clone(),
+        },
+    )
+    .await
+    .map_err(|lost| {
+        TrellisClientError::AuthorizationUnavailable(format!("provider guard: {lost:?}"))
+    })?;
     Ok(PreparedClientSession {
         max_data_body_bytes: offer.limits.max_data_body_bytes,
         offer,
         peer,
         context_digest,
+        deadline,
+        provider_guard,
     })
 }
 
@@ -304,6 +376,9 @@ where
     T: Send + 'static,
     F: Fn(serde_json::Value) -> Result<Option<T>, TrellisClientError> + Send + 'static,
 {
+    if tokio::time::Instant::now() >= prepared.deadline {
+        return Err(TrellisClientError::Timeout);
+    }
     let manager = client.live_manager().ok_or_else(|| {
         TrellisClientError::Bootstrap("live manager is unavailable for this connection".into())
     })?;
@@ -315,8 +390,12 @@ where
     let permit = manager.clone().admit_consumer().map_err(|code| {
         TrellisClientError::FeedProtocol(format!("admission rejected: {code:?}"))
     })?;
-    let core = Arc::new(ConsumerCore::new(prepared.offer.session_id.clone()));
+    let core = Arc::new(ConsumerCore::new(
+        prepared.offer.session_id.clone(),
+        prepared.offer.session_kind,
+    ));
     core.set_phase(ConsumerPhase::Prepared);
+    let provider_guard = std::sync::Arc::new(prepared.provider_guard);
     let control = Arc::new(ConsumerControl {
         nats: client.nats(),
         auth: client.auth_handle(),
@@ -326,26 +405,19 @@ where
         control_subject: prepared.offer.control_subject.clone(),
         pinned_session_key: prepared.peer.session_key.clone(),
         pinned_identity: prepared.peer.clone(),
+        provider_guard: provider_guard.clone(),
         close_started: std::sync::atomic::AtomicBool::new(false),
         last_control_seq: std::sync::atomic::AtomicU64::new(0),
     });
-    let provider_guard = LiveAuthorityGuard::retain(
-        client.authorization_provider(),
-        &prepared.context_digest,
-        LiveGuardRequirement::PeerProvider {
-            expected: prepared.peer.clone(),
-        },
-    )
-    .await
-    .map_err(|lost| {
-        TrellisClientError::AuthorizationUnavailable(format!("provider guard: {lost:?}"))
-    })?;
     let cancellation = LiveCancellation::new();
     let pump = ConsumerPump::new(
         core.clone(),
         control.clone(),
         cancellation.clone(),
         prepared.max_data_body_bytes,
+        prepared.deadline,
+        provider_guard.clone(),
+        permit,
     );
     let drain = pump.spawn(client.nats(), prepared.offer.data_subject.clone(), decode);
     Ok(crate::live::subscription::LiveSubscription::new(
@@ -353,7 +425,6 @@ where
         drain,
         control,
         cancellation,
-        permit,
         provider_guard,
     ))
 }
@@ -400,12 +471,50 @@ async fn wait_until(deadline: Option<tokio::time::Instant>) {
     }
 }
 
+/// Return the earlier of two optional monotonic deadlines.
+fn earliest_deadline(
+    first: Option<tokio::time::Instant>,
+    second: Option<tokio::time::Instant>,
+) -> Option<tokio::time::Instant> {
+    match (first, second) {
+        (Some(first), Some(second)) => Some(first.min(second)),
+        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+        (None, None) => None,
+    }
+}
+
+/// Convert a retained guard's wall-clock expiry into a monotonic wake.
+///
+/// Signed authorization validity uses the existing wall-clock policy; only the
+/// local wake is monotonic.
+fn guard_deadline(guard: &LiveAuthorityGuard) -> Option<tokio::time::Instant> {
+    let expires_at = guard.expires_at_seconds();
+    let now = crate::client::now_iat_seconds() as i64;
+    let remaining = expires_at.saturating_sub(now).max(0) as u64;
+    Some(tokio::time::Instant::now() + Duration::from_secs(remaining))
+}
+
+/// Releases the consumer session when the pump task actually exits.
+struct PumpCleanup<T>(Arc<ConsumerCore<T>>);
+
+impl<T> Drop for PumpCleanup<T> {
+    fn drop(&mut self) {
+        self.0.cleanup_finished();
+    }
+}
+
 /// One live data pump over a verified prepared session.
 pub(crate) struct ConsumerPump<T> {
     core: Arc<ConsumerCore<T>>,
     control: Arc<ConsumerControl>,
     cancellation: LiveCancellation,
     max_data_body_bytes: u64,
+    /// Absolute opening/reservation deadline; activation must beat it.
+    deadline: tokio::time::Instant,
+    /// Retained provider authority, checked on admission and on change events.
+    guard: Arc<LiveAuthorityGuard>,
+    /// Consumer admission retained until this pump settles.
+    permit: Option<super::manager::ConsumerPermit>,
 }
 
 impl<T> ConsumerPump<T> {
@@ -416,12 +525,18 @@ impl<T> ConsumerPump<T> {
         control: Arc<ConsumerControl>,
         cancellation: LiveCancellation,
         max_data_body_bytes: u64,
+        deadline: tokio::time::Instant,
+        guard: Arc<LiveAuthorityGuard>,
+        permit: super::manager::ConsumerPermit,
     ) -> Self {
         Self {
             core,
             control,
             cancellation,
             max_data_body_bytes,
+            deadline,
+            guard,
+            permit: Some(permit),
         }
     }
 
@@ -446,12 +561,27 @@ impl<T> ConsumerPump<T> {
         F: Fn(serde_json::Value) -> Result<Option<T>, TrellisClientError> + Send + 'static,
     {
         tokio::spawn(async move {
+            // Actual local cleanup completion is this task's exit, including
+            // every early return and the aborted-by-Drop path.
+            let _cleanup = PumpCleanup(Arc::clone(&self.core));
+            let mut guard_changes = self.guard.subscribe_changes();
+            // A prepared handle keeps an active deadline and admission even
+            // when the application never iterates it: the reservation starts
+            // before the opening exchange and does not restart here.
             tokio::select! {
                 _ = self.core.start.notified() => {}
                 _ = self.cancellation.cancelled() => return,
+                _ = tokio::time::sleep_until(self.deadline) => {
+                    self.core.commit_end(consumer_failure(
+                        LiveErrorCode::SetupTimeout,
+                        "live prepared session expired before activation",
+                    ));
+                    self.core.wake();
+                    return;
+                }
             }
             let session_id = self.core.session_id.clone();
-            let mut deadlines = LiveDeadlines::prepared(tokio::time::Instant::now());
+            let mut deadlines = LiveDeadlines::prepared_until(self.deadline);
             let mut subscription = match nats.subscribe(data_subject).await {
                 Ok(subscription) => subscription,
                 Err(_) => {
@@ -470,9 +600,13 @@ impl<T> ConsumerPump<T> {
                 return;
             }
             self.core.set_phase(ConsumerPhase::Activating);
+            if let Err(lost) = self.guard.check_now() {
+                self.core.commit_end(authority_failure(&lost));
+                return;
+            }
 
             // Activation: bounded fresh-proof retries within the reservation.
-            let reservation_deadline = tokio::time::Instant::now() + reservation_budget();
+            let reservation_deadline = self.deadline;
             let activate = activate_control(&session_id);
             let activate_seq = self.control.next_control_seq();
             loop {
@@ -506,13 +640,21 @@ impl<T> ConsumerPump<T> {
 
             let mut next_expected: u64 = 1;
             let mut last_credit_sent: u64 = 0;
+            // One logical credit control is outstanding at a time; retries
+            // reuse its identical body and sequence, and newer consumption is
+            // coalesced into the next logical control.
+            let mut pending_credit: Option<(u64, u64, u64)> = None;
             loop {
                 if self.core.committed_end().is_some() {
                     return;
                 }
                 if matches!(self.core.phase(), ConsumerPhase::Draining) {
                     // The data subscription and peer pulse work are stopped;
-                    // only the bounded local drain and its stall deadline remain.
+                    // only the bounded local drain and its stall deadline
+                    // remain. Local handoff progress re-arms that clock.
+                    if self.core.drain_complete().is_some() {
+                        return;
+                    }
                     let next = deadlines.next_due();
                     tokio::select! {
                         _ = self.cancellation.cancelled() => {
@@ -521,21 +663,33 @@ impl<T> ConsumerPump<T> {
                             return;
                         }
                         _ = wait_until(next) => {
-                            if deadlines.evaluate(tokio::time::Instant::now())
-                                == Some(DeadlineAction::ConsumerStalled)
-                            {
+                            let now = tokio::time::Instant::now();
+                            if deadlines.evaluate(now) == Some(DeadlineAction::ConsumerStalled) {
                                 self.core.discard_queue();
                                 self.core.commit_end(consumer_failure(
                                     LiveErrorCode::ConsumerSlow,
                                     "live draining queue was not consumed",
                                 ));
+                                return;
                             }
                         }
-                        _ = self.core.end_notify.notified() => {}
+                        _ = self.core.end_notify.notified() => {
+                            let consumed = self.core.consumed_seq();
+                            if consumed > last_credit_sent {
+                                deadlines.note_consumption(
+                                    tokio::time::Instant::now(),
+                                    consumed - last_credit_sent,
+                                );
+                                last_credit_sent = consumed;
+                            }
+                            if self.core.drain_complete().is_some() {
+                                return;
+                            }
+                        }
                     }
-                    return;
+                    continue;
                 }
-                let next = deadlines.next_due();
+                let next = earliest_deadline(deadlines.next_due(), guard_deadline(&self.guard));
                 tokio::select! {
                     _ = self.cancellation.cancelled() => {
                         self.core.discard_queue();
@@ -551,8 +705,20 @@ impl<T> ConsumerPump<T> {
                             );
                         }
                     }
+                    _ = guard_changes.recv() => {
+                        if let Err(lost) = self.guard.check_now() {
+                            self.core.discard_queue();
+                            self.core.commit_end(authority_failure(&lost));
+                            return;
+                        }
+                    }
                     _ = wait_until(next) => {
                         let now = tokio::time::Instant::now();
+                        if let Err(lost) = self.guard.check_now() {
+                            self.core.discard_queue();
+                            self.core.commit_end(authority_failure(&lost));
+                            return;
+                        }
                         match deadlines.evaluate(now) {
                             Some(DeadlineAction::ReservationExpired) => {
                                 self.core.commit_end(consumer_failure(
@@ -569,13 +735,19 @@ impl<T> ConsumerPump<T> {
                                 return;
                             }
                             Some(DeadlineAction::CreditDue) => {
-                                let received = self.core.received_seq();
-                                let consumed = self.core.consumed_seq();
                                 deadlines.credit_sent();
-                                if consumed > last_credit_sent {
-                                    last_credit_sent = consumed;
-                                    let control_seq = self.control.next_control_seq();
-                                    let _ = self
+                                if pending_credit.is_none() {
+                                    let consumed = self.core.consumed_seq();
+                                    if consumed > last_credit_sent {
+                                        pending_credit = Some((
+                                            self.control.next_control_seq(),
+                                            self.core.received_seq(),
+                                            consumed,
+                                        ));
+                                    }
+                                }
+                                if let Some((control_seq, received, consumed)) = pending_credit {
+                                    let acked = self
                                         .control
                                         .send_control(
                                             &credit_control(
@@ -586,7 +758,16 @@ impl<T> ConsumerPump<T> {
                                             ),
                                             control_seq,
                                         )
-                                        .await;
+                                        .await
+                                        .is_ok();
+                                    if acked {
+                                        last_credit_sent = last_credit_sent.max(consumed);
+                                        pending_credit = None;
+                                    } else {
+                                        // Retain the logical control and re-arm one
+                                        // bounded retry with the identical body.
+                                        deadlines.note_consumption(now, 0);
+                                    }
                                 }
                             }
                             _ => {}
@@ -600,16 +781,45 @@ impl<T> ConsumerPump<T> {
                             ));
                             return;
                         };
+                        // Incoming-frame admission performs a local current-state
+                        // check before any frame influences state.
+                        if let Err(lost) = self.guard.check_now() {
+                            self.core.discard_queue();
+                            self.core.commit_end(authority_failure(&lost));
+                            return;
+                        }
                         // Frames must authenticate against the pinned provider
                         // before they influence state; garbage is discarded.
                         let Ok(frame) = trellis_protocol::parse_live_frame(
                             &message.payload,
                             self.max_data_body_bytes,
                         ) else {
+                            if let Ok(telemetry) = self.core.telemetry.lock() {
+                                telemetry.rejection(
+                                    super::telemetry::LiveRejection::InvalidProtocol,
+                                );
+                            }
                             continue;
                         };
                         if !verify_provider_frame(&self.control, &message, &frame) {
+                            if let Ok(telemetry) = self.core.telemetry.lock() {
+                                telemetry.rejection(
+                                    super::telemetry::LiveRejection::InvalidSignature,
+                                );
+                            }
                             continue;
+                        }
+                        if let Ok(telemetry) = self.core.telemetry.lock() {
+                            telemetry.frame(
+                                super::telemetry::LiveFrameClass::Control,
+                                super::telemetry::LiveDirection::Receive,
+                            );
+                            if matches!(frame, LiveFrame::Data(_)) {
+                                telemetry.frame(
+                                    super::telemetry::LiveFrameClass::Data,
+                                    super::telemetry::LiveDirection::Receive,
+                                );
+                            }
                         }
                         match &frame {
                             LiveFrame::Data(data) => {
@@ -628,10 +838,9 @@ impl<T> ConsumerPump<T> {
                                 next_expected = seq + 1;
                                 match decode(data.value.clone()) {
                                     Ok(Some(value)) => {
-                                        let encoded_len =
-                                            serde_json::to_vec(&data.value).map_or(0, |bytes| {
-                                                bytes.len() as u64
-                                            });
+                                        // Charge the complete received DATA body,
+                                        // not a re-serialized value projection.
+                                        let encoded_len = message.payload.len() as u64;
                                         if !self.core.admit(super::subscription::AdmittedItem {
                                             value,
                                             encoded_len,
@@ -646,9 +855,16 @@ impl<T> ConsumerPump<T> {
                                     }
                                     Ok(None) => {
                                         // Keepalive and other filtered frames still
-                                        // occupy sequence space and release credit.
+                                        // occupy their ordered sequence slot and
+                                        // release credit once the prefix is clear.
                                         self.core.record_received();
-                                        self.core.release_filtered();
+                                        if !self.core.release_filtered() {
+                                            self.core.commit_end(consumer_failure(
+                                                LiveErrorCode::ConsumerSlow,
+                                                "bounded live ingress exceeded",
+                                            ));
+                                            return;
+                                        }
                                     }
                                     Err(error) => {
                                         self.core.commit_end(consumer_failure(
@@ -861,6 +1077,16 @@ mod tests {
             body: Bytes::new(),
             open_id: "open".into(),
             receive_max_payload_bytes: 1024,
+            permission: trellis_protocol::PermissionAtom::new(
+                trellis_protocol::PermissionTarget::api_surface(
+                    "api@v1",
+                    trellis_protocol::ApiSurfaceKind::Feed,
+                    "Watch".to_owned(),
+                )
+                .expect("api surface"),
+                trellis_protocol::PermissionAction::Subscribe,
+            )
+            .expect("permission"),
         }
     }
 

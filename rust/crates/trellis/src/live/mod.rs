@@ -19,6 +19,7 @@ pub use manager::LiveSessionManager;
 pub(crate) mod provider;
 pub(crate) mod provider_engine;
 pub(crate) mod subscription;
+pub(crate) mod telemetry;
 pub(crate) mod types;
 
 pub use types::{

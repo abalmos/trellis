@@ -156,17 +156,29 @@ impl ProviderSession {
         self.credit.notify_waiters();
     }
 
-    /// Admit one application frame against the exact credit window.
+    /// Return the next uncommitted DATA sequence.
+    ///
+    /// The caller holds the session output lane across frame construction and
+    /// handoff, so the returned sequence cannot race another publication. The
+    /// watermark only advances in [`Self::commit_frame`] after a successful
+    /// handoff, so a challenge cannot advertise an unsent frame.
+    #[must_use]
+    pub(crate) fn next_frame_seq(&self) -> u64 {
+        self.highest_sent.load(Ordering::Acquire) + 1
+    }
+
+    /// Validate one application frame against the exact credit window without
+    /// consuming a sequence or publishing anything.
     ///
     /// # Errors
     ///
     /// Returns [`LiveErrorCode::PayloadTooLarge`] for an oversize frame and
     /// [`LiveErrorCode::ResourceExhausted`] when the window is full.
-    pub(crate) fn admit_frame(
+    pub(crate) fn validate_frame_slot(
         &self,
         len: u64,
         max_data_body_bytes: u64,
-    ) -> Result<u64, LiveErrorCode> {
+    ) -> Result<(), LiveErrorCode> {
         if len > max_data_body_bytes {
             return Err(LiveErrorCode::PayloadTooLarge);
         }
@@ -181,22 +193,41 @@ impl ProviderSession {
         if self.outstanding_bytes.load(Ordering::Acquire) + len > WINDOW_BYTES {
             return Err(LiveErrorCode::ResourceExhausted);
         }
-        let seq = self.highest_sent.fetch_add(1, Ordering::AcqRel) + 1;
-        self.outstanding
-            .lock()
-            .map_err(|_| LiveErrorCode::ResourceExhausted)?
-            .push_back(OutstandingFrame { seq, len });
-        self.outstanding_bytes.fetch_add(len, Ordering::AcqRel);
-        Ok(seq)
+        Ok(())
     }
 
-    /// Apply one accepted credit cursor from the authenticated owner.
+    /// Commit one successfully handed-off application frame.
+    ///
+    /// The watermark advances only here, after the handoff succeeded; a
+    /// challenge or END can therefore never advertise an unsent frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LiveErrorCode::ResourceExhausted`] when the ledger is
+    /// unavailable. Bounds were validated by [`Self::validate_frame_slot`].
+    pub(crate) fn commit_frame(&self, seq: u64, len: u64) -> Result<(), LiveErrorCode> {
+        let mut outstanding = self
+            .outstanding
+            .lock()
+            .map_err(|_| LiveErrorCode::ResourceExhausted)?;
+        outstanding.push_back(OutstandingFrame { seq, len });
+        drop(outstanding);
+        self.outstanding_bytes.fetch_add(len, Ordering::AcqRel);
+        self.highest_sent.store(seq, Ordering::Release);
+        Ok(())
+    }
+
+    /// Validate one reported cursor pair before any state mutation.
     ///
     /// # Errors
     ///
     /// Returns [`LiveErrorCode::InvalidCursor`] for impossible or regressing
     /// cursors reported by the authenticated owner.
-    pub(crate) fn apply_credit(&self, received: u64, consumed: u64) -> Result<(), LiveErrorCode> {
+    pub(crate) fn validate_credit(
+        &self,
+        received: u64,
+        consumed: u64,
+    ) -> Result<(), LiveErrorCode> {
         let highest_sent = self.highest_sent.load(Ordering::Acquire);
         let current_received = self.highest_received.load(Ordering::Acquire);
         let current_consumed = self.highest_consumed.load(Ordering::Acquire);
@@ -206,6 +237,17 @@ impl ProviderSession {
         if received < current_received || consumed < current_consumed {
             return Err(LiveErrorCode::InvalidCursor);
         }
+        Ok(())
+    }
+
+    /// Apply one accepted credit cursor from the authenticated owner.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LiveErrorCode::InvalidCursor`] for impossible or regressing
+    /// cursors reported by the authenticated owner.
+    pub(crate) fn apply_credit(&self, received: u64, consumed: u64) -> Result<(), LiveErrorCode> {
+        self.validate_credit(received, consumed)?;
         self.highest_received.store(received, Ordering::Release);
         self.highest_consumed.store(consumed, Ordering::Release);
         let mut outstanding = self
@@ -230,7 +272,7 @@ impl ProviderSession {
 #[must_use]
 pub(crate) fn receipt_for(
     session: &ProviderSession,
-    reason: LiveEndReason,
+    end: &LiveEnd,
     cleanup: CloseCleanupState,
     now_ms: u64,
 ) -> ClosedReceipt {
@@ -238,7 +280,8 @@ pub(crate) fn receipt_for(
         session_id: session.session_id.clone(),
         owner_token: session.consumer.connection_id.clone(),
         base_subject: session.base_subject.clone(),
-        reason,
+        reason: end.reason(),
+        error_code: end.error().map(|error| error.code()),
         cleanup,
         final_seq: session.highest_sent.load(Ordering::Acquire),
         expires_at_ms: super::manager::receipt_expiry(now_ms),

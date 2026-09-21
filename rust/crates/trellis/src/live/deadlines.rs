@@ -95,6 +95,17 @@ impl LiveDeadlines {
         Self::with_phase(now, LiveDeadlinePhase::Prepared)
     }
 
+    /// Create one prepared consumer handle from an already-started reservation.
+    ///
+    /// The consumer's opening budget begins before the opening exchange, so the
+    /// pump installs the same absolute deadline rather than restarting it.
+    #[must_use]
+    pub(crate) fn prepared_until(deadline: Instant) -> Self {
+        let mut deadlines = Self::with_phase(deadline, LiveDeadlinePhase::Prepared);
+        deadlines.reservation_until = Some(deadline);
+        deadlines
+    }
+
     fn with_phase(now: Instant, phase: LiveDeadlinePhase) -> Self {
         Self {
             phase,

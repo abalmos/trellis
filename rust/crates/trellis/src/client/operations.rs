@@ -856,6 +856,17 @@ where
             &open_id,
             receive_max_payload_bytes,
         );
+        let action_name = D::KEY.split_once('.').map_or(D::KEY, |(_, action)| action);
+        let permission = trellis_protocol::PermissionAtom::new(
+            trellis_protocol::PermissionTarget::api_surface(
+                D::API_ID,
+                trellis_protocol::ApiSurfaceKind::Operation,
+                action_name.to_owned(),
+            )
+            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?,
+            trellis_protocol::PermissionAction::Observe,
+        )
+        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
         let open = crate::live::client_open::ClientOpen {
             kind: trellis_protocol::LiveSessionKind::OperationWatch,
             api_id: D::API_ID,
@@ -864,6 +875,7 @@ where
             body: Bytes::from(serde_json::to_vec(&body)?),
             open_id,
             receive_max_payload_bytes,
+            permission,
         };
         let prepared = crate::live::client_open::open_client_session(
             self.transport,
