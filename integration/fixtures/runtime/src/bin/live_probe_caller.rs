@@ -94,6 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         stream_id: "busy".to_owned(),
         through_index: Int64(1_025),
         finish: false,
+        fail: false,
         payload_bytes: None,
         padding_bytes: None,
     })
@@ -111,6 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         stream_id: "quiet".to_owned(),
         through_index: Int64(1),
         finish: true,
+        fail: false,
         payload_bytes: None,
         padding_bytes: None,
     })
@@ -125,6 +127,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         stream_id: "busy".to_owned(),
         through_index: Int64(BUSY_TOTAL),
         finish: true,
+        fail: false,
         payload_bytes: None,
         padding_bytes: None,
     })

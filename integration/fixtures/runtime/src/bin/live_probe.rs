@@ -31,6 +31,7 @@ struct Counters {
 struct Release {
     through_index: i64,
     finish: bool,
+    fail: bool,
     payload_bytes: u32,
     padding_bytes: u32,
 }
@@ -40,6 +41,7 @@ impl Default for Release {
         Self {
             through_index: 0,
             finish: false,
+            fail: false,
             payload_bytes: 4,
             padding_bytes: 0,
         }
@@ -63,11 +65,12 @@ impl KeyState {
         })
     }
 
-    fn snapshot(&self) -> (i64, bool, u32, u32) {
+    fn snapshot(&self) -> (i64, bool, bool, u32, u32) {
         let release = self.release.lock().expect("release lock");
         (
             release.through_index,
             release.finish,
+            release.fail,
             release.payload_bytes,
             release.padding_bytes,
         )
@@ -104,6 +107,7 @@ impl KeyState {
         &self,
         through_index: i64,
         finish: bool,
+        fail: bool,
         payload: u32,
         padding: u32,
     ) -> Result<(), ServerError> {
@@ -125,6 +129,7 @@ impl KeyState {
         }
         release.through_index = through_index;
         release.finish = finish;
+        release.fail = fail;
         release.payload_bytes = payload;
         release.padding_bytes = padding;
         drop(release);
@@ -158,7 +163,7 @@ fn source_stream(
             if cursor.generation == 0 {
                 cursor.generation = cursor.state.start();
             }
-            let (through, finish, payload_bytes, padding_bytes) = cursor.state.snapshot();
+            let (through, finish, fail, payload_bytes, padding_bytes) = cursor.state.snapshot();
             if cursor.next_index <= through {
                 let frame = LiveProbeFrame {
                     run_id: String::new(),
@@ -175,6 +180,12 @@ fn source_stream(
             if finish {
                 cursor.finish();
                 return None;
+            }
+            if fail {
+                return Some((
+                    Err(ServerError::Nats("live probe source failed".to_owned())),
+                    cursor,
+                ));
             }
             tokio::select! {
                 _ = cursor.state.notify.notified() => {}
@@ -259,6 +270,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     state.released(
                         input.through_index.0,
                         input.finish,
+                        input.fail,
                         input.payload_bytes.unwrap_or(4),
                         input.padding_bytes.unwrap_or(0),
                     )?;

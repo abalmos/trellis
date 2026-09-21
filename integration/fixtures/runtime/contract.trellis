@@ -146,6 +146,7 @@ model LiveProbeRelease {
   streamId: string;
   throughIndex: int64;
   finish: bool;
+  fail: bool;
   payloadBytes?: uint32;
   paddingBytes?: uint32;
 }

@@ -12,6 +12,7 @@ const TWO_HEARTBEATS_MS = 21_000;
 type KeyState = {
   through: bigint;
   finish: boolean;
+  fail: boolean;
   payloadBytes: number;
   paddingBytes: number;
   starts: number;
@@ -80,6 +81,7 @@ async function startTsProvider(runtime: ProviderRuntime): Promise<
       state = {
         through: 0n,
         finish: false,
+        fail: false,
         payloadBytes: 4,
         paddingBytes: 0,
         starts: 0,
@@ -105,6 +107,7 @@ async function startTsProvider(runtime: ProviderRuntime): Promise<
     const state = stateOf(input.runId, input.streamId);
     state.through = input.throughIndex;
     state.finish = input.finish;
+    state.fail = input.fail;
     if (input.payloadBytes !== undefined) {
       state.payloadBytes = input.payloadBytes;
     }
@@ -137,6 +140,7 @@ async function startTsProvider(runtime: ProviderRuntime): Promise<
           continue;
         }
         if (state.finish) return;
+        if (state.fail) throw new Error("live probe source failed");
         await new Promise<void>((resolve) => {
           if (signal.aborted) {
             resolve();
@@ -181,6 +185,7 @@ async function runProbeScenario(
         streamId: string;
         throughIndex: bigint;
         finish: boolean;
+        fail: boolean;
       },
     ) => { orThrow: () => Promise<unknown> };
     inspect: (
@@ -214,6 +219,7 @@ async function runProbeScenario(
       streamId: "busy",
       throughIndex: 1025n,
       finish: false,
+      fail: false,
     }).orThrow();
     await runtime.waitFor(() => busyIndexes.length >= 1025, {
       timeoutMs: 30_000,
@@ -231,6 +237,7 @@ async function runProbeScenario(
       streamId: "quiet",
       throughIndex: 1n,
       finish: true,
+      fail: false,
     }).orThrow();
     await runtime.waitFor(() => quietIndexes.length >= 1, {
       timeoutMs: 30_000,
@@ -248,6 +255,7 @@ async function runProbeScenario(
       streamId: "busy",
       throughIndex: BUSY_TOTAL,
       finish: true,
+      fail: false,
     }).orThrow();
     await busyTask;
     assertEquals(busyIndexes.length, 1026, "1026 busy frames delivered");
@@ -508,6 +516,86 @@ Deno.test("V3 Rust caller drives Rust liveprobe provider", async () => {
       await installer.connection.close();
       provider.kill();
       await provider.status;
+    }
+  });
+});
+
+Deno.test("T18 one failing live source leaves another session and an RPC functional", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const provider = await startTsProvider(runtime);
+    const caller = await runtime.connectClient({
+      name: `t18-caller-${crypto.randomUUID()}`,
+      contract: participants.LiveProbeCaller.participant,
+    });
+    const runId = `t18-${crypto.randomUUID()}`;
+    try {
+      const failing = await caller.watch({ runId, streamId: "failing" })
+        .orThrow();
+      const survivor = await caller.watch({ runId, streamId: "survivor" })
+        .orThrow();
+      const failingPump = (async () => {
+        for await (const _frame of failing) { /* drain to activation */ }
+      })();
+      const survivorFrames: bigint[] = [];
+      const survivorTask = (async () => {
+        for await (const frame of survivor) survivorFrames.push(frame.index);
+      })();
+      await runtime.waitFor(
+        async () =>
+          (await caller.inspect({ runId, streamId: "failing" })).orThrow()
+              .active === 1n &&
+          (await caller.inspect({ runId, streamId: "survivor" })).orThrow()
+              .active === 1n,
+        { timeoutMs: 30_000 },
+      );
+
+      // Fail one source and release one frame on the other.
+      await caller.release({
+        runId,
+        streamId: "failing",
+        throughIndex: 1n,
+        finish: false,
+        fail: true,
+      }).orThrow();
+      await caller.release({
+        runId,
+        streamId: "survivor",
+        throughIndex: 1n,
+        finish: false,
+        fail: false,
+      }).orThrow();
+
+      await runtime.waitFor(() => survivorFrames.length >= 1, {
+        timeoutMs: 30_000,
+      });
+      const failedEnd = await failing.closed;
+      await failingPump.catch(() => undefined);
+      assertEquals(
+        failedEnd.reason,
+        "source_error",
+        "the failing source ends the session as a source error",
+      );
+      assertEquals(survivorFrames, [1n], "the surviving session delivers");
+      // An unrelated finite RPC on the same provider stays functional.
+      const survivorStatus = await caller.inspect({
+        runId,
+        streamId: "survivor",
+      }).orThrow();
+      assertEquals(survivorStatus.active, 1n, "the survivor source is active");
+      assertEquals(survivorStatus.emitted, 1n, "exactly its released frame");
+
+      await survivor.close().orThrow();
+      await survivorTask;
+      await runtime.waitFor(
+        async () =>
+          (await caller.inspect({ runId, streamId: "survivor" })).orThrow()
+            .active === 0n,
+        { timeoutMs: 30_000 },
+      );
+    } finally {
+      await caller.connection.close();
+      await provider.stop();
+      await provider.exit;
     }
   });
 });
