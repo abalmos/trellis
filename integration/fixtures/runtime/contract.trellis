@@ -99,6 +99,7 @@ service AdminService {
 }
 service EventService {
   implements events;
+  use events { subscribe event Alpha; subscribe event Beta; }
   consumer events { title "Events"; description "Durable event acceptance values."; events [events.Alpha, events.Beta]; concurrency 1; replay new; retry { attempts 3; backoff [150ms, 300ms]; } }
 }
 service ChildProvider { implements device_child; }
