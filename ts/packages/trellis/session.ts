@@ -535,7 +535,7 @@ function outcomeForFailure(
   return "error";
 }
 
-function classifyRequestTransportFailure(args: {
+export function classifyRequestTransportFailure(args: {
   method?: string;
   subject: string;
   callerCapabilities?: readonly string[];
