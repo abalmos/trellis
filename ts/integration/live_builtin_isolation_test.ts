@@ -303,6 +303,71 @@ Deno.test("BI02 closing one of two Jobs.Watch consumers leaves the other serving
   }, runtimeOptions);
 });
 
+Deno.test("T09 disposing one of two scopes on one client leaves the other serving", async () => {
+  const metricsCapture = ensureCapture();
+  await withTrellisRuntime(async (runtime) => {
+    const service = await connectProvider(
+      runtime,
+      `t09-jobs-provider-${crypto.randomUUID()}`,
+    );
+    await service.jobs.work.handle(({ job }) =>
+      Promise.resolve(Result.ok(job.payload))
+    );
+    // One client connection owns both scopes.
+    const client = await runtime.connectClient({
+      name: `t09-jobs-${crypto.randomUUID()}`,
+      contract: webParticipants.Console.participant,
+    });
+    const abortA = new AbortController();
+    const abortB = new AbortController();
+    const framesA: Record<string, unknown>[] = [];
+    const framesB: Record<string, unknown>[] = [];
+    try {
+      const iteratorA = (await client.jobsWatch(
+        { includeInitial: false },
+        { signal: abortA.signal },
+      ).orThrow())[Symbol.asyncIterator]();
+      const iteratorB = (await client.jobsWatch(
+        { includeInitial: false },
+        { signal: abortB.signal },
+      ).orThrow())[Symbol.asyncIterator]();
+      const pumpA = pumpInto(iteratorA, framesA);
+      const pumpB = pumpInto(iteratorB, framesB);
+      await runtime.waitFor(
+        () =>
+          framesA.some((frame) => frame.kind === "ready") &&
+          framesB.some((frame) => frame.kind === "ready"),
+        { timeoutMs: 30_000 },
+      );
+
+      await closeConsumerA(metricsCapture, runtime, iteratorA, pumpA, abortA);
+      const baselineB = framesB.length;
+
+      await service.jobs.work.create({
+        value: `t09-jobs-${crypto.randomUUID()}`,
+      }).orThrow();
+      await runtime.waitFor(
+        () =>
+          framesB.slice(baselineB).some((frame) =>
+            frame.kind === "queryInvalidated"
+          ),
+        { timeoutMs: 30_000 },
+      );
+
+      await assertFiniteRpcSurvives(client);
+
+      abortB.abort();
+      await iteratorB.return?.();
+      await pumpB.catch(() => undefined);
+    } finally {
+      await service.stop();
+      abortA.abort();
+      abortB.abort();
+      await client.connection.close();
+    }
+  }, runtimeOptions);
+});
+
 Deno.test("BI02 closing one of two Events.Watch consumers leaves the other serving", async () => {
   const metricsCapture = ensureCapture();
   await withTrellisRuntime(async (runtime) => {

@@ -76,7 +76,7 @@ Deno.test("V3 Operation observation delivers typed updates then terminal", async
           } else if (event.type === "completed") {
             terminalState = event.snapshot?.state;
             terminalOutput = event.snapshot?.output?.value;
-            break;
+            // Do not break: let the normal transport END complete the stream.
           } else if (event.type === "failed" || event.type === "cancelled") {
             throw new Error(`operation ended ${event.type}`);
           }
@@ -99,6 +99,12 @@ Deno.test("V3 Operation observation delivers typed updates then terminal", async
       }
       assertEquals(terminalState, "completed", "terminal business snapshot");
       assertEquals(terminalOutput, "done:observe", "terminal business output");
+      const outcome = await subscription.closed;
+      assertEquals(
+        outcome.reason,
+        "complete",
+        "the subscription completes with a normal transport END",
+      );
       assertEquals(
         executions,
         1,

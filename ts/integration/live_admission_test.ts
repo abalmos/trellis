@@ -234,6 +234,15 @@ Deno.test("P08 a foreign principal's session control is denied and the owner con
       "the offer carries the session route",
     );
 
+    // Activate the owner observation with a real frame before the foreign
+    // control: a prepared session is not an active observation.
+    const ownerIterator = feed[Symbol.asyncIterator]();
+    const firstFrame = await ownerIterator.next();
+    assert(
+      !firstFrame.done,
+      "the owner must receive a real activation frame",
+    );
+
     // A different Console principal signs a close control for the owner session.
     const intruder = await consoleCaller(runtime, "p08-intruder");
     const intruderNats = await connect({
@@ -254,7 +263,10 @@ Deno.test("P08 a foreign principal's session control is denied and the owner con
       });
       await intruderNats.flush();
 
-      // The owner's observation must survive the foreign control.
+      // The owner's observation must survive the foreign control: an unrelated
+      // RPC still succeeds and the session is not closed.
+      const unrelated = await owner.client.sessionsList({}).orThrow();
+      assert(unrelated !== undefined, "an unrelated RPC must still succeed");
       const settled = await Promise.race([
         feed.closed.then(() => "closed" as const),
         new Promise<"open">((resolve) =>
