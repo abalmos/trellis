@@ -14,10 +14,6 @@ use trellis_runtime::{
 
 mod telemetry;
 
-const NATS_PORT: u16 = 4222;
-const NATS_HTTP_PORT: u16 = 8222;
-const NATS_WS_PORT: u16 = 8080;
-
 #[derive(Debug, Parser)]
 #[command(version, about = "Run the Trellis server")]
 struct Args {
@@ -402,22 +398,19 @@ async fn run(policy: StartupPolicy) -> miette::Result<()> {
             info!(log = %managed_paths.log.display(), "starting managed NATS");
             // Managed listeners follow the authored bundle's nats.conf so an
             // operator-selected port (or a host already using 4222) is honored.
-            let authored_nats =
-                fs::read_to_string(managed_paths.source.join("nats.conf")).unwrap_or_default();
-            let (nats_port, monitor_port, websocket_port) =
-                trellis_bootstrap::parse_nats_listen_ports(&authored_nats).unwrap_or((
-                    NATS_PORT,
-                    NATS_HTTP_PORT,
-                    NATS_WS_PORT,
-                ));
+            // The authored bundle must declare all three listeners explicitly;
+            // there is no default substitution at startup.
+            let nats_config = managed_paths.source.join("nats.conf");
+            let listeners =
+                trellis_bootstrap::read_nats_listen_ports(&nats_config).into_diagnostic()?;
             let server = LocalNats::builder()
                 .binary(source.clone())
                 .source(managed_paths.source)
                 .state(managed_paths.state)
                 .ports(LocalNatsPorts {
-                    nats: nats_port,
-                    monitor: monitor_port,
-                    websocket: websocket_port,
+                    nats: listeners.native,
+                    monitor: listeners.monitor,
+                    websocket: listeners.websocket,
                 })
                 .cache_dir(managed_paths.cache)
                 .pid_file(managed_paths.pid)

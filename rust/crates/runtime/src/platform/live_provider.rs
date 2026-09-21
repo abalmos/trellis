@@ -848,6 +848,39 @@ mod tests {
     }
 
     #[test]
+    fn managed_seed_file_is_private_and_stable() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("live-providers").join("platform.seed");
+        let first = create_managed_seed_file(&path).expect("create managed seed");
+        SessionAuth::from_seed_base64url(&first).expect("generated seed must validate");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let parent = std::fs::metadata(path.parent().expect("seed parent"))
+                .expect("seed directory metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            let file = std::fs::metadata(&path)
+                .expect("seed file metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(parent, 0o700, "seed directory must be private");
+            assert_eq!(file, 0o600, "seed file must be private");
+        }
+        // Re-invocation returns the persisted identity instead of rotating it.
+        let second = create_managed_seed_file(&path).expect("read persisted managed seed");
+        assert_eq!(first, second, "managed seed identity must persist");
+        // A corrupted existing seed is rejected, never silently replaced.
+        std::fs::write(&path, "not-a-valid-seed\n").expect("corrupt managed seed");
+        assert!(
+            create_managed_seed_file(&path).is_err(),
+            "invalid managed seed must be rejected"
+        );
+    }
+
+    #[test]
     fn live_surface_requires_an_owner() {
         assert!(require_live_provider_owner(true, true).is_ok());
         assert!(require_live_provider_owner(false, false).is_ok());

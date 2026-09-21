@@ -1085,15 +1085,26 @@ mod nats_reply_permission_tests {
         ApiRuntimeProjection {
             digest: "d".repeat(43),
             major: 1,
-            actions: BTreeMap::from([(
-                "feed:Watch".to_owned(),
-                ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Feed,
-                    upload: false,
-                    download: false,
-                    event_parameter_count: 0,
-                },
-            )]),
+            actions: BTreeMap::from([
+                (
+                    "feed:Watch".to_owned(),
+                    ActionRuntimeProjection {
+                        kind: RuntimeActionKind::Feed,
+                        upload: false,
+                        download: false,
+                        event_parameter_count: 0,
+                    },
+                ),
+                (
+                    "operation:Inspect".to_owned(),
+                    ActionRuntimeProjection {
+                        kind: RuntimeActionKind::Operation,
+                        upload: false,
+                        download: false,
+                        event_parameter_count: 0,
+                    },
+                ),
+            ]),
             capabilities: BTreeMap::new(),
         }
     }
@@ -1176,17 +1187,23 @@ mod nats_reply_permission_tests {
         }
     }
 
-    fn compiled_permissions() -> (TransportPermissions, TransportPermissions) {
-        let api_bindings = BTreeMap::from([(
+    fn api_bindings() -> BTreeMap<String, AuthorizationApiBinding> {
+        BTreeMap::from([(
             API_ID.to_owned(),
             AuthorizationApiBinding {
                 provider_deployment_id: PROVIDER_DEPLOYMENT.to_owned(),
             },
-        )]);
-        let registry = AuthorizationRegistryBinding {
+        )])
+    }
+
+    fn registry() -> AuthorizationRegistryBinding {
+        AuthorizationRegistryBinding {
             context_bucket: "contexts".to_owned(),
-        };
-        let provider = compile_transport_permissions(
+        }
+    }
+
+    fn provider_permissions() -> TransportPermissions {
+        compile_transport_permissions(
             &context(
                 PROVIDER_CONNECTION,
                 "sites-session-key",
@@ -1198,34 +1215,53 @@ mod nats_reply_permission_tests {
             ),
             &binding("fieldops.Sites", "Sites", true),
             &[],
-            &api_bindings,
-            &registry,
+            &api_bindings(),
+            &registry(),
         )
-        .expect("provider permissions compile");
+        .expect("provider permissions compile")
+    }
 
+    fn consumer_permissions(permission: PermissionAtom) -> TransportPermissions {
         let consumer_token = URL_SAFE_NO_PAD.encode(CONSUMER_CONNECTION.as_bytes());
-        let subscribe_atom = PermissionAtom::new(
-            PermissionTarget::api_surface(API_ID, ApiSurfaceKind::Feed, "Watch").unwrap(),
-            PermissionAction::Subscribe,
-        )
-        .unwrap();
-        let consumer = compile_transport_permissions(
+        compile_transport_permissions(
             &context(
                 CONSUMER_CONNECTION,
                 CONSUMER_SESSION_KEY,
                 "fieldops.Caller",
                 format!("_INBOX.{consumer_token}"),
-                GrantSet::new(vec![subscribe_atom]),
+                GrantSet::new(vec![permission]),
                 None,
                 None,
             ),
             &binding("fieldops.Caller", "Caller", false),
             &[],
-            &api_bindings,
-            &registry,
+            &api_bindings(),
+            &registry(),
         )
-        .expect("consumer permissions compile");
-        (provider, consumer)
+        .expect("consumer permissions compile")
+    }
+
+    fn feed_subscribe_permission() -> PermissionAtom {
+        PermissionAtom::new(
+            PermissionTarget::api_surface(API_ID, ApiSurfaceKind::Feed, "Watch").unwrap(),
+            PermissionAction::Subscribe,
+        )
+        .unwrap()
+    }
+
+    fn operation_permission(action: PermissionAction) -> PermissionAtom {
+        PermissionAtom::new(
+            PermissionTarget::api_surface(API_ID, ApiSurfaceKind::Operation, "Inspect").unwrap(),
+            action,
+        )
+        .unwrap()
+    }
+
+    fn compiled_permissions() -> (TransportPermissions, TransportPermissions) {
+        (
+            provider_permissions(),
+            consumer_permissions(feed_subscribe_permission()),
+        )
     }
 
     fn nats_list(subjects: &[String]) -> String {
@@ -1280,54 +1316,68 @@ mod nats_reply_permission_tests {
 
     impl TestBroker {
         fn start(response_allowance: &str) -> Self {
-            let (provider, consumer) = compiled_permissions();
-            let dir = tempfile::tempdir().expect("temp dir");
-            let config_path = dir.path().join("nats.conf");
-            let nats_port = free_port();
-            let http_port = free_port();
-            let ws_port = free_port();
-            let config = format!(
-                "port: {nats_port}\nhttp_port: {http_port}\nwebsocket {{ port: {ws_port}, no_tls: true }}\n\
-                 authorization {{\n  users: [\n\
-                 {{ user: \"provider\", password: \"pw\", permissions: {{ publish: {provider_publish}, subscribe: {provider_subscribe}, allow_responses: {response_allowance} }} }},\n\
-                 {{ user: \"consumer\", password: \"pw\", permissions: {{ publish: {consumer_publish}, subscribe: {consumer_subscribe} }} }}\n\
-                 ]\n}}\n",
-                provider_publish = nats_list(&provider.publish),
-                provider_subscribe = nats_list(&provider.subscribe),
-                consumer_publish = nats_list(&consumer.publish),
-                consumer_subscribe = nats_list(&consumer.subscribe),
-            );
-            std::fs::write(&config_path, config).expect("write config");
+            Self::start_with_consumer(
+                response_allowance,
+                consumer_permissions(feed_subscribe_permission()),
+            )
+        }
+
+        fn start_with_consumer(response_allowance: &str, consumer: TransportPermissions) -> Self {
+            let provider = provider_permissions();
             let binary = resolve_pinned_binary();
-            let pid_file = dir.path().join("nats.pid");
-            let log_path = dir.path().join("nats.log");
-            let server = match ManagedNatsServer::start(
-                &binary,
-                &config_path,
-                nats_port,
-                http_port,
-                ws_port,
-                &pid_file,
-                &NatsOutput::Log {
-                    path: log_path.clone(),
-                    mirror: false,
-                },
-            ) {
-                Ok(server) => server,
-                Err(error) => {
-                    let config = std::fs::read_to_string(&config_path).unwrap_or_default();
-                    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
-                    panic!(
-                        "start nats-server: {error}\n--- config ---\n{config}\n--- log ---\n{log}"
-                    );
+            // Broker tests run in parallel, so an ephemeral port observed by
+            // `free_port()` can be claimed by a sibling test before this
+            // nats-server binds it. Retry with fresh ports instead of failing
+            // the suite on that race.
+            let mut last: Option<(String, String)> = None;
+            for _attempt in 0..8 {
+                let dir = tempfile::tempdir().expect("temp dir");
+                let config_path = dir.path().join("nats.conf");
+                let nats_port = free_port();
+                let http_port = free_port();
+                let ws_port = free_port();
+                let config = format!(
+                    "port: {nats_port}\nhttp_port: {http_port}\nwebsocket {{ port: {ws_port}, no_tls: true }}\n\
+                     authorization {{\n  users: [\n\
+                     {{ user: \"provider\", password: \"pw\", permissions: {{ publish: {provider_publish}, subscribe: {provider_subscribe}, allow_responses: {response_allowance} }} }},\n\
+                     {{ user: \"consumer\", password: \"pw\", permissions: {{ publish: {consumer_publish}, subscribe: {consumer_subscribe} }} }}\n\
+                     ]\n}}\n",
+                    provider_publish = nats_list(&provider.publish),
+                    provider_subscribe = nats_list(&provider.subscribe),
+                    consumer_publish = nats_list(&consumer.publish),
+                    consumer_subscribe = nats_list(&consumer.subscribe),
+                );
+                std::fs::write(&config_path, &config).expect("write config");
+                let pid_file = dir.path().join("nats.pid");
+                let log_path = dir.path().join("nats.log");
+                match ManagedNatsServer::start(
+                    &binary,
+                    &config_path,
+                    nats_port,
+                    http_port,
+                    ws_port,
+                    &pid_file,
+                    &NatsOutput::Log {
+                        path: log_path.clone(),
+                        mirror: false,
+                    },
+                ) {
+                    Ok(server) => {
+                        let url = server.url();
+                        return Self {
+                            server,
+                            url,
+                            _dir: dir,
+                        };
+                    }
+                    Err(error) => {
+                        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+                        last = Some((format!("{error}"), format!("{config}\n--- log ---\n{log}")));
+                    }
                 }
-            };
-            let url = server.url();
-            Self {
-                server,
-                url,
-                _dir: dir,
             }
+            let (error, detail) = last.expect("at least one start attempt");
+            panic!("start nats-server after 8 attempts: {error}\n--- config ---\n{detail}");
         }
     }
 
@@ -1368,6 +1418,48 @@ mod nats_reply_permission_tests {
             SESSION_ID,
         )
         .expect("live subject")
+    }
+
+    fn operation_base() -> String {
+        trellis_protocol::derive_bound_operation_subject(API_ID, PROVIDER_DEPLOYMENT, "Inspect")
+            .expect("operation subject")
+    }
+
+    #[test]
+    fn operation_observe_is_the_only_operation_grant_with_live_delivery() {
+        let operation = operation_base();
+        let feed = feed_base();
+        let delivery = format!(
+            "live.v1.data.*.{}.*",
+            URL_SAFE_NO_PAD.encode(CONSUMER_CONNECTION.as_bytes())
+        );
+
+        let feed_subscribe = consumer_permissions(feed_subscribe_permission());
+        assert!(feed_subscribe.publish.contains(&feed));
+        assert!(feed_subscribe.subscribe.contains(&delivery));
+        assert!(!feed_subscribe
+            .publish
+            .contains(&format!("{operation}.control")));
+
+        let observe = consumer_permissions(operation_permission(PermissionAction::Observe));
+        assert!(observe.publish.contains(&format!("{operation}.control")));
+        assert!(observe
+            .publish
+            .contains(&format!("{operation}.observe.*.*")));
+        assert!(observe.subscribe.contains(&delivery));
+        assert!(!observe.publish.contains(&feed));
+
+        let invoke = consumer_permissions(operation_permission(PermissionAction::Invoke));
+        assert!(invoke.publish.contains(&operation));
+        assert!(invoke.publish.contains(&format!("{operation}.control")));
+        assert!(!invoke.subscribe.contains(&delivery));
+        assert!(!invoke.publish.contains(&format!("{operation}.observe.*.*")));
+
+        let cancel = consumer_permissions(operation_permission(PermissionAction::Cancel));
+        assert!(cancel.publish.contains(&format!("{operation}.control")));
+        assert!(!cancel.publish.contains(&operation));
+        assert!(!cancel.subscribe.contains(&delivery));
+        assert!(!cancel.publish.contains(&format!("{operation}.observe.*.*")));
     }
 
     async fn next_within<T: Send + 'static>(
@@ -1554,5 +1646,42 @@ mod nats_reply_permission_tests {
             error_mentioning(&consumer_errors, "Permissions Violation").await,
             "a non-provider must not publish live data"
         );
+    }
+
+    #[tokio::test]
+    async fn bt04_only_operation_observe_receives_live_delivery() {
+        let broker = TestBroker::start_with_consumer(
+            "{ max: 65535, expires: \"60s\" }",
+            consumer_permissions(operation_permission(PermissionAction::Observe)),
+        );
+        let (provider, _provider_errors) = connect(&broker.url, "provider").await;
+        let (consumer, _consumer_errors) = connect(&broker.url, "consumer").await;
+        let mut live = consumer.subscribe(live_subject()).await.unwrap();
+        provider.flush().await.unwrap();
+        consumer.flush().await.unwrap();
+        provider
+            .publish(live_subject(), b"observe".to_vec().into())
+            .await
+            .unwrap();
+        assert_eq!(
+            next_within(&mut live, "operation observation")
+                .await
+                .payload
+                .as_ref(),
+            b"observe"
+        );
+
+        for action in [PermissionAction::Invoke, PermissionAction::Cancel] {
+            let broker = TestBroker::start_with_consumer(
+                "{ max: 65535, expires: \"60s\" }",
+                consumer_permissions(operation_permission(action)),
+            );
+            let (consumer, errors) = connect(&broker.url, "consumer").await;
+            let _denied = consumer.subscribe(live_subject()).await.unwrap();
+            assert!(
+                error_mentioning(&errors, "Permissions Violation").await,
+                "{action:?} must not receive operation live delivery"
+            );
+        }
     }
 }
