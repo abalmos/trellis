@@ -4,6 +4,7 @@ pub const PARTICIPANT_PATH: &str = "platform";
 pub const PARTICIPANT_DIGEST: &str = "NfpCYy0dNnkwKTt7jyjVFshTVB68Vr1nY_GVgNhQslY";
 pub const IMPLEMENTED_API_IDS: &[&str] =
     &["trellis.auth@v1", "trellis.core@v1", "trellis.state@v1"];
+pub const EVENT_SUBSCRIBE_NEEDS: &[&str] = &[];
 pub struct Participant;
 impl trellis_rs::generated::ParticipantDescriptor for Participant {
     const ID: &'static str = PARTICIPANT_ID;
@@ -12,6 +13,7 @@ impl trellis_rs::generated::ParticipantDescriptor for Participant {
         trellis_rs::generated::ParticipantKind::Service;
     const COMPANION: Option<trellis_rs::generated::CompanionDescriptor> = None;
     const IMPLEMENTED_API_IDS: &'static [&'static str] = IMPLEMENTED_API_IDS;
+    const EVENT_SUBSCRIBE_NEEDS: &'static [&'static str] = EVENT_SUBSCRIBE_NEEDS;
     fn package_evidence() -> trellis_rs::generated::PackageEvidence {
         PACKAGE_EVIDENCE
     }

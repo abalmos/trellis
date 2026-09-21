@@ -474,6 +474,7 @@ pub struct ServiceHandle {
     event_listeners: SharedDurableEventListeners,
     event_failures: mpsc::UnboundedSender<ServiceRuntimeError>,
     auth: LocalAuthVerifier,
+    event_subscribe_needs: &'static [&'static str],
 }
 
 impl std::fmt::Debug for ServiceHandle {
@@ -838,6 +839,7 @@ pub struct ConnectedServiceRuntime<C> {
     service_name: String,
     registered_subjects: BTreeSet<String>,
     job_hosts: Vec<WorkerHostHandle>,
+    event_subscribe_needs: &'static [&'static str],
     _contract: PhantomData<C>,
 }
 
@@ -896,6 +898,7 @@ impl<C> ConnectedServiceRuntime<C> {
             service_name: service_name.into(),
             registered_subjects: BTreeSet::new(),
             job_hosts: Vec::new(),
+            event_subscribe_needs: &[],
             _contract: PhantomData,
         }
     }
@@ -1335,6 +1338,7 @@ impl<C> ConnectedServiceRuntime<C> {
             event_listeners: Arc::clone(&self.event_listeners),
             event_failures: self.event_failures.clone(),
             auth: self.auth.clone(),
+            event_subscribe_needs: self.event_subscribe_needs,
         }
     }
 }
@@ -1367,6 +1371,7 @@ impl<C: crate::generated::ParticipantDescriptor> ConnectedServiceRuntime<C> {
             binding,
             api_id,
         );
+        runtime.event_subscribe_needs = C::EVENT_SUBSCRIBE_NEEDS;
         runtime.operation_repository = Some(runtime.operation_repository().await?);
         let staging = async_nats::jetstream::new(runtime.client.nats().clone())
             .get_object_store(format!(
@@ -1395,6 +1400,14 @@ fn parse_bootstrap_binding(
         .service_bootstrap_binding()
         .cloned()
         .ok_or(ServiceRuntimeError::MissingBootstrapBinding)
+}
+
+/// Whether a participant's declared Event Subscribe needs authorize ephemeral
+/// delivery for one event. A declared durable consumer is not included.
+#[must_use]
+pub(crate) fn ephemeral_event_authorized(needs: &[&str], event_name: &str) -> bool {
+    let need = format!("event:{event_name}");
+    needs.contains(&need.as_str())
 }
 
 fn service_event_context_from_headers(
@@ -1450,6 +1463,16 @@ where
         &event_name,
     );
     if options.mode == ServiceEventListenerMode::Ephemeral {
+        // A declared durable consumer grants Consume authority only. Raw
+        // ephemeral observation needs its own Event Subscribe need; fail fast
+        // rather than sitting on a subscription the broker will not deliver to.
+        if !ephemeral_event_authorized(service.event_subscribe_needs, &event_name) {
+            return Err(ServiceRuntimeError::Client(
+                TrellisClientError::EventSubscriptionProtocol(format!(
+                    "ephemeral event delivery for '{event_name}' requires an Event Subscribe authority; a declared consumer grants durable delivery only"
+                )),
+            ));
+        }
         let mut events = client
             .nats()
             .subscribe(client.descriptor_subject(D::SUBSCRIBE_SUBJECT))
@@ -2241,6 +2264,18 @@ mod tests {
         EventConsumerResourceBinding, KvResourceBinding, StoreResourceBinding,
     };
     use std::collections::BTreeMap;
+
+    #[test]
+    fn explicit_ephemeral_requires_a_declared_event_subscribe_need() {
+        // A declared durable consumer alone grants no raw-subscribe authority.
+        assert!(!ephemeral_event_authorized(&[], "Alpha"));
+        assert!(!ephemeral_event_authorized(&["event:Beta"], "Alpha"));
+        assert!(ephemeral_event_authorized(&["event:Alpha"], "Alpha"));
+        assert!(ephemeral_event_authorized(
+            &["event:Beta", "event:Alpha"],
+            "Alpha"
+        ));
+    }
 
     fn binding() -> CoreBootstrapBinding {
         CoreBootstrapBinding::new(

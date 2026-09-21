@@ -858,8 +858,19 @@ fn render_participant(
             !companion.optional
         )
     }).unwrap_or_else(|| "None".to_owned());
+    let mut subscribe_needs: BTreeSet<String> = BTreeSet::new();
+    for (_api, selection) in participant.uses() {
+        for selected in &selection.actions {
+            if selected.action.kind == ActionKind::Event
+                && selected.direction == InteractionDirection::Subscribe
+            {
+                subscribe_needs.insert(format!("event:{}", selected.action.name));
+            }
+        }
+    }
+    let needs = string_slice(subscribe_needs.iter().map(String::as_str));
     let mut out = format!(
-        "//! Generated participant `{}`.\n\npub const PARTICIPANT_ID: &str = {:?};\npub const PARTICIPANT_PATH: &str = {path:?};\npub const PARTICIPANT_DIGEST: &str = {digest:?};\npub const IMPLEMENTED_API_IDS: &[&str] = &{};\n\npub struct Participant;\nimpl trellis_rs::generated::ParticipantDescriptor for Participant {{ const ID: &'static str = PARTICIPANT_ID; const PATH: &'static str = PARTICIPANT_PATH; const KIND: trellis_rs::generated::ParticipantKind = trellis_rs::generated::ParticipantKind::{kind}; const COMPANION: Option<trellis_rs::generated::CompanionDescriptor> = {companion}; const IMPLEMENTED_API_IDS: &'static [&'static str] = IMPLEMENTED_API_IDS; fn package_evidence() -> trellis_rs::generated::PackageEvidence {{ PACKAGE_EVIDENCE }} }}\n\n{evidence}\n",
+        "//! Generated participant `{}`.\n\npub const PARTICIPANT_ID: &str = {:?};\npub const PARTICIPANT_PATH: &str = {path:?};\npub const PARTICIPANT_DIGEST: &str = {digest:?};\npub const IMPLEMENTED_API_IDS: &[&str] = &{};\npub const EVENT_SUBSCRIBE_NEEDS: &[&str] = &{needs};\n\npub struct Participant;\nimpl trellis_rs::generated::ParticipantDescriptor for Participant {{ const ID: &'static str = PARTICIPANT_ID; const PATH: &'static str = PARTICIPANT_PATH; const KIND: trellis_rs::generated::ParticipantKind = trellis_rs::generated::ParticipantKind::{kind}; const COMPANION: Option<trellis_rs::generated::CompanionDescriptor> = {companion}; const IMPLEMENTED_API_IDS: &'static [&'static str] = IMPLEMENTED_API_IDS; const EVENT_SUBSCRIBE_NEEDS: &'static [&'static str] = EVENT_SUBSCRIBE_NEEDS; fn package_evidence() -> trellis_rs::generated::PackageEvidence {{ PACKAGE_EVIDENCE }} }}\n\n{evidence}\n",
         participant.identity(), participant.identity().as_str(),
         string_slice(participant.implements().iter().map(ApiId::as_str)),
     );

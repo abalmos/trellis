@@ -1113,6 +1113,11 @@ pub trait ParticipantDescriptor {
     /// APIs completely implemented by this participant.
     const IMPLEMENTED_API_IDS: &'static [&'static str] = &[];
 
+    /// `event:<Name>` descriptor names this participant explicitly declares as
+    /// subscribe needs. A declared durable consumer is not included: consumer
+    /// `Consume` and event `Subscribe` are independent authorities.
+    const EVENT_SUBSCRIBE_NEEDS: &'static [&'static str] = &[];
+
     /// Exact package evidence embedded by generation.
     fn package_evidence() -> PackageEvidence;
 

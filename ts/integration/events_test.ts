@@ -950,3 +950,69 @@ Deno.test("a declared durable consumer without Event Subscribe rejects explicit 
     }
   });
 });
+
+Deno.test("Rust consumer-only service rejects explicit ephemeral at the runtime boundary", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const identity = await runtime.registerService({
+      name: `consumer-only-rust-${crypto.randomUUID()}`,
+      contract: participants.EventServiceConsumerOnly.participant,
+    });
+    const process = new Deno.Command("cargo", {
+      args: [
+        "run",
+        "--config",
+        `patch.crates-io.trellis-rs.path=${
+          JSON.stringify(
+            fromFileUrl(new URL("../../rust/crates/trellis", import.meta.url)),
+          )
+        }`,
+        "--bin",
+        "events",
+        "--manifest-path",
+        fromFileUrl(
+          new URL(
+            "../../integration/fixtures/runtime/Cargo.toml",
+            import.meta.url,
+          ),
+        ),
+      ],
+      env: {
+        TRELLIS_URL: runtime.trellisUrl,
+        TRELLIS_IDENTITY_SEED: identity.seed,
+        CONSUMER_ONLY: "true",
+        EPHEMERAL: "true",
+        CARGO_TARGET_DIR: fromFileUrl(
+          new URL("../../rust/target", import.meta.url),
+        ),
+      },
+      stdout: "piped",
+      stderr: "inherit",
+    }).spawn();
+    try {
+      const reader = process.stdout.pipeThrough(new TextDecoderStream())
+        .getReader();
+      let output = "";
+      while (!output.includes("EPHEMERAL_REJECTED")) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        output += chunk.value;
+      }
+      assertStringIncludes(
+        output,
+        "EPHEMERAL_REJECTED",
+        "Rust explicit ephemeral must fail fast",
+      );
+      assertStringIncludes(
+        output,
+        "Event Subscribe",
+        "Rust failure names the missing authority",
+      );
+      assertEquals(output.includes("EPHEMERAL_ACCEPTED"), false);
+    } finally {
+      try {
+        process.kill("SIGTERM");
+      } catch { /* already exited */ }
+      await process.status;
+    }
+  });
+});

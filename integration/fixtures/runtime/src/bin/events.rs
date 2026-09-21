@@ -45,6 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let url = std::env::var("TRELLIS_URL")?;
     let identity = std::env::var("TRELLIS_IDENTITY_SEED")?;
+    if std::env::var("CONSUMER_ONLY").as_deref() == Ok("true") {
+        return run_consumer_only(&url, &identity).await;
+    }
     let mut service = Participant::connect(ServiceConnectOptions::new(&url, &identity)).await?;
     let seen = Arc::new(Mutex::new(BTreeSet::new()));
     let stats = Arc::new(Mutex::new(DeliveryStats::default()));
@@ -147,5 +150,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     service.run().await?;
     telemetry.shutdown().await;
+    Ok(())
+}
+
+/// Consumer-only participant: a declared durable consumer grants no raw
+/// Event Subscribe authority, so explicit ephemeral must fail fast.
+async fn run_consumer_only(
+    url: &str,
+    identity: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use runtime_trellis::participants::runtime_trellis_event_service_consumer_only::Participant as ConsumerOnly;
+    let service = ConsumerOnly::connect(ServiceConnectOptions::new(url, identity)).await?;
+    let outcome = service
+        .listen_event::<Alpha, _, _>(
+            |_event, _| async { Ok(()) },
+            ServiceEventListenOptions {
+                mode: ServiceEventListenerMode::Ephemeral,
+                group: None,
+            },
+        )
+        .await;
+    match outcome {
+        Ok(_) => println!("EPHEMERAL_ACCEPTED"),
+        Err(error) => println!("EPHEMERAL_REJECTED {error}"),
+    }
     Ok(())
 }
