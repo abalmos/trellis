@@ -242,47 +242,11 @@ async fn verify_offer(
             "offer control subject is not canonical for this session".into(),
         ));
     }
-    verify_offer_identity(open, &offer)?;
     // The selected deployment must match the consumer's installed binding.
     let selected = provider
         .provider_deployment_id(open.api_id)
         .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
-    if selected != offer.provider.deployment_id {
-        return Err(TrellisClientError::FeedProtocol(
-            "offer provider is not the selected deployment for this API".into(),
-        ));
-    }
-    // The independently selected binding is the evidence that this
-    // deployment's participant implements the API: bootstrap binds each API to
-    // a provider deployment that implements it. Deployment/provider contexts
-    // carry authority through admission-time materialization rather than
-    // context grants, so their atom list is not the right signal here. The
-    // locally retained consumer authority still requires the exact atom.
-    // Every advertised provider field must match the verified signed context;
-    // a valid signature does not authorize silently changing them later.
-    if peer.connection_id != offer.provider.connection_id
-        || peer.principal_id != offer.provider.principal_id
-        || peer.participant_id != offer.provider.participant_id
-        || peer.deployment_id.as_deref().unwrap_or("") != offer.provider.deployment_id
-        || peer.instance_id.as_deref().unwrap_or("") != offer.provider.instance_id
-    {
-        return Err(TrellisClientError::FeedProtocol(
-            "offer provider tuple does not match its verified context".into(),
-        ));
-    }
-    // The offered consumer tuple must be this opener's actual current local
-    // identity, resolved before the offer was accepted.
-    if consumer_digest.is_empty()
-        || consumer.connection_id != offer.consumer.connection_id
-        || consumer.principal_id != offer.consumer.principal_id
-        || consumer.participant_id != offer.consumer.participant_id
-        || trellis_protocol::encode_subject_token(&consumer.session_key)
-            != offer.consumer.session_key
-    {
-        return Err(TrellisClientError::FeedProtocol(
-            "offer consumer does not match the opening caller".into(),
-        ));
-    }
+    verify_offer_claims(open, &offer, &selected, &peer, consumer, consumer_digest)?;
     let negotiated = trellis_protocol::negotiate_max_data_body_bytes(
         open.receive_max_payload_bytes,
         client.nats().max_payload() as u64,
@@ -430,6 +394,55 @@ where
 }
 
 /// Reject an offer whose route or session kind does not match the open.
+/// Verify every advertised claim in a parsed, proof-verified live offer against
+/// the independently selected provider binding and the opener's pinned local
+/// identity. This is the production decision; its tests call the same function.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn verify_offer_claims(
+    open: &ClientOpen<'_>,
+    offer: &LiveOffer,
+    selected_provider_deployment_id: &str,
+    peer: &PinnedPeerIdentity,
+    consumer: &PinnedPeerIdentity,
+    consumer_digest: &str,
+) -> Result<(), TrellisClientError> {
+    verify_offer_identity(open, offer)?;
+    // The independently selected binding is the evidence that this deployment's
+    // participant implements the API; the offered provider deployment must be
+    // exactly that binding, never the offer's own claim.
+    if selected_provider_deployment_id != offer.provider.deployment_id {
+        return Err(TrellisClientError::FeedProtocol(
+            "offer provider is not the selected deployment for this API".into(),
+        ));
+    }
+    // Every advertised provider field must match the verified signed context; a
+    // valid signature does not authorize silently changing them later.
+    if peer.connection_id != offer.provider.connection_id
+        || peer.principal_id != offer.provider.principal_id
+        || peer.participant_id != offer.provider.participant_id
+        || peer.deployment_id.as_deref().unwrap_or("") != offer.provider.deployment_id
+        || peer.instance_id.as_deref().unwrap_or("") != offer.provider.instance_id
+    {
+        return Err(TrellisClientError::FeedProtocol(
+            "offer provider tuple does not match its verified context".into(),
+        ));
+    }
+    // The offered consumer tuple must be this opener's actual current local
+    // identity, resolved before the offer was accepted.
+    if consumer_digest.is_empty()
+        || consumer.connection_id != offer.consumer.connection_id
+        || consumer.principal_id != offer.consumer.principal_id
+        || consumer.participant_id != offer.consumer.participant_id
+        || trellis_protocol::encode_subject_token(&consumer.session_key)
+            != offer.consumer.session_key
+    {
+        return Err(TrellisClientError::FeedProtocol(
+            "offer consumer does not match the opening caller".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn verify_offer_identity(
     open: &ClientOpen<'_>,
     offer: &LiveOffer,
@@ -1019,7 +1032,7 @@ static LIVE_INBOX_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[cfg(test)]
 mod tests {
-    use super::{verify_offer_identity, ClientOpen};
+    use super::{verify_offer_claims, verify_offer_identity, ClientOpen};
     use bytes::Bytes;
     use trellis_protocol::{
         LiveOffer, LiveOfferConsumer, LiveOfferKind, LiveOfferLimits, LiveOfferProvider,
@@ -1127,5 +1140,100 @@ mod tests {
         let error = verify_offer_identity(&open, &offer(LiveSessionKind::Feed, base))
             .expect_err("kind must match");
         assert!(error.to_string().contains("session kind"));
+    }
+
+    fn consumer_identity() -> super::PinnedPeerIdentity {
+        super::PinnedPeerIdentity {
+            connection_id: "C".into(),
+            session_key: "consumer".into(),
+            principal_id: "pru".into(),
+            participant_id: "pau".into(),
+            deployment_id: None,
+            instance_id: None,
+        }
+    }
+
+    fn provider_identity() -> super::PinnedPeerIdentity {
+        super::PinnedPeerIdentity {
+            connection_id: "P".into(),
+            session_key: "K".into(),
+            principal_id: "pr".into(),
+            participant_id: "pa".into(),
+            deployment_id: Some("dep".into()),
+            instance_id: Some("inst".into()),
+        }
+    }
+
+    fn signed_offer(kind: LiveSessionKind, base: &str) -> LiveOffer {
+        let mut offer = offer(kind, base);
+        offer.consumer.session_key = trellis_protocol::encode_subject_token("consumer");
+        offer
+    }
+
+    #[test]
+    fn offer_from_a_non_selected_deployment_is_rejected() {
+        let base = "feed.v1.Watch";
+        let open = open(LiveSessionKind::Feed, base, base);
+        let error = verify_offer_claims(
+            &open,
+            &signed_offer(LiveSessionKind::Feed, base),
+            "dep-other",
+            &provider_identity(),
+            &consumer_identity(),
+            "digest",
+        )
+        .expect_err("selected deployment must match");
+        assert!(error.to_string().contains("selected deployment"));
+    }
+
+    #[test]
+    fn offer_with_a_mutated_provider_tuple_is_rejected() {
+        let base = "feed.v1.Watch";
+        let open = open(LiveSessionKind::Feed, base, base);
+        let mut mutated = provider_identity();
+        mutated.instance_id = Some("inst-mutated".into());
+        let error = verify_offer_claims(
+            &open,
+            &signed_offer(LiveSessionKind::Feed, base),
+            "dep",
+            &mutated,
+            &consumer_identity(),
+            "digest",
+        )
+        .expect_err("mutated provider tuple must be rejected");
+        assert!(error.to_string().contains("verified context"));
+    }
+
+    #[test]
+    fn offer_with_a_mutated_consumer_tuple_is_rejected() {
+        let base = "feed.v1.Watch";
+        let open = open(LiveSessionKind::Feed, base, base);
+        let mut mutated = consumer_identity();
+        mutated.participant_id = "other".into();
+        let error = verify_offer_claims(
+            &open,
+            &signed_offer(LiveSessionKind::Feed, base),
+            "dep",
+            &provider_identity(),
+            &mutated,
+            "digest",
+        )
+        .expect_err("mutated consumer tuple must be rejected");
+        assert!(error.to_string().contains("opening caller"));
+    }
+
+    #[test]
+    fn selected_deployment_and_complete_tuples_are_accepted() {
+        let base = "feed.v1.Watch";
+        let open = open(LiveSessionKind::Feed, base, base);
+        verify_offer_claims(
+            &open,
+            &signed_offer(LiveSessionKind::Feed, base),
+            "dep",
+            &provider_identity(),
+            &consumer_identity(),
+            "digest",
+        )
+        .expect("the selected provider's complete offer is accepted");
     }
 }

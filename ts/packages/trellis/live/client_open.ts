@@ -324,6 +324,57 @@ function guardSetupError(lost: LiveAuthorityLost): LiveStreamError {
     );
 }
 
+/** The opener's pinned local identity used to bind an offer's consumer tuple. */
+type OfferClaimLocal = {
+  connectionId: string;
+  sessionKey: string;
+  principalId: string;
+  participantId: string;
+};
+
+/**
+ * Verify the deployment and consumer claims of a parsed, proof-verified live
+ * offer against the independently selected provider binding and the opener's
+ * pinned local identity. This is the production decision; its tests call the
+ * same function.
+ */
+export function verifyOfferClaims(args: {
+  offer: LiveOfferWire;
+  selectedProviderDeploymentId: string | undefined;
+  localContextDigest: string | undefined;
+  local: OfferClaimLocal;
+}): void {
+  const { offer, local } = args;
+  // The independently selected binding is the evidence that this deployment's
+  // participant implements the API; the offered provider deployment must be
+  // exactly that binding, never the offer's own claim.
+  if (
+    !args.selectedProviderDeploymentId ||
+    offer.provider.deploymentId !== args.selectedProviderDeploymentId
+  ) {
+    throw new LiveStreamError(
+      "protocol_error",
+      "offer provider is not the selected deployment for this API",
+    );
+  }
+  // The offered consumer tuple must be the opener's actual current local
+  // identity, resolved before the offer was accepted.
+  if (
+    !args.localContextDigest ||
+    offer.consumer.connectionId !== local.connectionId ||
+    offer.consumer.sessionKey !== encodeEventSubjectParameterToken(
+        local.sessionKey,
+      ) ||
+    offer.consumer.principalId !== local.principalId ||
+    offer.consumer.participantId !== local.participantId
+  ) {
+    throw new LiveStreamError(
+      "protocol_error",
+      "offer consumer does not match the opening caller",
+    );
+  }
+}
+
 async function verifyOffer(
   host: LiveOpenHost<unknown>,
   baseSubject: string,
@@ -423,38 +474,14 @@ async function verifyOffer(
       );
     }
     // The provider deployment is the independently selected binding, never the
-    // offer's own claim.
-    if (
-      !authority.selectedProviderDeploymentId ||
-      offer.provider.deploymentId !== authority.selectedProviderDeploymentId
-    ) {
-      throw new LiveStreamError(
-        "protocol_error",
-        "offer provider is not the selected deployment for this API",
-      );
-    }
-    // The selected binding is the independent evidence that this deployment's
-    // participant implements the API: bootstrap binds each API to a provider
-    // deployment that implements it. Deployment/participant contexts carry
-    // their authority through admission-time materialization rather than
-    // context grants, so the context's atom list is not the right signal here.
-    // The offered consumer tuple must be the opener's actual local identity,
-    // resolved from the retained local authority.
-    const local = localGuard.identity;
-    if (
-      !authority.localContextDigest ||
-      offer.consumer.connectionId !== local.connectionId ||
-      offer.consumer.sessionKey !== encodeEventSubjectParameterToken(
-          local.sessionKey,
-        ) ||
-      offer.consumer.principalId !== local.principalId ||
-      offer.consumer.participantId !== local.participantId
-    ) {
-      throw new LiveStreamError(
-        "protocol_error",
-        "offer consumer does not match the opening caller",
-      );
-    }
+    // offer's own claim. The offered consumer tuple must be the opener's actual
+    // local identity, resolved from the retained local authority.
+    verifyOfferClaims({
+      offer,
+      selectedProviderDeploymentId: authority.selectedProviderDeploymentId,
+      localContextDigest: authority.localContextDigest,
+      local: localGuard.identity,
+    });
     if (
       liveDataSubject(
         offer.provider.connectionId,
