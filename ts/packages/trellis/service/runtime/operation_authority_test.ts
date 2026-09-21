@@ -11,6 +11,7 @@ import { assertEquals } from "@std/assert";
 
 import {
   operationObserveAuthorized,
+  OperationObserverArbiter,
   operationOwnerFenceHolds,
 } from "./core.ts";
 
@@ -83,4 +84,25 @@ Deno.test("O10 a different executor instance is rejected", () => {
     }),
     false,
   );
+});
+
+Deno.test("O08 the observer reconciles authoritative durable state across executors", async () => {
+  const delivered: unknown[] = [];
+  const arbiter = new OperationObserverArbiter((value) => {
+    delivered.push(value);
+    return Promise.resolve();
+  });
+  // Executor A emits a transient update.
+  assertEquals(arbiter.update("executor-a-update"), true);
+  // The authoritative snapshot comes from durable state, not the executor.
+  await arbiter.snapshot("durable-a");
+  // Executor ownership changes; the same observer keeps reconciling.
+  assertEquals(arbiter.update("executor-b-update"), true);
+  await arbiter.snapshot("durable-terminal");
+  assertEquals(delivered, [
+    "executor-a-update",
+    "durable-a",
+    "executor-b-update",
+    "durable-terminal",
+  ]);
 });

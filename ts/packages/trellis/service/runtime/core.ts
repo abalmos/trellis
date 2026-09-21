@@ -184,7 +184,7 @@ const OBSERVER_ARBITER_BOUND = 16;
  * one; admitted updates are never dropped. The bounded buffer rejects further
  * updates so only that observer fails with a slow-consumer outcome.
  */
-class OperationObserverArbiter {
+export class OperationObserverArbiter {
   readonly #emit: (value: unknown) => Promise<void>;
   readonly #updates: unknown[] = [];
   #pendingSnapshot: unknown | undefined;
