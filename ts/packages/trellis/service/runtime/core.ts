@@ -397,6 +397,20 @@ export function operationObserveAuthorized(
       runtime.creatorParticipantId === caller.participantId);
 }
 
+/**
+ * Whether a durable-operation update's executor fence still owns the operation.
+ *
+ * A legitimately signed internal update from a former executor — a stale epoch,
+ * or a different instance — is rejected before any outer Live delivery.
+ */
+export function operationOwnerFenceHolds(
+  runtime: { ownerInstanceId: string; ownerEpoch: number },
+  fence: { ownerInstanceId: string; ownerEpoch: number },
+): boolean {
+  return runtime.ownerInstanceId === fence.ownerInstanceId &&
+    runtime.ownerEpoch === fence.ownerEpoch;
+}
+
 export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
   #nats: NatsConnection;
   #version?: string;
@@ -1000,10 +1014,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     },
   ): AsyncResult<RuntimeOperationSnapshot, BaseError> {
     return AsyncResult.from((async () => {
-      if (
-        runtime.ownerInstanceId !== fence.ownerInstanceId ||
-        runtime.ownerEpoch !== fence.ownerEpoch
-      ) {
+      if (!operationOwnerFenceHolds(runtime, fence)) {
         recordCatalogCounter("trellis.operation.ownership.events", 1, {
           "trellis.action": "control",
           "trellis.outcome": "lost",

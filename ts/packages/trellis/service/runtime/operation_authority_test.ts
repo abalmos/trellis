@@ -9,7 +9,10 @@
 
 import { assertEquals } from "@std/assert";
 
-import { operationObserveAuthorized } from "./core.ts";
+import {
+  operationObserveAuthorized,
+  operationOwnerFenceHolds,
+} from "./core.ts";
 
 const OPERATION = {
   creatorPrincipalId: "principal-a",
@@ -48,4 +51,36 @@ Deno.test("O09 the same principal on a different participant is denied", () => {
 
 Deno.test("O09 internal callers without a verified caller are authorized", () => {
   assertEquals(operationObserveAuthorized(OPERATION, undefined), true);
+});
+
+const OWNER = { ownerInstanceId: "instance-a", ownerEpoch: 7 };
+
+Deno.test("O10 the current executor fence still owns the operation", () => {
+  assertEquals(
+    operationOwnerFenceHolds(OWNER, {
+      ownerInstanceId: "instance-a",
+      ownerEpoch: 7,
+    }),
+    true,
+  );
+});
+
+Deno.test("O10 a stale epoch is rejected before outer delivery", () => {
+  assertEquals(
+    operationOwnerFenceHolds(OWNER, {
+      ownerInstanceId: "instance-a",
+      ownerEpoch: 6,
+    }),
+    false,
+  );
+});
+
+Deno.test("O10 a different executor instance is rejected", () => {
+  assertEquals(
+    operationOwnerFenceHolds(OWNER, {
+      ownerInstanceId: "instance-b",
+      ownerEpoch: 7,
+    }),
+    false,
+  );
 });
