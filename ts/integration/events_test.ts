@@ -3,6 +3,8 @@ import { jetstream, jetstreamManager } from "@nats-io/jetstream";
 import { connect } from "@nats-io/transport-node";
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { fromFileUrl, join } from "@std/path";
+import { AuthError, Result } from "@qlever-llc/trellis";
+import { TrellisService } from "@qlever-llc/trellis/service";
 import {
   apis as webApis,
   participants as webParticipants,
@@ -909,3 +911,42 @@ for (const sdk of ["rust", "typescript"] as const) {
     });
   });
 }
+
+Deno.test("a declared durable consumer without Event Subscribe rejects explicit ephemeral", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const identity = await runtime.registerService({
+      name: `consumer-only-${crypto.randomUUID()}`,
+      contract: participants.EventServiceConsumerOnly.participant,
+    });
+    const service = await TrellisService.connect({
+      trellisUrl: runtime.trellisUrl,
+      participant: participants.EventServiceConsumerOnly.participant,
+      seed: identity.seed,
+    }).orThrow();
+    try {
+      let failure: unknown;
+      try {
+        await service.onAlpha(() => {}, {}, { mode: "ephemeral" }).orThrow();
+      } catch (error) {
+        failure = error;
+      }
+      assertEquals(
+        failure instanceof AuthError,
+        true,
+        "explicit ephemeral without Event Subscribe must fail with a typed AuthError",
+      );
+      if (failure instanceof AuthError) {
+        assertStringIncludes(
+          String(failure.message),
+          "Event Subscribe",
+          "the failure names the missing authority",
+        );
+      }
+      // The default durable listener still works for the declared consumer.
+      await service.onAlpha(() => {}, {}, { mode: "durable", group: "events" })
+        .orThrow();
+    } finally {
+      await service.stop();
+    }
+  });
+});

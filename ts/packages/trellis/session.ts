@@ -1682,14 +1682,24 @@ type TrellisInternalOpts<TA extends RuntimeApi> = TrellisOpts<TA> & {
   inboxPrefix?: string;
   eventConsumers?: RuntimeEventConsumers;
   apiBindings?: Readonly<Record<string, unknown>>;
+  /**
+   * `event:<Name>` descriptor names this participant explicitly declares as
+   * subscribe needs. When present, explicit ephemeral delivery is allowed only
+   * for those events; the declared durable consumer never implies it.
+   */
+  ephemeralEventNeeds?: ReadonlySet<string>;
 };
 
 const internalEventConsumers = Symbol("trellis.internal.eventConsumers");
 const internalApiBindings = Symbol("trellis.internal.apiBindings");
+const internalEphemeralEventNeeds = Symbol(
+  "trellis.internal.ephemeralEventNeeds",
+);
 
 type InternalizedTrellisOpts<TA extends RuntimeApi> = TrellisOpts<TA> & {
   [internalEventConsumers]?: RuntimeEventConsumers;
   [internalApiBindings]?: Readonly<Record<string, unknown>>;
+  [internalEphemeralEventNeeds]?: ReadonlySet<string>;
 };
 
 /**
@@ -1710,6 +1720,7 @@ export function createTrellisInternal<
   const {
     eventConsumers,
     apiBindings,
+    ephemeralEventNeeds,
     inboxPrefix,
     ...publicOpts
   } = opts ?? {};
@@ -1717,6 +1728,7 @@ export function createTrellisInternal<
     ...publicOpts,
     [internalEventConsumers]: eventConsumers,
     [internalApiBindings]: apiBindings,
+    [internalEphemeralEventNeeds]: ephemeralEventNeeds,
   };
   return new Trellis<TA, TMode, TState>(
     name,
@@ -2496,6 +2508,7 @@ export class Trellis<
   #operationDeploymentId?: string;
   #eventConsumers: RuntimeEventConsumers;
   #apiBindings: Readonly<Record<string, unknown>>;
+  #ephemeralEventNeeds?: ReadonlySet<string>;
   #durableEventLoops = new Map<string, DurableEventConsumerLoop<TA>>();
   #durableEventListenersStopped = false;
   #feedClosers = new Set<() => void>();
@@ -2542,6 +2555,7 @@ export class Trellis<
     this.#stateMigrations = opts?.stateMigrations ?? {};
     this.#eventConsumers = internalOpts?.[internalEventConsumers] ?? {};
     this.#apiBindings = internalOpts?.[internalApiBindings] ?? {};
+    this.#ephemeralEventNeeds = internalOpts?.[internalEphemeralEventNeeds];
     this.connection = opts?.connection ??
       new TrellisConnection({ kind: "client" });
 
@@ -4351,7 +4365,7 @@ export class Trellis<
     subjectData: Record<string, unknown>,
     fn: EventCallback<EventOf<TA, E>>,
     opts?: EventOpts,
-  ): AsyncResult<void, ValidationError | UnexpectedError> {
+  ): AsyncResult<void, AuthError | ValidationError | UnexpectedError> {
     return AsyncResult.from((async () => {
       try {
         const eventName = event as EventsOf<TA>;
@@ -4371,6 +4385,26 @@ export class Trellis<
         if (isErr(subject)) return subject;
 
         if (opts?.mode === "ephemeral") {
+          // A declared durable consumer grants Consume authority only. Raw
+          // ephemeral observation needs its own Event Subscribe need; fail
+          // fast rather than sitting on a subscription the broker will not
+          // deliver to.
+          const need = (ctx as { descriptorName?: string }).descriptorName ??
+            `event:${eventName}`;
+          if (
+            this.#ephemeralEventNeeds !== undefined &&
+            !this.#ephemeralEventNeeds.has(need)
+          ) {
+            return err(
+              new AuthError({
+                reason: "insufficient_permissions",
+                message:
+                  `ephemeral event delivery for '${eventName}' requires an Event Subscribe authority; ` +
+                  "a declared consumer grants durable delivery only",
+                context: { event: String(eventName), requiredNeed: need },
+              }),
+            );
+          }
           return await this.#startEphemeralEvent(
             eventName,
             ctx,

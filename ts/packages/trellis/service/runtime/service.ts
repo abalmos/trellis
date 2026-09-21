@@ -1174,6 +1174,8 @@ export async function createConnectedService<
   contractKv: TKv;
   contractEventConsumers?: ContractEventConsumers;
   apiBindings?: Readonly<Record<string, unknown>>;
+  /** `event:<Name>` subscribe needs explicitly declared by this participant. */
+  ephemeralEventNeeds?: ReadonlySet<string>;
   runtime: TrellisServiceRuntimeCreateOpts<TOwnedApi, TTrellisApi>;
   bindings: ResourceBindings;
   availability: TrellisAvailability;
@@ -1280,6 +1282,7 @@ export async function createConnectedService<
         bindings: args.bindings.eventConsumers,
       },
       apiBindings: args.apiBindings,
+      ephemeralEventNeeds: args.ephemeralEventNeeds ?? new Set(),
       connection,
     },
   );
@@ -2828,6 +2831,7 @@ export function connectTrellisServiceWithRuntimeDeps<
           >,
           contractEventConsumers: contractRuntime.eventConsumers,
           apiBindings: bootstrap.binding.apiBindings,
+          ephemeralEventNeeds: participantEphemeralEventNeeds(args.participant),
           runtime,
           bindings: bootstrap.binding.resources,
           availability: participantAvailability(
@@ -2990,6 +2994,34 @@ export function connectTrellisServiceWithRuntimeDeps<
       );
     }
   })());
+}
+
+/**
+ * Collect the `event:<Name>` descriptor names this participant explicitly
+ * declares as subscribe needs. A declared durable consumer is not included:
+ * `Consume` and `Subscribe` are independent authorities.
+ */
+function participantEphemeralEventNeeds(
+  participant: unknown,
+): ReadonlySet<string> {
+  const needs = new Set<string>();
+  const uses = Reflect.get(participant as object, "uses");
+  if (!Array.isArray(uses)) return needs;
+  for (const entry of uses) {
+    const actions = Reflect.get(entry as object, "actions");
+    if (!Array.isArray(actions)) continue;
+    for (const action of actions) {
+      const descriptorName = Reflect.get(action as object, "descriptorName");
+      const direction = Reflect.get(action as object, "direction");
+      if (
+        direction === "subscribe" && typeof descriptorName === "string" &&
+        descriptorName.startsWith("event:")
+      ) {
+        needs.add(descriptorName);
+      }
+    }
+  }
+  return needs;
 }
 
 /** Connected session implementation backing the public service type. */
