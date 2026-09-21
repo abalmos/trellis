@@ -54,16 +54,20 @@ function rustFixtureCommand(bin: string): string[] {
 }
 
 /** Start the in-process TypeScript `liveprobe` provider used by V3 pairings. */
-async function startTsProvider(runtime: ProviderRuntime): Promise<
+async function startTsProvider(
+  runtime: ProviderRuntime,
+  replica?: { name: string; seed: string },
+): Promise<
   { stop: () => Promise<void>; exit: Promise<void> }
 > {
-  const identity = await runtime.registerService({
+  const identity = replica ?? await runtime.registerService({
     name: `live-probe-ts-${crypto.randomUUID()}`,
     contract: participants.LiveProbeProvider.participant,
   });
   const service = await TrellisService.connect({
     trellisUrl: runtime.trellisUrl,
     participant: participants.LiveProbeProvider.participant,
+    name: replica?.name,
     seed: identity.seed,
   }).orThrow();
   const keys = new Map<string, KeyState>();
@@ -596,6 +600,70 @@ Deno.test("T18 one failing live source leaves another session and an RPC functio
       await caller.connection.close();
       await provider.stop();
       await provider.exit;
+    }
+  });
+});
+
+Deno.test("T17 owner-directed controls route to the accepting replica", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const identity = await runtime.registerService({
+      name: `t17-replica-${crypto.randomUUID()}`,
+      contract: participants.LiveProbeProvider.participant,
+    });
+    // Two replicas of one selected deployment share the provider route.
+    const replicaA = await startTsProvider(runtime, {
+      name: `t17-a-${crypto.randomUUID()}`,
+      seed: identity.seed,
+    });
+    const replicaB = await startTsProvider(runtime, {
+      name: `t17-b-${crypto.randomUUID()}`,
+      seed: identity.seed,
+    });
+    const caller = await runtime.connectClient({
+      name: `t17-caller-${crypto.randomUUID()}`,
+      contract: participants.LiveProbeCaller.participant,
+    });
+    const runId = `t17-${crypto.randomUUID()}`;
+    try {
+      const feed = await caller.watch({ runId, streamId: "s" }).orThrow();
+      const frames: bigint[] = [];
+      const pump = (async () => {
+        for await (const frame of feed) frames.push(frame.index);
+      })();
+      // The owner-directed control must reach the replica that accepted the
+      // session for the released frame to arrive.
+      await runtime.waitFor(
+        async () =>
+          (await caller.inspect({ runId, streamId: "s" })).orThrow().active ===
+            1n,
+        { timeoutMs: 30_000 },
+      );
+      await caller.release({
+        runId,
+        streamId: "s",
+        throughIndex: 1n,
+        finish: true,
+        fail: false,
+      }).orThrow();
+      await runtime.waitFor(() => frames.length >= 1, { timeoutMs: 30_000 });
+      const end = await feed.closed;
+      assertEquals(end.reason, "complete", "one normal end");
+      await pump;
+      assertEquals(
+        frames,
+        [1n],
+        "the owner-directed control released the frame",
+      );
+      // A competing replica never answered with a session error.
+      assertEquals(
+        frames.includes(0n),
+        false,
+        "no spurious frame from a competing replica",
+      );
+    } finally {
+      await caller.connection.close();
+      await replicaA.stop();
+      await replicaB.stop();
     }
   });
 });
