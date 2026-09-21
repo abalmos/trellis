@@ -200,12 +200,16 @@ impl<'a, C> DeviceConnectOptions<'a, C> {
 }
 
 /// Whether an event subscription uses a durable or ephemeral JetStream consumer.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+///
+/// There is deliberately no `Default` implementation: an implicit delivery
+/// guarantee is easy to get wrong. Select the mode explicitly through
+/// [`EventSubscribeOptions::durable`] or [`EventSubscribeOptions::ephemeral`],
+/// or let a generated service API select the declared consumer binding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EventSubscriptionMode {
     /// Reuse a named durable consumer and retain delivery state across reconnects.
     Durable,
     /// Create an unnamed consumer that ends when the subscription is dropped.
-    #[default]
     Ephemeral,
 }
 
@@ -220,7 +224,12 @@ pub enum EventReplayPolicy {
 }
 
 /// Options for descriptor-backed event subscriptions.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+///
+/// Construct these with [`EventSubscribeOptions::durable`] or
+/// [`EventSubscribeOptions::ephemeral`]; there is intentionally no `Default`,
+/// so a delivery guarantee is always chosen explicitly. A generated or service
+/// API that already knows its declared consumer selects that consumer for you.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EventSubscribeOptions {
     /// JetStream stream that owns the event consumer. Defaults to the Trellis event stream.
     pub stream: Option<String>,
@@ -230,6 +239,44 @@ pub struct EventSubscribeOptions {
     pub replay: EventReplayPolicy,
     /// Optional durable name. Ignored for ephemeral subscriptions.
     pub durable_name: Option<String>,
+}
+
+impl EventSubscribeOptions {
+    /// Durable consumption from the named Trellis-provisioned consumer.
+    #[must_use]
+    pub fn durable(durable_name: impl Into<String>) -> Self {
+        Self {
+            stream: None,
+            mode: EventSubscriptionMode::Durable,
+            replay: EventReplayPolicy::New,
+            durable_name: Some(durable_name.into()),
+        }
+    }
+
+    /// Explicit ephemeral consumption; delivery state is not retained.
+    #[must_use]
+    pub fn ephemeral() -> Self {
+        Self {
+            stream: None,
+            mode: EventSubscriptionMode::Ephemeral,
+            replay: EventReplayPolicy::New,
+            durable_name: None,
+        }
+    }
+
+    /// Select the JetStream stream that owns the event consumer.
+    #[must_use]
+    pub fn with_stream(mut self, stream: impl Into<String>) -> Self {
+        self.stream = Some(stream.into());
+        self
+    }
+
+    /// Select the initial delivery position for a newly created consumer.
+    #[must_use]
+    pub fn with_replay(mut self, replay: EventReplayPolicy) -> Self {
+        self.replay = replay;
+        self
+    }
 }
 
 /// One descriptor-backed event message with explicit JetStream acknowledgement controls.
@@ -2221,6 +2268,20 @@ mod tests {
         let first = super::connection_runtime_auth().expect("runtime auth");
         let second = super::connection_runtime_auth().expect("runtime auth");
         assert_ne!(first.session_key, second.session_key);
+    }
+
+    #[test]
+    fn event_subscribe_options_require_an_explicit_delivery_mode() {
+        let durable = super::EventSubscribeOptions::durable("orders");
+        assert_eq!(durable.mode, super::EventSubscriptionMode::Durable);
+        assert_eq!(durable.durable_name.as_deref(), Some("orders"));
+        let ephemeral = super::EventSubscribeOptions::ephemeral();
+        assert_eq!(ephemeral.mode, super::EventSubscriptionMode::Ephemeral);
+        assert!(ephemeral.durable_name.is_none());
+        assert_eq!(
+            durable.with_replay(super::EventReplayPolicy::All).replay,
+            super::EventReplayPolicy::All,
+        );
     }
 
     #[test]
