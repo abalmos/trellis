@@ -46,3 +46,26 @@ Deno.test("NX10 failed setup releases the consumer permit", () => {
   assertEquals(live.isAvailable(), false);
   assertThrows(() => live.admitConsumer());
 });
+
+Deno.test("D4 manager fencing reaches every registered session and a late one", () => {
+  const live = new LiveSessionManager();
+  const fenced: string[] = [];
+  const session = (id: string) => ({
+    fence: () => fenced.push(id),
+    close: () => Promise.resolve(),
+  });
+  live.registerSession(session("a"));
+  live.registerSession(session("b"));
+  live.suspend();
+  assertEquals(fenced.sort(), ["a", "b"], "suspend fences every session");
+  // A registration racing a suspended generation is fenced immediately.
+  live.registerSession(session("late"));
+  assertEquals(fenced.includes("late"), true);
+  const generation = live.generation();
+  live.resume();
+  assertEquals(
+    live.generation(),
+    generation,
+    "resume keeps the generation after a fence",
+  );
+});

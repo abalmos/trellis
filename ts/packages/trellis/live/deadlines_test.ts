@@ -183,3 +183,31 @@ Deno.test("VT-timer dispose invalidates queued callbacks", () => {
   clock.advanceTo(C.openReservationMs);
   assertEquals(fired, 0);
 });
+
+Deno.test("T02 two distinct post-activation challenges are acknowledged in order", () => {
+  const d = LiveDeadlines.reserved(0);
+  d.beginActivating(0, "activation");
+  d.commitActive(0, true);
+  const nonces: string[] = [];
+  let now = 0;
+  // Walk logical time until two separate heartbeat challenges have been issued
+  // and answered; each carries a distinct nonce identity.
+  while (nonces.length < 2 && now < C.heartbeatIntervalMs * 4 + 1_000) {
+    if (d.evaluate(now) === "challenge_due") {
+      const nonce = `challenge-${nonces.length}`;
+      d.beginChallenge(now, nonce);
+      const outstanding = d.outstandingChallenge();
+      assertEquals(outstanding, nonce, "the outstanding challenge identity");
+      nonces.push(outstanding!);
+      d.freshRoundTrip(now, true);
+      assertEquals(
+        d.outstandingChallenge(),
+        undefined,
+        "answering clears the outstanding challenge",
+      );
+    }
+    now += 1_000;
+  }
+  assertEquals(nonces, ["challenge-0", "challenge-1"]);
+  assertEquals(d.phase, "active");
+});

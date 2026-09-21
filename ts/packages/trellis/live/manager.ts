@@ -167,18 +167,16 @@ export class LiveSessionManager {
   /** Register one owned endpoint session and return its deregistration. */
   registerSession(session: ManagedSession): () => void {
     let registered = true;
-    const stop = (): void => {
-      session.fence();
-    };
-    this.#sessions.set(session, stop);
-    if (this.#stopped || this.#suspended) {
-      session.fence();
-    }
-    return () => {
+    const deregister = (): void => {
       if (!registered) return;
       registered = false;
       this.#sessions.delete(session);
     };
+    this.#sessions.set(session, deregister);
+    if (this.#stopped || this.#suspended) {
+      session.fence();
+    }
+    return deregister;
   }
 
   /** Record one bounded, expiring closed-session receipt. */
