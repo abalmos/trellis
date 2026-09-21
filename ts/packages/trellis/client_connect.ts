@@ -784,7 +784,8 @@ async function recoverClientBootstrapWithRetry(args: {
     };
   }
 
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+  let attempts = 0;
+  while (true) {
     const attemptStartedAt = performance.now();
     const requestStartedAtMs = args.deps.now();
     try {
@@ -855,25 +856,26 @@ async function recoverClientBootstrapWithRetry(args: {
       }
       if (
         error instanceof AuthorizationContextRefreshError &&
-        attempt < 9
+        error.code === "resource_pending"
       ) {
         await new Promise((resolve) => setTimeout(resolve, 100));
         continue;
       }
-      if (attempt === 0) {
+      if (
+        error instanceof AuthorizationContextRefreshError &&
+        attempts < 9
+      ) {
+        attempts += 1;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        continue;
+      }
+      if (attempts === 0) {
+        attempts += 1;
         continue;
       }
       throw error;
     }
   }
-
-  throw createTransportError({
-    code: "trellis.bootstrap.time_sync_failed",
-    message: "Trellis could not confirm the client time window.",
-    hint:
-      "Retry the connection. If it keeps happening, check the client and Trellis clocks.",
-    context: { trellisUrl: args.trellisUrl },
-  });
 }
 
 async function createRuntimeUserAuthenticator(args: {
