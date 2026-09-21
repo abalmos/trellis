@@ -491,7 +491,7 @@ Deno.test("TS service connection observes usable, suspended, resumed, and dispos
   });
 });
 
-Deno.test("TS Feed active and end observations balance across normal and early close", async () => {
+Deno.test("TS Feed telemetry derives exact per-side deltas from one owner", async () => {
   const capture = ensureCapture();
   try {
     await withTrellisRuntime(async (runtime) => {
@@ -506,14 +506,13 @@ Deno.test("TS Feed active and end observations balance across normal and early c
         seed: identity.seed,
       }).orThrow();
       const serviceExit = service.wait().catch((error: unknown) => error);
-      let closed = 0;
-      await service.handleWatch(async ({ emit, signal }) => {
-        let frame = 0;
-        while (!signal.aborted) {
-          await emit({ value: `owner-feed-${++frame}` }).orThrow();
-          await new Promise((resolve) => setTimeout(resolve, 25));
+      let sourceEnds = 0;
+      await service.handleWatch(async ({ emit }) => {
+        // A finite source returns normally so the consumer sees a normal END.
+        for (let frame = 1; frame <= 3; frame++) {
+          await emit({ value: `owner-feed-${frame}` }).orThrow();
         }
-        closed += 1;
+        sourceEnds += 1;
       });
       const client = await runtime.connectClient({
         name: "feed-owner-caller",
@@ -521,48 +520,82 @@ Deno.test("TS Feed active and end observations balance across normal and early c
       });
       try {
         await capture.flush();
-        const before = capture.total("trellis.feed.ends");
-        const natural = await client.watch({}).orThrow();
-        const iterator = natural[Symbol.asyncIterator]();
+        const before = {
+          clientEnds: capture.total("trellis.feed.ends", {
+            "trellis.side": "client",
+          }),
+          serverEnds: capture.total("trellis.feed.ends", {
+            "trellis.side": "server",
+          }),
+          clientActive: capture.total("trellis.feed.active", {
+            "trellis.side": "client",
+          }),
+          liveConsumerEnds: capture.total("trellis.live.ends", {
+            "trellis.kind": "feed",
+            "trellis.side": "consumer",
+          }),
+        };
+
+        // 1. Normal EOF: consume every value and the normal END.
+        const normal = await client.watch({}).orThrow();
+        const seen: unknown[] = [];
+        for await (const value of normal) seen.push(value);
+        // Reaching the end of the loop without return/cancel is the normal
+        // source EOF proof.
+        assertEquals(seen.length, 3);
+
+        // 2. Local cancellation after one value.
+        const cancelled = await client.watch({}).orThrow();
+        const iterator = cancelled[Symbol.asyncIterator]();
         await iterator.next();
         await iterator.return?.();
-        await runtime.waitFor(() => closed >= 1);
-        const earlyAbort = new AbortController();
-        const early = await client.watch({}, { signal: earlyAbort.signal })
-          .orThrow();
-        await early[Symbol.asyncIterator]().next();
-        earlyAbort.abort();
-        await runtime.waitFor(() => closed >= 2);
+
+        // 3. Prepared cancellation before the first next(): no
+        // active/end pair, but one live end still applies.
+        const prepared = await client.watch({}).orThrow();
+        await prepared[Symbol.asyncIterator]().return?.();
+
         await runtime.waitFor(async () => {
           await capture.flush();
-          return capture.total("trellis.feed.ends") >= before + 2;
-        }, { timeoutMs: 30_000 });
-        // Return before any next(): a never-iterated handle must release local
-        // ownership and record one client end without starting provider work.
-        const neverStarted = await client.watch({}).orThrow();
-        await neverStarted[Symbol.asyncIterator]().return?.();
-        await runtime.waitFor(async () => {
-          await capture.flush();
-          return capture.total("trellis.feed.ends") >= before + 3;
+          return capture.total("trellis.feed.ends", {
+                "trellis.side": "client",
+              }) >= before.clientEnds + 2 &&
+            capture.total("trellis.feed.ends", {
+                "trellis.side": "server",
+              }) >= before.serverEnds + 2 &&
+            capture.total("trellis.live.ends", {
+                "trellis.kind": "feed",
+                "trellis.side": "consumer",
+              }) >= before.liveConsumerEnds + 3;
         }, { timeoutMs: 30_000 });
         await capture.flush();
+
+        assertEquals(sourceEnds, 2);
         assertEquals(
           capture.total("trellis.feed.ends", {
             "trellis.side": "client",
-          }) >= 3,
-          true,
+          }) - before.clientEnds,
+          2,
         );
         assertEquals(
           capture.total("trellis.feed.ends", {
             "trellis.side": "server",
-          }) >= 2,
-          true,
+          }) - before.serverEnds,
+          2,
         );
+        assertEquals(
+          capture.total("trellis.live.ends", {
+            "trellis.kind": "feed",
+            "trellis.side": "consumer",
+          }) - before.liveConsumerEnds,
+          3,
+        );
+        // No active Feed projection remains once every handle settled.
         assertEquals(
           capture.total("trellis.feed.active", {
             "trellis.side": "client",
-          }) > 0,
-          false,
+          }),
+          before.clientActive,
         );
       } finally {
         await client.connection.close();
