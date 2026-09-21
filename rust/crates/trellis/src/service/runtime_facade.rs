@@ -1279,6 +1279,12 @@ impl<C> ConnectedServiceRuntime<C> {
     /// Run registered subjects using the default NATS request loop.
     pub async fn run(self) -> Result<(), ServiceRuntimeError> {
         self.router.recover_operations().await?;
+        // A live-capable router must be given its connection's provider owner
+        // before it serves any traffic; fail before readiness, not at the first
+        // caller.
+        self.router
+            .require_live_owner()
+            .map_err(ServiceRuntimeError::from)?;
         let mut event_failures = self.event_failure_receiver;
         let subjects = self.registered_subjects.into_iter().collect::<Vec<_>>();
         let job_hosts = self.job_hosts;
