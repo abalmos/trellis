@@ -47,6 +47,10 @@ where
         self.handler.is_unary_rpc_route(subject)
     }
 
+    fn is_live_route(&self, subject: &str) -> bool {
+        self.handler.is_live_route(subject)
+    }
+
     fn handle<'a>(
         &'a self,
         subject: &'a str,

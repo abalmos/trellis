@@ -380,6 +380,26 @@ export function toVerifierPermission(
   };
 }
 
+/**
+ * How many live openings one route may verify concurrently before it sheds
+ * excess unverified requests.
+ */
+const MAX_PENDING_OPENINGS = 64;
+
+/**
+ * Whether one reply destination is provably inside the verified caller's inbox.
+ *
+ * Live openings must never reflect a denial, validation error, or offer onto a
+ * destination outside this prefix.
+ */
+function callerOwnsReply(
+  reply: string | undefined,
+  inboxPrefix: string,
+): boolean {
+  if (!reply || !inboxPrefix) return false;
+  return reply === inboxPrefix || reply.startsWith(`${inboxPrefix}.`);
+}
+
 function toVerifiedCaller(
   contextDigest: string,
   projection: VerifiedAuthorizationContextTokenProjection["context"],
@@ -3460,14 +3480,21 @@ export class Trellis<
     this.#tasks.add(
       `feed:${feed}`,
       AsyncResult.try(async () => {
+        // Admission bound before any verification work is spawned: an unbounded
+        // set of attacker-supplied openings must not create unbounded tasks.
+        let inFlight = 0;
         for await (const msg of sub) {
+          if (inFlight >= MAX_PENDING_OPENINGS) continue;
+          inFlight += 1;
           void this.#acceptLiveFeedOpen(
             feed,
             descriptor,
             msg,
             handler,
             provider,
-          );
+          ).finally(() => {
+            inFlight -= 1;
+          });
         }
       }),
     );
@@ -3509,7 +3536,25 @@ export class Trellis<
     ) => unknown | Promise<unknown>,
     provider: LiveFeedProvider,
   ): Promise<void> {
+    let replyOwned = false;
     try {
+      const caller = await this.#authenticateFeedRequest({
+        msg,
+        permission: descriptor.permission,
+        requiredCapabilities: descriptor.subscribeCapabilities,
+      });
+      const callerValue = caller.take();
+      if (isErr(callerValue) || callerValue.type !== "verified") {
+        // An unverified caller cannot prove its reply destination, so it gets
+        // no denial, validation error, or offer on any subject.
+        return;
+      }
+      if (!callerOwnsReply(msg.reply, callerValue.inboxPrefix)) {
+        // Never disclose to or reflect onto a destination outside the verified
+        // caller's inbox prefix.
+        return;
+      }
+      replyOwned = true;
       const opening = parseLiveOpen(msg.data);
       if (!opening) {
         this.#respondWithError(
@@ -3520,23 +3565,6 @@ export class Trellis<
             hint: "Use the live Feed client.",
             context: { feed },
           }),
-        );
-        return;
-      }
-      const caller = await this.#authenticateFeedRequest({
-        msg,
-        permission: descriptor.permission,
-        requiredCapabilities: descriptor.subscribeCapabilities,
-      });
-      const callerValue = caller.take();
-      if (isErr(callerValue)) {
-        this.#respondWithError(msg, callerValue.error);
-        return;
-      }
-      if (callerValue.type !== "verified") {
-        this.#respondWithError(
-          msg,
-          new AuthError({ reason: "feed_creator_identity_required" }),
         );
         return;
       }
@@ -3587,6 +3615,7 @@ export class Trellis<
         },
       );
     } catch (cause) {
+      if (!replyOwned) return;
       const error = annotateHandlerBoundaryError(cause, {
         feed,
         requestId: msg.headers?.get("request-id"),

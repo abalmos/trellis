@@ -22,6 +22,8 @@ export type ClosedReceipt = {
   readonly reason: string;
   readonly cleanup: "complete" | "incomplete";
   readonly finalSeq: string;
+  readonly receivedSeq: string;
+  readonly consumedSeq: string;
   readonly expiresAtMs: number;
 };
 

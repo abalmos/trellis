@@ -342,6 +342,12 @@ impl Router {
         self.route(subject).is_some_and(|route| route.unary_rpc)
     }
 
+    /// Whether one registered subject is a live observation opening or
+    /// lifecycle-control route.
+    pub(crate) fn is_live_route(&self, subject: &str) -> bool {
+        self.route(subject).is_some_and(|route| route.live)
+    }
+
     fn descriptor_name(&self, name: &str) -> String {
         name.split_once('.')
             .map_or(name, |(_, action)| action)

@@ -183,6 +183,14 @@ pub trait RequestHandler: Send + Sync {
         self.route_token(subject).is_some()
     }
 
+    /// Whether one inbound subject is a registered live observation route.
+    ///
+    /// The no-reflection admission rule is selected from the registered route
+    /// surface, never from attacker-controlled payload bytes.
+    fn is_live_route(&self, _subject: &str) -> bool {
+        false
+    }
+
     fn handle<'a>(
         &'a self,
         subject: &'a str,
@@ -244,6 +252,10 @@ impl RequestHandler for Router {
         Router::is_unary_rpc_route(self, subject)
     }
 
+    fn is_live_route(&self, subject: &str) -> bool {
+        Router::is_live_route(self, subject)
+    }
+
     fn handle<'a>(
         &'a self,
         subject: &'a str,
@@ -285,6 +297,10 @@ where
 
     fn is_unary_rpc_route(&self, subject: &str) -> bool {
         AuthenticatedRouter::is_unary_rpc_route(self, subject)
+    }
+
+    fn is_live_route(&self, subject: &str) -> bool {
+        AuthenticatedRouter::is_live_route(self, subject)
     }
 
     fn handle<'a>(
@@ -818,13 +834,13 @@ impl HandlerResponse {
     }
 }
 
-/// Whether one live opening's error must be dropped without any reply.
+/// Whether one live route's dispatch error must be dropped without any reply.
 ///
 /// The plan forbids reflecting a denial onto a reply that is not provably the
 /// authenticated caller's inbox. Unverified, missing-proof, and foreign-reply
 /// openings are therefore dropped silently; only setup errors for an already
-/// authorized opening are answered.
-fn is_dropped_live_open_denial(error: &ServerError) -> bool {
+/// authorized opening are answered by the ordinary error publisher.
+fn is_dropped_live_denial(error: &ServerError) -> bool {
     matches!(
         error,
         ServerError::RequestDenied { .. }
@@ -864,7 +880,7 @@ where
 {
     let registered_route = handler.route_token(&request.subject);
     let route = registered_route.unwrap_or_else(instruments::unknown_route);
-    let live_open = super::live_router::is_live_open_body(&request.payload);
+    let live_route = handler.is_live_route(&request.subject);
     let mut unary = (handler.is_unary_rpc_route(&request.subject) && request.reply_to.is_some())
         .then(|| UnaryRequest::start(&request.context, route));
     let reply_to = request.reply_to;
@@ -884,7 +900,7 @@ where
                 .collect()
         })),
         Err(error) => match reply_to {
-            Some(reply_to) if !live_open || !is_dropped_live_open_denial(&error) => {
+            Some(reply_to) if !live_route || !is_dropped_live_denial(&error) => {
                 Ok(Some(vec![encode_error_reply_with_context(
                     reply_to,
                     &error,
@@ -911,7 +927,7 @@ where
 {
     let registered_route = handler.route_token(&request.subject);
     let route = registered_route.unwrap_or_else(instruments::unknown_route);
-    let live_open = super::live_router::is_live_open_body(&request.payload);
+    let live_route = handler.is_live_route(&request.subject);
     let mut unary = handler
         .is_unary_rpc_route(&request.subject)
         .then(|| UnaryRequest::start(&request.context, route));
@@ -942,7 +958,7 @@ where
     let (response, outcome) = match result {
         Ok(response) => (response, dispatch),
         Err(error) => {
-            if live_open && is_dropped_live_open_denial(&error) {
+            if live_route && is_dropped_live_denial(&error) {
                 // A live opening whose reply is not provably the caller's inbox
                 // must not receive a reflected denial on an unverified subject.
                 if let Some(unary) = &mut unary {
@@ -1469,6 +1485,7 @@ mod tests {
     const DECLARED_ROUTE: &str = "test@v1:Route.Declared";
     const DENIED_ROUTE: &str = "test@v1:Route.Denied";
     const LIVE_ROUTE: &str = "test@v1:Route.Live";
+    const PLAIN_ROUTE: &str = "test@v1:Route.Plain";
     const PANIC_ROUTE: &str = "test@v1:Route.Panic";
     const ENVELOPE_ROUTE: &str = "test@v1:Route.Envelope";
 
@@ -1478,6 +1495,7 @@ mod tests {
             "test.declared" => Some(DECLARED_ROUTE),
             "test.denied" => Some(DENIED_ROUTE),
             "test.live" => Some(LIVE_ROUTE),
+            "test.plain" => Some(PLAIN_ROUTE),
             "test.panic" => Some(PANIC_ROUTE),
             "test.envelope" => Some(ENVELOPE_ROUTE),
             _ => None,
@@ -1489,6 +1507,10 @@ mod tests {
     impl RequestHandler for DeniedHandler {
         fn route_token(&self, subject: &str) -> Option<&'static str> {
             route_token_for(subject)
+        }
+
+        fn is_live_route(&self, subject: &str) -> bool {
+            subject == "test.live"
         }
 
         fn handle<'a>(
@@ -1641,9 +1663,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn denied_live_open_is_dropped_without_a_reflected_reply() {
+    async fn denied_live_route_is_dropped_without_a_reflected_reply() {
         let host = test_service_host(DeniedHandler);
-        // A live opening body forces the live route discriminator.
+        // A registered live route is dropped regardless of the payload shape, so
+        // a malformed/nested opening cannot slip past a body discriminator.
         let mut request = test_request("test.live");
         request.payload = Bytes::from_static(
             br#"{"format":"trellis.live.v1","type":"open","openId":"c29tZS1ub25jZS0xNg","receiveMaxPayloadBytes":1048576,"input":{}}"#,
@@ -1653,11 +1676,18 @@ mod tests {
             .expect("dispatch should not fail");
         assert!(
             dropped.is_none(),
-            "a denied live opening must be dropped without a reflected reply"
+            "a denied live route must be dropped without a reflected reply"
+        );
+        let dropped_malformed = dispatch_all(&host, test_request("test.live"))
+            .await
+            .expect("dispatch should not fail");
+        assert!(
+            dropped_malformed.is_none(),
+            "a live route denial is dropped even for a non-opening payload"
         );
 
-        // An ordinary denied request keeps its encoded error reply.
-        let replies = dispatch_all(&host, test_request("test.live"))
+        // An ordinary denied non-live request keeps its encoded error reply.
+        let replies = dispatch_all(&host, test_request("test.plain"))
             .await
             .expect("dispatch should not fail")
             .expect("an ordinary denial still replies");

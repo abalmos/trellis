@@ -1235,21 +1235,33 @@ impl TrellisClient {
             allow_insecure_origin,
         )?);
         let mut retry_delay = Duration::from_millis(100);
-        loop {
-            match contexts.refresh(&auth).await {
-                Err(TrellisClientError::BootstrapHttp { code, .. })
-                    if kind == trellis_protocol::AuthorizationPrincipalKind::Service
-                        && code == "resource_pending" =>
-                {
-                    tokio::time::sleep(retry_delay).await;
-                    retry_delay = (retry_delay * 2).min(Duration::from_secs(1));
-                }
-                result => {
-                    result?;
-                    break;
+        // The pending window is bounded by the connect budget: a service whose
+        // resources never materialize fails as retryable-unavailable instead of
+        // retrying forever or hiding behind a credential error.
+        tokio::time::timeout(Duration::from_millis(timeout_ms), async {
+            loop {
+                match contexts.refresh(&auth).await {
+                    Err(TrellisClientError::BootstrapHttp { code, .. })
+                        if kind == trellis_protocol::AuthorizationPrincipalKind::Service
+                            && code == "resource_pending" =>
+                    {
+                        tokio::time::sleep(retry_delay).await;
+                        retry_delay = (retry_delay * 2).min(Duration::from_secs(1));
+                    }
+                    result => {
+                        result?;
+                        break;
+                    }
                 }
             }
-        }
+            Ok::<(), TrellisClientError>(())
+        })
+        .await
+        .map_err(|_| {
+            TrellisClientError::AuthorizationUnavailable(
+                "native bootstrap resource materialization exceeded the connect budget".to_owned(),
+            )
+        })??;
         let authorization: ServiceBootstrapAuthorization =
             serde_json::from_value(contexts.state_snapshot()?.authorization.ok_or_else(|| {
                 TrellisClientError::Bootstrap("native bootstrap omitted resource evidence".into())

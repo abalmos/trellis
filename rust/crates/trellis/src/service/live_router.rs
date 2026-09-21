@@ -821,16 +821,6 @@ pub(crate) fn data_subject(
     derive_live_data_subject(provider_connection_id, consumer_connection_id, session_id)
 }
 
-/// Return whether one parsed opening body is a live open envelope.
-#[must_use]
-pub(crate) fn is_live_open_body(payload: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(payload).is_ok_and(|value| {
-        value.get("format").and_then(|format| format.as_str())
-            == Some(trellis_protocol::LIVE_VERSION)
-            && value.get("type").and_then(|kind| kind.as_str()) == Some("open")
-    })
-}
-
 /// Map one authority loss into a setup rejection.
 #[must_use]
 #[expect(dead_code, reason = "authority mapping for live route diagnostics")]

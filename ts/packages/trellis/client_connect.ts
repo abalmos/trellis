@@ -776,6 +776,8 @@ async function recoverClientBootstrapWithRetry(args: {
   deps: ClientConnectDeps;
   offsetState: ClockOffsetState;
   onTerminalSession?: () => Promise<void>;
+  bootstrapTimeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<ClientBootstrapResponse> {
   if (!args.identity.sessionId) {
     return {
@@ -785,7 +787,19 @@ async function recoverClientBootstrapWithRetry(args: {
   }
 
   let attempts = 0;
+  // The pending window is bounded by the connect budget; a service whose
+  // resources never materialize fails as the retryable pending error rather
+  // than looping forever or disguising itself as bad credentials.
+  const deadlineMs = performance.now() + (args.bootstrapTimeoutMs ?? 30_000);
   while (true) {
+    if (args.signal?.aborted) {
+      throw createTransportError({
+        code: "trellis.bootstrap.aborted",
+        message: "Trellis client bootstrap was aborted.",
+        hint: "Retry the connection when the caller is ready.",
+        context: { trellisUrl: args.trellisUrl },
+      });
+    }
     const attemptStartedAt = performance.now();
     const requestStartedAtMs = args.deps.now();
     try {
@@ -858,6 +872,7 @@ async function recoverClientBootstrapWithRetry(args: {
         error instanceof AuthorizationContextRefreshError &&
         error.code === "resource_pending"
       ) {
+        if (performance.now() >= deadlineMs) throw error;
         await new Promise((resolve) => setTimeout(resolve, 100));
         continue;
       }
@@ -1125,6 +1140,8 @@ export async function connectClientWithDeps<
         cache: authorizationContexts,
         deps,
         offsetState,
+        bootstrapTimeoutMs: args.timeout,
+        signal: args.signal,
       });
     } catch (error) {
       if (currentUrl && isExpiredBindError(error)) {
@@ -1143,6 +1160,8 @@ export async function connectClientWithDeps<
       cache: authorizationContexts,
       deps,
       offsetState,
+      bootstrapTimeoutMs: args.timeout,
+      signal: args.signal,
       onTerminalSession: async () => {
         if (
           browserInstallation &&
@@ -1711,6 +1730,8 @@ async function resolveAuthRequired<
       cache,
       deps,
       offsetState,
+      bootstrapTimeoutMs: args.timeout,
+      signal: args.signal,
     });
   }
 

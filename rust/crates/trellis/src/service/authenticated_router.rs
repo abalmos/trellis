@@ -132,6 +132,11 @@ where
         self.router.is_unary_rpc_route(subject)
     }
 
+    /// Whether one subject is a registered live observation route.
+    pub(crate) fn is_live_route(&self, subject: &str) -> bool {
+        self.router.is_live_route(subject)
+    }
+
     #[doc = concat!("Trellis API operation `", stringify!(new), "`.")]
     pub fn new(router: Router, validator: V) -> Self {
         Self {

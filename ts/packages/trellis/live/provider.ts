@@ -159,6 +159,7 @@ class ProviderSessionRecord {
   highestReceived = 0n;
   sourceStarted = false;
   endPublished = false;
+  terminal: LiveEnd | undefined;
   readonly abort = new AbortController();
   emitInFlight = false;
   closed = false;
@@ -170,6 +171,8 @@ class ProviderSessionRecord {
   creditWaiter: (() => void) | undefined;
   closeSettled = false;
   permit: { [Symbol.dispose](): void } | undefined;
+  deregister: (() => void) | undefined;
+  lane: Promise<void> = Promise.resolve();
   startSource: () => void = () => {};
   readonly telemetry: LiveTelemetryOwner;
 
@@ -266,6 +269,25 @@ export class LiveFeedProvider {
     return run;
   }
 
+  /**
+   * Run one session-scoped publication under that session's own lane.
+   *
+   * A blocked source or signing wait for one session must never delay another
+   * session's liveness or controls. Only bounded route-level verification and
+   * receipt handling share the route lane.
+   */
+  #withSessionLane<U>(
+    record: ProviderSessionRecord,
+    work: () => Promise<U>,
+  ): Promise<U> {
+    const run = record.lane.then(work, work);
+    record.lane = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
   /** Return the guard's current own-context digest, never a frozen copy. */
   #ownDigest(): string {
     return this.#host.ownGuard.contextDigest;
@@ -295,6 +317,10 @@ export class LiveFeedProvider {
     }) => Promise<void>,
     kind: LiveSessionKind = "feed",
   ): Promise<void> {
+    // An opening without a reply destination cannot hand off an offer.
+    if (!msg.reply) return;
+    // Validate the shared opening bound before any resource is allocated.
+    const maxDataBodyBytes = this.#negotiate(open.receiveMaxPayloadBytes);
     const sessionId = liveGenerateNonce();
     const callerGuard = await this.#host.retainCallerAuthority(
       caller.contextDigest,
@@ -311,18 +337,26 @@ export class LiveFeedProvider {
       callerGuard.release();
       throw cause;
     }
-    const record = new ProviderSessionRecord(
-      sessionId,
-      open.openId,
-      kind,
-      baseSubject,
-      this.#host.identity.connectionId,
-      caller,
-      callerGuard,
-      this.#clock,
-      () => void this.#onDue(record),
-    );
+    let record: ProviderSessionRecord;
+    try {
+      record = new ProviderSessionRecord(
+        sessionId,
+        open.openId,
+        kind,
+        baseSubject,
+        this.#host.identity.connectionId,
+        caller,
+        callerGuard,
+        this.#clock,
+        () => void this.#onDue(record),
+      );
+    } catch (cause) {
+      permit[Symbol.dispose]();
+      callerGuard.release();
+      throw cause;
+    }
     record.permit = permit;
+    record.maxDataBodyBytes = maxDataBodyBytes;
     record.startSource = () => {
       if (record.sourceStarted || record.phase === "closed") return;
       record.sourceStarted = true;
@@ -331,16 +365,15 @@ export class LiveFeedProvider {
       void this.#runSource(record, startSource);
     };
     this.#sessions.set(sessionId, record);
-    this.#host.manager.registerSession({
+    record.deregister = this.#host.manager.registerSession({
       fence: () => this.#fence(record),
       close: async () => {
         await this.#terminate(record, new LiveEnd("local_shutdown"));
       },
     });
-    const maxDataBodyBytes = this.#negotiate(
-      open.receiveMaxPayloadBytes,
-    );
-    record.maxDataBodyBytes = maxDataBodyBytes;
+    // Arm the reservation deadline before any externally interruptible handoff
+    // so a stalled or failed offer still enters owned teardown.
+    this.#armTimer(record);
     const offer: LiveOfferWire = {
       format: LIVE_VERSION,
       type: "offer",
@@ -377,12 +410,17 @@ export class LiveFeedProvider {
         consumerStallMs: C.consumerStallMs,
       },
     };
-    if (!msg.reply) return;
-    await this.#withLane(() =>
-      this.#publishSigned(msg.reply!.toString(), jsonBytes(offer))
-    );
-    // Arm the reservation deadline; the timer owns all policy afterwards.
-    this.#armTimer(record);
+    try {
+      await this.#withSessionLane(
+        record,
+        () => this.#publishSigned(msg.reply!.toString(), jsonBytes(offer)),
+      );
+    } catch (cause) {
+      // A failed handoff must enter owned teardown, never leave an untimed
+      // record holding admission.
+      await this.#terminate(record, new LiveEnd("cancelled"));
+      throw cause;
+    }
   }
 
   /**
@@ -503,8 +541,9 @@ export class LiveFeedProvider {
         requestId,
         result.code,
       );
-      await this.#withLane(() =>
-        this.#tryPublishSigned(msg.reply!.toString(), jsonBytes(error))
+      await this.#withSessionLane(
+        record,
+        () => this.#tryPublishSigned(msg.reply!.toString(), jsonBytes(error)),
       );
       return;
     }
@@ -515,8 +554,9 @@ export class LiveFeedProvider {
       return;
     }
     const ack = this.#ackBody(record, control, requestId, outcome);
-    const published = await this.#withLane(() =>
-      this.#tryPublishSigned(msg.reply!.toString(), jsonBytes(ack))
+    const published = await this.#withSessionLane(
+      record,
+      () => this.#tryPublishSigned(msg.reply!.toString(), jsonBytes(ack)),
     );
     if (!published) {
       await this.#terminate(
@@ -669,7 +709,19 @@ export class LiveFeedProvider {
         if (!this.#validateCredit(record, control)) {
           return { code: "invalid_cursor" };
         }
+        if (control.action === "end-ack") {
+          // Only an acknowledgement of the END already published is valid; it
+          // must not invent or overwrite the committed terminal reason.
+          if (!record.endPublished) {
+            return { code: "invalid_request" };
+          }
+          const acked = control.receivedSeq ? BigInt(control.receivedSeq) : 0n;
+          if (acked !== record.highestSent) {
+            return { code: "invalid_cursor" };
+          }
+        }
         this.#applyCredit(record, control);
+        record.terminal ??= new LiveEnd("cancelled");
         record.phase = "closing";
         record.telemetry.closing();
         record.deadlines.beginClosing(nowMs);
@@ -677,7 +729,7 @@ export class LiveFeedProvider {
         this.#armTimer(record);
         return {
           state: "closed",
-          terminal: new LiveEnd("cancelled"),
+          terminal: record.terminal,
           cleanup: null,
           challenge: undefined,
           startSource: false,
@@ -813,8 +865,8 @@ export class LiveFeedProvider {
       requestId,
       action: control.action,
       state: "closed",
-      acceptedReceivedSeq: receipt.finalSeq,
-      acceptedConsumedSeq: receipt.finalSeq,
+      acceptedReceivedSeq: receipt.receivedSeq,
+      acceptedConsumedSeq: receipt.consumedSeq,
       terminal: {
         reason: receipt.reason,
         error: null,
@@ -929,7 +981,10 @@ export class LiveFeedProvider {
       challengeId: challenge.id,
       lastSentSeq: challenge.lastSentSeq,
     });
-    await this.#withLane(() => this.#tryPublishFrame(record, body));
+    await this.#withSessionLane(
+      record,
+      () => this.#tryPublishFrame(record, body, "control"),
+    );
   }
 
   async #publishSigned(
@@ -956,17 +1011,33 @@ export class LiveFeedProvider {
   async #tryPublishFrame(
     record: ProviderSessionRecord,
     body: Uint8Array,
+    frameClass: "data" | "control",
   ): Promise<boolean> {
-    if (record.closed || record.phase === "closed") return false;
+    if (this.#publicationBlocked(record, frameClass)) return false;
     try {
       const headers = await this.#liveHeaders(record.dataSubject, body);
-      if (record.closed) return false;
+      // Final transport admission after the awaited signature: the fence,
+      // phase, cancellation, or authority may have moved while signing.
+      if (this.#publicationBlocked(record, frameClass)) return false;
       this.#host.nats.publish(record.dataSubject, body, { headers });
-      record.telemetry.frame("data", "send");
+      record.telemetry.frame(frameClass, "send");
       return true;
     } catch {
       return false;
     }
+  }
+
+  /** Whether one frame may still enter transport for this session. */
+  #publicationBlocked(
+    record: ProviderSessionRecord,
+    frameClass: "data" | "control",
+  ): boolean {
+    if (record.closed) return true;
+    if (frameClass === "control") return false;
+    if (record.phase !== "active" || record.abort.signal.aborted) return true;
+    return Boolean(
+      this.#host.ownGuard.checkNow() || record.callerGuard.checkNow(),
+    );
   }
 
   async #liveHeaders(
@@ -1099,8 +1170,9 @@ export class LiveFeedProvider {
           throw new LiveStreamError("cancelled", "live session was cancelled");
         }
       }
-      const published = await this.#withLane(() =>
-        this.#tryPublishFrame(record, body)
+      const published = await this.#withSessionLane(
+        record,
+        () => this.#tryPublishFrame(record, body, "data"),
       );
       if (!published) {
         throw new LiveStreamError("source_failed", "live publication failed");
@@ -1122,20 +1194,24 @@ export class LiveFeedProvider {
     end: LiveEnd,
   ): Promise<boolean> {
     if (record.endPublished) return true;
+    // The first committed terminal is authoritative; a later source or control
+    // completion never overwrites it.
+    const committed = record.terminal ??= end;
     const body = jsonBytes({
       format: LIVE_VERSION,
       type: "end",
       sessionId: record.sessionId,
       finalSeq: record.highestSent.toString(),
       terminal: {
-        reason: end.reason,
-        error: end.error
-          ? { code: end.error.code, message: end.error.message }
+        reason: committed.reason,
+        error: committed.error
+          ? { code: committed.error.code, message: committed.error.message }
           : null,
       },
     });
-    const published = await this.#withLane(() =>
-      this.#tryPublishFrame(record, body)
+    const published = await this.#withSessionLane(
+      record,
+      () => this.#tryPublishFrame(record, body, "control"),
     );
     if (!published) return false;
     record.endPublished = true;
@@ -1148,6 +1224,7 @@ export class LiveFeedProvider {
   /** Fence one session without awaiting any cleanup. */
   #fence(record: ProviderSessionRecord): void {
     if (record.closed) return;
+    if (record.phase !== "closing") record.phase = "closing";
     record.abort.abort();
     record.wakeCredit();
   }
@@ -1167,29 +1244,34 @@ export class LiveFeedProvider {
       };
     }
     this.#fence(record);
-    if (!record.endPublished && end.reason !== "cancelled") {
-      await this.#publishEnd(record, end);
+    const committed = record.terminal ?? end;
+    if (!record.endPublished && committed.reason !== "cancelled") {
+      await this.#publishEnd(record, committed);
     }
     record.closed = true;
     record.phase = "closed";
     record.timer.dispose();
     record.telemetry.closing();
-    record.telemetry.end(end);
+    record.telemetry.end(committed);
     const settled = await this.#awaitSettlement(record);
     this.#finishCleanup(record, settled);
     this.#sessions.delete(record.sessionId);
+    record.deregister?.();
+    record.deregister = undefined;
     this.#host.manager.insertReceipt({
       sessionId: record.sessionId,
       ownerConnectionId: record.consumer.connectionId,
       ownerSessionKey: record.consumer.sessionKey,
       baseSubject: record.baseSubject,
-      reason: end.reason,
+      reason: committed.reason,
       cleanup: record.cleanupState === "complete" ? "complete" : "incomplete",
       finalSeq: record.highestSent.toString(),
+      receivedSeq: record.highestReceived.toString(),
+      consumedSeq: record.highestConsumed.toString(),
     });
     record.callerGuard.release();
     return {
-      end,
+      end: committed,
       remote: "confirmed",
       cleanup: record.cleanupState === "unknown"
         ? "unknown"
@@ -1249,7 +1331,8 @@ export class LiveFeedProvider {
     void (async () => {
       record.telemetry.closing();
       record.telemetry.end(
-        record.lastControl?.outcome.terminal ?? new LiveEnd("cancelled"),
+        record.terminal ?? record.lastControl?.outcome.terminal ??
+          new LiveEnd("cancelled"),
       );
       const settled = await this.#awaitSettlement(record);
       this.#finishCleanup(record, settled);
@@ -1270,8 +1353,9 @@ export class LiveFeedProvider {
         pending.requestId,
         outcome,
       );
-      await this.#withLane(() =>
-        this.#tryPublishSigned(pending.reply, jsonBytes(ack))
+      await this.#withSessionLane(
+        record,
+        () => this.#tryPublishSigned(pending.reply, jsonBytes(ack)),
       );
     })();
   }
