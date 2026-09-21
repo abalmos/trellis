@@ -1057,6 +1057,9 @@ pub(crate) async fn publish_challenge(
 /// # Errors
 ///
 /// Returns a wire error when the publication handoff fails.
+/// Bounded attempts for the one logical END handoff per session.
+const END_PUBLISH_ATTEMPTS: usize = 3;
+
 pub(crate) async fn publish_end(
     record: &ProviderSessionRecord,
     nats: &async_nats::Client,
@@ -1065,7 +1068,9 @@ pub(crate) async fn publish_end(
     let session = &record.session;
     let _lane = record.output_lane.lock().await;
     // Exactly one terminal frame per session: a later source/close path cannot
-    // publish a second END with a different cause.
+    // publish a second END with a different cause. The claim is one-shot, but
+    // the single handoff is retried within a bounded budget so a transient
+    // publication failure does not lose the terminal frame.
     if record.end_sent.swap(true, Ordering::AcqRel) {
         return Ok(());
     }
@@ -1076,16 +1081,35 @@ pub(crate) async fn publish_end(
     let body = serde_json::to_vec(&end_frame(&session.session_id, final_seq, terminal))
         .map_err(|_| LiveErrorCode::ProtocolError)?;
     let headers = record.signed_headers(&session.data_subject, &body)?;
-    nats.publish_with_headers(session.data_subject.clone(), headers, Bytes::from(body))
-        .await
-        .map_err(|_| LiveErrorCode::PeerLost)?;
-    if let Ok(telemetry) = record.telemetry.lock() {
-        telemetry.frame(
-            super::telemetry::LiveFrameClass::Control,
-            super::telemetry::LiveDirection::Send,
-        );
+    let mut last_error = None;
+    for attempt in 0..END_PUBLISH_ATTEMPTS {
+        match nats
+            .publish_with_headers(
+                session.data_subject.clone(),
+                headers.clone(),
+                Bytes::from(body.clone()),
+            )
+            .await
+        {
+            Ok(()) => {
+                if let Ok(telemetry) = record.telemetry.lock() {
+                    telemetry.frame(
+                        super::telemetry::LiveFrameClass::Control,
+                        super::telemetry::LiveDirection::Send,
+                    );
+                }
+                return Ok(());
+            }
+            Err(error) => {
+                last_error = Some(error);
+                if attempt + 1 < END_PUBLISH_ATTEMPTS {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            }
+        }
     }
-    Ok(())
+    let _ = last_error;
+    Err(LiveErrorCode::PeerLost)
 }
 
 /// Build one acknowledgement for a handled control.
