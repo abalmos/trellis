@@ -381,6 +381,22 @@ function isOperationRevisionConflict(cause: unknown): boolean {
     message.includes("sequence mismatch");
 }
 
+/**
+ * Whether a verified caller is the creator of one durable operation.
+ *
+ * Observation and control authority is scoped to the exact creating principal
+ * and participant. A foreign principal, or the same principal on a different
+ * participant, is denied — the operation is not disclosed to a guesser.
+ */
+export function operationObserveAuthorized(
+  runtime: { creatorPrincipalId: string; creatorParticipantId: string },
+  caller?: { principalId: string; participantId: string },
+): boolean {
+  return !caller ||
+    (runtime.creatorPrincipalId === caller.principalId &&
+      runtime.creatorParticipantId === caller.participantId);
+}
+
 export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
   #nats: NatsConnection;
   #version?: string;
@@ -1140,9 +1156,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     return runtime.apiId === apiId && runtime.operation === operation &&
       runtime.snapshot.id === invocationId &&
       runtime.snapshot.operation === operation &&
-      (!caller ||
-        (runtime.creatorPrincipalId === caller.principalId &&
-          runtime.creatorParticipantId === caller.participantId));
+      operationObserveAuthorized(runtime, caller);
   }
 
   #rejectSignalWaiters(runtime: RuntimeOperationRecord): void {
