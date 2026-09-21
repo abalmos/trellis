@@ -136,7 +136,7 @@ export type OperationRef<
     OperationSnapshot<TProgress, TOutput>,
     OperationControlError | UnexpectedError
   >;
-  wait(): AsyncResult<
+  wait(options?: OperationWaitOptions): AsyncResult<
     TerminalOperation<TProgress, TOutput>,
     OperationControlError | UnexpectedError
   >;
@@ -168,6 +168,12 @@ export type OperationWatchOptions = {
   updates?: boolean;
   /** Abort only this observation; not a business cancel. */
   signal?: AbortSignal;
+};
+
+/** Options controlling the observation phase of one wait. */
+export type OperationWaitOptions = {
+  /** Stop only this observer loop; never dispatches a business cancel. */
+  observationSignal?: AbortSignal;
 };
 
 /** Options that identify an idempotent operation invocation. */
@@ -822,7 +828,7 @@ class RuntimeOperationRef<
     return this.#controlSnapshot("get");
   }
 
-  wait(): AsyncResult<
+  wait(options?: OperationWaitOptions): AsyncResult<
     TerminalOperation<TProgress, TOutput>,
     OperationControlError | UnexpectedError
   > {
@@ -835,11 +841,17 @@ class RuntimeOperationRef<
         return ok(initialTerminal);
       }
 
-      const eventsValue = await this.watch().take();
+      const eventsValue = await this.watch({
+        signal: options?.observationSignal,
+      })
+        .take();
       if (isErr(eventsValue)) {
         const terminal = await this.#terminalSnapshotFromGet().take();
         if (!isErr(terminal) && terminal !== null) {
           return ok(terminal);
+        }
+        if (options?.observationSignal?.aborted) {
+          return err(this.#observationCancelledError());
         }
         return eventsValue;
       }
@@ -856,6 +868,9 @@ class RuntimeOperationRef<
         if (!isErr(terminal) && terminal !== null) {
           return ok(terminal);
         }
+        if (options?.observationSignal?.aborted) {
+          return err(this.#observationCancelledError());
+        }
         return err(watchFailure(cause));
       } finally {
         await subscription[Symbol.asyncDispose]();
@@ -864,6 +879,11 @@ class RuntimeOperationRef<
       const terminal = await this.#terminalSnapshotFromGet().take();
       if (!isErr(terminal) && terminal !== null) {
         return ok(terminal);
+      }
+      // A local observation stop is a normal cancellation, not an incomplete
+      // watch: it never dispatches a business cancel or invents a terminal.
+      if (options?.observationSignal?.aborted) {
+        return err(this.#observationCancelledError());
       }
 
       return err(createTransportError({
@@ -874,6 +894,15 @@ class RuntimeOperationRef<
         context: { operationId: this.id, operation: this.operation },
       }));
     })());
+  }
+
+  #observationCancelledError(): TransportError {
+    return createTransportError({
+      code: "trellis.operation.observation_cancelled",
+      message: "The operation observation was cancelled locally.",
+      hint: "The durable Operation itself was not cancelled.",
+      context: { operationId: this.id, operation: this.operation },
+    });
   }
 
   #terminalSnapshotFromGet(): AsyncResult<
@@ -995,11 +1024,23 @@ class RuntimeOperationRef<
         return err(subscription.error);
       }
       if (options.signal) {
-        options.signal.addEventListener(
-          "abort",
-          () => subscription.close(),
-          { once: true },
-        );
+        const close = () => {
+          subscription.close();
+        };
+        if (options.signal.aborted) {
+          close();
+          return err(createTransportError({
+            code: "trellis.operation.watch_aborted",
+            message: "The operation watch was aborted while it opened.",
+            hint: "Retry watching the operation if it is still needed.",
+            context: { operationId: this.id, operation: this.operation },
+          }));
+        }
+        options.signal.addEventListener("abort", close, { once: true });
+        // The listener is owned by this observation and removed at settlement.
+        void subscription.closed.finally(() => {
+          options.signal?.removeEventListener("abort", close);
+        });
       }
       return ok(subscription);
     })());
@@ -1115,6 +1156,8 @@ function watchFailure(
 type ObservedWatchOptions<TProgress, TOutput, TUpdate> = {
   ready?: Promise<void>;
   skipEvent?: (event: OperationEvent<TProgress, TOutput, TUpdate>) => boolean;
+  /** Stops only this automatic observer; never a business cancel. */
+  observationSignal?: AbortSignal;
 };
 
 type InvokedOperation<
@@ -1200,9 +1243,19 @@ function beginObservedWatch<
     }
 
     const subscription = watchValue;
+    let stopped = false;
     const close = async () => {
+      stopped = true;
       await subscription[Symbol.asyncDispose]();
     };
+    const signal = options.observationSignal;
+    const onAbort = () => {
+      void close();
+    };
+    if (signal) {
+      if (signal.aborted) void close();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    }
 
     const task = (async (): Promise<
       Result<
@@ -1236,6 +1289,16 @@ function beginObservedWatch<
           }
         }
 
+        if (stopped) {
+          // A local stop is a normal observation cancellation: no
+          // `watch_incomplete` and no unsolicited error callback.
+          return err(createTransportError({
+            code: "trellis.operation.observation_cancelled",
+            message: "The operation observation was stopped locally.",
+            hint: "The durable Operation itself was not cancelled.",
+            context: { operationId: operation.id },
+          }));
+        }
         const incomplete = createTransportError({
           code: "trellis.operation.watch_incomplete",
           message: "Trellis ended the operation watch before completion.",
@@ -1258,6 +1321,7 @@ function beginObservedWatch<
         );
         return err(failure);
       } finally {
+        signal?.removeEventListener("abort", onAbort);
         await close();
       }
     })();
@@ -1335,7 +1399,6 @@ function startObservedOperation<
 
     if (!isErr(observedValue)) {
       ready.resolve();
-      bindObservationSignal(observation, options?.observationSignal);
     }
     return ok(createPublicOperationRef(startedValue.operation, observation));
   })());
@@ -1378,6 +1441,7 @@ function startObservedTransfer<
     const observedValue = await beginObservedWatch(operation, callbacks, {
       ready: ready.promise,
       skipEvent: createAcceptedReplayFilter(startedValue.accepted),
+      observationSignal: options?.observationSignal,
     }).take();
     const observation = isErr(observedValue) ? {} : observedValue;
 
@@ -1394,7 +1458,6 @@ function startObservedTransfer<
 
     if (!isErr(observedValue)) {
       ready.resolve();
-      bindObservationSignal(observation, options?.observationSignal);
     }
 
     const transferredValue = await operation.startTransfer(body).take();
@@ -1452,15 +1515,41 @@ function createPublicOperationRef<
     service: operation.service,
     operation: operation.operation,
     get: () => operation.get(),
-    wait: () =>
+    wait: (options?: OperationWaitOptions) =>
       AsyncResult.from((async () => {
-        const waited = activeJobWaitHook?.({
-          kind: "operation",
-          id: operation.id,
-          operationId: operation.id,
-          service: operation.service,
-          type: operation.operation,
-        }, async () => {
+        // The observation-only signal stops the automatic callback observer; it
+        // never dispatches a business cancel.
+        const signal = options?.observationSignal;
+        const stopObserving = () => {
+          void observation.close?.();
+        };
+        if (signal) {
+          if (signal.aborted) stopObserving();
+          else signal.addEventListener("abort", stopObserving, { once: true });
+        }
+        try {
+          const waited = activeJobWaitHook?.({
+            kind: "operation",
+            id: operation.id,
+            operationId: operation.id,
+            service: operation.service,
+            type: operation.operation,
+          }, async () => {
+            if (observation.task) {
+              const terminal = await observation.task;
+              const terminalValue = terminal.take();
+              if (!isErr(terminalValue)) {
+                return ok(terminalValue);
+              }
+              if (isObservedCallbackError(terminalValue.error)) {
+                return terminalValue;
+              }
+            }
+
+            return await operation.wait(options);
+          });
+          if (waited) return await waited;
+
           if (observation.task) {
             const terminal = await observation.task;
             const terminalValue = terminal.take();
@@ -1472,22 +1561,10 @@ function createPublicOperationRef<
             }
           }
 
-          return await operation.wait();
-        });
-        if (waited) return await waited;
-
-        if (observation.task) {
-          const terminal = await observation.task;
-          const terminalValue = terminal.take();
-          if (!isErr(terminalValue)) {
-            return ok(terminalValue);
-          }
-          if (isObservedCallbackError(terminalValue.error)) {
-            return terminalValue;
-          }
+          return await operation.wait(options);
+        } finally {
+          signal?.removeEventListener("abort", stopObserving);
         }
-
-        return await operation.wait();
       })()),
     watch: (options?: OperationWatchOptions) => operation.watch(options),
     cancel: () => operation.cancel(),
@@ -1506,21 +1583,6 @@ function createPublicOperationRef<
   };
 
   return base as OperationRef<TDesc, TProgress, TOutput, TUpdate>;
-}
-
-function bindObservationSignal<TProgress, TOutput>(
-  observation: OperationWatchObservation<TProgress, TOutput>,
-  signal?: AbortSignal,
-): void {
-  if (!signal || !observation.close) return;
-  const abort = () => {
-    void observation.close?.();
-  };
-  if (signal.aborted) {
-    abort();
-    return;
-  }
-  signal.addEventListener("abort", abort, { once: true });
 }
 
 function createOperationInputBuilder<

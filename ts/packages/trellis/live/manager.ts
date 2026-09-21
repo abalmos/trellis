@@ -13,6 +13,18 @@ const C = liveConstants();
 /** Reasons the manager itself is unavailable for new sessions. */
 export type ManagerUnavailable = "stopped" | "epoch_changed";
 
+/** One closed-session receipt retained for idempotent control handling. */
+export type ClosedReceipt = {
+  readonly sessionId: string;
+  readonly ownerConnectionId: string;
+  readonly ownerSessionKey: string;
+  readonly baseSubject: string;
+  readonly reason: string;
+  readonly cleanup: "complete" | "incomplete";
+  readonly finalSeq: string;
+  readonly expiresAtMs: number;
+};
+
 /** One tracked endpoint session that the manager can fence and close. */
 export interface ManagedSession {
   /** Synchronously fence the session; no new yields or publications. */
@@ -57,6 +69,7 @@ export class LiveSessionManager {
   #consumers = 0;
   #providers: ProviderAdmission | undefined;
   readonly #sessions = new Map<ManagedSession, () => void>();
+  readonly #receipts = new Map<string, ClosedReceipt>();
 
   #admission(): ProviderAdmission {
     return this.#providers ??= new ProviderAdmission(
@@ -164,6 +177,35 @@ export class LiveSessionManager {
       registered = false;
       this.#sessions.delete(session);
     };
+  }
+
+  /** Record one bounded, expiring closed-session receipt. */
+  insertReceipt(receipt: Omit<ClosedReceipt, "expiresAtMs">): void {
+    const now = performance.now();
+    this.#expireReceipts(now);
+    this.#receipts.set(receipt.sessionId, {
+      ...receipt,
+      expiresAtMs: now + C.tombstoneMs,
+    });
+    while (this.#receipts.size > C.maxTombstones) {
+      const oldest = this.#receipts.keys().next().value;
+      if (oldest === undefined) break;
+      this.#receipts.delete(oldest);
+    }
+  }
+
+  /** Find one unexpired closed-session receipt. */
+  receipt(sessionId: string): ClosedReceipt | undefined {
+    const now = performance.now();
+    this.#expireReceipts(now);
+    const receipt = this.#receipts.get(sessionId);
+    return receipt && receipt.expiresAtMs > now ? receipt : undefined;
+  }
+
+  #expireReceipts(nowMs: number): void {
+    for (const [sessionId, receipt] of this.#receipts) {
+      if (receipt.expiresAtMs <= nowMs) this.#receipts.delete(sessionId);
+    }
   }
 
   /** Count currently retained consumer sessions (diagnostics/tests). */

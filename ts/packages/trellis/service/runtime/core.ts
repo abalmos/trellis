@@ -94,6 +94,7 @@ import {
   type RuntimeOperationSnapshot,
   type RuntimeOperationState,
   safeJson,
+  toVerifierPermission,
   Trellis,
   type TrellisAuth,
   type TrellisMode,
@@ -101,6 +102,7 @@ import {
   type VerifiedCaller,
   verifyLocalAuthorization,
 } from "../../session.ts";
+import { LiveAuthorityGuard } from "../../live/authority.ts";
 import {
   type FileInfo,
   FileInfoSchema,
@@ -171,6 +173,92 @@ type RuntimeOperationFence = Readonly<{
 }>;
 
 const CANONICAL_POSITIVE_INTEGER = /^[1-9][0-9]*$/u;
+
+/** Maximum admitted-but-not-yet-emitted observer entries. */
+const OBSERVER_ARBITER_BOUND = 16;
+
+/**
+ * Serializes one Operation observer's backend notifications.
+ *
+ * A snapshot waiting to be emitted is coalesced to the latest authoritative
+ * one; admitted updates are never dropped. The bounded buffer rejects further
+ * updates so only that observer fails with a slow-consumer outcome.
+ */
+class OperationObserverArbiter {
+  readonly #emit: (value: unknown) => Promise<void>;
+  readonly #updates: unknown[] = [];
+  #pendingSnapshot: unknown | undefined;
+  #snapshotDeferred: PromiseWithResolvers<void> | undefined;
+  #draining = false;
+  #failed = false;
+
+  constructor(emit: (value: unknown) => Promise<void>) {
+    this.#emit = emit;
+  }
+
+  /** Queue one authoritative snapshot, coalescing with a pending one. */
+  snapshot(value: unknown): Promise<void> {
+    this.#pendingSnapshot = value;
+    // Capture the deferred locally: the drain loop starts synchronously inside
+    // `#kick` and may clear `#snapshotDeferred` before this returns.
+    const deferred = (this.#snapshotDeferred ??= Promise.withResolvers<void>());
+    this.#kick();
+    return deferred.promise;
+  }
+
+  /** Admit one transient update; false means the bound was exceeded. */
+  update(value: unknown): boolean {
+    if (this.#failed || this.#updates.length >= OBSERVER_ARBITER_BOUND) {
+      return false;
+    }
+    this.#updates.push(value);
+    this.#kick();
+    return true;
+  }
+
+  #kick(): void {
+    if (this.#draining || this.#failed) return;
+    this.#draining = true;
+    void (async () => {
+      try {
+        while (true) {
+          const nextUpdate = this.#updates.shift();
+          if (nextUpdate !== undefined) {
+            await this.#emit(nextUpdate);
+            continue;
+          }
+          if (this.#pendingSnapshot !== undefined) {
+            const deferred = this.#snapshotDeferred;
+            const value = this.#pendingSnapshot;
+            this.#pendingSnapshot = undefined;
+            this.#snapshotDeferred = undefined;
+            await this.#emit(value);
+            deferred?.resolve();
+            continue;
+          }
+          // Clear the draining flag and re-check without awaiting, so a
+          // snapshot or update queued during the last emit is never lost.
+          this.#draining = false;
+          if (
+            this.#updates.length === 0 && this.#pendingSnapshot === undefined
+          ) {
+            return;
+          }
+          this.#draining = true;
+        }
+      } catch {
+        this.#failed = true;
+        this.#updates.splice(0);
+        this.#snapshotDeferred?.reject(
+          new Error("operation observer emit failed"),
+        );
+        this.#snapshotDeferred = undefined;
+      } finally {
+        this.#draining = false;
+      }
+    })();
+  }
+}
 
 function asStringPointerValue(
   operation: string,
@@ -1503,8 +1591,8 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                 sessionKey: value.caller.sessionKey,
                 principalId: value.caller.principalId,
                 participantId: value.caller.participantId,
-                deploymentId: value.caller.deploymentId ?? "",
-                instanceId: value.caller.instanceId ?? "",
+                deploymentId: value.caller.deploymentId ?? undefined,
+                instanceId: value.caller.instanceId ?? undefined,
                 contextDigest: value.caller.contextDigest,
               },
               async (session) => {
@@ -1650,6 +1738,11 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       : this.auth.contextDigest;
     if (!cache || !digest) return undefined;
     const own = await cache.resolveContext(digest);
+    const observe = ctx.permissions?.observe;
+    if (!observe) return undefined;
+    const ownGuard = await LiveAuthorityGuard.retain(cache, digest, {
+      kind: "local-provider",
+    });
     const provider = new LiveFeedProvider({
       nats: this.#nats,
       identity: {
@@ -1659,9 +1752,16 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
         participantId: own.context.participantId,
         deploymentId: own.context.deploymentId ?? "",
         instanceId: own.context.instanceId ?? "",
-        contextDigest: own.contextDigest,
       },
       sign: async (bytes) => await this.auth.sign(bytes),
+      ownGuard,
+      permission: toVerifierPermission(observe),
+      retainCallerAuthority: (callerDigest, permission) =>
+        LiveAuthorityGuard.retain(cache, callerDigest, {
+          kind: "observer",
+          permission,
+        }),
+      manager: this.connection.live,
     });
     const observeSub = this.#nats.subscribe(
       provider.wildcardSubject(ctx.subject),
@@ -1676,7 +1776,18 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
             ctx.permissions?.observe,
             ctx.observeCapabilities ?? [],
           );
-          return !isErr(validated.take());
+          const authenticated = validated.take();
+          if (isErr(authenticated)) return undefined;
+          const caller = authenticated.caller;
+          return {
+            connectionId: caller.connectionId,
+            sessionKey: caller.sessionKey,
+            principalId: caller.principalId,
+            participantId: caller.participantId,
+            deploymentId: caller.deploymentId ?? undefined,
+            instanceId: caller.instanceId ?? undefined,
+            contextDigest: caller.contextDigest,
+          };
         });
       }
     })();
@@ -1702,20 +1813,40 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       signal,
     } = args;
     if (signal.aborted) throw new Error("operation watch aborted");
-
-    const updateSub = includeUpdates
-      ? this.#nats.subscribe(`${ctx.subject}.updates.${operationId}`)
-      : undefined;
-    const durableWatch = (await (await this.operationStoreHandle())
-      .watch(operationId)
-      .orThrow())[Symbol.asyncIterator]();
+    const cache = this.auth.authorizationProviderCache;
+    const observe = ctx.permissions?.observe;
+    if (!cache || !observe) throw new Error("authorization unavailable");
+    // The current observer guard is retained before any async allocation and
+    // follows identity-preserving refresh; `caller.contextDigest` is only the
+    // opening evidence.
+    const observerGuard = await LiveAuthorityGuard.retain(
+      cache,
+      caller.contextDigest,
+      { kind: "observer", permission: toVerifierPermission(observe) },
+    );
+    let updateSub: ReturnType<NatsConnection["subscribe"]> | undefined;
+    let durableWatch: AsyncIterator<unknown> | undefined;
+    let updates: Promise<void> = Promise.resolve();
+    let terminalSeen = false;
     const stop = () => {
       updateSub?.unsubscribe();
-      void durableWatch.return?.();
+      void durableWatch?.return?.();
     };
     signal.addEventListener("abort", stop, { once: true });
+    // Both backend sources funnel through this single arbiter; the provider's
+    // concurrent-emit rule is never violated, snapshots conflate to the latest
+    // authoritative value, and admitted updates are never dropped.
+    const arbiter = new OperationObserverArbiter(emit);
 
     try {
+      updateSub = includeUpdates
+        ? this.#nats.subscribe(`${ctx.subject}.updates.${operationId}`)
+        : undefined;
+      const watchIterator = (await (await this.operationStoreHandle())
+        .watch(operationId)
+        .orThrow())[Symbol.asyncIterator]();
+      durableWatch = watchIterator as AsyncIterator<unknown>;
+      if (signal.aborted) throw new Error("operation watch aborted");
       if (updateSub) await this.#nats.flush();
       const current = await this.#resolveOperation(operationId);
       if (
@@ -1724,7 +1855,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       ) {
         throw this.#operationNotFoundError(operationId);
       }
-      await emit({ kind: "snapshot", snapshot: current.snapshot });
+      await arbiter.snapshot({ kind: "snapshot", snapshot: current.snapshot });
       if (
         current.snapshot.state === "completed" ||
         current.snapshot.state === "failed" ||
@@ -1736,15 +1867,12 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       let ownerEpoch = 0;
       let updateSequence = 0;
       let revision = current.revision;
-      const updates = updateSub
+      let lastSnapshot = JSON.stringify(current.snapshot);
+      updates = updateSub
         ? (async () => {
           for await (const updateMsg of updateSub) {
             if (signal.aborted) break;
-            try {
-              const cache = this.auth.authorizationProviderCache;
-              if (!cache) throw new Error("authorization unavailable");
-              await cache.resolveContext(caller.contextDigest);
-            } catch {
+            if (observerGuard.checkNow() || terminalSeen) {
               stop();
               break;
             }
@@ -1780,8 +1908,14 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               "update",
               envelope.update,
             ).take();
+            // A verified peer's update that does not match the declared codec
+            // is a protocol failure, not silently discarded traffic.
+            if (isErr(parsedUpdate)) {
+              throw new Error(
+                "operation update did not match the declared codec",
+              );
+            }
             if (
-              isErr(parsedUpdate) ||
               typeof executor !== "string" ||
               typeof connectionId !== "string" ||
               typeof envelope.occurredAt !== "string" ||
@@ -1818,70 +1952,80 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
               "update",
               parsedUpdate,
             ).take();
-            if (isErr(wireUpdate)) continue;
-            await emit({
-              kind: "event",
-              sequence: latest.sequence,
-              event: {
-                type: "update",
-                update: wireUpdate,
-                snapshot: latest.snapshot,
-              },
-            });
+            if (isErr(wireUpdate)) {
+              throw new Error("operation update could not be re-encoded");
+            }
+            if (terminalSeen) break;
+            if (
+              !arbiter.update({
+                kind: "event",
+                sequence: latest.sequence,
+                event: {
+                  type: "update",
+                  update: wireUpdate,
+                  snapshot: latest.snapshot,
+                },
+              })
+            ) {
+              // The bounded observer buffer cannot admit another valid update:
+              // fail only this observer with a slow-consumer outcome.
+              throw new Error("operation observer update buffer overflow");
+            }
           }
         })()
         : Promise.resolve();
 
-      try {
-        for (;;) {
-          if (signal.aborted) throw new Error("operation watch aborted");
-          const next = await durableWatch.next();
-          if (next.done) {
-            throw new Error("operation watch source ended");
-          }
-          const changed = next.value;
-          const durable = changed.take();
-          if (isErr(durable)) throw durable.error;
-          if (!durable.value) {
-            throw new Error("operation watch source ended");
-          }
-          if (durable.value.revision <= revision) continue;
-          revision = durable.value.revision;
-          if (
-            !this.#matchesOperationRoute(
-              durable.value,
-              operation,
-              ctx,
-              caller,
-            )
-          ) {
-            throw new Error("operation watch source ended");
-          }
-          try {
-            const cache = this.auth.authorizationProviderCache;
-            if (!cache) throw new Error("authorization unavailable");
-            await cache.resolveContext(caller.contextDigest);
-          } catch {
-            throw new Error("authorization unavailable");
-          }
-          await emit({
-            kind: "snapshot",
-            snapshot: durable.value.snapshot,
-          });
-          if (
-            durable.value.snapshot.state === "completed" ||
-            durable.value.snapshot.state === "failed" ||
-            durable.value.snapshot.state === "cancelled"
-          ) {
-            return;
-          }
+      for (;;) {
+        if (signal.aborted) throw new Error("operation watch aborted");
+        const next = await watchIterator.next();
+        if (next.done) {
+          throw new Error("operation watch source ended");
         }
-      } finally {
-        stop();
-        await updates;
+        const changed = next.value;
+        const durable = changed.take();
+        if (isErr(durable)) throw durable.error;
+        if (!durable.value) {
+          throw new Error("operation watch source ended");
+        }
+        if (durable.value.revision <= revision) continue;
+        revision = durable.value.revision;
+        if (
+          !this.#matchesOperationRoute(
+            durable.value,
+            operation,
+            ctx,
+            caller,
+          )
+        ) {
+          throw new Error("operation watch source ended");
+        }
+        if (observerGuard.checkNow()) {
+          throw new Error("authorization unavailable");
+        }
+        const terminal = durable.value.snapshot.state === "completed" ||
+          durable.value.snapshot.state === "failed" ||
+          durable.value.snapshot.state === "cancelled";
+        // Lease-only writes advance the storage revision without changing the
+        // business snapshot; they must not invent progress.
+        const snapshotJson = JSON.stringify(durable.value.snapshot);
+        if (snapshotJson === lastSnapshot && !terminal) continue;
+        lastSnapshot = snapshotJson;
+        if (terminal) {
+          // Freeze further update admission before the authoritative terminal
+          // snapshot; already admitted updates are already queued ahead of it.
+          terminalSeen = true;
+        }
+        await arbiter.snapshot({
+          kind: "snapshot",
+          snapshot: durable.value.snapshot,
+        });
+        if (terminal) return;
       }
     } finally {
+      stop();
+      observerGuard.release();
       signal.removeEventListener("abort", stop);
+      await updates.catch(() => {});
     }
   }
 

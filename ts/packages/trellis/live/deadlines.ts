@@ -87,6 +87,18 @@ export class LiveDeadlines {
     return new LiveDeadlines(nowMs, "prepared");
   }
 
+  /**
+   * Create one prepared consumer handle from an already-started reservation.
+   *
+   * The consumer's opening budget begins before the opening exchange, so the
+   * pump installs the same absolute deadline rather than restarting it.
+   */
+  static preparedUntil(deadlineMs: number): LiveDeadlines {
+    const deadlines = new LiveDeadlines(deadlineMs, "prepared");
+    deadlines.#reservationUntil = deadlineMs;
+    return deadlines;
+  }
+
   get phase(): LiveDeadlinePhase {
     return this.#phase;
   }

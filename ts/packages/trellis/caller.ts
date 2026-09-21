@@ -5,6 +5,7 @@ import {
   ok,
   type Result,
 } from "@qlever-llc/result";
+import type { LiveSubscription } from "./live/subscription.ts";
 import type { Codec } from "./generated.ts";
 import type { TrellisConnection } from "./connection.ts";
 import type { TypedKV } from "./kv.ts";
@@ -120,7 +121,10 @@ type ActionMethod<TAction extends SelectedActionShape> = TAction["kind"] extends
       ? TAction["event"] extends GeneratedCodec ? (
           input: CodecValue<TAction["input"]>,
           opts?: FeedSubscribeOpts,
-        ) => AsyncResult<AsyncIterable<CodecValue<TAction["event"]>>, BaseError>
+        ) => AsyncResult<
+          LiveSubscription<CodecValue<TAction["event"]>>,
+          BaseError
+        >
       : never
     : never
   : TAction["kind"] extends "event"

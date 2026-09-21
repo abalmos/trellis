@@ -28,6 +28,8 @@ import type { Codec } from "./generated.ts";
 import { encodeEventSubjectParameterToken } from "./helpers.ts";
 import { openLiveFeed, openLiveOperationWatch } from "./live/client_open.ts";
 import { LiveFeedProvider, parseLiveOpen } from "./live/provider.ts";
+import type { PermissionAtom } from "./auth/protocol_wasm.ts";
+import { LiveAuthorityGuard } from "./live/authority.ts";
 import type { LiveSubscription } from "./live/subscription.ts";
 import { LiveStreamError } from "./live/types.ts";
 import type { ParticipantKvMetadata } from "./participant_runtime/metadata.ts";
@@ -346,7 +348,8 @@ export async function verifyLocalAuthorization(
   }
 }
 
-function toVerifierPermission(
+/** Map one descriptor permission atom into the verifier's nested atom. */
+export function toVerifierPermission(
   permission: DescriptorPermissionAtom,
 ): VerifierPermissionAtom {
   if (
@@ -3238,33 +3241,10 @@ export class Trellis<
   ): AsyncResult<FeedSubscription<TEvent>, BaseError> {
     const route = trellisRoute("rpc", feed);
     let owned = false;
-    let counted = false;
-    let ended = false;
-    let setupReason: "error" | "cancelled" | "unavailable" = "error";
-    const finish = (
-      reason: "complete" | "cancelled" | "revoked" | "unavailable" | "error",
-    ) => {
-      if (ended) return;
-      ended = true;
-      this.#feedClosers.delete(closeOnNats);
-      try {
-        if (counted) {
-          recordCatalogUpDown("trellis.feed.active", -1, {
-            "trellis.side": "client",
-          });
-        }
-        recordCatalogCounter("trellis.feed.ends", 1, {
-          "trellis.side": "client",
-          "trellis.reason": reason,
-        });
-      } catch {
-        // Feed cleanup must not depend on optional telemetry.
-      }
-    };
     let subscription: FeedSubscription<TEvent> | undefined;
     const closeOnNats = () => {
       subscription?.close();
-      finish("unavailable");
+      this.#feedClosers.delete(closeOnNats);
     };
     return AsyncResult.from(
       (async (): Promise<Result<FeedSubscription<TEvent>, BaseError>> => {
@@ -3292,7 +3272,6 @@ export class Trellis<
           return subject;
         }
         if (opts?.signal?.aborted) {
-          setupReason = "cancelled";
           const error = createTransportError({
             code: "trellis.feed.subscribe_aborted",
             message:
@@ -3304,6 +3283,42 @@ export class Trellis<
         }
         try {
           const cache = this.#auth.authorizationProviderCache;
+          if (!cache) {
+            throw new LiveStreamError(
+              "authorization_unavailable",
+              "provider authorization cache is required for live observations",
+            );
+          }
+          // The bound feed subject encodes the exact API identity and the
+          // provider deployment the installed binding selected; decode them
+          // from the subject rather than trusting the offer's own claim.
+          const routeTokens = subject.split(".");
+          const apiIdentity = routeTokens.length >= 4
+            ? decodeSubjectToken(routeTokens[2])
+            : undefined;
+          const selectedProviderDeploymentId = routeTokens.length >= 4
+            ? decodeSubjectToken(routeTokens[3])
+            : undefined;
+          const expectedApi =
+            `${descriptor.permission.apiId}@${descriptor.permission.apiVersion}`;
+          if (
+            apiIdentity !== expectedApi ||
+            typeof selectedProviderDeploymentId !== "string" ||
+            selectedProviderDeploymentId.length === 0
+          ) {
+            throw new LiveStreamError(
+              "binding_changed",
+              "the selected provider binding is unavailable for this API",
+            );
+          }
+          // Cancellation is live before the first awaited open allocation.
+          const abort = () => {
+            subscription?.fence();
+          };
+          opts?.signal?.addEventListener("abort", abort, { once: true });
+          if (opts?.signal?.aborted) {
+            throw new LiveStreamError("cancelled", "live open was aborted");
+          }
           subscription = await openLiveFeed(
             {
               nats: this.#nats,
@@ -3312,15 +3327,12 @@ export class Trellis<
               sessionKey: this.#auth.sessionKey,
               live: this.connection.live,
               createRequestProof: (s, p, r) => this.createRequestProof(s, p, r),
-              resolveContext: cache
-                ? (digest) => cache.resolveContext(digest)
-                : () =>
-                  Promise.reject(
-                    new LiveStreamError(
-                      "authorization_unavailable",
-                      "provider authorization cache is required for live observations",
-                    ),
-                  ),
+              authority: {
+                cache,
+                selectedProviderDeploymentId,
+                permission: toVerifierPermission(descriptor.permission),
+                localContextDigest: this.#contextDigest(),
+              },
               decodeEvent: (value) => {
                 const parsed = parseRuntimeSchema(
                   descriptor.event,
@@ -3333,36 +3345,19 @@ export class Trellis<
             subject,
             payload,
           );
-          const abort = () => {
-            subscription?.close();
-            finish("cancelled");
-          };
-          opts?.signal?.addEventListener("abort", abort, { once: true });
+          // The abort listener was installed before the open; a signal that
+          // fired during it is observed here.
+          if (opts?.signal?.aborted) {
+            subscription.fence();
+            throw new LiveStreamError("cancelled", "live open was aborted");
+          }
           owned = true;
           this.#feedClosers.add(closeOnNats);
-          try {
-            recordCatalogUpDown("trellis.feed.active", 1, {
-              "trellis.side": "client",
-            });
-            counted = true;
-          } catch {
-            // The acknowledged subscription remains owned even without telemetry.
-          }
-          // The owned live handle is the single cleanup owner: record exactly one
-          // end and decrement active when it closes, including return() before
-          // the first next().
-          void subscription.closed.then((end) => {
-            const reason = end.reason === "complete"
-              ? "complete"
-              : end.reason === "cancelled" || end.reason === "local_shutdown"
-              ? "cancelled"
-              : end.reason === "disconnected" || end.reason === "peer_lost"
-              ? "unavailable"
-              : end.reason === "authorization_lost" ||
-                  end.reason === "binding_changed"
-              ? "revoked"
-              : "error";
-            finish(reason);
+          // The endpoint's own telemetry owner records the legacy Feed
+          // projection from the same local state; no second accounting here.
+          void subscription.closed.then(() => {
+            opts?.signal?.removeEventListener("abort", abort);
+            this.#feedClosers.delete(closeOnNats);
           });
           const _ = route;
           return ok(subscription!);
@@ -3392,9 +3387,7 @@ export class Trellis<
           });
           return err(error);
         }
-      })().finally(() => {
-        if (!owned) finish(setupReason);
-      }),
+      })(),
     );
   }
 
@@ -3417,6 +3410,11 @@ export class Trellis<
       });
     }
     const own = await cache.resolveContext(this.#contextDigest());
+    const ownGuard = await LiveAuthorityGuard.retain(
+      cache,
+      this.#contextDigest(),
+      { kind: "local-provider" },
+    );
     const provider = new LiveFeedProvider({
       nats: this.#nats,
       identity: {
@@ -3426,9 +3424,16 @@ export class Trellis<
         participantId: own.context.participantId,
         deploymentId: own.context.deploymentId ?? "",
         instanceId: own.context.instanceId ?? "",
-        contextDigest: own.contextDigest,
       },
       sign: async (digest) => await this.#auth.sign(digest),
+      ownGuard,
+      permission: toVerifierPermission(descriptor.permission),
+      retainCallerAuthority: (digest, permission) =>
+        LiveAuthorityGuard.retain(cache, digest, {
+          kind: "observer",
+          permission,
+        }),
+      manager: this.connection.live,
     });
     let sub: ReturnType<NatsConnection["subscribe"]>;
     let controlSub: ReturnType<NatsConnection["subscribe"]>;
@@ -3477,7 +3482,18 @@ export class Trellis<
               requiredCapabilities: descriptor.subscribeCapabilities,
             });
             const callerValue = caller.take();
-            return !isErr(callerValue) && callerValue.type === "verified";
+            if (isErr(callerValue) || callerValue.type !== "verified") {
+              return undefined;
+            }
+            return {
+              connectionId: callerValue.connectionId,
+              sessionKey: callerValue.sessionKey,
+              principalId: callerValue.principalId,
+              participantId: callerValue.participantId,
+              deploymentId: callerValue.deploymentId ?? undefined,
+              instanceId: callerValue.instanceId ?? undefined,
+              contextDigest: callerValue.contextDigest,
+            };
           });
         }
       }),
@@ -3550,8 +3566,8 @@ export class Trellis<
           sessionKey: callerValue.sessionKey,
           principalId: callerValue.principalId,
           participantId: callerValue.participantId,
-          deploymentId: callerValue.deploymentId ?? "",
-          instanceId: callerValue.instanceId ?? "",
+          deploymentId: callerValue.deploymentId ?? undefined,
+          instanceId: callerValue.instanceId ?? undefined,
           contextDigest: callerValue.contextDigest,
         },
         async ({ emit, signal }) => {
@@ -3602,9 +3618,17 @@ export class Trellis<
       },
       watchJson: (subject, body, decodeEvent) => {
         const error = unavailable?.();
-        return error
-          ? AsyncResult.from(Promise.resolve(err(error)))
-          : this.#watchJson(subject, body as JsonValue, decodeEvent);
+        if (error) return AsyncResult.from(Promise.resolve(err(error)));
+        const permissions = Reflect.get(descriptor as object, "permissions") as
+          | Record<string, DescriptorPermissionAtom>
+          | undefined;
+        const observe = permissions?.observe;
+        return this.#watchJson(
+          subject,
+          body as JsonValue,
+          decodeEvent,
+          observe ? toVerifierPermission(observe) : undefined,
+        );
       },
       putTransfer: (
         grant: SendTransferGrant,
@@ -5558,6 +5582,7 @@ export class Trellis<
     subject: string,
     body: JsonValue,
     decodeEvent: (value: unknown) => T | undefined,
+    observePermission: PermissionAtom | undefined,
   ): AsyncResult<
     LiveSubscription<T>,
     TransportError | UnexpectedError
@@ -5598,6 +5623,33 @@ export class Trellis<
       }
       const operationSubject = subject.slice(0, -".control".length);
       const cache = this.#auth.authorizationProviderCache;
+      // The bound operation route encodes the exact API identity and provider
+      // deployment the selected binding resolved to.
+      const routeTokens = operationSubject.split(".");
+      const apiIdentity = routeTokens.length >= 4
+        ? decodeSubjectToken(routeTokens[2])
+        : undefined;
+      const selectedProviderDeploymentId = routeTokens.length >= 4
+        ? decodeSubjectToken(routeTokens[3])
+        : undefined;
+      if (
+        !cache || !observePermission || !apiIdentity ||
+        !selectedProviderDeploymentId
+      ) {
+        const error = createTransportError({
+          code: "trellis.watch.failed",
+          message: "The operation watch binding is unavailable.",
+          hint: "Reconnect to Trellis so the API binding is installed.",
+          context: { subject },
+        });
+        recordRuntimeError(error, {
+          surface: "operation",
+          direction: "client",
+          operation: "watchJson",
+          phase: "request_encoding",
+        });
+        return err(error);
+      }
       try {
         const subscription = await openLiveOperationWatch(
           {
@@ -5607,15 +5659,12 @@ export class Trellis<
             sessionKey: this.#auth.sessionKey,
             live: this.connection.live,
             createRequestProof: (s, p, r) => this.createRequestProof(s, p, r),
-            resolveContext: cache
-              ? (digest) => cache.resolveContext(digest)
-              : () =>
-                Promise.reject(
-                  new LiveStreamError(
-                    "authorization_unavailable",
-                    "provider authorization cache is required for live observations",
-                  ),
-                ),
+            authority: {
+              cache,
+              selectedProviderDeploymentId,
+              permission: observePermission,
+              localContextDigest: this.#contextDigest(),
+            },
             decodeEvent,
           },
           operationSubject,
@@ -5653,5 +5702,19 @@ export class Trellis<
         return err(error);
       }
     })());
+  }
+}
+
+/** Decode one base64url subject parameter token back to its exact identity. */
+function decodeSubjectToken(token: string): string | undefined {
+  try {
+    const normalized = token.replaceAll("-", "+").replaceAll("_", "/");
+    const padded = normalized +
+      "=".repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return undefined;
   }
 }

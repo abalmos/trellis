@@ -521,6 +521,7 @@ export const TRELLIS_CATALOG_DURATIONS = [
   "trellis.transfer.duration",
   "trellis.cli.duration",
   "trellis.browser.navigation.duration",
+  "trellis.live.handshake.duration",
 ] as const;
 
 /** Duration metric names accepted by {@link recordCatalogDuration}. */
@@ -537,6 +538,9 @@ export const TRELLIS_CATALOG_COUNTERS = [
   "trellis.delivery.dispositions",
   "trellis.dlq.transitions",
   "trellis.feed.ends",
+  "trellis.live.ends",
+  "trellis.live.frames",
+  "trellis.live.rejections",
   "trellis.transfer.wire.bytes",
   "trellis.runtime.lease.events",
   "trellis.snapshot.errors",
@@ -552,6 +556,9 @@ export const TRELLIS_CATALOG_UPDOWNS = [
   "trellis.rpc.server.inflight",
   "trellis.operation.active",
   "trellis.feed.active",
+  "trellis.live.sessions",
+  "trellis.live.buffered.bytes",
+  "trellis.live.cleanup.pending",
 ] as const;
 
 /** Up/down metric names accepted by {@link recordCatalogUpDown}. */
@@ -573,6 +580,7 @@ const CATALOG_ATTRIBUTE_KEYS = new Set([
   "trellis.state",
   "trellis.kind",
   "trellis.side",
+  "trellis.class",
   "trellis.app",
   "trellis.command",
   "trellis.reason",
@@ -654,6 +662,7 @@ function catalogBoundaries(name: TrellisCatalogDuration): number[] {
     case "trellis.event.process.duration":
     case "trellis.transfer.duration":
     case "trellis.cli.duration":
+    case "trellis.live.handshake.duration":
       return CATALOG_LONG_DURATION_BOUNDARIES;
     default:
       return CATALOG_DURATION_BOUNDARIES;

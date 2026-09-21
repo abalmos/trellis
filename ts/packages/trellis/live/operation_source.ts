@@ -27,7 +27,7 @@ export type OperationWatchSourceSession = {
   signal: AbortSignal;
 };
 
-/** Parse a live Operation-watch open. Missing observation is not a legacy stream. */
+/** Parse a live Operation-watch open. A missing observation is a protocol error. */
 export function parseOperationWatchOpen(
   value: unknown,
 ): OperationWatchOpen | undefined {

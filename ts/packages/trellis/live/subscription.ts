@@ -8,11 +8,15 @@ import {
   LiveEnd,
   LiveStreamError,
 } from "./types.ts";
+import { type LiveTelemetryKind, LiveTelemetryOwner } from "./telemetry.ts";
 
 const C = liveConstants();
 
 /** One verified and admitted application item. */
 export type Admitted<T> = { value: T; encodedLen: number };
+
+/** One ordered receive slot: an application value or a filtered marker. */
+type Slot<T> = { kind: "value"; item: Admitted<T> } | { kind: "filtered" };
 
 /** Consumer-visible session phase. */
 export type ConsumerPhase =
@@ -45,7 +49,7 @@ export class ConsumerCore<T> {
   readonly sessionId: string;
   readonly start = Promise.withResolvers<void>();
   readonly #started = Promise.withResolvers<void>();
-  #queue: Admitted<T>[] = [];
+  #slots: Slot<T>[] = [];
   #queuedBytes = 0;
   #end: LiveEnd | undefined;
   #pendingEnd: LiveEnd | undefined;
@@ -57,9 +61,16 @@ export class ConsumerCore<T> {
   #waiter: (() => void) | undefined;
   #creditWaiter: (() => void) | undefined;
   readonly #endWaiters: Array<(end: LiveEnd) => void> = [];
+  readonly #telemetry: LiveTelemetryOwner;
 
-  constructor(sessionId: string) {
+  constructor(sessionId: string, kind: LiveTelemetryKind) {
     this.sessionId = sessionId;
+    this.#telemetry = new LiveTelemetryOwner(kind, "consumer");
+  }
+
+  /** This endpoint's single telemetry owner. */
+  get telemetry(): LiveTelemetryOwner {
+    return this.#telemetry;
   }
 
   /** Resolve the internal start gate; the first `next()` calls this. */
@@ -82,7 +93,27 @@ export class ConsumerCore<T> {
   }
 
   setPhase(phase: ConsumerPhase): void {
+    if (this.#phase === phase) return;
     this.#phase = phase;
+    switch (phase) {
+      case "prepared":
+        this.#telemetry.prepared();
+        break;
+      case "activating":
+        this.#telemetry.activating();
+        break;
+      case "active":
+        this.#telemetry.active();
+        break;
+      case "draining":
+        this.#telemetry.draining();
+        break;
+      case "closing":
+        this.#telemetry.closing();
+        break;
+      case "closed":
+        break;
+    }
     this.wake();
   }
 
@@ -92,36 +123,63 @@ export class ConsumerCore<T> {
 
   /** Admit one verified application item within the wire window. */
   admit(item: Admitted<T>): boolean {
-    if (this.#queue.length + 1 > C.windowFrames) return false;
+    if (this.#slots.length + 1 > C.windowFrames) return false;
     if (this.#queuedBytes + item.encodedLen > C.windowBytes) return false;
-    this.#queue.push(item);
+    this.#slots.push({ kind: "value", item });
     this.#queuedBytes += item.encodedLen;
     this.#received += 1n;
+    this.#telemetry.buffered(item.encodedLen);
     this.wake();
     this.wakeCredit();
     return true;
   }
 
-  /** Record one verified frame that is not exposed to the application. */
-  releaseFiltered(): void {
+  /**
+   * Record one verified frame deliberately filtered from the application.
+   *
+   * The frame keeps its ordered slot, so the consumed prefix cannot advance
+   * past an earlier unread value. Returns `false` when the bounded slot window
+   * cannot admit the marker.
+   */
+  releaseFiltered(): boolean {
+    if (this.#slots.length + 1 > C.windowFrames) return false;
+    this.#slots.push({ kind: "filtered" });
     this.#received += 1n;
-    this.#consumed += 1n;
     this.wakeCredit();
     this.wake();
+    return true;
   }
 
   hasQueued(): boolean {
-    return this.#queue.length > 0;
+    return this.#slots.length > 0;
   }
 
+  /**
+   * Take the next application item, advancing the contiguous consumed prefix
+   * across any filtered slots in front of it.
+   */
   consume(): Admitted<T> | undefined {
-    const item = this.#queue.shift();
-    if (item) {
-      this.#queuedBytes -= item.encodedLen;
+    while (true) {
+      const slot = this.#slots.shift();
+      if (!slot) return undefined;
+      if (slot.kind === "filtered") {
+        this.#consumed += 1n;
+        this.wakeCredit();
+        continue;
+      }
+      this.#queuedBytes -= slot.item.encodedLen;
+      this.#telemetry.buffered(-slot.item.encodedLen);
       this.#consumed += 1n;
+      // Filtered markers queued behind this value need no application
+      // handoff, so the contiguous consumed prefix may advance across them
+      // immediately (G09: value 1 + filtered 2 reports consumed 2).
+      while (this.#slots[0]?.kind === "filtered") {
+        this.#slots.shift();
+        this.#consumed += 1n;
+      }
       this.wakeCredit();
+      return slot.item;
     }
-    return item;
   }
 
   consumedSeq(): bigint {
@@ -157,6 +215,7 @@ export class ConsumerCore<T> {
     if (this.#end) return;
     this.#end = end;
     this.#phase = "closed";
+    this.#telemetry.end(end);
     this.#pendingEnd = undefined;
     this.wake();
     this.start.resolve();
@@ -174,19 +233,32 @@ export class ConsumerCore<T> {
   }
 
   discardQueue(): void {
-    this.#queue = [];
+    this.#slots = [];
+    if (this.#queuedBytes > 0) {
+      this.#telemetry.buffered(-this.#queuedBytes);
+    }
     this.#queuedBytes = 0;
+  }
+
+  /** Actual local cleanup completed; remove the session and pending gauge. */
+  cleanupFinished(): void {
+    this.#telemetry.cleanupFinished();
+  }
+
+  /** Retained local cleanup exceeded the shared grace. */
+  cleanupExceededGrace(): void {
+    this.#telemetry.cleanupExceededGrace();
   }
 
   /** Resolve a pending normal end once the queue is empty. */
   drainComplete(): boolean {
     if (this.#end?.isComplete() !== true) return false;
-    return this.#queue.length === 0;
+    return this.#slots.length === 0;
   }
 
   /** Promote a pending normal end to the committed outcome once drained. */
   commitDrainIfComplete(): void {
-    if (this.#pendingEnd && this.#queue.length === 0) {
+    if (this.#pendingEnd && this.#slots.length === 0) {
       const pending = this.#pendingEnd;
       this.#pendingEnd = undefined;
       this.commitEnd(pending);
@@ -246,6 +318,7 @@ export class LiveSubscription<T> implements AsyncIterableIterator<T> {
   readonly #core: ConsumerCore<T>;
   readonly #cancellation: LiveCancellation;
   readonly #closeFn: () => Promise<LiveCloseReceipt>;
+  readonly #fence: (() => LiveEnd | undefined) | undefined;
   readonly #closed = Promise.withResolvers<LiveEnd>();
   #closedResolved = false;
   #nextPending = false;
@@ -258,20 +331,26 @@ export class LiveSubscription<T> implements AsyncIterableIterator<T> {
     cancellation: LiveCancellation,
     closeFn: () => Promise<LiveCloseReceipt>,
     permit?: { [Symbol.dispose](): void },
+    fence?: () => LiveEnd | undefined,
   ) {
     this.#core = core;
     this.#cancellation = cancellation;
     this.#closeFn = closeFn;
     this.#permit = permit;
+    this.#fence = fence;
     this.#core.onEnd((end) => this.#resolveClosed(end));
   }
 
-  #resolveClosed(end: LiveEnd): void {
+  #resolveClosed(end: LiveEnd, releasePermit = true): void {
     if (this.#closedResolved) return;
     this.#closedResolved = true;
+    if (releasePermit) this.#releasePermit();
+    this.#closed.resolve(end);
+  }
+
+  #releasePermit(): void {
     this.#permit?.[Symbol.dispose]();
     this.#permit = undefined;
-    this.#closed.resolve(end);
   }
 
   /** The terminal outcome; resolves once and never rejects. */
@@ -303,6 +382,13 @@ export class LiveSubscription<T> implements AsyncIterableIterator<T> {
           this.#core.cancel();
           return { done: true, value: undefined };
         }
+        // A continuing current-authority check fences queued data before it is
+        // handed to the application.
+        const fenced = this.#fence?.();
+        if (fenced) {
+          this.#core.discardQueue();
+          this.#core.commitEnd(fenced);
+        }
         const end = this.#core.committedEnd();
         if (end && !end.isComplete()) {
           this.#core.discardQueue();
@@ -315,6 +401,9 @@ export class LiveSubscription<T> implements AsyncIterableIterator<T> {
         if (this.#activePhase()) {
           const item = this.#core.consume();
           if (item) {
+            // Handing out the last queued value commits a pending normal end
+            // immediately; the application need not poll once more.
+            this.#core.commitDrainIfComplete();
             return { done: false, value: item.value };
           }
         }
@@ -348,21 +437,38 @@ export class LiveSubscription<T> implements AsyncIterableIterator<T> {
     return this.#closePromise;
   }
 
+  /** Synchronously fence this session; no new yields or publications. */
+  fence(): void {
+    this.#cancel();
+  }
+
   #cancel(): void {
     this.#cancellation.cancel();
     this.#core.discardQueue();
     this.#core.cancel();
-    this.#resolveClosed(
-      this.#core.committedEnd() ?? this.#core.pendingEnd() ??
-        new LiveEnd("cancelled"),
-    );
+    // A pending normal end is not a successful committed result once queued
+    // data is discarded; the permit stays until the close exchange settles.
+    // The local terminal is committed into the core so the public `closed`
+    // outcome, the iteration result and the telemetry owner share one source
+    // of truth (a prepared cancellation must still record one live end).
+    const end = this.#core.committedEnd() ?? new LiveEnd("cancelled");
+    this.#core.commitEnd(end);
+    this.#resolveClosed(end, false);
+  }
+
+  async #settleClose(): Promise<LiveCloseReceipt> {
+    try {
+      return await this.#runClose();
+    } finally {
+      this.#releasePermit();
+    }
   }
 
   /** Cancellation-safe iterator return; never hangs behind a pending next. */
   async return(value?: unknown): Promise<IteratorResult<T>> {
     this.#cancel();
     try {
-      await this.#runClose();
+      await this.#settleClose();
     } catch {
       // Remote confirmation is best-effort and already bounded.
     }
@@ -373,19 +479,21 @@ export class LiveSubscription<T> implements AsyncIterableIterator<T> {
     return await this.return(error);
   }
 
-  /** Explicitly close the observation and await the bounded close exchange. */
-  async close(): Promise<AsyncResult<LiveCloseReceipt, UnexpectedError>> {
+  /**
+   * Explicitly close the observation.
+   *
+   * Returns the bounded close receipt directly; use `.orThrow()` or await the
+   * result. This is intentionally not an `async` wrapper.
+   */
+  close(): AsyncResult<LiveCloseReceipt, UnexpectedError> {
     this.#cancel();
-    try {
-      const receipt = await this.#runClose();
-      return AsyncResult.ok(receipt);
-    } catch (cause) {
-      return AsyncResult.err(new UnexpectedError({ cause }));
-    }
+    return AsyncResult.try(() => this.#settleClose());
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
-    await this.close();
+    await this.#settleClose().catch(() => {
+      // Disposal is best-effort; the bounded close exchange already ran.
+    });
   }
 }
 
