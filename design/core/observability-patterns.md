@@ -91,16 +91,19 @@ terminal outcome. A running Operation with zero observers retains one unchanged
 execution lifetime, and opening or closing a watcher never changes Operation
 execution counts. `trellis.live.cleanup.pending` decrements only on actual
 source termination, so a zero active-session gauge with nonzero pending is still
-a visible leak. Until the `trellis.live.*` families are emitted, the existing
-`trellis.feed.active` and `trellis.feed.ends` families remain the published Feed
-lifecycle signal.
+a visible leak. All seven families are emitted by the same endpoint record that
+owns the local state. `trellis.feed.active` and `trellis.feed.ends` remain as a
+narrow Feed-only projection of that owner: `kind != feed` produces no Feed
+observation, the first `ACTIVE` increments active, the first terminal after
+`ACTIVE` decrements it and records one end, and a prepared failure, cancellation
+or expiry records no Feed active/end pair.
 
-Labels stay bounded: `trellis.live.kind` (`feed`/`operation_watch`),
-`trellis.side` (`consumer`/`provider`), `trellis.phase`, fixed `reason` and
-rejection codes, and `sent`/`received` direction. Raw subjects, session and
-Operation IDs, principal or deployment identities, digests, inputs, and
-free-form error strings are never metric dimensions. Telemetry never keeps a
-session alive and never closes a healthy one.
+Labels stay bounded: `trellis.kind` (`feed`/`operation_watch`), `trellis.side`
+(`consumer`/`provider`), `trellis.phase`, fixed `reason` and rejection codes,
+and `send`/`receive` direction. Raw subjects, session and Operation IDs,
+principal or deployment identities, digests, inputs, and free-form error strings
+are never metric dimensions. Telemetry never keeps a session alive and never
+closes a healthy one.
 
 ### Runtime Health And Events Views
 

@@ -94,6 +94,11 @@ listens on the ports written to `nats/nats.conf`, which the `--nats-port`,
 | `8080` | Browser websocket clients |
 | `8222` | NATS monitoring and health |
 
+`trellis init config` rejects port `0`, duplicate listener ports, and a NATS
+listener that collides with `--trellis-port`. Managed startup reads those three
+listeners from `nats/nats.conf` and fails when they are missing, duplicated, or
+supplied as unsupported expressions; it never substitutes defaults.
+
 The runtime safely converges the streams and KV buckets owned by its selected
 mode during startup, exposes the embedded portal, first-admin and login flows,
 authorization context registries, `/healthz`, and `/readyz`. On a fresh

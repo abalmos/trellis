@@ -512,8 +512,8 @@
       "instrument": "UpDownCounter<i64>",
       "unit": "{subscription}",
       "attributes": { "trellis.side": ["client", "server"] },
-      "owner": "Feed stream owner",
-      "observation": "Open subscriptions; decrement on return/drop/cancel/EOF exactly once."
+      "owner": "Live observation endpoint telemetry owner (Feed kind only)",
+      "observation": "Feed-only projection derived from the same owner as the seven trellis.live.* families. Increment on the first committed ACTIVE; decrement and record one end at the first terminal after ACTIVE. Prepared failures, cancellations and expiries record no active/end pair, and a retained completed handle leaves no active Feed."
     },
     {
       "name": "trellis.feed.ends",
@@ -523,8 +523,91 @@
         "trellis.side": ["client", "server"],
         "trellis.reason": ["complete", "cancelled", "revoked", "unavailable", "error"]
       },
-      "owner": "Same Feed owner",
-      "observation": "One stream termination; do not treat expected cancellation as service failure."
+      "owner": "Same Live observation endpoint telemetry owner",
+      "observation": "One termination per Feed session that reached ACTIVE. Explicit revocation or expiry maps to revoked; unknown coverage, peer loss, disconnect and binding change map to unavailable; setup timeout, consumer slow, delivery gap, source/protocol error and resource exhaustion map to error. The detailed live reason stays on trellis.live.ends."
+    },
+    {
+      "name": "trellis.live.sessions",
+      "instrument": "UpDownCounter<i64>",
+      "unit": "{session}",
+      "attributes": {
+        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.side": ["consumer", "provider"],
+        "trellis.phase": ["prepared", "activating", "active", "draining", "closing"]
+      },
+      "owner": "Live observation endpoint record (Rust and TypeScript)",
+      "observation": "Move exactly one unit between phases; remove at actual local cleanup completion. Retained cleanup stays closing. Never export closed or tombstone series."
+    },
+    {
+      "name": "trellis.live.ends",
+      "instrument": "Counter<u64>",
+      "unit": "{session}",
+      "attributes": {
+        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.side": ["consumer", "provider"],
+        "trellis.reason": ["complete", "cancelled", "local_shutdown", "setup_timeout", "peer_lost", "disconnected", "authorization_lost", "binding_changed", "consumer_slow", "delivery_gap", "source_error", "protocol_error", "resource_exhausted"]
+      },
+      "owner": "Same endpoint record",
+      "observation": "Exactly once at the local terminal commit, including admitted prepared sessions that expire or are cancelled. A pending normal END is not yet a consumer terminal."
+    },
+    {
+      "name": "trellis.live.handshake.duration",
+      "instrument": "Histogram<f64>",
+      "unit": "s",
+      "attributes": {
+        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.side": ["consumer", "provider"]
+      },
+      "owner": "Same endpoint record",
+      "observation": "First activation initiation through committed ACTIVE or activation failure. Recorded once; retries do not restart it, and how long an unused prepared handle was held is not included.",
+      "boundaries": [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 900, 3600]
+    },
+    {
+      "name": "trellis.live.buffered.bytes",
+      "instrument": "UpDownCounter<i64>",
+      "unit": "By",
+      "attributes": {
+        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.side": ["consumer", "provider"]
+      },
+      "owner": "Same endpoint record",
+      "observation": "Actual retained serialized DATA/source-ingress payload bytes. The charge transfers from raw admission to decoded/staged ownership and releases on handoff, drop or fence. Scalar outstanding-credit costs are not retained bytes and must not be added here; this is not total heap or RSS."
+    },
+    {
+      "name": "trellis.live.frames",
+      "instrument": "Counter<u64>",
+      "unit": "{frame}",
+      "attributes": {
+        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.side": ["consumer", "provider"],
+        "trellis.class": ["data", "control"],
+        "trellis.direction": ["send", "receive"]
+      },
+      "owner": "Same endpoint record",
+      "observation": "Count actual admitted outgoing and verified incoming live messages once per wire attempt; retry traffic is traffic. Non-DATA protocol messages are control. Rejected input is not admitted receive traffic."
+    },
+    {
+      "name": "trellis.live.rejections",
+      "instrument": "Counter<u64>",
+      "unit": "{message}",
+      "attributes": {
+        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.side": ["consumer", "provider"],
+        "trellis.reason": ["invalid_signature", "foreign_identity", "invalid_protocol", "over_capacity"]
+      },
+      "owner": "Same endpoint record",
+      "observation": "Fixed rejection categories only. Unauthenticated and unsafe requests are dropped without reflection and without an arbitrary error-text dimension."
+    },
+    {
+      "name": "trellis.live.cleanup.pending",
+      "instrument": "UpDownCounter<i64>",
+      "unit": "{source}",
+      "attributes": {
+        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.side": ["consumer", "provider"]
+      },
+      "owner": "Same endpoint record",
+      "observation": "Increment once when owned cleanup exceeds the shared grace; decrement only at actual later settlement. Removing the live record from normal routing never clears it."
     },
     {
       "name": "trellis.resource.bindings",

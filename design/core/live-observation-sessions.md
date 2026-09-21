@@ -66,11 +66,23 @@ subscriptions do not.
 
 Provider-origin messages (offer, control response, challenge, data, end) are
 signed over the **actual NATS subject and raw received bytes** with the
-`trellis-live-server-proof.v1` domain. The offer's identity fields use the
+`trellis-live-server-proof.v1` domain. Owner-control replies are signed over the
+reply inbox, never the request subject. The offer's identity fields use the
 canonical subject-token projection of the full runtime key; proof headers and
 retained identities use the full runtime key. A frame is accepted only when the
 actual subject, current covered context, pinned provider tuple, session id, and
 signature all verify.
+
+Both endpoints retain a real covered authority lease, not a digest snapshot:
+self and peer for a consumer, self and admitted caller for a provider. The
+selected provider deployment comes from the installed binding (the bound subject
+for a Feed, the bound route for an Operation), never from the offer's own claim;
+the complete advertised provider tuple must match its verified context, and the
+offered consumer tuple must match the opener's current local identity.
+Provider/caller contexts carry their authority through admission-time
+materialization rather than context atoms, so the peer check is the selected
+binding plus tuple/identity matching, while the locally retained observer atom
+is required exactly.
 
 An identity-preserving authorization refresh on an unchanged transport epoch
 does not close the session, reset sequence/credit, or reinvoke the handler. A
@@ -83,9 +95,15 @@ extending liveness and without closing an otherwise valid session.
 - The provider window is 64 outstanding frames and 1 MiB of exact encoded `DATA`
   bodies. Cost is the whole serialized frame body, not a surrogate.
 - The consumer releases credit when a validated item is **handed to the
-  application**, not when bytes arrive. It sends cumulative credit after 16
-  newly consumed frames or 50 ms, whichever comes first, piggybacked on a
-  pending pulse.
+  application**, not when bytes arrive. It sends cumulative credit in a bounded
+  control after 16 newly released frames or 50 ms, whichever comes first. At
+  most one logical credit control is outstanding; retries reuse its identical
+  body and sequence with a fresh proof, and newer consumption is coalesced into
+  the next one. A pending challenge is answered with a pulse that also carries
+  the current cursors.
+- A deliberately filtered frame still occupies its ordered slot, so the consumed
+  prefix cannot advance past an earlier unread value; the prefix then advances
+  across consecutive filtered markers.
 - Wire cursors are checked u64 values serialized as canonical decimal strings.
 - A verified sequence gap, or a challenge/end that implies an unreceived
   trailing sequence, closes the session as `delivery_gap`. Duplicates neither
@@ -104,9 +122,18 @@ extending liveness and without closing an otherwise valid session.
 - Normal source completion publishes `end` after every admitted frame; the
   consumer acknowledges and drains already-queued items in bounded `DRAINING`
   before resolving `complete`.
+- Handing out the final queued value commits `complete` and resolves `closed`
+  immediately; the application need not poll once more. Abort, disposal, own
+  authority loss, or a decode/protocol failure before the remaining queue is
+  handed out discards it and commits the corresponding non-complete outcome.
 - Explicit close and end-ack share one bounded best-effort exchange with fresh
   proofs per retry and a single total budget. `session_not_found`, transport
-  loss, or no response leaves remote cleanup **unconfirmed**.
+  loss, or no response leaves remote cleanup **unconfirmed**. A repeated logical
+  close receives the current closed receipt, signed for its fresh request id.
+- Closing resources that have not actually settled keep occupying admission.
+  When owned cleanup exceeds the shared grace it counts once in
+  `trellis.live.cleanup.pending`, the session stays `closing`, and both are
+  released only at actual later settlement.
 
 ## Observation versus execution
 
@@ -119,10 +146,32 @@ extending liveness and without closing an otherwise valid session.
 
 ## Observability
 
-Live session, end, handshake, buffer, frame, rejection, and cleanup-pending
-instruments are emitted by the real session owners. Labels are bounded; session
-and Operation ids never become metric dimensions. No span is held open for the
-lifetime of a session, and no per-frame spans are emitted.
+Seven families are emitted by the endpoint record that owns the local state, in
+both SDKs:
+
+- `trellis.live.sessions` moves one unit between `prepared`, `activating`,
+  `active`, `draining`, and `closing`, and is removed only at actual local
+  cleanup completion. There is no `closed`/tombstone series.
+- `trellis.live.ends` records exactly once at the local terminal commit,
+  including admitted prepared sessions that expire or are cancelled.
+- `trellis.live.handshake.duration` measures first activation through committed
+  `ACTIVE` or activation failure, once, without including unused prepared time.
+- `trellis.live.buffered.bytes` tracks actually retained serialized payload,
+  transferring the charge from raw admission to decoded/staged ownership.
+- `trellis.live.frames` counts admitted outgoing and verified incoming messages
+  once per wire attempt with a `data`/`control` class and direction.
+- `trellis.live.rejections` uses the fixed categories `invalid_signature`,
+  `foreign_identity`, `invalid_protocol`, and `over_capacity`.
+- `trellis.live.cleanup.pending` counts owned cleanup that exceeded the grace
+  until it truly settles.
+
+The `trellis.feed.active` / `trellis.feed.ends` pair is a narrow
+Feed-only projection of that same owner: `kind != feed` produces no Feed
+observation, the first `ACTIVE` increments active, the first terminal after
+`ACTIVE` decrements it and records one end, and a prepared failure/cancel/expiry
+records no Feed active/end pair. Labels are bounded; session and Operation ids, subjects,
+principals and arbitrary error text never become dimensions. No span is held
+open for the lifetime of a session, and no per-frame spans are emitted.
 
 ## Testing
 
