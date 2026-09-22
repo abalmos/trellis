@@ -9,7 +9,7 @@ use runtime_trellis::types::{Empty, Sample};
 use tracing_subscriber::prelude::*;
 use trellis_rs::generated::EventDescriptor;
 use trellis_rs::service::{
-    ServerError, ServiceConnectOptions, ServiceEventListenerMode, ServiceEventListenOptions,
+    ServerError, ServiceConnectOptions, ServiceEventListenOptions, ServiceEventListenerMode,
 };
 use trellis_rs::telemetry::{init_from_env, TelemetryIdentity, TelemetryRole};
 
@@ -155,10 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Consumer-only participant: a declared durable consumer grants no raw
 /// Event Subscribe authority, so explicit ephemeral must fail fast.
-async fn run_consumer_only(
-    url: &str,
-    identity: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn run_consumer_only(url: &str, identity: &str) -> Result<(), Box<dyn std::error::Error>> {
     use runtime_trellis::participants::runtime_trellis_event_service_consumer_only::Participant as ConsumerOnly;
     let service = ConsumerOnly::connect(ServiceConnectOptions::new(url, identity)).await?;
     let outcome = service

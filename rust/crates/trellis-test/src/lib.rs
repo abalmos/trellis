@@ -9,11 +9,13 @@
 //! A current-thread runtime starves the control plane's subsystems: its auth callout handshake
 //! fails and startup reports an authorization violation.
 
+mod admin;
 mod config;
 mod error;
 mod ports;
 mod runtime;
 
+pub use admin::TrellisTestAdmin;
 pub use error::TrellisTestError;
 pub use runtime::{
     TrellisTestRuntime, TrellisTestRuntimeOptions, TrellisTestTimeouts, DEFAULT_ADMIN_USERNAME,
