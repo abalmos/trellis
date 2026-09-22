@@ -405,7 +405,7 @@ fn compile_api_surface(
                 .map_err(|error| invalid_error(error.to_string()))?;
             publish.insert(subject.clone());
             publish.insert(format!("{subject}.control.*.*"));
-            // The exact Feed Subscribe grant also authorizes this caller's own
+            // The exact Live Subscribe grant also authorizes this caller's own
             // live observation controls and connection-scoped delivery.
             publish.insert(format!("{subject}.observe.*.*"));
             subscribe.insert(consumer_live_data_subscription(connection_id));

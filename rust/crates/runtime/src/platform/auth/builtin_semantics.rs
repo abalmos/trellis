@@ -1424,7 +1424,7 @@ fn api_0() -> ApiRuntimeProjection {
 
 fn api_1() -> ApiRuntimeProjection {
     ApiRuntimeProjection {
-        digest: "aUohKUjAdrsQhEPqCsJQkF0Ehqmva2xK1Kju1yLRDxM".into(),
+        digest: "ort4pZPv8EIhAelwexctvEIJhNuNaWCZPtIDF4XVLXM".into(),
         major: 1,
         actions: BTreeMap::from([
             (
@@ -3206,8 +3206,8 @@ fn participant_4() -> BuiltinParticipant {
 fn participant_5() -> BuiltinParticipant {
     BuiltinParticipant {
         package_digest: PACKAGE_DIGEST,
-        participant_digest: "NfpCYy0dNnkwKTt7jyjVFshTVB68Vr1nY_GVgNhQslY",
-        needs_digest: "g6luAuyHMaAXPuKQsF-SITnsg8v_5iOM1j8L73A8JqM",
+        participant_digest: "sUeAJFVB2bQsynir1vAGZhwKYWpLyHBhh7gk6uZAl0I",
+        needs_digest: "AyNzEaubTt9TavqPWPGRD1lcjBw3QXE8ozAmb9MFjA4",
         projection: ParticipantRuntimeProjection {
             participant_id: "trellis.platform".into(),
             participant_kind: ParticipantKind::Service,
@@ -3320,4 +3320,4 @@ fn resource_permission(
     .expect("generated resource permission")
 }
 
-pub(crate) const PACKAGE_DIGEST: &str = "jrwvEmXfrHI4l0hzRmlLv7aQZdydTMVy6oKFsN-Drn0";
+pub(crate) const PACKAGE_DIGEST: &str = "351HnUzHKb3mL9ywXi0iiawhcYstruqKuwBW0-c1kUY";

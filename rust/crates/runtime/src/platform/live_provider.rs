@@ -35,11 +35,11 @@ use super::{ensure_builtin_provider_deployment, RuntimeError};
 pub enum LiveProviderRole {
     /// Platform Operation provider for the Auth/Core/State public routes.
     Platform,
-    /// Health API and Feed provider.
+    /// Health API live provider.
     Health,
-    /// Jobs API and Feed provider.
+    /// Jobs API live provider.
     Jobs,
-    /// Events API and Feed provider.
+    /// Events API live provider.
     Events,
 }
 
@@ -773,7 +773,7 @@ pub fn live_provider_declares_resources(role: LiveProviderRole) -> bool {
 ///
 /// # Errors
 ///
-/// Returns [`RuntimeError::Platform`] when the router serves a Feed or
+/// Returns [`RuntimeError::Platform`] when the router serves a Live or
 /// Operation watch route without an installed provider owner.
 #[allow(
     dead_code,
@@ -785,7 +785,7 @@ pub fn require_live_provider_owner(
 ) -> Result<(), RuntimeError> {
     if router_serves_live_surface && !owner_present {
         return Err(RuntimeError::Platform(
-            "a router serving a Feed or Operation watch route requires a live provider owner"
+            "a router serving a Live or Operation watch route requires a live provider owner"
                 .to_owned(),
         ));
     }

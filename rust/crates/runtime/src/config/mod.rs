@@ -801,13 +801,13 @@ pub struct LiveProviderSeedFilesConfig {
     /// Platform Operation provider identity seed file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub platform: Option<PathBuf>,
-    /// Health API/Feed provider identity seed file.
+    /// Health API live provider identity seed file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub health: Option<PathBuf>,
-    /// Jobs API/Feed provider identity seed file.
+    /// Jobs API live provider identity seed file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jobs: Option<PathBuf>,
-    /// Events API/Feed provider identity seed file.
+    /// Events API live provider identity seed file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub events: Option<PathBuf>,
 }
