@@ -75,12 +75,12 @@ import type {
   ActiveEventPublishFacade,
   EventListenerContext,
   EventOpts,
+  HandlerTrellis,
   LiveEventOf,
   LiveHandlerContext,
   LiveInputOf,
   LiveRegistration as RootLiveRegistration,
   LivesOf,
-  HandlerTrellis,
   OperationHandlerContext,
   OperationHandlerErrorOf,
   OperationOutputOf,
@@ -3160,12 +3160,12 @@ export class TrellisServiceSession<
     }
 
     const live: ServiceHandleFacade["live"] = {};
-    for (const feedName of Object.keys(this.#runtime.api.feeds ?? {})) {
+    for (const liveName of Object.keys(this.#runtime.api.feeds ?? {})) {
       addSurfaceLeaf(
-        feed,
-        feedName,
+        live,
+        liveName,
         (handler) =>
-          this.#runtime.feedHandle(feedName).handle((context) =>
+          this.#runtime.feedHandle(liveName).handle((context) =>
             (handler as (args: unknown) => unknown | Promise<unknown>)({
               ...context,
               client: this.#handlerTrellis,
@@ -3194,7 +3194,7 @@ export class TrellisServiceSession<
       addSurfaceLeaf(operation, operationName, leaf);
     }
 
-    return { rpc, feed, operation };
+    return { rpc, live, operation };
   }
 
   #createSqlOutboxBinding<TTx>(
