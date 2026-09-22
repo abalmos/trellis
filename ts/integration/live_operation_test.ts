@@ -57,7 +57,7 @@ Deno.test("V3 Operation observation delivers typed updates then terminal", async
     try {
       const handle = await caller.work({ value: "observe" }).start()
         .orThrow();
-      const subscription = await handle.watch({ updates: true }).orThrow();
+      const subscription = await handle.live({ updates: true }).orThrow();
       const updates: string[] = [];
       let terminalState: string | undefined;
       let terminalOutput: string | undefined;

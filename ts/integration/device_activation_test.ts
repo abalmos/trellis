@@ -88,7 +88,7 @@ Deno.test("device companion requires separate selected consent across restart", 
     // BI07: a live observation of the real Platform Operation must deliver an
     // authoritative snapshot and closing it must not cancel the operation.
     {
-      const observation = await pending.watch({}).orThrow();
+      const observation = await pending.live({}).orThrow();
       const events: unknown[] = [];
       for await (const event of observation) {
         events.push(event);
