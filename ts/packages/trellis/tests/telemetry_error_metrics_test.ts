@@ -183,7 +183,7 @@ Deno.test("Live client template failures record trellis error metric", async () 
     { api },
   );
 
-  await runtime.feedHandle("Test.Stream").input({}).subscribe().take();
+  await runtime.liveHandle("Test.Stream").input({}).subscribe().take();
   await reader.forceFlush();
 
   const dataPoint = findTrellisErrorDataPoint({

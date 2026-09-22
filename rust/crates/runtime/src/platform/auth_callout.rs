@@ -685,7 +685,7 @@ impl CalloutProcessor {
                     health_watch = permissions
                         .publish
                         .iter()
-                        .any(|subject| subject == "feed.v1.Health.Watch"),
+                        .any(|subject| subject == "live.v1.route.Health.Watch"),
                     "compiled NATS authorization permissions"
                 );
                 let expires_at_ms = [

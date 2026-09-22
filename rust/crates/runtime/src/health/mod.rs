@@ -53,7 +53,7 @@ const RPC_SUBJECTS: &[&str] = &[
     "rpc.v1.Health.Inspect",
     "rpc.v1.Health.Metrics",
     "rpc.v1.Health.Summary",
-    "feed.v1.Health.Watch",
+    "live.v1.route.Health.Watch",
 ];
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

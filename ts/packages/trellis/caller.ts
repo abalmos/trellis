@@ -290,7 +290,7 @@ export function createCallerRuntime<TContract extends GeneratedParticipant>(
           const error = unavailable();
           return error
             ? AsyncResult.from(Promise.resolve(err(error)))
-            : runtime.feedHandle(action.name).input(input).subscribe(opts);
+            : runtime.liveHandle(action.name).input(input).subscribe(opts);
         };
         break;
       case "event":

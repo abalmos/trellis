@@ -35,8 +35,8 @@ use trellis_rs::service::{
 };
 
 mod bootstrap;
-mod browser;
-mod error;
+pub(crate) mod browser;
+pub(crate) mod error;
 mod router;
 mod security;
 mod telemetry;
@@ -74,7 +74,7 @@ use super::{
     ResourceBindingEvidence, ResourceBindingState, ResourceProviderIdentity, SessionRepository,
 };
 
-const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60_000;
+pub(crate) const IDEMPOTENCY_TTL_MS: i64 = 24 * 60 * 60_000;
 
 #[derive(Clone)]
 pub(crate) struct OidcProvider {
@@ -435,7 +435,7 @@ fn checked_add(value: i64, duration: i64) -> Result<i64, HttpError> {
         .ok_or_else(|| HttpError::internal("timestamp_overflow"))
 }
 
-fn digest_parts(parts: &[&str]) -> String {
+pub(crate) fn digest_parts(parts: &[&str]) -> String {
     let mut digest = Sha256::new();
     for part in parts {
         digest.update((part.len() as u64).to_be_bytes());

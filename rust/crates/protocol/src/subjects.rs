@@ -347,7 +347,9 @@ pub fn derive_event_wildcard_subject(
 /// Returns [`ProtocolError::InvalidIdentifier`] for an invalid `vN` version or
 /// logical surface name.
 pub fn derive_feed_subject(version: &str, logical_name: &str) -> Result<String, ProtocolError> {
-    derive_subject("feed", version, logical_name)
+    validate_version(version)?;
+    validate_logical_name(logical_name)?;
+    Ok(format!("live.{version}.route.{logical_name}"))
 }
 
 /// Return whether two tokenized event subject patterns can match the same subject.

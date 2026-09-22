@@ -1105,7 +1105,7 @@ mod tests {
 
     #[test]
     fn feed_open_publishes_on_the_same_base_subject() {
-        let base = "feed.v1.Watch";
+        let base = "live.v1.route.Watch";
         let open = open(LiveSessionKind::Standalone, base, base);
         verify_offer_identity(&open, &offer(LiveSessionKind::Standalone, base)).expect("feed offer");
     }
@@ -1172,7 +1172,7 @@ mod tests {
 
     #[test]
     fn offer_from_a_non_selected_deployment_is_rejected() {
-        let base = "feed.v1.Watch";
+        let base = "live.v1.route.Watch";
         let open = open(LiveSessionKind::Standalone, base, base);
         let error = verify_offer_claims(
             &open,
@@ -1188,7 +1188,7 @@ mod tests {
 
     #[test]
     fn offer_with_a_mutated_provider_tuple_is_rejected() {
-        let base = "feed.v1.Watch";
+        let base = "live.v1.route.Watch";
         let open = open(LiveSessionKind::Standalone, base, base);
         let mut mutated = provider_identity();
         mutated.instance_id = Some("inst-mutated".into());
@@ -1206,7 +1206,7 @@ mod tests {
 
     #[test]
     fn offer_with_a_mutated_consumer_tuple_is_rejected() {
-        let base = "feed.v1.Watch";
+        let base = "live.v1.route.Watch";
         let open = open(LiveSessionKind::Standalone, base, base);
         let mut mutated = consumer_identity();
         mutated.participant_id = "other".into();
@@ -1224,7 +1224,7 @@ mod tests {
 
     #[test]
     fn selected_deployment_and_complete_tuples_are_accepted() {
-        let base = "feed.v1.Watch";
+        let base = "live.v1.route.Watch";
         let open = open(LiveSessionKind::Standalone, base, base);
         verify_offer_claims(
             &open,

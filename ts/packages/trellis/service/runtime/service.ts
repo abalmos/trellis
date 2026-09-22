@@ -3165,7 +3165,7 @@ export class TrellisServiceSession<
         live,
         liveName,
         (handler) =>
-          this.#runtime.feedHandle(liveName).handle((context) =>
+          this.#runtime.liveHandle(liveName).handle((context) =>
             (handler as (args: unknown) => unknown | Promise<unknown>)({
               ...context,
               client: this.#handlerTrellis,

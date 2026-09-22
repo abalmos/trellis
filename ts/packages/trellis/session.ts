@@ -2722,7 +2722,7 @@ export class Trellis<
     const surface: SurfaceGroups<RuntimeLiveLeaf> = {};
     for (const feed of Object.keys(this.api.feeds ?? {})) {
       const leaf: RuntimeLiveLeaf = (input, opts) =>
-        this.feedHandle(feed as LivesOf<TA>).input(
+        this.liveHandle(feed as LivesOf<TA>).input(
           input as LiveInputOf<TA, LivesOf<TA>>,
         ).subscribe(opts) as AsyncResult<
           LiveSubscription<unknown>,
@@ -3233,7 +3233,7 @@ export class Trellis<
     });
   }
 
-  feedHandle<F extends LivesOf<TA>>(
+  liveHandle<F extends LivesOf<TA>>(
     feed: F,
   ):
     & LiveInputBuilder<LiveInputOf<TA, F>, LiveEventOf<TA, F>>
