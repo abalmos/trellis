@@ -8,6 +8,8 @@ and this project adheres to
 
 ## [Unreleased]
 
+## [0.12.0-rc.1] - 2026-09-22
+
 ### Added
 
 - Added deployment-owned authorization trust initialization and direct-key
