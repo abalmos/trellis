@@ -508,25 +508,6 @@
       "observation": "Actual transmitted/received payload bytes, including retries; not business unique object size."
     },
     {
-      "name": "trellis.feed.active",
-      "instrument": "UpDownCounter<i64>",
-      "unit": "{subscription}",
-      "attributes": { "trellis.side": ["client", "server"] },
-      "owner": "Live observation endpoint telemetry owner (Feed kind only)",
-      "observation": "Feed-only projection derived from the same owner as the seven trellis.live.* families. Increment on the first committed ACTIVE; decrement and record one end at the first terminal after ACTIVE. Prepared failures, cancellations and expiries record no active/end pair, and a retained completed handle leaves no active Feed."
-    },
-    {
-      "name": "trellis.feed.ends",
-      "instrument": "Counter<u64>",
-      "unit": "{subscription}",
-      "attributes": {
-        "trellis.side": ["client", "server"],
-        "trellis.reason": ["complete", "cancelled", "revoked", "unavailable", "error"]
-      },
-      "owner": "Same Live observation endpoint telemetry owner",
-      "observation": "One termination per Feed session that reached ACTIVE. Explicit revocation or expiry maps to revoked; unknown coverage, peer loss, disconnect and binding change map to unavailable; setup timeout, consumer slow, delivery gap, source/protocol error and resource exhaustion map to error. The detailed live reason stays on trellis.live.ends."
-    },
-    {
       "name": "trellis.live.sessions",
       "instrument": "UpDownCounter<i64>",
       "unit": "{session}",

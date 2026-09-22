@@ -208,8 +208,6 @@ pub enum CounterFamily {
     DeliveryDispositions,
     /// Authoritative dead-letter transition operations.
     DeadLetterTransitions,
-    /// Feed stream terminations.
-    FeedEnds,
     /// Live observation session local terminal commits.
     LiveEnds,
     /// Admitted outgoing and verified incoming live session frames.
@@ -237,7 +235,6 @@ impl CounterFamily {
             Self::OperationOwnershipEvents => "trellis.operation.ownership.events",
             Self::DeliveryDispositions => "trellis.delivery.dispositions",
             Self::DeadLetterTransitions => "trellis.dlq.transitions",
-            Self::FeedEnds => "trellis.feed.ends",
             Self::LiveEnds => "trellis.live.ends",
             Self::LiveFrames => "trellis.live.frames",
             Self::LiveRejections => "trellis.live.rejections",
@@ -256,7 +253,6 @@ impl CounterFamily {
             Self::ConnectionTransitions => "{transition}",
             Self::JobLeaseEvents | Self::RuntimeLeaseEvents => "{event}",
             Self::OperationOwnershipEvents => "{event}",
-            Self::FeedEnds => "{subscription}",
             Self::LiveEnds => "{session}",
             Self::LiveFrames => "{frame}",
             Self::LiveRejections => "{message}",
@@ -276,8 +272,6 @@ pub enum UpDownFamily {
     RpcServerInflight,
     /// Locally owned operation executions.
     OperationActive,
-    /// Open feed subscriptions.
-    FeedActive,
     /// Live observation sessions by current phase.
     LiveSessions,
     /// Retained live serialized payload bytes.
@@ -292,7 +286,6 @@ impl UpDownFamily {
         match self {
             Self::RpcServerInflight => "trellis.rpc.server.inflight",
             Self::OperationActive => "trellis.operation.active",
-            Self::FeedActive => "trellis.feed.active",
             Self::LiveSessions => "trellis.live.sessions",
             Self::LiveBufferedBytes => "trellis.live.buffered.bytes",
             Self::LiveCleanupPending => "trellis.live.cleanup.pending",
@@ -304,7 +297,6 @@ impl UpDownFamily {
         match self {
             Self::RpcServerInflight => "{request}",
             Self::OperationActive => "{execution}",
-            Self::FeedActive => "{subscription}",
             Self::LiveSessions => "{session}",
             Self::LiveBufferedBytes => "By",
             Self::LiveCleanupPending => "{source}",
@@ -890,7 +882,6 @@ mod tests {
             "trellis.rpc.server.duration"
         );
         assert_eq!(CounterFamily::RpcClientAttempts.unit(), "{attempt}");
-        assert_eq!(UpDownFamily::FeedActive.unit(), "{subscription}");
         assert_eq!(ObservableFamily::JobsReady.name(), "trellis.jobs.ready");
     }
 }

@@ -112,31 +112,6 @@ impl LiveDirection {
     }
 }
 
-/// Maps one detailed end onto the fixed Feed-only reason.
-fn feed_projection_reason(end: &LiveEnd) -> &'static str {
-    match end.reason() {
-        LiveEndReason::Complete => "complete",
-        LiveEndReason::Cancelled | LiveEndReason::LocalShutdown => "cancelled",
-        LiveEndReason::PeerLost | LiveEndReason::Disconnected | LiveEndReason::BindingChanged => {
-            "unavailable"
-        }
-        LiveEndReason::AuthorizationLost => {
-            let code = end.error().map(|error| error.code().as_str()).unwrap_or("");
-            if code.contains("revoked") || code.contains("expired") || code.contains("permission") {
-                "revoked"
-            } else {
-                "unavailable"
-            }
-        }
-        LiveEndReason::SetupTimeout
-        | LiveEndReason::ConsumerSlow
-        | LiveEndReason::DeliveryGap
-        | LiveEndReason::SourceError
-        | LiveEndReason::ProtocolError
-        | LiveEndReason::ResourceExhausted => "error",
-    }
-}
-
 /// One endpoint's live telemetry owner.
 pub(crate) struct LiveTelemetryOwner {
     kind: LiveSessionKind,
@@ -144,7 +119,6 @@ pub(crate) struct LiveTelemetryOwner {
     phase: Option<LivePhase>,
     handshake_started: Option<Instant>,
     handshake_recorded: bool,
-    feed_active: bool,
     ended: bool,
     removed: bool,
     cleanup_pending: bool,
@@ -166,7 +140,6 @@ impl LiveTelemetryOwner {
             phase: None,
             handshake_started: None,
             handshake_recorded: false,
-            feed_active: false,
             ended: false,
             removed: false,
             cleanup_pending: false,
@@ -185,10 +158,6 @@ impl LiveTelemetryOwner {
             KeyValue::new("trellis.kind", self.kind_str()),
             KeyValue::new("trellis.side", self.side.as_str()),
         ]
-    }
-
-    fn is_feed(&self) -> bool {
-        matches!(self.kind, LiveSessionKind::Standalone)
     }
 
     fn transition(&mut self, next: LivePhase) {
@@ -238,14 +207,6 @@ impl LiveTelemetryOwner {
     pub(crate) fn active(&mut self) {
         self.record_handshake();
         self.transition(LivePhase::Active);
-        if self.is_feed() && !self.feed_active {
-            self.feed_active = true;
-            add_updown(
-                UpDownFamily::FeedActive,
-                1,
-                &[KeyValue::new("trellis.side", self.feed_side())],
-            );
-        }
     }
 
     /// A verified normal end was admitted and the queue is draining.
@@ -274,22 +235,6 @@ impl LiveTelemetryOwner {
         let mut attributes = self.base();
         attributes.push(KeyValue::new("trellis.reason", end.reason().as_str()));
         add_counter(CounterFamily::LiveEnds, 1, &attributes);
-        if self.feed_active {
-            self.feed_active = false;
-            add_updown(
-                UpDownFamily::FeedActive,
-                -1,
-                &[KeyValue::new("trellis.side", self.feed_side())],
-            );
-            add_counter(
-                CounterFamily::FeedEnds,
-                1,
-                &[
-                    KeyValue::new("trellis.side", self.feed_side()),
-                    KeyValue::new("trellis.reason", feed_projection_reason(end)),
-                ],
-            );
-        }
     }
 
     /// Retained cleanup exceeded the shared grace.
@@ -339,14 +284,6 @@ impl LiveTelemetryOwner {
             return;
         }
         add_updown(UpDownFamily::LiveBufferedBytes, delta, &self.base());
-    }
-
-    /// The Feed projection uses the existing client/server side label.
-    fn feed_side(&self) -> &'static str {
-        match self.side {
-            LiveSide::Consumer => "client",
-            LiveSide::Provider => "server",
-        }
     }
 }
 
@@ -445,10 +382,6 @@ mod tests {
         ])
     }
 
-    fn feed_active_key() -> String {
-        key(&[("trellis.side", "server")])
-    }
-
     fn feed_end_key(reason: &str) -> String {
         key(&[("trellis.side", "server"), ("trellis.reason", reason)])
     }
@@ -460,164 +393,6 @@ mod tests {
             ("trellis.class", class),
             ("trellis.direction", direction),
         ])
-    }
-
-    #[tokio::test]
-    async fn feed_provider_session_tracks_phases_handshake_end_and_feed_projection() {
-        let _guard = meter_test_lock().await;
-        let capture = process_capture();
-
-        let sessions = UpDownFamily::LiveSessions.name();
-        let ends = CounterFamily::LiveEnds.name();
-        let handshake = DurationFamily::LiveHandshake.name();
-        let feed_active = UpDownFamily::FeedActive.name();
-        let feed_ends = CounterFamily::FeedEnds.name();
-
-        let before = values(&capture, sessions);
-        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Standalone, LiveSide::Provider);
-        assert_eq!(
-            delta(&before, &values(&capture, sessions)),
-            BTreeMap::from([(phase_key("prepared"), 1.0)]),
-            "preparing a session enters the prepared phase"
-        );
-
-        let before = values(&capture, sessions);
-        owner.activating();
-        assert_eq!(
-            delta(&before, &values(&capture, sessions)),
-            BTreeMap::from([
-                (phase_key("prepared"), -1.0),
-                (phase_key("activating"), 1.0)
-            ]),
-            "activation moves the session out of prepared"
-        );
-
-        let before = values(&capture, sessions);
-        let handshake_before = counts(&capture, handshake);
-        owner.active();
-        assert_eq!(
-            delta(&before, &values(&capture, sessions)),
-            BTreeMap::from([(phase_key("activating"), -1.0), (phase_key("active"), 1.0)]),
-            "commit moves the session to active"
-        );
-        assert_eq!(
-            delta(&handshake_before, &counts(&capture, handshake)),
-            BTreeMap::from([(base_key(), 1.0)]),
-            "activation records exactly one handshake duration sample"
-        );
-
-        let feed_active_before = values(&capture, feed_active);
-        owner.frame(LiveFrameClass::Data, LiveDirection::Send);
-        assert_eq!(
-            delta(&feed_active_before, &values(&capture, feed_active)),
-            BTreeMap::new(),
-            "an admitted frame does not change feed active"
-        );
-
-        let sessions_before = values(&capture, sessions);
-        let ends_before = values(&capture, ends);
-        let feed_active_before = values(&capture, feed_active);
-        let feed_ends_before = values(&capture, feed_ends);
-        owner.end(&LiveEnd::complete());
-        assert_eq!(
-            delta(&sessions_before, &values(&capture, sessions)),
-            BTreeMap::from([(phase_key("active"), -1.0), (phase_key("closing"), 1.0)]),
-            "a committed end moves the session to closing"
-        );
-        assert_eq!(
-            delta(&ends_before, &values(&capture, ends)),
-            BTreeMap::from([(reason_key("complete"), 1.0)]),
-            "one complete end records one live end with its reason"
-        );
-        assert_eq!(
-            delta(&feed_active_before, &values(&capture, feed_active)),
-            BTreeMap::from([(feed_active_key(), -1.0)]),
-            "the feed projection releases its active subscription"
-        );
-        assert_eq!(
-            delta(&feed_ends_before, &values(&capture, feed_ends)),
-            BTreeMap::from([(feed_end_key("complete"), 1.0)]),
-            "the feed projection records one complete end"
-        );
-
-        let sessions_before = values(&capture, sessions);
-        let handshake_before = counts(&capture, handshake);
-        owner.cleanup_finished();
-        assert_eq!(
-            delta(&sessions_before, &values(&capture, sessions)),
-            BTreeMap::from([(phase_key("closing"), -1.0)]),
-            "cleanup completion removes the closing session"
-        );
-        assert_eq!(
-            delta(&handshake_before, &counts(&capture, handshake)),
-            BTreeMap::new(),
-            "the handshake is recorded once, not again at end or cleanup"
-        );
-    }
-
-    #[tokio::test]
-    async fn prepared_non_complete_end_records_no_feed_active_or_feed_end() {
-        let _guard = meter_test_lock().await;
-        let capture = process_capture();
-
-        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Standalone, LiveSide::Provider);
-
-        let ends_before = values(&capture, CounterFamily::LiveEnds.name());
-        let feed_active_before = values(&capture, UpDownFamily::FeedActive.name());
-        let feed_ends_before = values(&capture, CounterFamily::FeedEnds.name());
-
-        owner.end(&LiveEnd::new(LiveEndReason::SetupTimeout, None));
-
-        assert_eq!(
-            delta(
-                &ends_before,
-                &values(&capture, CounterFamily::LiveEnds.name())
-            ),
-            BTreeMap::from([(reason_key("setup_timeout"), 1.0)]),
-            "a prepared expiry records one live end with its reason"
-        );
-        assert_eq!(
-            delta(
-                &feed_active_before,
-                &values(&capture, UpDownFamily::FeedActive.name())
-            ),
-            BTreeMap::new(),
-            "a prepared failure never acquires a feed active slot"
-        );
-        assert_eq!(
-            delta(
-                &feed_ends_before,
-                &values(&capture, CounterFamily::FeedEnds.name())
-            ),
-            BTreeMap::new(),
-            "a prepared failure records no feed end"
-        );
-
-        owner.cleanup_finished();
-    }
-
-    #[tokio::test]
-    async fn operation_watch_active_never_touches_feed_projection() {
-        let _guard = meter_test_lock().await;
-        let capture = process_capture();
-
-        let feed_active_before = values(&capture, UpDownFamily::FeedActive.name());
-        let mut owner =
-            LiveTelemetryOwner::new_prepared(LiveSessionKind::Operation, LiveSide::Consumer);
-        owner.activating();
-        owner.active();
-
-        assert_eq!(
-            delta(
-                &feed_active_before,
-                &values(&capture, UpDownFamily::FeedActive.name())
-            ),
-            BTreeMap::new(),
-            "operation watch activation stays out of the feed projection"
-        );
-
-        owner.end(&LiveEnd::complete());
-        owner.cleanup_finished();
     }
 
     #[tokio::test]
@@ -717,96 +492,6 @@ mod tests {
             delta(&sessions_before, &values(&capture, sessions)),
             BTreeMap::from([(phase_key("prepared"), -1.0)]),
             "cleanup completion removes the session series"
-        );
-    }
-
-    #[tokio::test]
-    async fn repeated_end_and_cleanup_are_idempotent() {
-        let _guard = meter_test_lock().await;
-        let capture = process_capture();
-
-        let sessions = UpDownFamily::LiveSessions.name();
-        let ends = CounterFamily::LiveEnds.name();
-        let feed_active = UpDownFamily::FeedActive.name();
-        let feed_ends = CounterFamily::FeedEnds.name();
-
-        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Standalone, LiveSide::Provider);
-        owner.activating();
-        owner.active();
-
-        let ends_before = values(&capture, ends);
-        let feed_active_before = values(&capture, feed_active);
-        let feed_ends_before = values(&capture, feed_ends);
-        owner.end(&LiveEnd::complete());
-        assert_eq!(
-            delta(&ends_before, &values(&capture, ends)),
-            BTreeMap::from([(reason_key("complete"), 1.0)])
-        );
-        assert_eq!(
-            delta(&feed_active_before, &values(&capture, feed_active)),
-            BTreeMap::from([(feed_active_key(), -1.0)])
-        );
-        assert_eq!(
-            delta(&feed_ends_before, &values(&capture, feed_ends)),
-            BTreeMap::from([(feed_end_key("complete"), 1.0)])
-        );
-
-        let sessions_before = values(&capture, sessions);
-        let ends_before = values(&capture, ends);
-        let feed_active_before = values(&capture, feed_active);
-        let feed_ends_before = values(&capture, feed_ends);
-        owner.end(&LiveEnd::complete());
-        assert_eq!(
-            delta(&sessions_before, &values(&capture, sessions)),
-            BTreeMap::new(),
-            "a second end does not move phases"
-        );
-        assert_eq!(
-            delta(&ends_before, &values(&capture, ends)),
-            BTreeMap::new(),
-            "a second end records no second live end"
-        );
-        assert_eq!(
-            delta(&feed_active_before, &values(&capture, feed_active)),
-            BTreeMap::new(),
-            "a second end does not release feed active twice"
-        );
-        assert_eq!(
-            delta(&feed_ends_before, &values(&capture, feed_ends)),
-            BTreeMap::new(),
-            "a second end records no second feed end"
-        );
-
-        let sessions_before = values(&capture, sessions);
-        owner.cleanup_finished();
-        assert_eq!(
-            delta(&sessions_before, &values(&capture, sessions)),
-            BTreeMap::from([(phase_key("closing"), -1.0)]),
-            "cleanup removes the closing session once"
-        );
-        let sessions_before = values(&capture, sessions);
-        owner.cleanup_finished();
-        assert_eq!(
-            delta(&sessions_before, &values(&capture, sessions)),
-            BTreeMap::new(),
-            "a second cleanup does not remove the session again"
-        );
-
-        assert!(
-            values(&capture, feed_active)
-                .get(&feed_active_key())
-                .copied()
-                .unwrap_or(0.0)
-                >= 0.0,
-            "feed active must never go negative"
-        );
-        assert!(
-            values(&capture, sessions)
-                .get(&phase_key("closing"))
-                .copied()
-                .unwrap_or(0.0)
-                >= 0.0,
-            "live sessions must never go negative"
         );
     }
 }

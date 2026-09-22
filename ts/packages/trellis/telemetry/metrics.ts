@@ -537,7 +537,6 @@ export const TRELLIS_CATALOG_COUNTERS = [
   "trellis.operation.ownership.events",
   "trellis.delivery.dispositions",
   "trellis.dlq.transitions",
-  "trellis.feed.ends",
   "trellis.live.ends",
   "trellis.live.frames",
   "trellis.live.rejections",
@@ -555,7 +554,6 @@ export type TrellisCatalogCounter = typeof TRELLIS_CATALOG_COUNTERS[number];
 export const TRELLIS_CATALOG_UPDOWNS = [
   "trellis.rpc.server.inflight",
   "trellis.operation.active",
-  "trellis.feed.active",
   "trellis.live.sessions",
   "trellis.live.buffered.bytes",
   "trellis.live.cleanup.pending",
