@@ -22,8 +22,6 @@ const LIVE_FAMILIES = [
   "trellis.live.cleanup.pending",
 ];
 
-const FEED_FAMILIES = ["trellis.feed.active", "trellis.feed.ends"];
-
 /**
  * The Rust provider engine owns built-in Health sessions. Opening a real
  * `Health.Watch` must make that owner export its `trellis.live.*` families
@@ -84,7 +82,6 @@ Deno.test("M01 Rust provider owner exports live families over the real OTLP wire
   ).join("\n");
   assert(bodies.length > 0, "the server exported no metrics over the wire");
   const live = LIVE_FAMILIES.filter((name) => decoded.includes(name));
-  const feedFamilies = FEED_FAMILIES.filter((name) => decoded.includes(name));
   // Every family this ordinary session touches must appear; the durable
   // rejection and retained-cleanup families only appear on their own events.
   for (
@@ -93,15 +90,11 @@ Deno.test("M01 Rust provider owner exports live families over the real OTLP wire
       "trellis.live.ends",
       "trellis.live.handshake.duration",
       "trellis.live.frames",
-      "trellis.feed.active",
-      "trellis.feed.ends",
     ]
   ) {
     assert(
       decoded.includes(required),
-      `missing ${required}; exported live families: ${live.join(", ")}; feed: ${
-        feedFamilies.join(", ")
-      }`,
+      `missing ${required}; exported live families: ${live.join(", ")}`,
     );
   }
 });

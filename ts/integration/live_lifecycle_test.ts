@@ -122,11 +122,13 @@ Deno.test("L19/L20 prepared return never starts a provider source", async () => 
     try {
       await metricsCapture.flush();
       const beforeEnds = metricsCapture.total("trellis.live.ends", {
-        "trellis.kind": "feed",
+        "trellis.kind": "standalone",
         "trellis.side": "consumer",
       });
-      const beforeActive = metricsCapture.total("trellis.feed.active", {
-        "trellis.side": "client",
+      const beforeActive = metricsCapture.total("trellis.live.sessions", {
+        "trellis.kind": "standalone",
+        "trellis.side": "consumer",
+        "trellis.phase": "active",
       });
       const beforePending = metricsCapture.total(
         "trellis.live.cleanup.pending",
@@ -143,14 +145,16 @@ Deno.test("L19/L20 prepared return never starts a provider source", async () => 
       assertEquals(cleanups, 0);
       assertEquals(
         metricsCapture.total("trellis.live.ends", {
-          "trellis.kind": "feed",
+          "trellis.kind": "standalone",
           "trellis.side": "consumer",
         }) - beforeEnds,
         1,
       );
       assertEquals(
-        metricsCapture.total("trellis.feed.active", {
-          "trellis.side": "client",
+        metricsCapture.total("trellis.live.sessions", {
+          "trellis.kind": "standalone",
+          "trellis.side": "consumer",
+          "trellis.phase": "active",
         }),
         beforeActive,
       );
@@ -184,11 +188,13 @@ Deno.test("L24/L25 finite source delivers ordered values and one normal end", as
     });
     try {
       await metricsCapture.flush();
-      const beforeClientEnds = metricsCapture.total("trellis.feed.ends", {
-        "trellis.side": "client",
+      const beforeConsumerEnds = metricsCapture.total("trellis.live.ends", {
+        "trellis.kind": "standalone",
+        "trellis.side": "consumer",
       });
-      const beforeServerEnds = metricsCapture.total("trellis.feed.ends", {
-        "trellis.side": "server",
+      const beforeProviderEnds = metricsCapture.total("trellis.live.ends", {
+        "trellis.kind": "standalone",
+        "trellis.side": "provider",
       });
 
       const handle = await client.watch({}).orThrow();
@@ -201,15 +207,17 @@ Deno.test("L24/L25 finite source delivers ordered values and one normal end", as
       assertEquals(starts, 1);
       assertEquals(cleanups, 1);
       assertEquals(
-        metricsCapture.total("trellis.feed.ends", {
-          "trellis.side": "client",
-        }) - beforeClientEnds,
+        metricsCapture.total("trellis.live.ends", {
+          "trellis.kind": "standalone",
+          "trellis.side": "consumer",
+        }) - beforeConsumerEnds,
         1,
       );
       assertEquals(
-        metricsCapture.total("trellis.feed.ends", {
-          "trellis.side": "server",
-        }) - beforeServerEnds,
+        metricsCapture.total("trellis.live.ends", {
+          "trellis.kind": "standalone",
+          "trellis.side": "provider",
+        }) - beforeProviderEnds,
         1,
       );
     } finally {

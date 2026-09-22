@@ -153,7 +153,17 @@ pub mod internal {
             let action = if wildcard && family != "operations" {
                 "Route"
             } else {
-                subject.splitn(4, '.').nth(3).unwrap_or_default()
+                let logical = subject.splitn(4, '.').nth(3).unwrap_or_default();
+                // A live descriptor's logical name is `<ApiShortName>.<Action>`
+                // (for example `Health.Watch`); the bound route drops the API
+                // short-name group so it matches the client's bound subject.
+                if family == "live" {
+                    logical
+                        .split_once('.')
+                        .map_or(logical, |(_, action)| action)
+                } else {
+                    logical
+                }
             };
             match family {
                 "rpc" => {

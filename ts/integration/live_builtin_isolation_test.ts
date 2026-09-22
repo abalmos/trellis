@@ -137,7 +137,7 @@ async function closeConsumerA(
 ): Promise<void> {
   await metricsCapture.flush();
   const beforeEnds = metricsCapture.total("trellis.live.ends", {
-    "trellis.kind": "feed",
+    "trellis.kind": "standalone",
     "trellis.side": "consumer",
   });
   abortA.abort();
@@ -146,14 +146,14 @@ async function closeConsumerA(
   await runtime.waitFor(async () => {
     await metricsCapture.flush();
     return metricsCapture.total("trellis.live.ends", {
-          "trellis.kind": "feed",
+          "trellis.kind": "standalone",
           "trellis.side": "consumer",
         }) - beforeEnds >= 1;
   }, { timeoutMs: 15_000 });
   await metricsCapture.flush();
   assertEquals(
     metricsCapture.total("trellis.live.ends", {
-      "trellis.kind": "feed",
+      "trellis.kind": "standalone",
       "trellis.side": "consumer",
     }) - beforeEnds,
     1,
