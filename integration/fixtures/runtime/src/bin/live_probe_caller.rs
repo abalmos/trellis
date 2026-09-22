@@ -6,7 +6,7 @@
 //! harness asserts against.
 
 use futures_util::StreamExt;
-use runtime_trellis::apis::runtime_trellis_liveprobe_v1::{feeds, rpc};
+use runtime_trellis::apis::runtime_trellis_liveprobe_v1::{lives, rpc};
 use runtime_trellis::participants::runtime_trellis_live_probe_caller::Client;
 use runtime_trellis::types::LiveProbeFrame;
 use runtime_trellis::Int64;
@@ -67,13 +67,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api = client.runtime_trellis_liveprobe_v1();
     let run_id = format!("v3-{}", std::process::id());
     let mut busy = api
-        .watch(&feeds::WatchInput {
+        .watch(&lives::WatchInput {
             run_id: run_id.clone(),
             stream_id: "busy".to_owned(),
         })
         .await?;
     let quiet_stream = api
-        .watch(&feeds::WatchInput {
+        .watch(&lives::WatchInput {
             run_id: run_id.clone(),
             stream_id: "quiet".to_owned(),
         })

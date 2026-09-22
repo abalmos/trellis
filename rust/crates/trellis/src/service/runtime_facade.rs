@@ -27,7 +27,7 @@ use super::transfer::{
 };
 use super::{
     bootstrap_service_host, control_subject, BootstrapBindingInfo, DownloadTransferGrantPlan,
-    EventPublisher, LiveDescriptor, HandlerResult, JobsResourceBinding, KvResourceBinding,
+    EventPublisher, HandlerResult, JobsResourceBinding, KvResourceBinding, LiveDescriptor,
     OperationControl, OperationDescriptor, OperationTransferProgress, RequestContext, Router,
     RpcDescriptor, ServerError, ServiceResourceBindings, StoreResourceBinding, StoreResourceClient,
     UploadTransferCompletion, UploadTransferSession,

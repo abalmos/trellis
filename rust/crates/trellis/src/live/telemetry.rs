@@ -14,7 +14,7 @@
 use std::time::Instant;
 
 use opentelemetry::KeyValue;
-use trellis_protocol::{LiveEndReason, LiveSessionKind};
+use trellis_protocol::LiveSessionKind;
 
 use crate::telemetry::instruments::{
     add_counter, add_updown, record_family_duration, CounterFamily, DurationFamily, UpDownFamily,
@@ -466,7 +466,8 @@ mod tests {
         let pending = UpDownFamily::LiveCleanupPending.name();
         let sessions = UpDownFamily::LiveSessions.name();
 
-        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Standalone, LiveSide::Provider);
+        let mut owner =
+            LiveTelemetryOwner::new_prepared(LiveSessionKind::Standalone, LiveSide::Provider);
         let pending_before = values(&capture, pending);
         let sessions_before = values(&capture, sessions);
 

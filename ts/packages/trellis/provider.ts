@@ -16,8 +16,8 @@ import type {
   ParticipantKvMetadata,
 } from "./participant_runtime/metadata.ts";
 import type {
-  LiveHandler,
   GeneratedServiceParticipant,
+  LiveHandler,
   OperationHandler,
   RpcHandler,
 } from "./service/runtime/service.ts";
@@ -295,7 +295,7 @@ export function createProviderRuntime<
     )
   ) {
     const [group, leaf] = surfacePath(name);
-    const register = service.handle.feed![group]![leaf]!;
+    const register = service.handle.live![group]![leaf]!;
     provider[`handle${pascalSurfaceName(name)}`] = (
       handler: (args: Record<string, unknown>) => unknown,
     ) => register((args) => handler(args));

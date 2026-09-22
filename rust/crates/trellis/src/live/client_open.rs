@@ -1107,7 +1107,8 @@ mod tests {
     fn feed_open_publishes_on_the_same_base_subject() {
         let base = "live.v1.route.Watch";
         let open = open(LiveSessionKind::Standalone, base, base);
-        verify_offer_identity(&open, &offer(LiveSessionKind::Standalone, base)).expect("feed offer");
+        verify_offer_identity(&open, &offer(LiveSessionKind::Standalone, base))
+            .expect("feed offer");
     }
 
     #[test]

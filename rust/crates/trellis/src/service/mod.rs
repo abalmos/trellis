@@ -88,7 +88,7 @@ pub use runtime_facade::{ConnectedServiceRuntime, CoreBootstrapBinding, ServiceH
 pub use runtime_facade::{
     ServiceConnectOptions, ServiceEventListenOptions, ServiceEventListenerContext,
     ServiceEventListenerHandle, ServiceEventListenerMode, ServiceEventPublisherContext,
-    ServiceLiveHandlerContext, ServiceHandlerContext, ServiceRuntimeError, DEFAULT_TIMEOUT_MS,
+    ServiceHandlerContext, ServiceLiveHandlerContext, ServiceRuntimeError, DEFAULT_TIMEOUT_MS,
 };
 #[doc(hidden)]
 pub use schema_validation::validate_input_schema;

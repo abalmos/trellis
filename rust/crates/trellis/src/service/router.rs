@@ -17,7 +17,7 @@ use super::operations::ServiceOperationProvider;
 use super::request_loop::{HandlerResponse, ResponseStream};
 use super::schema_validation::validate_input_schema;
 use super::{
-    control_subject, LiveDescriptor, HandlerResult, OperationControlRequest, OperationDescriptor,
+    control_subject, HandlerResult, LiveDescriptor, OperationControlRequest, OperationDescriptor,
     OperationLiveEvent, OperationLiveWatch, OperationSignalAccepted, OperationSnapshot,
     OperationSnapshotFrame, RpcDescriptor, ServerError,
 };

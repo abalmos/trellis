@@ -14,8 +14,8 @@ import {
 } from "@nats-io/nats-core";
 import type {
   EventDesc,
-  LiveDesc,
   InferSchemaType,
+  LiveDesc,
   RPCDesc,
 } from "./participant.ts";
 import {
@@ -1767,7 +1767,6 @@ export type LiveSubscribeOpts = {
   signal?: AbortSignal;
 };
 
-
 export type LiveInputBuilder<TInput, TEvent> = {
   input(input: TInput): {
     subscribe(
@@ -3326,12 +3325,17 @@ export class Trellis<
           // provider deployment the installed binding selected; decode them
           // from the subject rather than trusting the offer's own claim.
           const routeTokens = subject.split(".");
-          const apiIdentity = routeTokens.length >= 4
-            ? decodeSubjectToken(routeTokens[2])
+          // Standalone live subjects carry an extra `route` token:
+          // `live.v1.route.<api>.<deployment>.<action>`; Operation subjects are
+          // `operation.v1.<api>.<deployment>.<action>`.
+          const routeOffset = routeTokens[2] === "route" ? 1 : 0;
+          const apiIdentity = routeTokens.length >= 4 + routeOffset
+            ? decodeSubjectToken(routeTokens[2 + routeOffset])
             : undefined;
-          const selectedProviderDeploymentId = routeTokens.length >= 4
-            ? decodeSubjectToken(routeTokens[3])
-            : undefined;
+          const selectedProviderDeploymentId =
+            routeTokens.length >= 4 + routeOffset
+              ? decodeSubjectToken(routeTokens[3 + routeOffset])
+              : undefined;
           const expectedApi =
             `${descriptor.permission.apiId}@${descriptor.permission.apiVersion}`;
           if (

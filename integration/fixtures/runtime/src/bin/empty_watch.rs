@@ -1,6 +1,6 @@
 //! NX03: finite empty Watch completes with no application frames.
 use futures_util::StreamExt;
-use runtime_trellis::apis::runtime_trellis_runtime_v1::feeds;
+use runtime_trellis::apis::runtime_trellis_runtime_v1::lives;
 use runtime_trellis::participants::runtime_trellis_caller::Client;
 use std::io::Write as _;
 use trellis_rs::auth::{load_admin_session, start_agent_login, StartAgentLoginOpts};
@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     let mut frames = client
         .runtime_trellis_runtime_v1()
-        .watch(&feeds::WatchInput {})
+        .watch(&lives::WatchInput {})
         .await?;
     if frames.next().await.is_some() {
         return Err("empty Watch emitted an application frame".into());

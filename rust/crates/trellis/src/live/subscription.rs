@@ -1137,7 +1137,10 @@ mod tests {
 
     #[test]
     fn waker_recheck_does_not_consume_credit() {
-        let core = ConsumerCore::new("session".into(), trellis_protocol::LiveSessionKind::Standalone);
+        let core = ConsumerCore::new(
+            "session".into(),
+            trellis_protocol::LiveSessionKind::Standalone,
+        );
         assert!(!core.has_queued());
         assert_eq!(core.consumed_seq(), 0);
         assert!(core.admit(AdmittedItem {
@@ -1156,7 +1159,10 @@ mod tests {
     fn filtered_slot_holds_the_consumed_prefix() {
         // G09: a filtered frame behind an unread value cannot advance the
         // consumed prefix past that value.
-        let core = ConsumerCore::new("session".into(), trellis_protocol::LiveSessionKind::Standalone);
+        let core = ConsumerCore::new(
+            "session".into(),
+            trellis_protocol::LiveSessionKind::Standalone,
+        );
         assert!(core.admit(AdmittedItem {
             value: 1_u8,
             encoded_len: 10,
@@ -1173,7 +1179,10 @@ mod tests {
     fn last_handoff_commits_a_pending_normal_end() {
         // G10: handing out the final queued value commits `complete` without
         // another `next()` call.
-        let core = ConsumerCore::new("session".into(), trellis_protocol::LiveSessionKind::Standalone);
+        let core = ConsumerCore::new(
+            "session".into(),
+            trellis_protocol::LiveSessionKind::Standalone,
+        );
         assert!(core.admit(AdmittedItem {
             value: 9_u8,
             encoded_len: 4,
@@ -1191,7 +1200,10 @@ mod tests {
     fn seventy_thousand_transitions_cross_the_old_count_boundary() {
         // T01: actual production sequence/credit transitions cross 65,535
         // without wrap or reuse. No broker/crypto/serialization overhead.
-        let core = ConsumerCore::new("session".into(), trellis_protocol::LiveSessionKind::Standalone);
+        let core = ConsumerCore::new(
+            "session".into(),
+            trellis_protocol::LiveSessionKind::Standalone,
+        );
         for index in 1..=70_001_u64 {
             assert!(core.admit(AdmittedItem {
                 value: index,
@@ -1211,7 +1223,10 @@ mod tests {
 
     #[test]
     fn abnormal_end_discards_queued_items() {
-        let core = ConsumerCore::new("session".into(), trellis_protocol::LiveSessionKind::Standalone);
+        let core = ConsumerCore::new(
+            "session".into(),
+            trellis_protocol::LiveSessionKind::Standalone,
+        );
         assert!(core.admit(AdmittedItem {
             value: 1_u8,
             encoded_len: 1,

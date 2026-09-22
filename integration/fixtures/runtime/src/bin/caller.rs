@@ -1,7 +1,7 @@
 //! Generated Rust caller leg: Feed `Watch` and Operation `Work` through the
 //! generated client against the live provider.
 use futures_util::StreamExt;
-use runtime_trellis::apis::runtime_trellis_runtime_v1::{feeds, operations, rpc};
+use runtime_trellis::apis::runtime_trellis_runtime_v1::{lives, operations, rpc};
 use runtime_trellis::participants::runtime_trellis_caller::Client;
 use runtime_trellis::types::Value;
 use std::io::Write as _;
@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(echo.value, "Rust received from TypeScript");
 
     // Generated Feed call: the provider streams rust-feed-* frames on Watch.
-    let mut frames = runtime.watch(&feeds::WatchInput {}).await?;
+    let mut frames = runtime.watch(&lives::WatchInput {}).await?;
     let frame = frames
         .next()
         .await
