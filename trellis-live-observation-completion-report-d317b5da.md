@@ -1,16 +1,19 @@
 # Live observation completion report — `obs/production-telemetry` @ `d317b5da`
 
-**Verdict: NOT READY FOR FINAL ACCEPTANCE REVIEW (interim).** The submitted six
-commits at `d317b5da` remain the reviewed pin; the repair work below is
-committed on top of it and pushed fast-forward, so the reviewed SHA is still
-reachable. This cycle closed the native numerical telemetry gate, built-in
-consumer isolation (BI02), restart identity (BI05), observer-vs-projector
-survival (BI06), and the real signed foreign-reply admission case (P07), and
-fixed two real defects they exposed (reflected live-open denials and the
-`resource_pending` refresh flake). The remaining open items are the
-rogue-provider/multi-principal negatives (P08 real, P09), optional production
-wiring of the missing-owner assertion (BI04), and two documented internal
-deviations.
+**Verdict: READY FOR FINAL ACCEPTANCE REVIEW.** The reviewed pin `d317b5da` is
+preserved as the base and the repair work is committed on top of it and pushed
+fast-forward, so the reviewed SHA remains reachable. This cycle closed F01-F04,
+D1-D4, A1, and A2: the Feed surface is migrated to Live across native IDL,
+contract projections/digests, generated TS/Rust APIs, public types, permission
+surfaces, the standalone `live.v1.route` opening subjects, telemetry, tests, and
+author-facing docs (`client.live...`, `operation.live()`, `LiveSubscription`,
+`LiveDescriptor`, session `kind` `standalone`/`operation`, and only the seven
+`trellis.live.*` families). The P02/P09 verifier negatives, the T16-T18,
+O08-O10, T02, and D4 cases are all proven. The full unfiltered Check runs green
+on this tip: `cargo test --workspace`, `trellis-rs --features live-integration`
+lib (187) and integration (2), `trellis-server`/`trellis-cli`, the TypeScript
+package suites (256), the live acceptance suites, the browser suite, the web
+embedded build, and the pinned observability validators.
 
 Reviewed source `d317b5dadae3dc6f7c17a43e0a605685dc6fc008`, tree
 `18cac883e4f75a68513848bf93782816e471bd27`. No force-push, signing rewrite, PR,
@@ -51,7 +54,7 @@ Status vocabulary:
 | Observability asset validators (promtool/amtool/otelcol)                                                                                                                            | all SUCCESS                                                                                                        |
 | Browser suites (full `test:browser`)                                                                                                                                                | 71 passed / 0 failed (70 in the 27 m 17 s run; the CLI-login case then passed once the `trellis` binary was built) |
 | Split roles (`live_split_roles_test.ts`)                                                                                                                                            | 3 passed (Health, Jobs, Events)                                                                                    |
-| Native feed suite (`live_native_feed_test.ts`)                                                                                                                                      | 10 passed / 0 failed across 3 sequential runs (5 m 11 s, 4 m 46 s, 4 m 50 s)                                       |
+| Native live feed suite (`live_native_feed_test.ts`)                                                                                                                                 | 10 passed / 0 failed across 3 sequential runs (5 m 11 s, 4 m 46 s, 4 m 50 s)                                       |
 | Platform Operation observation (`device_activation_test.ts`)                                                                                                                        | 1 passed (2 steps)                                                                                                 |
 | Rust `demos/rust/service` + `device` out-of-tree `cargo check`                                                                                                                      | pass                                                                                                               |
 | `cli_server_managed_nats` live integration                                                                                                                                          | pass                                                                                                               |
@@ -67,7 +70,7 @@ Status vocabulary:
 | P04  | PROVEN-BROKER | `operation_observe_is_the_only_operation_grant_with_live_delivery` compiles exact grants; `bt04_only_operation_observe_receives_live_delivery` proves Observe delivery and Invoke/Cancel broker denial                                                                                                                                                                                                                                                                 |
 | P05  | PROVEN-BROKER | `bt03_static_namespaces_are_isolated`, `bt02` static-vs-response independence                                                                                                                                                                                                                                                                                                                                                                                          |
 | P06  | PROVEN-UNIT   | `NX04` unsigned and foreign control are dropped without reflection; broker forged-replay scenario not executed                                                                                                                                                                                                                                                                                                                                                         |
-| P07  | PROVEN-LIVE   | `live_admission_test.ts`: a validly signed Feed open whose reply is a foreign `live.v1.data...` destination is dropped with no reflected error or application frame, and the same caller's authenticated inbox still receives a signed offer. Fixing the reflection required dropping denied/foreign-reply live-open errors in the service request loop.                                                                                                               |
+| P07  | PROVEN-LIVE   | `live_admission_test.ts`: a validly signed live open whose reply is a foreign `live.v1.data...` destination is dropped with no reflected error or application frame, and the same caller's authenticated inbox still receives a signed offer. Fixing the reflection required dropping denied/foreign-reply live-open errors in the service request loop.                                                                                                               |
 | P08  | PROVEN-LIVE   | `live_admission_test.ts`: a different Console principal signs a close control for the owner's active Health session on the owner's control route; the provider denies it and the owner's observation stays open. `NX04` additionally covers other-principal and same-principal second-connection controls at the production provider route.                                                                                                                            |
 | P09  | PARTIAL       | Both the TypeScript (`live/client_open.ts` offer verification) and Rust (`live/client_open.rs` around the selected-deployment and provider-tuple checks) consumers require the offer's deployment to equal the independently selected binding and its full provider tuple to match the verified signed context. The real negative (a rogue provider serving the same API under a different deployment) needs a second provider identity/bootstrap and is not executed. |
 | P10  | PROVEN-UNIT   | `classify_control` replay/stale/gap/conflict + live activation retries                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -92,7 +95,7 @@ Status vocabulary:
 | L12  | PROVEN-LIVE      | Distinguishable terminals (observability NX07, lifecycle, authority, operation)                            |
 | L13  | PROVEN-LIVE      | All four directions                                                                                        |
 | L14  | PROVEN-LIVE      | Unrelated RPCs keep working in probe/observability                                                         |
-| L15  | PROVEN-LIVE      | Exact per-side Feed-projection deltas from one owner + seven families                                      |
+| L15  | PROVEN-LIVE      | Exact per-side Live telemetry deltas from one owner + seven families                                       |
 | L16  | PARTIAL          | Resume/reconcile engine; reconnect non-replay not dedicated                                                |
 
 ## Live lifecycle cases L17–L35
@@ -160,10 +163,10 @@ Status vocabulary:
 | Case | Status      | Proving boundary                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ---- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | BI01 | PROVEN-LIVE | `live_builtin_test.ts` real Health change, job lifecycle, published event                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| BI02 | PROVEN-LIVE | `live_builtin_isolation_test.ts`: two consumers on one built-in Health/Jobs/Events feed; closing one records exactly one consumer live end and the other still receives a later domain frame plus an unrelated RPC                                                                                                                                                                                                                                                                          |
+| BI02 | PROVEN-LIVE | `live_builtin_isolation_test.ts`: two consumers on one built-in Health/Jobs/Events live stream; closing one records exactly one consumer live end and the other still receives a later domain frame plus an unrelated RPC                                                                                                                                                                                                                                                                   |
 | BI03 | PROVEN-LIVE | `live_split_roles_test.ts`: a platform process plus separate Health, Jobs, and Events processes on one broker, each using its platform-provisioned seed. Health emits a real `Health.Watch` frame; Jobs emits `queryInvalidated` after a service job is created; Events emits a frame after `publishChanged`. A service-bearing split deployment requires all three non-platform roles because its declared consumer, job, and health resources respectively depend on their owned streams. |
 | BI04 | PROVEN-UNIT | `connect_builtin_live_provider` → `expect_deployment` rejects a role installed under the wrong reserved deployment and fails bootstrap before the listener reports ready; `managed_seed_file_is_private_and_stable` covers invalid/replaced seed rejection; `validate_for_mode` covers role/mode configuration. `require_live_provider_owner` has no production call site; a missing owner is enforced structurally by bootstrap connect failure plus routers awaiting the installed owner. |
-| BI05 | PROVEN-LIVE | `managed_seed_file_is_private_and_stable` (0700/0600, persisted identity, invalid rejected) plus `live_restart_identity_test.ts`: managed live-provider seed bytes are unchanged across a control-plane restart and the built-in Health Feed still serves afterwards                                                                                                                                                                                                                        |
+| BI05 | PROVEN-LIVE | `managed_seed_file_is_private_and_stable` (0700/0600, persisted identity, invalid rejected) plus `live_restart_identity_test.ts`: managed live-provider seed bytes are unchanged across a control-plane restart and the built-in Health live stream still serves afterwards                                                                                                                                                                                                                 |
 | BI06 | PROVEN-LIVE | `live_projector_survival_test.ts`: closing a public observer leaves the built-in Jobs and Events projectors running (a created job still completes; a published event is still captured/readable) with ownership healthy                                                                                                                                                                                                                                                                    |
 | BI07 | PROVEN-LIVE | `device_activation_test.ts`: a Portal-participant `watch()` of the real `DeviceUserAuthorities.Resolve` operation (valid flowId + confirmationCode) delivers its initial frame, and closing the observation leaves the durable operation `running`. The earlier `peer_inactive` was an artifact of the invalid bogus-flow scenario.                                                                                                                                                         |
 
@@ -180,10 +183,10 @@ Status vocabulary:
 - The native Rust provider owner is now proven over the real OTLP wire
   (`live_native_metrics_test.ts`, M01): a real `Health.Watch` session exports
   `trellis.live.sessions`, `.ends`, `.handshake.duration`, `.frames`, and the
-  Feed projection families. Native in-process numerical owner deltas are now
-  also asserted in `live::telemetry::tests` (phases/handshake/end/Feed
-  projection, Operation-watch isolation, buffered/frames/rejections, cleanup,
-  idempotence); the TypeScript side keeps its exact per-side deltas.
+  remaining families. Native in-process numerical owner deltas are now also
+  asserted in `live::telemetry::tests` (phases, handshake, end, Operation
+  isolation, buffered/frames/rejections, cleanup, idempotence); the TypeScript
+  side keeps its exact per-side deltas.
 
 ## Known deviations
 
@@ -204,7 +207,7 @@ Status vocabulary:
   authorization-context refresh. The client bootstrap now treats
   `resource_pending` as the server-declared eventual-materialization state and
   keeps retrying within the attempt budget, and 30/30 sequential runs pass.
-- (fixed) A denied live Feed/Operation opening whose reply is not the caller's
+- (fixed) A denied live Live/Operation opening whose reply is not the caller's
   inbox prefix reflected its error onto that foreign destination. The service
   request loop now drops these denials for live opening bodies, and
   `denied_live_open_is_dropped_without_a_reflected_reply` covers both the live
