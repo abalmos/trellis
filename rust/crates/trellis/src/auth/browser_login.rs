@@ -325,7 +325,6 @@ impl AgentLoginChallenge {
             allow_insecure_origin: *allow_insecure_origin,
         };
 
-        super::session_store::save_admin_session(&state)?;
         let client = connect_admin_client_async(&state).await?;
         let response = client
             .request_api_value("trellis.auth@v1", "Sessions.Me", json!({}))
