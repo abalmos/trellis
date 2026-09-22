@@ -19,6 +19,7 @@ tempfile = "3.15.0"
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "process", "rt-multi-thread", "signal", "time"] }
 trellis-bootstrap = { path = "../bootstrap" }
+trellis-cli = { path = "../cli" }
 trellis-local-nats = { path = "../local-nats" }
 trellis-rs = { path = "../trellis" }
 trellis-runtime = { path = "../runtime" }

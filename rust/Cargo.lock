@@ -5722,6 +5722,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "trellis-bootstrap",
+ "trellis-cli",
  "trellis-local-nats",
  "trellis-rs",
  "trellis-runtime",
