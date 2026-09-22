@@ -23,7 +23,7 @@ use trellis_rs::telemetry::{
 
 mod auth;
 mod bootstrap;
-mod deploy;
+pub mod deploy;
 mod events;
 mod resources;
 mod runtime;

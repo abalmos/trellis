@@ -99,15 +99,24 @@ enum DeploymentKind {
     Device,
 }
 
-pub(super) struct CompiledParticipantInput {
-    pub(super) participant_id: String,
-    pub(super) participant_digest: String,
-    pub(super) participant_path: String,
-    pub(super) package_digest: String,
-    pub(super) package_evidence: auth_types::AuthPackageEvidence,
+/// A compiled participant plus the package evidence `Auth.Deployments.Apply` requires.
+///
+/// Public so Rust tooling (for example the test harness) can apply a participant from a source
+/// directory through the same compilation path the CLI uses.
+pub struct CompiledParticipantInput {
+    /// Participant identity, for example `tsd-survey-service.Survey`.
+    pub participant_id: String,
+    /// Semantic participant digest.
+    pub participant_digest: String,
+    /// Participant path inside the package.
+    pub participant_path: String,
+    /// Semantic digest of the root package.
+    pub package_digest: String,
+    /// Full exact package closure evidence.
+    pub package_evidence: auth_types::AuthPackageEvidence,
 }
 
-pub(super) fn compile_participant_input(
+pub fn compile_participant_input(
     source: &std::path::Path,
     selected_participant: Option<&str>,
     expected_kind: Option<trellis_idl::ParticipantKind>,

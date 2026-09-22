@@ -16,7 +16,7 @@ use trellis_runtime_apis::types::{
     Approval, ApprovalMode, ApprovedCapability, ApprovedResource, AuthDeploymentsApplyRequest,
     AuthDeploymentsCreateRequest, AuthDeploymentsCreateRequestKind, AuthParticipantsGetRequest,
     AuthParticipantsInstallRequest,
-    AuthServiceInstancesProvisionRequest, ConsentRequest,
+    AuthPortalsGrantOverridesPutRequest, AuthServiceInstancesProvisionRequest, ConsentRequest,
 };
 
 use crate::error::TrellisTestError;
@@ -308,6 +308,39 @@ impl TrellisTestAdmin {
             })
             .await
             .map_err(|error| TrellisTestError::Runtime(format!("installing participant: {error}")))?;
+        Ok(())
+    }
+}
+
+impl TrellisTestAdmin {
+    /// Configures the built-in portal's consent ceiling for `participant_id`, so a browser app
+    /// participant can be consented to during its portal login.
+    ///
+    /// Mirrors the TypeScript harness's `ensurePortalConsentPolicy`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the platform rejects the override.
+    pub async fn ensure_portal_consent_policy(
+        &self,
+        participant_id: &str,
+        capability_ids: &[String],
+    ) -> Result<(), TrellisTestError> {
+        let request: AuthPortalsGrantOverridesPutRequest = wire(serde_json::json!({
+            "portalId": "builtin",
+            "participantId": participant_id,
+            "directCapabilities": capability_ids,
+            "capabilityGroupKeys": [],
+            "roleMappings": [],
+            "expectedVersion": null,
+            "idempotencyKey": idempotency_key(),
+        }))?;
+        self.auth
+            .portals_grant_overrides_put(&request)
+            .await
+            .map_err(|error| {
+                TrellisTestError::Runtime(format!("setting portal consent policy: {error}"))
+            })?;
         Ok(())
     }
 }

@@ -200,6 +200,157 @@ pub async fn perform_local_login(
     Ok(())
 }
 
+/// Consent the flow is asking for, handed to a caller that must prepare policy before approving.
+pub struct PortalConsentSummary {
+    /// Participant the pending consent belongs to, when the flow names one.
+    pub participant_id: Option<String>,
+    /// Capability ids the flow is asking to grant.
+    pub capabilities: Vec<String>,
+}
+
+/// Outcome of starting a local-password login.
+pub enum LocalLoginStep {
+    /// The flow is waiting for consent; finish it with [`approve_local_login`].
+    ConsentRequired {
+        /// Flow identifier.
+        flow_id: String,
+        /// Binding secret that must accompany the approval.
+        binding: PortalBinding,
+        /// What the flow is asking to grant.
+        summary: PortalConsentSummary,
+    },
+    /// The flow already completed.
+    Completed {
+        /// Flow identifier.
+        flow_id: String,
+    },
+}
+
+fn consent_summary(consent: &Value) -> PortalConsentSummary {
+    let participant_id = consent
+        .get("participantId")
+        .or_else(|| consent.get("contractId"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let capabilities = consent
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("id").and_then(Value::as_str).map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    PortalConsentSummary {
+        participant_id,
+        capabilities,
+    }
+}
+
+/// Starts a local-password login flow and reports whether it needs consent.
+///
+/// Callers that must configure policy before consenting use this instead of
+/// [`complete_local_login`]: run [`approve_local_login`] once the policy is in place.
+///
+/// # Errors
+///
+/// Returns an auth-request HTTP failure when a step is rejected, and an auth-flow failure when
+/// the flow reaches a terminal state that is neither approval nor redirect.
+pub async fn begin_local_login(
+    trellis_url: &str,
+    login_url: &str,
+    username: &str,
+    password: &str,
+) -> Result<LocalLoginStep, TrellisAuthError> {
+    let base = base_url(trellis_url)?;
+    let flow_id = flow_id_from_url(login_url)?;
+    let binding = create_portal_binding();
+    perform_local_login(&base, &flow_id, username, password, &binding).await?;
+
+    let browser = get_flow(&base, &flow_id).await?;
+    let portal = match browser.state.as_str() {
+        "authenticated" | "approval_required" => {
+            post_portal_flow(&base, &flow_id, &binding).await?
+        }
+        "approved" | "consumed" => return Ok(LocalLoginStep::Completed { flow_id }),
+        other => {
+            return Err(TrellisAuthError::AuthFlowFailed(format!(
+                "local login did not reach approval; portal state is '{other}'"
+            )));
+        }
+    };
+
+    match portal.state.as_str() {
+        "approved" | "consumed" => Ok(LocalLoginStep::Completed { flow_id }),
+        "approval_required" => {
+            let consent = portal.consent_view.clone().ok_or_else(|| {
+                TrellisAuthError::AuthFlowFailed("flow omitted its consent view".to_owned())
+            })?;
+            let summary = consent_summary(&consent);
+            Ok(LocalLoginStep::ConsentRequired {
+                flow_id,
+                binding,
+                summary,
+            })
+        }
+        other => Err(TrellisAuthError::AuthFlowFailed(format!(
+            "local login did not reach approval; portal state is '{other}'"
+        ))),
+    }
+}
+
+/// Approves the consent a started flow is waiting on, completing the login.
+///
+/// # Errors
+///
+/// Returns an auth-request HTTP failure when the approval is rejected, and an auth-flow failure
+/// when the flow does not reach a terminal state.
+pub async fn approve_local_login(
+    trellis_url: &str,
+    flow_id: &str,
+    binding: &PortalBinding,
+) -> Result<String, TrellisAuthError> {
+    let base = base_url(trellis_url)?;
+    let portal = post_portal_flow(&base, flow_id, binding).await?;
+    let consent = portal.consent_view.clone().ok_or_else(|| {
+        TrellisAuthError::AuthFlowFailed("flow omitted its consent view".to_owned())
+    })?;
+    let decision_digest = consent
+        .get("decisionDigest")
+        .and_then(Value::as_str)
+        .or(portal.decision_digest.as_deref())
+        .ok_or_else(|| {
+            TrellisAuthError::AuthFlowFailed("flow omitted its decision digest".to_owned())
+        })?
+        .to_owned();
+    let body = approval_body(&consent, &decision_digest, true);
+    let response = http_client()?
+        .post(format!("{base}/auth/flow/{flow_id}/approval"))
+        .header("content-type", "application/json")
+        .header("origin", &base)
+        .header(PORTAL_BINDING_HEADER, &binding.secret)
+        .json(&body)
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        let error = decode_trellis_http_error(response).await;
+        return Err(TrellisAuthError::AuthRequestHttpFailure(
+            error.status,
+            error.code,
+        ));
+    }
+    let approved = response.json::<FlowWire>().await?;
+    if approved.state == "approved" || approved.state == "consumed" {
+        Ok(flow_id.to_owned())
+    } else {
+        Err(TrellisAuthError::AuthFlowFailed(format!(
+            "auth approval did not complete; portal state is '{}'",
+            approved.state
+        )))
+    }
+}
+
 /// Completes a local-password login flow: log in, then approve the pending consent when asked.
 ///
 /// Returns the completed flow id. This is the Rust counterpart of the browser portal's
@@ -216,67 +367,11 @@ pub async fn complete_local_login(
     username: &str,
     password: &str,
 ) -> Result<String, TrellisAuthError> {
-    let base = base_url(trellis_url)?;
-    let flow_id = flow_id_from_url(login_url)?;
-    let binding = create_portal_binding();
-    perform_local_login(&base, &flow_id, username, password, &binding).await?;
-
-    let browser = get_flow(&base, &flow_id).await?;
-    let portal = match browser.state.as_str() {
-        "authenticated" | "approval_required" => {
-            post_portal_flow(&base, &flow_id, &binding).await?
-        }
-        "approved" | "consumed" => return Ok(flow_id),
-        other => {
-            return Err(TrellisAuthError::AuthFlowFailed(format!(
-                "local login did not reach approval; portal state is '{other}'"
-            )));
-        }
-    };
-
-    match portal.state.as_str() {
-        "approved" | "consumed" => Ok(flow_id),
-        "approval_required" => {
-            let consent = portal.consent_view.clone().ok_or_else(|| {
-                TrellisAuthError::AuthFlowFailed("flow omitted its consent view".to_owned())
-            })?;
-            let decision_digest = consent
-                .get("decisionDigest")
-                .and_then(Value::as_str)
-                .or(portal.decision_digest.as_deref())
-                .ok_or_else(|| {
-                    TrellisAuthError::AuthFlowFailed("flow omitted its decision digest".to_owned())
-                })?
-                .to_owned();
-            let body = approval_body(&consent, &decision_digest, true);
-            let response = http_client()?
-                .post(format!("{base}/auth/flow/{flow_id}/approval"))
-                .header("content-type", "application/json")
-                .header("origin", &base)
-                .header(PORTAL_BINDING_HEADER, &binding.secret)
-                .json(&body)
-                .send()
-                .await?;
-            if !response.status().is_success() {
-                let error = decode_trellis_http_error(response).await;
-                return Err(TrellisAuthError::AuthRequestHttpFailure(
-                    error.status,
-                    error.code,
-                ));
-            }
-            let approved = response.json::<FlowWire>().await?;
-            if approved.state == "approved" || approved.state == "consumed" {
-                Ok(flow_id)
-            } else {
-                Err(TrellisAuthError::AuthFlowFailed(format!(
-                    "auth approval did not complete; portal state is '{}'",
-                    approved.state
-                )))
-            }
-        }
-        other => Err(TrellisAuthError::AuthFlowFailed(format!(
-            "local login did not reach approval; portal state is '{other}'"
-        ))),
+    match begin_local_login(trellis_url, login_url, username, password).await? {
+        LocalLoginStep::Completed { flow_id } => Ok(flow_id),
+        LocalLoginStep::ConsentRequired {
+            flow_id, binding, ..
+        } => approve_local_login(trellis_url, &flow_id, &binding).await,
     }
 }
 
@@ -292,6 +387,28 @@ mod tests {
             .expect("secret is base64url");
         assert_eq!(secret.len(), 32);
         assert_eq!(binding.digest, URL_SAFE_NO_PAD.encode(Sha256::digest(&secret)));
+    }
+
+    #[test]
+    fn consent_summary_reads_the_participant_and_capability_ids() {
+        let consent = serde_json::json!({
+            "participantId": "trellis.cli",
+            "capabilities": [
+                { "id": "record", "required": true, "eligible": true },
+                { "id": "configure", "required": false, "eligible": true }
+            ]
+        });
+        let summary = consent_summary(&consent);
+        assert_eq!(summary.participant_id.as_deref(), Some("trellis.cli"));
+        assert_eq!(summary.capabilities, vec!["record", "configure"]);
+    }
+
+    #[test]
+    fn consent_summary_falls_back_to_the_contract_id() {
+        let consent = serde_json::json!({ "contractId": "tsd-operator.Operator" });
+        let summary = consent_summary(&consent);
+        assert_eq!(summary.participant_id.as_deref(), Some("tsd-operator.Operator"));
+        assert!(summary.capabilities.is_empty());
     }
 
     #[test]

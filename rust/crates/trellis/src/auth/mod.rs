@@ -31,8 +31,9 @@ pub use models::{
     DeviceCompanionIdentity, DeviceIdentity, StartAgentLoginOpts,
 };
 pub use portal::{
-    complete_local_login, create_portal_binding, flow_id_from_url, perform_local_login,
-    PortalBinding, PORTAL_BINDING_HEADER,
+    approve_local_login, begin_local_login, complete_local_login, create_portal_binding,
+    flow_id_from_url, perform_local_login, LocalLoginStep, PortalBinding, PortalConsentSummary,
+    PORTAL_BINDING_HEADER,
 };
 pub use protocol::AuthenticatedUser;
 pub use session_store::{clear_admin_session, load_admin_session, save_admin_session};
