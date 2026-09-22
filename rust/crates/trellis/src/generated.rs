@@ -1037,8 +1037,8 @@ where
             .await
     }
 
-    /// Watch durable lifecycle snapshots from the current runtime.
-    pub async fn watch(
+    /// Observe durable lifecycle snapshots from the current runtime.
+    pub async fn live(
         &self,
     ) -> Result<
         crate::live::subscription::LiveSubscription<
@@ -1046,7 +1046,7 @@ where
         >,
         crate::client::TrellisClientError,
     > {
-        self.inner.watch().await
+        self.inner.live().await
     }
 
     /// Upload the declared Operation transfer body through the accepted grant.

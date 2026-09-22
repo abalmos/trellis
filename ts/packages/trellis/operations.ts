@@ -140,7 +140,7 @@ export type OperationRef<
     TerminalOperation<TProgress, TOutput>,
     OperationControlError | UnexpectedError
   >;
-  watch(options?: OperationWatchOptions): AsyncResult<
+  live(options?: OperationWatchOptions): AsyncResult<
     LiveSubscription<OperationEvent<TProgress, TOutput, TUpdate>>,
     OperationControlError | UnexpectedError
   >;
@@ -841,7 +841,7 @@ class RuntimeOperationRef<
         return ok(initialTerminal);
       }
 
-      const eventsValue = await this.watch({
+      const eventsValue = await this.live({
         signal: options?.observationSignal,
       })
         .take();
@@ -988,7 +988,7 @@ class RuntimeOperationRef<
     return this.#transport.putTransfer(grant, body);
   }
 
-  watch(options: OperationWatchOptions = {}): AsyncResult<
+  live(options: OperationWatchOptions = {}): AsyncResult<
     LiveSubscription<OperationEvent<TProgress, TOutput, TUpdate>>,
     OperationControlError | UnexpectedError
   > {
@@ -1235,14 +1235,14 @@ function beginObservedWatch<
   }
 
   return AsyncResult.from((async () => {
-    const watchValue = await operation.watch({
+    const liveValue = await operation.live({
       updates: callbacks.onUpdate !== undefined,
     }).take();
-    if (isErr(watchValue)) {
-      return watchValue;
+    if (isErr(liveValue)) {
+      return liveValue;
     }
 
-    const subscription = watchValue;
+    const subscription = liveValue;
     let stopped = false;
     const close = async () => {
       stopped = true;
@@ -1566,7 +1566,7 @@ function createPublicOperationRef<
           signal?.removeEventListener("abort", stopObserving);
         }
       })()),
-    watch: (options?: OperationWatchOptions) => operation.watch(options),
+    live: (options?: OperationWatchOptions) => operation.live(options),
     cancel: () => operation.cancel(),
     signal: (signal: string, input?: unknown) =>
       operation.signal(signal, input),

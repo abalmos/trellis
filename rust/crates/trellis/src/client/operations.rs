@@ -786,22 +786,22 @@ where
     pub async fn wait(
         &self,
     ) -> Result<OperationSnapshot<D::Progress, D::Output>, TrellisClientError> {
-        let mut events = self.watch().await?;
+        let mut events = self.live().await?;
         let result = wait_for_terminal_snapshot(&mut events).await;
         let _ = events.close().await;
         result
     }
 
-    /// Open a live Operation watch without declared update envelopes.
-    pub async fn watch(
+    /// Open a live Operation observation without declared update envelopes.
+    pub async fn live(
         &self,
     ) -> Result<LiveSubscription<OperationEvent<D::Progress, D::Output, Value>>, TrellisClientError>
     {
         self.open_operation_watch::<Value>(false, None).await
     }
 
-    /// Watch durable lifecycle events plus declared live-only updates.
-    pub async fn watch_with_updates(
+    /// Observe durable lifecycle events plus declared live-only updates.
+    pub async fn live_with_updates(
         &self,
     ) -> Result<
         LiveSubscription<OperationEvent<D::Progress, D::Output, D::Update>>,
@@ -827,7 +827,7 @@ where
     where
         D::UpdateEvidence: HasOperationUpdates,
     {
-        let events = self.watch_with_updates().await?;
+        let events = self.live_with_updates().await?;
         Ok(events.map_items(|event| match event {
             OperationEvent::Update { update } => LiveMapDecision::Emit(update),
             event if is_terminal_event(&event) => LiveMapDecision::Complete,

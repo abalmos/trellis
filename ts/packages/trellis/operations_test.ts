@@ -115,7 +115,7 @@ Deno.test("watch returns a live subscription of operation events", async () => {
     service: "orders",
     operation: "Run",
   });
-  const watched = await operation.watch();
+  const watched = await operation.live();
   const subscription = watched.take();
   if (isErr(subscription)) throw subscription.error;
   const events = [];
