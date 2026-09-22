@@ -29,4 +29,4 @@ pub use projector::{
 pub use query::{EventsQuery, EventsQueryError};
 pub use router::build_router_with_query;
 pub use storage::{EventsStore, EventsStoreError, ProjectedEvent};
-pub use watch::register_events_watch_feed;
+pub use watch::register_events_watch_live;

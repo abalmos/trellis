@@ -848,7 +848,7 @@ where
             .operation_subject(D::API_ID, D::KEY, D::SUBJECT)?;
         let publish_subject = control_subject(&base_subject);
         let open_id = trellis_protocol::generate_nonce()
-            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+            .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
         let receive_max_payload_bytes = self.transport.nats().max_payload() as u64;
         let body = operation_watch_open_value(
             self.id(),
@@ -863,10 +863,10 @@ where
                 trellis_protocol::ApiSurfaceKind::Operation,
                 action_name.to_owned(),
             )
-            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?,
+            .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?,
             trellis_protocol::PermissionAction::Observe,
         )
-        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+        .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
         let open = crate::live::client_open::ClientOpen {
             kind: trellis_protocol::LiveSessionKind::Operation,
             api_id: D::API_ID,

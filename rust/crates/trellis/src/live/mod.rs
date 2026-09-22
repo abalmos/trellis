@@ -1,4 +1,4 @@
-//! Live observation sessions shared by Feed and Operation observation.
+//! Live observation sessions shared by Live and Operation observation.
 //!
 //! This module owns the per-connection session runtime: retained authority
 //! guards, prepared provider and consumer sessions, the serialized control and

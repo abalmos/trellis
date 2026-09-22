@@ -269,10 +269,10 @@ fn compile_provider_action(
             }
         }
         RuntimeActionKind::Live => {
-            let subject = trellis_protocol::derive_bound_feed_subject(api_id, deployment_id, name)
+            let subject = trellis_protocol::derive_bound_live_subject(api_id, deployment_id, name)
                 .map_err(|error| invalid_error(error.to_string()))?;
             subscribe.insert(subject.clone());
-            subscribe.insert(trellis_protocol::derive_feed_control_subject(
+            subscribe.insert(trellis_protocol::derive_live_control_subject(
                 &subject,
                 instance_id,
             ));
@@ -401,7 +401,7 @@ fn compile_api_surface(
                 .get(api_id)
                 .ok_or_else(|| invalid_error(format!("API {api_id} is not bound")))?
                 .provider_deployment_id;
-            let subject = trellis_protocol::derive_bound_feed_subject(api_id, deployment_id, name)
+            let subject = trellis_protocol::derive_bound_live_subject(api_id, deployment_id, name)
                 .map_err(|error| invalid_error(error.to_string()))?;
             publish.insert(subject.clone());
             publish.insert(format!("{subject}.control.*.*"));
@@ -839,7 +839,7 @@ mod tests {
     }
 
     #[test]
-    fn feed_provider_subscribes_only_to_its_bound_open_and_owner_control_routes() {
+    fn live_provider_subscribes_only_to_its_bound_open_and_owner_control_routes() {
         let action = ActionRuntimeProjection {
             kind: RuntimeActionKind::Live,
             upload: false,
@@ -864,14 +864,14 @@ mod tests {
         )
         .unwrap();
 
-        let subject = trellis_protocol::derive_bound_feed_subject(
+        let subject = trellis_protocol::derive_bound_live_subject(
             "fieldops.sites@v1",
             "sites-deployment",
             "Watch",
         )
         .unwrap();
         let emitted_subscription_subject =
-            trellis_protocol::derive_feed_control_subject(&subject, "sites-instance");
+            trellis_protocol::derive_live_control_subject(&subject, "sites-instance");
         let own_token = URL_SAFE_NO_PAD.encode(b"sites-connection");
         assert_eq!(
             subscribe,
@@ -887,7 +887,7 @@ mod tests {
         );
         assert!(subscribe.contains(&emitted_subscription_subject));
         assert!(
-            !subscribe.contains(&trellis_protocol::derive_feed_control_subject(
+            !subscribe.contains(&trellis_protocol::derive_live_control_subject(
                 &subject,
                 "sibling-instance",
             ))
@@ -897,7 +897,7 @@ mod tests {
     }
 
     #[test]
-    fn feed_caller_publishes_only_to_bound_open_and_owner_control_routes() {
+    fn live_caller_publishes_only_to_bound_open_and_owner_control_routes() {
         let api_id = "fieldops.sites@v1";
         let api = ApiRuntimeProjection {
             digest: "digest".to_owned(),
@@ -938,7 +938,7 @@ mod tests {
         .unwrap();
 
         let subject =
-            trellis_protocol::derive_bound_feed_subject(api_id, "sites-deployment", "Watch")
+            trellis_protocol::derive_bound_live_subject(api_id, "sites-deployment", "Watch")
                 .unwrap();
         let own_token = URL_SAFE_NO_PAD.encode(b"caller-connection");
         assert_eq!(
@@ -1241,7 +1241,7 @@ mod nats_reply_permission_tests {
         .expect("consumer permissions compile")
     }
 
-    fn feed_subscribe_permission() -> PermissionAtom {
+    fn live_subscribe_permission() -> PermissionAtom {
         PermissionAtom::new(
             PermissionTarget::api_surface(API_ID, ApiSurfaceKind::Live, "Watch").unwrap(),
             PermissionAction::Subscribe,
@@ -1260,7 +1260,7 @@ mod nats_reply_permission_tests {
     fn compiled_permissions() -> (TransportPermissions, TransportPermissions) {
         (
             provider_permissions(),
-            consumer_permissions(feed_subscribe_permission()),
+            consumer_permissions(live_subscribe_permission()),
         )
     }
 
@@ -1318,7 +1318,7 @@ mod nats_reply_permission_tests {
         fn start(response_allowance: &str) -> Self {
             Self::start_with_consumer(
                 response_allowance,
-                consumer_permissions(feed_subscribe_permission()),
+                consumer_permissions(live_subscribe_permission()),
             )
         }
 
@@ -1406,9 +1406,9 @@ mod nats_reply_permission_tests {
         (client, errors)
     }
 
-    fn feed_base() -> String {
-        trellis_protocol::derive_bound_feed_subject(API_ID, PROVIDER_DEPLOYMENT, "Watch")
-            .expect("feed subject")
+    fn live_base() -> String {
+        trellis_protocol::derive_bound_live_subject(API_ID, PROVIDER_DEPLOYMENT, "Watch")
+            .expect("live subject")
     }
 
     fn live_subject() -> String {
@@ -1428,16 +1428,16 @@ mod nats_reply_permission_tests {
     #[test]
     fn operation_observe_is_the_only_operation_grant_with_live_delivery() {
         let operation = operation_base();
-        let feed = feed_base();
+        let live = live_base();
         let delivery = format!(
             "live.v1.data.*.{}.*",
             URL_SAFE_NO_PAD.encode(CONSUMER_CONNECTION.as_bytes())
         );
 
-        let feed_subscribe = consumer_permissions(feed_subscribe_permission());
-        assert!(feed_subscribe.publish.contains(&feed));
-        assert!(feed_subscribe.subscribe.contains(&delivery));
-        assert!(!feed_subscribe
+        let live_subscribe = consumer_permissions(live_subscribe_permission());
+        assert!(live_subscribe.publish.contains(&live));
+        assert!(live_subscribe.subscribe.contains(&delivery));
+        assert!(!live_subscribe
             .publish
             .contains(&format!("{operation}.control")));
 
@@ -1447,7 +1447,7 @@ mod nats_reply_permission_tests {
             .publish
             .contains(&format!("{operation}.observe.*.*")));
         assert!(observe.subscribe.contains(&delivery));
-        assert!(!observe.publish.contains(&feed));
+        assert!(!observe.publish.contains(&live));
 
         let invoke = consumer_permissions(operation_permission(PermissionAction::Invoke));
         assert!(invoke.publish.contains(&operation));
@@ -1491,7 +1491,7 @@ mod nats_reply_permission_tests {
             "_INBOX.{}",
             URL_SAFE_NO_PAD.encode(CONSUMER_CONNECTION.as_bytes())
         );
-        let mut requests = provider.subscribe(feed_base()).await.unwrap();
+        let mut requests = provider.subscribe(live_base()).await.unwrap();
         let mut replies = consumer
             .subscribe(format!("{consumer_inbox}.*"))
             .await
@@ -1506,7 +1506,7 @@ mod nats_reply_permission_tests {
             "no static grant may already permit the response inbox"
         );
         consumer
-            .publish_with_reply(feed_base(), reply.clone(), b"req".to_vec().into())
+            .publish_with_reply(live_base(), reply.clone(), b"req".to_vec().into())
             .await
             .unwrap();
         let request = next_within(&mut requests, "request").await;
@@ -1538,7 +1538,7 @@ mod nats_reply_permission_tests {
 
         let reply2 = format!("{consumer_inbox}.r2");
         consumer
-            .publish_with_reply(feed_base(), reply2.clone(), b"req2".to_vec().into())
+            .publish_with_reply(live_base(), reply2.clone(), b"req2".to_vec().into())
             .await
             .unwrap();
         let request2 = next_within(&mut requests, "second request").await;
@@ -1560,7 +1560,7 @@ mod nats_reply_permission_tests {
             "_INBOX.{}",
             URL_SAFE_NO_PAD.encode(CONSUMER_CONNECTION.as_bytes())
         );
-        let mut requests = provider.subscribe(feed_base()).await.unwrap();
+        let mut requests = provider.subscribe(live_base()).await.unwrap();
         let mut replies = consumer
             .subscribe(format!("{consumer_inbox}.*"))
             .await
@@ -1571,7 +1571,7 @@ mod nats_reply_permission_tests {
 
         let reply = format!("{consumer_inbox}.count");
         consumer
-            .publish_with_reply(feed_base(), reply.clone(), b"req".to_vec().into())
+            .publish_with_reply(live_base(), reply.clone(), b"req".to_vec().into())
             .await
             .unwrap();
         let _ = next_within(&mut requests, "request").await;

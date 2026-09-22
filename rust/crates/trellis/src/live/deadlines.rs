@@ -4,7 +4,7 @@
 //! pure reducer: every transition takes an explicit [`Instant`], so the same
 //! production state machine runs under a real clock or a paused test clock.
 //! Durations originate in the shared protocol constants; no second timing
-//! policy or per-feed timeout knob exists here.
+//! policy or per-live timeout knob exists here.
 //!
 //! There is no total ACTIVE age limit. The reservation deadline runs only from
 //! allocation to activation. An ACTIVE session uses independent peer,

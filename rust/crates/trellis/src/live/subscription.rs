@@ -700,7 +700,7 @@ impl ConsumerControl {
         .map_err(|_| TrellisClientError::Timeout)?
         .ok_or(TrellisClientError::Timeout)?;
         if response.subject.as_str() != reply {
-            return Err(TrellisClientError::FeedProtocol(
+            return Err(TrellisClientError::LiveProtocol(
                 "control reply arrived on a foreign subject".into(),
             ));
         }
@@ -722,7 +722,7 @@ impl ConsumerControl {
             .and_then(|headers| headers.get("authorization-context"))
             .map(ToString::to_string)
             .ok_or_else(|| {
-                TrellisClientError::FeedProtocol("control reply omitted context".into())
+                TrellisClientError::LiveProtocol("control reply omitted context".into())
             })?;
         if digest == self.provider_guard.context_digest() {
             return Ok(());
@@ -1044,45 +1044,45 @@ pub(crate) fn parse_control_response(
     let headers = message
         .headers
         .as_ref()
-        .ok_or_else(|| TrellisClientError::FeedProtocol("control reply omitted headers".into()))?;
+        .ok_or_else(|| TrellisClientError::LiveProtocol("control reply omitted headers".into()))?;
     let context_digest = headers
         .get("authorization-context")
-        .ok_or_else(|| TrellisClientError::FeedProtocol("control reply omitted context".into()))?
+        .ok_or_else(|| TrellisClientError::LiveProtocol("control reply omitted context".into()))?
         .to_string();
     let session_key = headers
         .get("session-key")
-        .ok_or_else(|| TrellisClientError::FeedProtocol("control reply omitted signer".into()))?
+        .ok_or_else(|| TrellisClientError::LiveProtocol("control reply omitted signer".into()))?
         .to_string();
     let proof = headers
         .get("trellis-live-proof")
-        .ok_or_else(|| TrellisClientError::FeedProtocol("control reply omitted proof".into()))?
+        .ok_or_else(|| TrellisClientError::LiveProtocol("control reply omitted proof".into()))?
         .to_string();
     if session_key != control.pinned_session_key {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "control reply signer does not match the pinned provider".into(),
         ));
     }
     trellis_protocol::verify_live_server_proof_encoded(
         &trellis_protocol::LiveServerProof::parse(proof)
-            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?,
+            .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?,
         &context_digest,
         message.subject.as_str(),
         &message.payload,
         &control.pinned_session_key,
     )
-    .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+    .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     let value: serde_json::Value = serde_json::from_slice(&message.payload)
-        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+        .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     match value.get("type").and_then(|kind| kind.as_str()) {
         Some("control-ack") => {
             let ack: LiveControlAck = serde_json::from_value(value)
-                .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+                .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
             if ack.session_id != control.session_id
                 || ack.control_seq.get() != expected_control_seq
                 || ack.request_id != expected_request_id
                 || !ack_action_matches(ack.action, expected_action)
             {
-                return Err(TrellisClientError::FeedProtocol(
+                return Err(TrellisClientError::LiveProtocol(
                     "control reply does not answer this attempt".into(),
                 ));
             }
@@ -1090,21 +1090,21 @@ pub(crate) fn parse_control_response(
         }
         Some("control-error") => {
             let error: LiveControlError = serde_json::from_value(value)
-                .map_err(|parse| TrellisClientError::FeedProtocol(parse.to_string()))?;
+                .map_err(|parse| TrellisClientError::LiveProtocol(parse.to_string()))?;
             if error.session_id != control.session_id
                 || error.control_seq.get() != expected_control_seq
                 || error.request_id != expected_request_id
             {
-                return Err(TrellisClientError::FeedProtocol(
+                return Err(TrellisClientError::LiveProtocol(
                     "control error does not answer this attempt".into(),
                 ));
             }
-            Err(TrellisClientError::FeedProtocol(format!(
+            Err(TrellisClientError::LiveProtocol(format!(
                 "live control rejected with '{:?}'",
                 error.code
             )))
         }
-        _ => Err(TrellisClientError::FeedProtocol(
+        _ => Err(TrellisClientError::LiveProtocol(
             "unexpected live control response".into(),
         )),
     }

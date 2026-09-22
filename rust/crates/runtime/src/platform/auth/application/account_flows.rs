@@ -187,10 +187,14 @@ where
         let bootstrap = self
             .rotate_admin_account_flow(portal_base_url, authority_targets, now)
             .await?
-            .ok_or(AuthorizationStateError::Storage(format!("first-admin flow could not be created")))?;
+            .ok_or(AuthorizationStateError::Storage(format!(
+                "first-admin flow could not be created"
+            )))?;
         let bootstrap_url = bootstrap
             .bootstrap_url
-            .ok_or(AuthorizationStateError::Storage(format!("first-admin bootstrap URL is missing")))?;
+            .ok_or(AuthorizationStateError::Storage(format!(
+                "first-admin bootstrap URL is missing"
+            )))?;
         let token = Url::parse(&bootstrap_url)
             .ok()
             .and_then(|url| {
@@ -198,28 +202,43 @@ where
                     .find(|(key, _)| key == "adminAccountToken")
                     .map(|(_, value)| value.into_owned())
             })
-            .ok_or(AuthorizationStateError::Storage(format!("first-admin bootstrap URL carries no token")))?;
+            .ok_or(AuthorizationStateError::Storage(format!(
+                "first-admin bootstrap URL carries no token"
+            )))?;
         let token_hash = URL_SAFE_NO_PAD.encode(Sha256::digest(
-            URL_SAFE_NO_PAD
-                .decode(&token)
-                .map_err(|_| AuthorizationStateError::Storage("first-admin token is not canonical base64url".to_owned()))?,
+            URL_SAFE_NO_PAD.decode(&token).map_err(|_| {
+                AuthorizationStateError::Storage(
+                    "first-admin token is not canonical base64url".to_owned(),
+                )
+            })?,
         ));
         let flow = self
             .repository
             .get_account_flow_by_hash(&token_hash)
             .await?
-            .ok_or(AuthorizationStateError::Storage(format!("first-admin flow not found by token")))?;
-        let targets = flow.payload["bindings"]
-            .as_array()
-            .ok_or(AuthorizationStateError::Storage(format!("first-admin flow declares no authority targets")))?;
+            .ok_or(AuthorizationStateError::Storage(format!(
+                "first-admin flow not found by token"
+            )))?;
+        let targets =
+            flow.payload["bindings"]
+                .as_array()
+                .ok_or(AuthorizationStateError::Storage(format!(
+                    "first-admin flow declares no authority targets"
+                )))?;
         let mut bindings = Vec::with_capacity(targets.len());
         for target in targets {
-            let participant_id = target["participantId"]
-                .as_str()
-                .ok_or(AuthorizationStateError::Storage(format!("first-admin authority target is malformed")))?;
-            let installed_revision = target["installedRevision"]
-                .as_u64()
-                .ok_or(AuthorizationStateError::Storage(format!("first-admin authority target is not installed")))?;
+            let participant_id =
+                target["participantId"]
+                    .as_str()
+                    .ok_or(AuthorizationStateError::Storage(format!(
+                        "first-admin authority target is malformed"
+                    )))?;
+            let installed_revision =
+                target["installedRevision"]
+                    .as_u64()
+                    .ok_or(AuthorizationStateError::Storage(format!(
+                        "first-admin authority target is not installed"
+                    )))?;
             let (_, installed) = self
                 .repository
                 .get_installed_participant_record(
@@ -227,7 +246,9 @@ where
                     Some(installed_revision),
                 )
                 .await?
-                .ok_or(AuthorizationStateError::Storage(format!("first-admin authority target is not installed")))?;
+                .ok_or(AuthorizationStateError::Storage(format!(
+                    "first-admin authority target is not installed"
+                )))?;
             bindings.push(FirstAdminBinding {
                 participant_id: participant_id.to_owned(),
                 installed_revision,
@@ -240,7 +261,8 @@ where
                     .collect(),
             });
         }
-        let request_digest = super::super::http::digest_parts(&["local-admin", &token_hash, username]);
+        let request_digest =
+            super::super::http::digest_parts(&["local-admin", &token_hash, username]);
         let outcome = self
             .complete_first_admin(FirstAdminRegistration {
                 token,

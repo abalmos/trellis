@@ -601,7 +601,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 return Err(self.error_previous(
-                    "expected rpc, operation, feed, publish event, or subscribe event",
+                    "expected rpc, operation, live, publish event, or subscribe event",
                 ))
             }
         };

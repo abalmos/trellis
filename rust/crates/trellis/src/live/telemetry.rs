@@ -1,7 +1,7 @@
 //! One truthful telemetry owner per live observation endpoint.
 //!
 //! The endpoint record owns exactly one of these; it derives both the seven
-//! `trellis.live.*` families and the narrow Feed-only projections from the
+//! `trellis.live.*` families and the narrow Live-only projections from the
 //! same local state. Instruments are never recorded from a detached closer,
 //! UI status, or handle garbage collection.
 //!
@@ -148,7 +148,7 @@ impl LiveTelemetryOwner {
 
     fn kind_str(&self) -> &'static str {
         match self.kind {
-            LiveSessionKind::Standalone => "feed",
+            LiveSessionKind::Standalone => "live",
             LiveSessionKind::Operation => "operation_watch",
         }
     }
@@ -222,7 +222,7 @@ impl LiveTelemetryOwner {
     /// Commit the one local terminal outcome.
     ///
     /// A prepared failure/cancel/expiry records `trellis.live.ends` without a
-    /// Feed active/end pair.
+    /// Live active/end pair.
     pub(crate) fn end(&mut self, end: &LiveEnd) {
         if self.ended {
             return;
@@ -363,12 +363,12 @@ mod tests {
     }
 
     fn base_key() -> String {
-        key(&[("trellis.kind", "feed"), ("trellis.side", "provider")])
+        key(&[("trellis.kind", "live"), ("trellis.side", "provider")])
     }
 
     fn phase_key(phase: &str) -> String {
         key(&[
-            ("trellis.kind", "feed"),
+            ("trellis.kind", "live"),
             ("trellis.side", "provider"),
             ("trellis.phase", phase),
         ])
@@ -376,19 +376,19 @@ mod tests {
 
     fn reason_key(reason: &str) -> String {
         key(&[
-            ("trellis.kind", "feed"),
+            ("trellis.kind", "live"),
             ("trellis.side", "provider"),
             ("trellis.reason", reason),
         ])
     }
 
-    fn feed_end_key(reason: &str) -> String {
+    fn live_end_key(reason: &str) -> String {
         key(&[("trellis.side", "server"), ("trellis.reason", reason)])
     }
 
     fn frame_key(class: &str, direction: &str) -> String {
         key(&[
-            ("trellis.kind", "feed"),
+            ("trellis.kind", "live"),
             ("trellis.side", "provider"),
             ("trellis.class", class),
             ("trellis.direction", direction),

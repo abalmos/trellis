@@ -34,5 +34,5 @@ pub use resolver::{
 };
 pub use router::build_router_with_query;
 pub use storage::{ListJobsFilter, SqliteJobsStore, SqliteJobsStoreError};
-pub use watch::register_jobs_watch_feed;
+pub use watch::register_jobs_watch_live;
 pub use worker_presence::{start_worker_presence_projector, WorkerPresenceProjectorHandle};

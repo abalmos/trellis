@@ -1,4 +1,4 @@
-//! `Events.Watch` feed implementation.
+//! `Events.Watch` live implementation.
 
 use std::collections::BTreeMap;
 
@@ -12,8 +12,8 @@ use crate::projector::{project_message_inner, EventMessageStream, EventVerifier,
 use crate::storage::ProjectedEvent;
 use crate::wire::generated_output;
 
-/// Register the `Events.Watch` feed on the built-in Events router.
-pub fn register_events_watch_feed(
+/// Register the `Events.Watch` live on the built-in Events router.
+pub fn register_events_watch_live(
     router: &mut Router,
     events_runtime: EventsRuntime,
     verifier: EventVerifier,

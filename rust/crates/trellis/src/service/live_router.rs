@@ -1,6 +1,6 @@
-//! Router integration for live Feed and Operation watch routes.
+//! Router integration for live Live and Operation watch routes.
 //!
-//! A live-capable Feed or Operation watch route answers one bounded opening
+//! A live-capable Live or Operation watch route answers one bounded opening
 //! request with a signed offer and hands ownership of the reservation to the
 //! connection's live session manager. It never enters an infinite reply loop
 //! and never starts a domain source before the delivery-path challenge round
@@ -10,8 +10,8 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 
 use trellis_protocol::{
-    derive_live_data_subject, derive_live_observe_wildcard_subject, ApiSurfaceKind, FeedOpenKind,
-    LiveErrorCode, LiveOfferLimits, LiveSessionKind, PermissionAction, PermissionAtom,
+    derive_live_data_subject, derive_live_observe_wildcard_subject, ApiSurfaceKind, LiveErrorCode,
+    LiveOfferLimits, LiveOpenKind, LiveSessionKind, PermissionAction, PermissionAtom,
     PermissionTarget, OPEN_RESERVATION_MS,
 };
 
@@ -83,8 +83,8 @@ impl LiveProviderOwner {
     }
 }
 
-/// Inputs for one provider Feed opening.
-pub(crate) struct FeedOpenInputs {
+/// Inputs for one provider Live opening.
+pub(crate) struct LiveOpenInputs {
     #[expect(dead_code, reason = "identity retained for live open diagnostics")]
     pub api_id: String,
     pub base_subject: String,
@@ -94,21 +94,21 @@ pub(crate) struct FeedOpenInputs {
 }
 
 /// The consumer's verified opening request for one provider session.
-pub(crate) struct FeedOpenRequest {
+pub(crate) struct LiveOpenRequest {
     pub request: RequestContext,
-    pub inputs: FeedOpenInputs,
-    pub opening: FeedOpeningMeta,
+    pub inputs: LiveOpenInputs,
+    pub opening: LiveOpeningMeta,
     pub encoded_input: serde_json::Value,
     pub cancellation: crate::live::LiveCancellation,
 }
 
-/// Parse and validate one Feed opening body.
+/// Parse and validate one Live opening body.
 ///
 /// # Errors
 ///
 /// Returns a validation error for a malformed envelope, an unsupported
 /// protocol, or an invalid native input codec value.
-pub(crate) fn parse_feed_open<TInput>(payload: &[u8]) -> Result<FeedOpening<TInput>, ServerError>
+pub(crate) fn parse_live_open<TInput>(payload: &[u8]) -> Result<LiveOpening<TInput>, ServerError>
 where
     TInput: crate::generated::Codec,
 {
@@ -139,7 +139,7 @@ where
         return Err(ServerError::Validation {
             issues: Box::new(vec![ValidationIssue {
                 path: "/type".to_owned(),
-                message: "feed opening must carry the open discriminator".to_owned(),
+                message: "live opening must carry the open discriminator".to_owned(),
             }]),
         });
     }
@@ -149,7 +149,7 @@ where
         .ok_or_else(|| ServerError::Validation {
             issues: Box::new(vec![ValidationIssue {
                 path: "/openId".to_owned(),
-                message: "feed opening omitted its open id".to_owned(),
+                message: "live opening omitted its open id".to_owned(),
             }]),
         })?;
     trellis_protocol::parse_nonce(open_id, ["openId"]).map_err(|error| {
@@ -166,7 +166,7 @@ where
         .ok_or_else(|| ServerError::Validation {
             issues: Box::new(vec![ValidationIssue {
                 path: "/receiveMaxPayloadBytes".to_owned(),
-                message: "feed opening omitted its receive payload limit".to_owned(),
+                message: "live opening omitted its receive payload limit".to_owned(),
             }]),
         })?;
     let input_value = value
@@ -175,7 +175,7 @@ where
         .ok_or_else(|| ServerError::Validation {
             issues: Box::new(vec![ValidationIssue {
                 path: "/input".to_owned(),
-                message: "feed opening omitted its native input".to_owned(),
+                message: "live opening omitted its native input".to_owned(),
             }]),
         })?;
     let input = TInput::decode(input_value).map_err(|error| ServerError::Validation {
@@ -184,23 +184,23 @@ where
             message: error.to_string(),
         }]),
     })?;
-    Ok(FeedOpening {
+    Ok(LiveOpening {
         open_id: open_id.to_owned(),
         receive_max_payload_bytes,
         input,
     })
 }
 
-/// One parsed Feed opening.
-pub(crate) struct FeedOpening<TInput> {
+/// One parsed Live opening.
+pub(crate) struct LiveOpening<TInput> {
     pub open_id: String,
     pub receive_max_payload_bytes: u64,
     pub input: TInput,
 }
 
-/// Protocol metadata of one parsed Feed opening, independent of the native
+/// Protocol metadata of one parsed Live opening, independent of the native
 /// input so the decoded input can move into the delayed source factory.
-pub(crate) struct FeedOpeningMeta {
+pub(crate) struct LiveOpeningMeta {
     pub open_id: String,
     pub receive_max_payload_bytes: u64,
 }
@@ -251,7 +251,7 @@ pub(crate) fn parse_operation_watch_open(
             }]),
         });
     }
-    if open.observation.kind != FeedOpenKind::Open {
+    if open.observation.kind != LiveOpenKind::Open {
         return Err(ServerError::Validation {
             issues: Box::new(vec![ValidationIssue {
                 path: "/observation/type".to_owned(),
@@ -291,7 +291,7 @@ pub(crate) struct OperationWatchOpening {
     pub include_updates: bool,
 }
 
-/// Adapt one generated Feed handler stream into the engine's source items.
+/// Adapt one generated Live handler stream into the engine's source items.
 ///
 /// Each encoded event is emitted as one application value and a normal stream
 /// completion becomes the engine's explicit `End` item.
@@ -332,8 +332,8 @@ where
     }))
 }
 
-/// One reserved provider Feed open ready to return its offer.
-pub(crate) struct ReservedFeed {
+/// One reserved provider Live open ready to return its offer.
+pub(crate) struct ReservedLive {
     pub prepared: LivePreparedResponse,
 }
 
@@ -342,19 +342,19 @@ pub(crate) struct ReservedOperationWatch {
     pub prepared: LivePreparedResponse,
 }
 
-/// Reserve one Feed session, publish its activation challenge task, and build
+/// Reserve one Live session, publish its activation challenge task, and build
 /// the signed offer reply.
 ///
 /// # Errors
 ///
 /// Returns a setup error when the manager is unavailable, the transport epoch
 /// changed, admission is exhausted, or the offer cannot be authenticated.
-pub(crate) async fn reserve_feed<D, F>(
+pub(crate) async fn reserve_live<D, F>(
     client: &TrellisClient,
     manager: &std::sync::Arc<LiveSessionManager>,
-    request: &FeedOpenRequest,
+    request: &LiveOpenRequest,
     source_factory: F,
-) -> Result<ReservedFeed, ServerError>
+) -> Result<ReservedLive, ServerError>
 where
     D: crate::generated::LiveDescriptor,
     F: FnOnce() -> std::pin::Pin<
@@ -380,7 +380,7 @@ where
     let request_id = context
         .request_id
         .clone()
-        .ok_or_else(|| ServerError::Nats("feed request is missing a request id".to_owned()))?;
+        .ok_or_else(|| ServerError::Nats("live request is missing a request id".to_owned()))?;
     let own_context_digest = client
         .authorization_context_digest()
         .map_err(|error| ServerError::Nats(error.to_string()))?;
@@ -434,7 +434,7 @@ where
             consumer_principal_id: consumer.principal_id.clone(),
             consumer_participant_id: consumer.participant_id.clone(),
             receive_max_payload_bytes: opening.receive_max_payload_bytes,
-            feed_input: Some(encoded_input),
+            live_input: Some(encoded_input),
             operation_id: None,
             include_updates: None,
         })
@@ -518,7 +518,7 @@ where
     spawn_session_drivers(client.nats(), std::sync::Arc::clone(&record), negotiated)
         .await
         .map_err(|code| ServerError::Nats(format!("live control subscription failed: {code:?}")))?;
-    Ok(ReservedFeed {
+    Ok(ReservedLive {
         prepared: LivePreparedResponse {
             offer,
             headers,
@@ -618,7 +618,7 @@ where
             consumer_principal_id: consumer.principal_id.clone(),
             consumer_participant_id: consumer.participant_id.clone(),
             receive_max_payload_bytes: opening.receive_max_payload_bytes,
-            feed_input: None,
+            live_input: None,
             operation_id: Some(opening.operation_id.clone()),
             include_updates: Some(opening.include_updates),
         })
@@ -794,7 +794,7 @@ pub(crate) fn sign_live_offer(
     Ok(headers)
 }
 
-/// Return the exact owner-control wildcard for one Feed route.
+/// Return the exact owner-control wildcard for one Live route.
 ///
 /// # Errors
 ///

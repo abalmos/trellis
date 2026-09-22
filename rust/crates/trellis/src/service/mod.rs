@@ -149,7 +149,7 @@ pub mod internal {
             let subject = subject.strip_suffix(".>").unwrap_or(subject);
             // An operation action name may contain dots (`Auth.X.Y`), so it
             // spans every segment after the `operations.v1.<api>` prefix. RPC
-            // and Feed wildcard entries keep the derived `Route` prefix form.
+            // and Live wildcard entries keep the derived `Route` prefix form.
             let action = if wildcard && family != "operations" {
                 "Route"
             } else {
@@ -182,7 +182,7 @@ pub mod internal {
                 }
                 "live" => {
                     let derived =
-                        trellis_protocol::derive_bound_feed_subject(api_id, deployment_id, action)
+                        trellis_protocol::derive_bound_live_subject(api_id, deployment_id, action)
                             .map_err(|error| super::ServerError::Nats(error.to_string()))?;
                     bound.push(if wildcard {
                         derived

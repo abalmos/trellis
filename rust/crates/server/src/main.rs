@@ -159,7 +159,13 @@ impl StartupPolicy {
                     Some(bootstrap),
                 )
             }
-            None => (Operation::Run, args.server, args.mode, args.reset_admin, None),
+            None => (
+                Operation::Run,
+                args.server,
+                args.mode,
+                args.reset_admin,
+                None,
+            ),
         };
         let paths = if server.system {
             ServerPaths::system(server.config)?

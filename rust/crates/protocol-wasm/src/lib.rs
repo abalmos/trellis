@@ -555,7 +555,7 @@ pub fn live_logical_open_hash(identity_json: &str) -> Result<String, JsError> {
         consumer_principal_id: wire.consumer_principal_id,
         consumer_participant_id: wire.consumer_participant_id,
         receive_max_payload_bytes: wire.receive_max_payload_bytes,
-        feed_input: wire.input,
+        live_input: wire.input,
         operation_id: wire.operation_id,
         include_updates: wire.include_updates,
     };

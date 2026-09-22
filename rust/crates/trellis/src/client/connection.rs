@@ -1069,7 +1069,7 @@ impl TrellisClient {
             "operation" => {
                 trellis_protocol::derive_bound_operation_subject(api_id, &deployment_id, action)
             }
-            "live" => trellis_protocol::derive_bound_feed_subject(api_id, &deployment_id, action),
+            "live" => trellis_protocol::derive_bound_live_subject(api_id, &deployment_id, action),
             _ => unreachable!("only request route families are deployment-bound"),
         };
         subject.map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
@@ -1712,7 +1712,7 @@ impl TrellisClient {
             | TrellisClientError::OperationProtocol(_)
             | TrellisClientError::TransferProtocol(_)
             | TrellisClientError::EventSubscriptionProtocol(_)
-            | TrellisClientError::FeedProtocol(_) => "invalid",
+            | TrellisClientError::LiveProtocol(_) => "invalid",
             _ => "error",
         }
     }
@@ -2016,8 +2016,8 @@ impl TrellisClient {
             >)
     }
 
-    /// Subscribe to one descriptor-backed feed and decode event payloads.
-    /// Subscribe to one generated Feed through the connection's live manager.
+    /// Subscribe to one descriptor-backed live and decode event payloads.
+    /// Subscribe to one generated Live through the connection's live manager.
     ///
     /// Returns a prepared, owned handle. The first `poll_next` installs the
     /// exact data subscription and activates the session; an uniterated handle
@@ -2040,7 +2040,7 @@ impl TrellisClient {
             .map_err(|error| TrellisClientError::Codec(error.to_string()))?;
         let base_subject = self.bound_key_subject("live", D::API_ID, D::KEY)?;
         let open_id = trellis_protocol::generate_nonce()
-            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+            .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
         let body = serde_json::json!({
             "format": trellis_protocol::LIVE_VERSION,
             "type": "open",
@@ -2055,10 +2055,10 @@ impl TrellisClient {
                 trellis_protocol::ApiSurfaceKind::Live,
                 action_name.to_owned(),
             )
-            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?,
+            .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?,
             trellis_protocol::PermissionAction::Subscribe,
         )
-        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+        .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
         let open = crate::live::client_open::ClientOpen {
             kind: trellis_protocol::LiveSessionKind::Standalone,
             api_id: D::API_ID,
@@ -2072,7 +2072,7 @@ impl TrellisClient {
         let prepared =
             crate::live::client_open::open_client_session(self, &self.authorization_provider, open)
                 .await?;
-        crate::live::client_open::install_feed_handle::<D>(self, prepared).await
+        crate::live::client_open::install_live_handle::<D>(self, prepared).await
     }
 
     /// Download the bytes exposed by a receive transfer grant.

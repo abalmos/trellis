@@ -97,7 +97,7 @@ pub(crate) struct ProviderSessionRecord {
     pub deadline_notify: tokio::sync::Notify,
     /// Guards one-time closure and receipt recording.
     pub finished: AtomicBool,
-    /// Server-side live telemetry ownership, including the Feed-only projection.
+    /// Server-side live telemetry ownership, including the Live-only projection.
     pub telemetry: std::sync::Mutex<super::telemetry::LiveTelemetryOwner>,
     /// Serializes every signed handoff for this session: DATA, challenge, END,
     /// acknowledgements and error replies share one ordering boundary.

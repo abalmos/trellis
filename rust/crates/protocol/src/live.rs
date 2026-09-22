@@ -10,7 +10,7 @@
 //! # Wire grammar
 //!
 //! ```text
-//! Feed base:      live.v1.route.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
+//! Live base:      live.v1.route.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
 //! Operation base: operation.v1.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
 //! Owner control:  <base>.observe.<b64(P)>.<sessionId>
 //! Live delivery:  live.v1.data.<b64(P)>.<b64(C)>.<sessionId>
@@ -587,15 +587,15 @@ pub fn negotiate_max_data_body_bytes(
     Ok(negotiated)
 }
 
-/// Feed opening request sent to the unchanged bound Feed base subject.
+/// Live opening request sent to the unchanged bound Live base subject.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct FeedOpen {
+pub struct LiveOpen {
     /// Exact protocol discriminator.
     pub format: String,
     /// Literal `open` discriminant.
     #[serde(rename = "type")]
-    pub kind: FeedOpenKind,
+    pub kind: LiveOpenKind,
     /// Consumer-generated nonce binding this logical open attempt.
     pub open_id: String,
     /// Consumer's actual connected NATS `max_payload`.
@@ -604,10 +604,10 @@ pub struct FeedOpen {
     pub input: Value,
 }
 
-/// Discriminant for [`FeedOpen`].
+/// Discriminant for [`LiveOpen`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum FeedOpenKind {
+pub enum LiveOpenKind {
     /// Literal `open`.
     Open,
 }
@@ -620,7 +620,7 @@ pub struct OperationObservationOpen {
     pub format: String,
     /// Literal `open` discriminant.
     #[serde(rename = "type")]
-    pub kind: FeedOpenKind,
+    pub kind: LiveOpenKind,
     /// Consumer-generated nonce binding this logical open attempt.
     pub open_id: String,
     /// Consumer's actual connected NATS `max_payload`.
@@ -711,7 +711,7 @@ pub struct LiveOffer {
     /// Literal `offer` discriminant.
     #[serde(rename = "type")]
     pub kind: LiveOfferKind,
-    /// Feed or Operation watch observation.
+    /// Live or Operation watch observation.
     #[serde(rename = "kind")]
     pub session_kind: LiveSessionKind,
     /// Consumer nonce this offer answers.
@@ -1783,7 +1783,7 @@ pub fn live_server_proof_digest(
 /// Inputs identifying one logical open attempt for duplicate detection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LogicalOpenIdentity {
-    /// Feed or Operation watch observation.
+    /// Live or Operation watch observation.
     pub kind: LiveSessionKind,
     /// Descriptor/binding-derived base subject.
     pub base_subject: String,
@@ -1799,8 +1799,8 @@ pub struct LogicalOpenIdentity {
     pub consumer_participant_id: String,
     /// Consumer's advertised NATS payload limit.
     pub receive_max_payload_bytes: u64,
-    /// Native Feed input, when this is a Feed open.
-    pub feed_input: Option<Value>,
+    /// Native Live input, when this is a Live open.
+    pub live_input: Option<Value>,
     /// Durable Operation id, when this is an Operation watch open.
     pub operation_id: Option<String>,
     /// Whether transient updates were requested, when this is a watch open.
@@ -1821,11 +1821,11 @@ pub fn logical_open_hash(identity: &LogicalOpenIdentity) -> Result<String, Proto
     validate_subject_token(&identity.consumer_session_key, ["consumerSessionKey"])?;
     validate_logical_identity(&identity.consumer_principal_id, "consumerPrincipalId")?;
     validate_logical_identity(&identity.consumer_participant_id, "consumerParticipantId")?;
-    if identity.kind == LiveSessionKind::Standalone && identity.feed_input.is_none() {
+    if identity.kind == LiveSessionKind::Standalone && identity.live_input.is_none() {
         return Err(live_error(
             LiveProtocolErrorCode::InvalidFormat,
             ["input"],
-            "Feed open identity requires the native input value",
+            "Live open identity requires the native input value",
         ));
     }
     if identity.kind == LiveSessionKind::Operation {
@@ -1849,7 +1849,7 @@ pub fn logical_open_hash(identity: &LogicalOpenIdentity) -> Result<String, Proto
             "principalId": identity.consumer_principal_id,
             "participantId": identity.consumer_participant_id,
         },
-        "input": identity.feed_input,
+        "input": identity.live_input,
         "operationId": identity.operation_id,
         "includeUpdates": identity.include_updates.unwrap_or(false),
     });
@@ -2163,7 +2163,7 @@ mod tests {
             consumer_principal_id: "01JYPRINCIPAL00000000000".into(),
             consumer_participant_id: "app.console@v1".into(),
             receive_max_payload_bytes: 1_048_576,
-            feed_input: Some(serde_json::json!({ "site": "north" })),
+            live_input: Some(serde_json::json!({ "site": "north" })),
             operation_id: None,
             include_updates: None,
         };
@@ -2180,7 +2180,7 @@ mod tests {
         assert_ne!(first, logical_open_hash(&changed).unwrap());
 
         let mut missing_input = identity.clone();
-        missing_input.feed_input = None;
+        missing_input.live_input = None;
         assert!(logical_open_hash(&missing_input).is_err());
     }
 
@@ -2237,8 +2237,10 @@ mod tests {
         let encoded = serde_json::to_string(&offer).unwrap();
         let decoded: LiveOffer = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, offer);
-        let with_unknown =
-            encoded.replace("\"kind\":\"standalone\"", "\"kind\":\"feed\",\"extra\":1");
+        let with_unknown = encoded.replace(
+            "\"kind\":\"standalone\"",
+            "\"kind\":\"standalone\",\"extra\":1",
+        );
         assert!(with_unknown.contains("extra"));
         assert!(serde_json::from_str::<LiveOffer>(&with_unknown).is_err());
     }

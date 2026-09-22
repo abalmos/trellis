@@ -179,7 +179,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
     ));
     let query = JobsQuery::with_store(jobs_runtime.clone(), store.clone(), Arc::clone(&resolver));
     let mut router = trellis_jobs_runtime::build_router_with_query(query);
-    trellis_jobs_runtime::register_jobs_watch_feed(
+    trellis_jobs_runtime::register_jobs_watch_live(
         &mut router,
         jobs_runtime.clone(),
         resources.jobs_stream.clone(),

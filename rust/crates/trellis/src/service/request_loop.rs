@@ -55,12 +55,6 @@ pub type ResponseStream = Pin<Box<dyn Stream<Item = Result<Bytes, ServerError>> 
 pub enum HandlerResponse {
     Frames(Vec<Bytes>),
     Error(Bytes),
-    Stream(ResponseStream),
-    FeedStream {
-        stream: ResponseStream,
-        control_subject: String,
-        feed_id: String,
-    },
     /// One verified live reservation ready to hand to the connection manager.
     ///
     /// The request loop publishes exactly one signed offer for this response;
@@ -91,7 +85,7 @@ pub struct ErrorAnnotationContext {
     contract_id: Option<String>,
     contract_digest: Option<String>,
     method: Option<String>,
-    feed: Option<String>,
+    live: Option<String>,
     operation: Option<String>,
 }
 
@@ -128,7 +122,7 @@ impl ErrorAnnotationContext {
             self.contract_digest.as_deref(),
         );
         insert_string(&mut context, "method", self.method.as_deref());
-        insert_string(&mut context, "feed", self.feed.as_deref());
+        insert_string(&mut context, "live", self.live.as_deref());
         insert_string(&mut context, "operation", self.operation.as_deref());
         context
     }
@@ -140,10 +134,10 @@ impl ErrorAnnotationContext {
     fn set_surface(&mut self, subject: &str) {
         if let Some(method) = surface_key(subject, "rpc") {
             self.method = Some(method.to_string());
-        } else if let Some(feed) = surface_key(subject, "feed") {
-            self.feed = Some(feed.to_string());
-        } else if let Some(feed) = surface_key(subject, "lives") {
-            self.feed = Some(feed.to_string());
+        } else if let Some(live) = surface_key(subject, "live") {
+            self.live = Some(live.to_string());
+        } else if let Some(live) = surface_key(subject, "lives") {
+            self.live = Some(live.to_string());
         } else if let Some(operation) = surface_key(subject, "operations") {
             self.operation = Some(trim_operation_control(operation).to_string());
         } else if let Some(operation) = surface_key(subject, "op") {
@@ -177,7 +171,7 @@ pub trait RequestHandler: Send + Sync {
     /// Whether one inbound subject is a registered unary request/reply RPC.
     ///
     /// Handlers backed by a router answer from the registered surface kind so a
-    /// Feed or Operation route is never a unary request. Other handlers default
+    /// Live or Operation route is never a unary request. Other handlers default
     /// to their declared route token, which is request/reply by construction.
     fn is_unary_rpc_route(&self, subject: &str) -> bool {
         self.route_token(subject).is_some()
@@ -208,20 +202,6 @@ pub trait RequestHandler: Send + Sync {
             match self.handle_response(subject, payload, context).await? {
                 HandlerResponse::Frames(frames) => Ok(frames),
                 HandlerResponse::Error(payload) => Ok(vec![payload]),
-                HandlerResponse::Stream(mut stream) => {
-                    let mut frames = Vec::new();
-                    while let Some(frame) = stream.next().await {
-                        frames.push(frame?);
-                    }
-                    Ok(frames)
-                }
-                HandlerResponse::FeedStream { mut stream, .. } => {
-                    let mut frames = Vec::new();
-                    while let Some(frame) = stream.next().await {
-                        frames.push(frame?);
-                    }
-                    Ok(frames)
-                }
                 HandlerResponse::LivePrepared(_) => Err(ServerError::Nats(
                     "a live response requires a live owner and cannot be collected".to_owned(),
                 )),
@@ -545,7 +525,7 @@ pub fn encode_error_reply_with_context(
         #[serde(skip_serializing_if = "Option::is_none")]
         method: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        feed: Option<&'a str>,
+        live: Option<&'a str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         operation: Option<&'a str>,
     }
@@ -563,7 +543,7 @@ pub fn encode_error_reply_with_context(
         contract_id: annotations.contract_id.as_deref(),
         contract_digest: annotations.contract_digest.as_deref(),
         method: annotations.method.as_deref(),
-        feed: annotations.feed.as_deref(),
+        live: annotations.live.as_deref(),
         operation: annotations.operation.as_deref(),
     },
 }) {
@@ -748,7 +728,7 @@ async fn dispatch_outcome<T>(
 ///
 /// The unary server observation stays open until the reply is actually handed
 /// to the transport, so a failed handoff is not recorded as a success. Stream
-/// and feed responses never carry the unary observation.
+/// and live responses never carry the unary observation.
 pub(crate) struct DispatchedResponse {
     pub(crate) reply_to: String,
     pub(crate) response: HandlerResponse,
@@ -827,7 +807,7 @@ pub(crate) enum DispatchResponse {
 impl HandlerResponse {
     /// Whether this response is a unary RPC for the server duration family.
     ///
-    /// Stream, Feed and live responses have their own lifetimes and must never
+    /// Stream, Live and live responses have their own lifetimes and must never
     /// be counted as unary RPC successes.
     pub(crate) fn is_unary(&self) -> bool {
         matches!(self, Self::Frames(_) | Self::Error(_))
@@ -974,7 +954,7 @@ where
             )
         }
     };
-    // A stream or feed response owns its own lifetime; the unary server
+    // A live response owns its own lifetime; the unary server
     // observation and span must not count it, and only a registered route is a
     // unary surface. A unary observation and span stay open for the caller to
     // finish after the reply handoff.
@@ -1020,11 +1000,11 @@ async fn publish_response(
     let DispatchedResponse {
         reply_to,
         response,
-        annotations,
+        annotations: _,
         mut unary,
         outcome,
     } = dispatched;
-    let result = publish_handler_response(client, reply_to, response, &annotations).await;
+    let result = publish_handler_response(client, reply_to, response).await;
     // The unary observation and its span end with the actual reply handoff. A
     // delivered business failure sets an error status with a static bounded
     // description; a failed publication is an unavailable request.
@@ -1038,7 +1018,6 @@ async fn publish_handler_response(
     client: &async_nats::Client,
     reply_to: String,
     response: HandlerResponse,
-    annotations: &ErrorAnnotationContext,
 ) -> Result<(), ServerError> {
     match response {
         HandlerResponse::Frames(frames) => {
@@ -1054,32 +1033,6 @@ async fn publish_handler_response(
             };
             publish_reply(client, reply).await?;
         }
-        HandlerResponse::Stream(mut stream) => loop {
-            let frame = AssertUnwindSafe(stream.next()).catch_unwind().await;
-            match frame {
-                Ok(Some(Ok(payload))) => {
-                    publish_reply(client, encode_success_reply(reply_to.clone(), payload)).await?;
-                }
-                Ok(Some(Err(error))) => {
-                    publish_reply(
-                        client,
-                        encode_error_reply_with_context(reply_to.clone(), &error, annotations),
-                    )
-                    .await?;
-                    break;
-                }
-                Ok(None) => break,
-                Err(panic) => {
-                    let error = panic_to_server_error(panic);
-                    publish_reply(
-                        client,
-                        encode_error_reply_with_context(reply_to.clone(), &error, annotations),
-                    )
-                    .await?;
-                    break;
-                }
-            }
-        },
         HandlerResponse::LivePrepared(prepared) => {
             // One signed offer, no infinite reply loop. Ownership of the
             // reservation already moved to the connection's live manager.
@@ -1089,48 +1042,6 @@ async fn publish_handler_response(
                 .publish_with_headers(reply_to, prepared.headers, prepared.offer)
                 .await
                 .map_err(|error| ServerError::Nats(error.to_string()))?;
-        }
-        HandlerResponse::FeedStream {
-            mut stream,
-            control_subject,
-            feed_id,
-        } => {
-            let mut headers = HeaderMap::new();
-            headers.insert("feed-status", "ready");
-            headers.insert("feed-control-subject", control_subject.as_str());
-            headers.insert("feed-id", feed_id.as_str());
-            client
-                .publish_with_headers(reply_to.clone(), headers, Bytes::new())
-                .await
-                .map_err(|error| ServerError::Nats(error.to_string()))?;
-
-            loop {
-                let frame = AssertUnwindSafe(stream.next()).catch_unwind().await;
-                match frame {
-                    Ok(Some(Ok(payload))) => {
-                        publish_reply(client, encode_success_reply(reply_to.clone(), payload))
-                            .await?;
-                    }
-                    Ok(Some(Err(error))) => {
-                        publish_reply(
-                            client,
-                            encode_error_reply_with_context(reply_to.clone(), &error, annotations),
-                        )
-                        .await?;
-                        break;
-                    }
-                    Ok(None) => break,
-                    Err(panic) => {
-                        let error = panic_to_server_error(panic);
-                        publish_reply(
-                            client,
-                            encode_error_reply_with_context(reply_to.clone(), &error, annotations),
-                        )
-                        .await?;
-                        break;
-                    }
-                }
-            }
         }
     }
     Ok(())
@@ -1694,70 +1605,6 @@ mod tests {
         assert!(
             replies[0].is_error,
             "ordinary denials keep their error reply"
-        );
-    }
-
-    struct FeedHandler;
-
-    impl RequestHandler for FeedHandler {
-        fn route_token(&self, _subject: &str) -> Option<&'static str> {
-            Some("test@v1:Route.Feed")
-        }
-
-        fn is_unary_rpc_route(&self, _subject: &str) -> bool {
-            false
-        }
-
-        fn handle<'a>(
-            &'a self,
-            _subject: &'a str,
-            _payload: Bytes,
-            _context: RequestContext,
-        ) -> BoxFuture<'a, Result<Bytes, ServerError>> {
-            Box::pin(async { Ok(Bytes::from_static(b"{}")) })
-        }
-
-        fn handle_response<'a>(
-            &'a self,
-            _subject: &'a str,
-            _payload: Bytes,
-            _context: RequestContext,
-        ) -> BoxFuture<'a, Result<HandlerResponse, ServerError>> {
-            Box::pin(async {
-                let frames = futures_util::stream::iter(vec![Ok(Bytes::from_static(b"{}"))]);
-                Ok(HandlerResponse::FeedStream {
-                    stream: Box::pin(frames),
-                    control_subject: "feed.control".to_owned(),
-                    feed_id: "feed-1".to_owned(),
-                })
-            })
-        }
-    }
-
-    #[tokio::test]
-    async fn feed_streams_never_acquire_a_unary_sample() {
-        let _guard = crate::telemetry::capture::meter_test_lock().await;
-        let capture = crate::telemetry::capture::process_capture();
-        capture.flush();
-
-        // FeedStream success must not record a unary server sample.
-        let host = test_service_host(FeedHandler);
-        let dispatched = dispatch_response(&host, test_request("test.feed"))
-            .await
-            .expect("dispatch should not fail");
-        assert!(matches!(dispatched, DispatchResponse::Reply(_)));
-        assert!(
-            server_outcomes_for(&capture, "test@v1:Route.Feed").is_empty(),
-            "a feed stream must not acquire a unary sample"
-        );
-
-        // A feed error path must also stay out of the unary family even though
-        // its wire error is a single frame: ownership comes from the registered
-        // surface kind, not the response shape.
-        assert!(HandlerResponse::Error(Bytes::new()).is_unary());
-        assert!(
-            !host.is_unary_rpc_route("test.feed"),
-            "a non-unary registered surface must not own a unary sample"
         );
     }
 

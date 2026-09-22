@@ -246,9 +246,9 @@ fn build_router(store: HealthStore, invalidations: broadcast::Sender<Invalidatio
         let store = metrics_store.clone();
         async move { store.metrics(&input, now_ns()).map_err(map_store_error) }
     });
-    let feed_store = store.clone();
+    let live_store = store.clone();
     router.register_live::<HealthWatchLiveDescriptor, _, _>(move |_context, input| {
-        let store = feed_store.clone();
+        let store = live_store.clone();
         let receiver = invalidations.subscribe();
         let ready = health_watch_frame(json!({
             "type": "ready",

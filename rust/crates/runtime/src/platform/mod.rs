@@ -1137,7 +1137,8 @@ pub async fn seed_admin_credentials(
 
     let mut targets = Vec::with_capacity(2);
     for binding in [
-        auth::cli_participant_binding(now).map_err(|error| RuntimeError::Platform(error.to_string()))?,
+        auth::cli_participant_binding(now)
+            .map_err(|error| RuntimeError::Platform(error.to_string()))?,
         auth::console_participant_binding(now)
             .map_err(|error| RuntimeError::Platform(error.to_string()))?,
     ] {

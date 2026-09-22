@@ -261,7 +261,7 @@ pub(crate) async fn start(context: &RuntimeContext) -> Result<SubsystemHandle, R
                 >
         },
     );
-    trellis_events_runtime::register_events_watch_feed(
+    trellis_events_runtime::register_events_watch_live(
         &mut router,
         events_runtime.clone(),
         event_verifier.clone(),

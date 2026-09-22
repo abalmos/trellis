@@ -460,7 +460,7 @@ pub struct ActionCodecProjection {
     pub input: Option<Value>,
     /// RPC or operation result schema.
     pub output: Option<Value>,
-    /// Event/feed item schema.
+    /// Event/live item schema.
     pub payload: Option<Value>,
     /// Operation progress schema.
     pub update: Option<Value>,

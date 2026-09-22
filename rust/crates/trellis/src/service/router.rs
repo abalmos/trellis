@@ -22,13 +22,13 @@ use super::{
     OperationSnapshotFrame, RpcDescriptor, ServerError,
 };
 
-/// Low-level context for one verified live Feed invocation.
+/// Low-level context for one verified live Live invocation.
 ///
 /// Supplied only after the router verified the opening request and reserved the
 /// session. The cancellation token is cloneable and exposes no authority
 /// constructor to applications.
 #[derive(Clone)]
-pub struct FeedRequestContext {
+pub struct LiveRequestContext {
     /// Request metadata, unchanged from ordinary handlers.
     pub request: RequestContext,
     /// Cancellation for this source scope.
@@ -216,7 +216,7 @@ pub struct Router {
     provider_deployment_id: Option<String>,
     provider_instance_id: Option<String>,
     operation_recoveries: Vec<OperationRecovery>,
-    /// Live owner for Feed/Operation observation routes on this connection.
+    /// Live owner for Live/Operation observation routes on this connection.
     ///
     /// Shared so a route registered before its owner is installed still
     /// resolves the owner at dispatch time.
@@ -243,19 +243,19 @@ impl Router {
         self.provider_deployment_id = Some(deployment_id.into());
     }
 
-    /// Bind Feed control routes to this service instance.
+    /// Bind Live control routes to this service instance.
     pub fn set_provider_instance_id(&mut self, instance_id: impl Into<String>) {
         self.provider_instance_id = Some(instance_id.into());
     }
 
-    /// Bind live Feed/Operation observation routes to one connected owner.
+    /// Bind live Live/Operation observation routes to one connected owner.
     pub fn set_live_owner(&mut self, owner: super::live_router::LiveProviderOwner) {
         if let Ok(mut live_owner) = self.live_owner.write() {
             *live_owner = Some(owner);
         }
     }
 
-    /// Return whether this router contains any live Feed or Operation route.
+    /// Return whether this router contains any live Live or Operation route.
     #[must_use]
     pub fn serves_live_surface(&self) -> bool {
         self.handlers.values().any(|route| route.live)
@@ -272,7 +272,7 @@ impl Router {
 
     /// Fail when a live route is registered without a live provider owner.
     ///
-    /// This is a construction/startup invariant: a router that serves a Feed
+    /// This is a construction/startup invariant: a router that serves a Live
     /// or Operation watch route must be given its connection's provider owner
     /// before it serves traffic. Missing ownership is an immediate
     /// configuration failure, never a dispatch-time fallback.
@@ -284,7 +284,7 @@ impl Router {
     pub fn require_live_owner(&self) -> Result<(), ServerError> {
         if self.serves_live_surface() && !self.has_live_owner() {
             return Err(ServerError::Nats(
-                "a router serving a Feed or Operation watch route requires a live provider owner"
+                "a router serving a Live or Operation watch route requires a live provider owner"
                     .to_owned(),
             ));
         }
@@ -307,7 +307,7 @@ impl Router {
             "operation" => {
                 trellis_protocol::derive_bound_operation_subject(api_id, deployment_id, &action)
             }
-            "feed" => trellis_protocol::derive_bound_feed_subject(api_id, deployment_id, &action),
+            "live" => trellis_protocol::derive_bound_live_subject(api_id, deployment_id, &action),
             _ => unreachable!("only request route families are deployment-bound"),
         };
         subject.expect("generated route metadata must form a valid bound subject")
@@ -322,9 +322,9 @@ impl Router {
 
     /// Interns one bounded route token at registration time.
     ///
-    /// Feed surfaces share the request-route family: their open is a
-    /// request/response RPC at the shared dispatch boundary, while the feed's
-    /// own lifetime is observed by the feed instruments, not this token.
+    /// Live surfaces share the request-route family: their open is a
+    /// request/response RPC at the shared dispatch boundary, while the live's
+    /// own lifetime is observed by the live instruments, not this token.
     fn intern_route(&self, api: &str, key: &str) -> &'static str {
         crate::telemetry::instruments::route_token(
             crate::telemetry::instruments::RouteFamily::Rpc,
@@ -498,7 +498,7 @@ impl Router {
         );
     }
 
-    /// Register one descriptor-backed live Feed handler.
+    /// Register one descriptor-backed live Live handler.
     ///
     /// The opening request is verified and the session reserved before the
     /// handler runs; handler output starts only after the delivery-path
@@ -508,12 +508,12 @@ impl Router {
     where
         D: LiveDescriptor + 'static,
         D::Input: Send + 'static,
-        F: Fn(FeedRequestContext, D::Input) -> S + Send + Sync + 'static,
+        F: Fn(LiveRequestContext, D::Input) -> S + Send + Sync + 'static,
         S: Stream<Item = Result<D::Event, ServerError>> + Send + 'static,
     {
         let handler = Arc::new(handler);
         let live_owner = Arc::clone(&self.live_owner);
-        let subject = self.descriptor_subject("feed", D::API_ID, D::KEY, D::SUBJECT);
+        let subject = self.descriptor_subject("live", D::API_ID, D::KEY, D::SUBJECT);
         let provider_deployment_id = self
             .provider_deployment_id
             .clone()
@@ -551,16 +551,16 @@ impl Router {
                                 .and_then(|owner| owner.clone())
                                 .ok_or_else(|| {
                                     ServerError::Nats(format!(
-                                        "feed route '{handler_subject}' has no live provider owner"
+                                        "live route '{handler_subject}' has no live provider owner"
                                     ))
                                 })?;
-                            let opening = crate::service::live_router::parse_feed_open::<D::Input>(
+                            let opening = crate::service::live_router::parse_live_open::<D::Input>(
                                 &payload,
                             )?;
                             let encoded_input = crate::generated::Codec::encode(&opening.input)
                                 .map_err(|error| ServerError::Nats(error.to_string()))?;
                             let input = opening.input;
-                            let meta = crate::service::live_router::FeedOpeningMeta {
+                            let meta = crate::service::live_router::LiveOpeningMeta {
                                 open_id: opening.open_id.clone(),
                                 receive_max_payload_bytes: opening.receive_max_payload_bytes,
                             };
@@ -571,7 +571,7 @@ impl Router {
                                 let request = ctx.clone();
                                 move || {
                                     let stream = handler(
-                                        FeedRequestContext {
+                                        LiveRequestContext {
                                             request,
                                             cancellation: factory_cancellation.clone(),
                                         },
@@ -582,12 +582,12 @@ impl Router {
                                     )
                                 }
                             };
-                            let reserved = crate::service::live_router::reserve_feed::<D, _>(
+                            let reserved = crate::service::live_router::reserve_live::<D, _>(
                                 owner.client(),
                                 owner.manager()?,
-                                &crate::service::live_router::FeedOpenRequest {
+                                &crate::service::live_router::LiveOpenRequest {
                                     request: ctx,
-                                    inputs: crate::service::live_router::FeedOpenInputs {
+                                    inputs: crate::service::live_router::LiveOpenInputs {
                                         api_id: D::API_ID.to_owned(),
                                         base_subject: handler_subject,
                                         provider_instance_id,
@@ -908,20 +908,6 @@ impl Router {
         {
             HandlerResponse::Frames(frames) => Ok(frames),
             HandlerResponse::Error(payload) => Ok(vec![payload]),
-            HandlerResponse::Stream(mut stream) => {
-                let mut frames = Vec::new();
-                while let Some(frame) = stream.next().await {
-                    frames.push(frame?);
-                }
-                Ok(frames)
-            }
-            HandlerResponse::FeedStream { mut stream, .. } => {
-                let mut frames = Vec::new();
-                while let Some(frame) = stream.next().await {
-                    frames.push(frame?);
-                }
-                Ok(frames)
-            }
             HandlerResponse::LivePrepared(_) => Err(ServerError::Nats(
                 "a live response requires a live owner and cannot be collected".to_owned(),
             )),
@@ -1253,39 +1239,39 @@ mod tests {
         }
     }
 
-    struct TestFeed;
+    struct TestLive;
 
-    impl LiveDescriptor for TestFeed {
+    impl LiveDescriptor for TestLive {
         type Input = Value;
         type Event = Value;
 
         const API_ID: &'static str = "test@v1";
-        const DESCRIPTOR_NAME: &'static str = "feed.Live";
+        const DESCRIPTOR_NAME: &'static str = "live.Live";
         const KEY: &'static str = "Test.Live";
         const SUBJECT: &'static str = "live.v1.route.Test.Live";
         const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[];
     }
 
     #[tokio::test]
-    async fn feed_routes_require_a_live_provider_owner() {
+    async fn live_routes_require_a_live_provider_owner() {
         let mut router = Router::new();
         router.set_provider_instance_id("provider-instance");
-        router.register_live::<TestFeed, _, _>(|_, _| {
+        router.register_live::<TestLive, _, _>(|_, _| {
             stream::pending::<Result<Value, ServerError>>()
         });
         let response = router
             .handle_request_response(
-                TestFeed::SUBJECT,
+                TestLive::SUBJECT,
                 Bytes::from_static(b"{}"),
                 RequestContext {
-                    subject: TestFeed::SUBJECT.to_owned(),
+                    subject: TestLive::SUBJECT.to_owned(),
                     ..Default::default()
                 },
             )
             .await;
         assert!(
             matches!(response, Err(ServerError::Nats(message)) if message.contains("live provider owner")),
-            "a Feed route without a live owner must fail closed"
+            "a Live route without a live owner must fail closed"
         );
     }
 
@@ -1293,17 +1279,17 @@ mod tests {
     async fn live_open_rejects_a_non_live_envelope_before_reserving() {
         let mut router = Router::new();
         router.set_provider_instance_id("provider-instance");
-        router.register_live::<TestFeed, _, _>(|_, _| {
+        router.register_live::<TestLive, _, _>(|_, _| {
             stream::pending::<Result<Value, ServerError>>()
         });
         // A legacy finite request body is an explicit incompatible-protocol
         // error, never a silent fallback to an old transport.
         let response = router
             .handle_request_response(
-                TestFeed::SUBJECT,
+                TestLive::SUBJECT,
                 Bytes::from_static(b"{}"),
                 RequestContext {
-                    subject: TestFeed::SUBJECT.to_owned(),
+                    subject: TestLive::SUBJECT.to_owned(),
                     ..Default::default()
                 },
             )

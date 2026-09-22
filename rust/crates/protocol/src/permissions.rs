@@ -79,7 +79,7 @@ pub enum PermissionAction {
     Control,
     /// Publish an event.
     Publish,
-    /// Subscribe to an event or feed.
+    /// Subscribe to an event or live observation.
     Subscribe,
     /// Read state or a resource.
     Read,

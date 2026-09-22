@@ -737,7 +737,7 @@ impl ServiceHandle {
     }
 }
 
-/// High-level context for one verified live Feed handler invocation.
+/// High-level context for one verified live Live handler invocation.
 ///
 /// Embeds the ordinary [`ServiceHandlerContext`] unchanged and adds the source
 /// scope's cancellation token. The token has no authority constructor exposed
@@ -746,7 +746,7 @@ impl ServiceHandle {
 pub struct ServiceLiveHandlerContext {
     /// Ordinary service handler context for this invocation.
     pub context: ServiceHandlerContext,
-    /// Cancellation for this Feed source scope.
+    /// Cancellation for this Live source scope.
     pub cancellation: crate::live::LiveCancellation,
 }
 
@@ -921,7 +921,7 @@ impl<C> ConnectedServiceRuntime<C> {
                 &self.provider_deployment_id,
                 action,
             ),
-            "feed" => trellis_protocol::derive_bound_feed_subject(
+            "live" => trellis_protocol::derive_bound_live_subject(
                 api_id,
                 &self.provider_deployment_id,
                 action,
@@ -1210,7 +1210,7 @@ impl<C> ConnectedServiceRuntime<C> {
             .insert(self.descriptor_subject("rpc", D::API_ID, D::KEY));
     }
 
-    /// Register one descriptor-backed live Feed handler and record its subject.
+    /// Register one descriptor-backed live Live handler and record its subject.
     ///
     /// The high-level handler receives the embedded ordinary
     /// [`ServiceHandlerContext`] plus this source scope's cancellation token.
@@ -1231,7 +1231,7 @@ impl<C> ConnectedServiceRuntime<C> {
                 input,
             )
         });
-        let subject = self.descriptor_subject("feed", D::API_ID, D::KEY);
+        let subject = self.descriptor_subject("live", D::API_ID, D::KEY);
         self.registered_subjects.insert(subject.clone());
         self.router
             .set_live_owner(super::live_router::LiveProviderOwner::new(

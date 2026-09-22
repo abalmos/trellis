@@ -30,7 +30,7 @@ pub(crate) struct ClientOpen<'a> {
     pub base_subject: &'a str,
     /// NATS subject the opening request is published on.
     ///
-    /// Feeds publish on `base_subject`. Operation watch publishes on the
+    /// Live observations publish on `base_subject`. Operation watch publishes on the
     /// operation control subject while the offer still binds `base_subject`.
     pub publish_subject: &'a str,
     pub body: Bytes,
@@ -56,7 +56,7 @@ pub(crate) struct PreparedClientSession {
 
 /// Outcome of one complete client open.
 pub(crate) enum ClientOpenOutcome {
-    Feed(PreparedClientSession),
+    Live(PreparedClientSession),
     Operation(PreparedClientSession),
 }
 
@@ -137,9 +137,9 @@ async fn verify_offer(
     consumer_digest: &str,
 ) -> Result<PreparedClientSession, TrellisClientError> {
     trellis_protocol::validate_control_body(&response.payload)
-        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+        .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     let value: serde_json::Value = serde_json::from_slice(&response.payload)
-        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+        .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     let kind = value.get("type").and_then(|kind| kind.as_str());
     if kind != Some("offer") {
         // A signed open-error or any non-offer body is a setup failure; it is
@@ -149,19 +149,19 @@ async fn verify_offer(
             .and_then(|code| code.as_str())
             .or_else(|| value.get("type").and_then(|kind| kind.as_str()))
             .unwrap_or("invalid_request");
-        return Err(TrellisClientError::FeedProtocol(format!(
+        return Err(TrellisClientError::LiveProtocol(format!(
             "live open rejected with '{code}': {value}"
         )));
     }
     let offer: LiveOffer = serde_json::from_value(value)
-        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+        .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     if offer.kind != LiveOfferKind::Offer {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "live open response is not an offer".into(),
         ));
     }
     if offer.open_id != open.open_id {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer answers a different logical open".into(),
         ));
     }
@@ -173,49 +173,49 @@ async fn verify_offer(
         .and_then(|headers| headers.get("authorization-context"))
         .map(ToString::to_string)
         .ok_or_else(|| {
-            TrellisClientError::FeedProtocol("offer omitted its authorization context".into())
+            TrellisClientError::LiveProtocol("offer omitted its authorization context".into())
         })?;
     let session_key = response
         .headers
         .as_ref()
         .and_then(|headers| headers.get("session-key"))
         .map(ToString::to_string)
-        .ok_or_else(|| TrellisClientError::FeedProtocol("offer omitted its signer".into()))?;
+        .ok_or_else(|| TrellisClientError::LiveProtocol("offer omitted its signer".into()))?;
     let proof = response
         .headers
         .as_ref()
         .and_then(|headers| headers.get("trellis-live-proof"))
         .map(ToString::to_string)
-        .ok_or_else(|| TrellisClientError::FeedProtocol("offer omitted its proof".into()))?;
+        .ok_or_else(|| TrellisClientError::LiveProtocol("offer omitted its proof".into()))?;
     trellis_protocol::verify_live_server_proof_encoded(
         &trellis_protocol::LiveServerProof::parse(proof)
-            .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?,
+            .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?,
         &context_digest,
         response.subject.as_str(),
         &response.payload,
         &session_key,
     )
-    .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+    .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     let policy = provider
         .policy()
-        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+        .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     let lease = provider
         .resolve_context(&context_digest, policy.now_unix_seconds)
         .await
-        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+        .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     let peer = PinnedPeerIdentity::from_signed(lease.signed_context());
     if peer.session_key != session_key {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer context does not bind the signing session key".into(),
         ));
     }
     if trellis_protocol::encode_subject_token(&session_key) != offer.provider.session_key {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer signer does not match its advertised identity".into(),
         ));
     }
     if offer.request_id != request_id {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer answers a different opening request".into(),
         ));
     }
@@ -225,9 +225,9 @@ async fn verify_offer(
         &offer.consumer.connection_id,
         &offer.session_id,
     )
-    .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+    .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     if expected_data != offer.data_subject {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer data subject is not canonical for this session".into(),
         ));
     }
@@ -236,29 +236,29 @@ async fn verify_offer(
         &offer.provider.connection_id,
         &offer.session_id,
     )
-    .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+    .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     if expected_control != offer.control_subject {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer control subject is not canonical for this session".into(),
         ));
     }
     // The selected deployment must match the consumer's installed binding.
     let selected = provider
         .provider_deployment_id(open.api_id)
-        .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+        .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     verify_offer_claims(open, &offer, &selected, &peer, consumer, consumer_digest)?;
     let negotiated = trellis_protocol::negotiate_max_data_body_bytes(
         open.receive_max_payload_bytes,
         client.nats().max_payload() as u64,
     )
-    .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
+    .map_err(|error| TrellisClientError::LiveProtocol(error.to_string()))?;
     if offer.limits.max_data_body_bytes > negotiated {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer exceeds the negotiated data body limit".into(),
         ));
     }
     if offer.kind != LiveOfferKind::Offer {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "unsupported live offer kind".into(),
         ));
     }
@@ -285,7 +285,7 @@ async fn verify_offer(
     })
 }
 
-/// Install one prepared Feed observation as an owned public handle.
+/// Install one prepared Live observation as an owned public handle.
 ///
 /// The handle owns the caller's prepared state and the exact data
 /// subscription; the first poll starts activation and the pump.
@@ -294,7 +294,7 @@ async fn verify_offer(
 ///
 /// Returns a setup error when the data subscription cannot be flushed or the
 /// consumer admission bound is reached.
-pub(crate) async fn install_feed_handle<D>(
+pub(crate) async fn install_live_handle<D>(
     client: &crate::client::TrellisClient,
     prepared: PreparedClientSession,
 ) -> Result<crate::live::subscription::LiveSubscription<D::Event>, TrellisClientError>
@@ -352,7 +352,7 @@ where
         ))
     })?;
     let permit = manager.clone().admit_consumer().map_err(|code| {
-        TrellisClientError::FeedProtocol(format!("admission rejected: {code:?}"))
+        TrellisClientError::LiveProtocol(format!("admission rejected: {code:?}"))
     })?;
     let core = Arc::new(ConsumerCore::new(
         prepared.offer.session_id.clone(),
@@ -411,7 +411,7 @@ pub(crate) fn verify_offer_claims(
     // participant implements the API; the offered provider deployment must be
     // exactly that binding, never the offer's own claim.
     if selected_provider_deployment_id != offer.provider.deployment_id {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer provider is not the selected deployment for this API".into(),
         ));
     }
@@ -423,7 +423,7 @@ pub(crate) fn verify_offer_claims(
         || peer.deployment_id.as_deref().unwrap_or("") != offer.provider.deployment_id
         || peer.instance_id.as_deref().unwrap_or("") != offer.provider.instance_id
     {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer provider tuple does not match its verified context".into(),
         ));
     }
@@ -436,7 +436,7 @@ pub(crate) fn verify_offer_claims(
         || trellis_protocol::encode_subject_token(&consumer.session_key)
             != offer.consumer.session_key
     {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer consumer does not match the opening caller".into(),
         ));
     }
@@ -448,12 +448,12 @@ fn verify_offer_identity(
     offer: &LiveOffer,
 ) -> Result<(), TrellisClientError> {
     if offer.base_subject != open.base_subject {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer base subject does not match the opening route".into(),
         ));
     }
     if offer.session_kind != open.kind {
-        return Err(TrellisClientError::FeedProtocol(
+        return Err(TrellisClientError::LiveProtocol(
             "offer session kind does not match the opening kind".into(),
         ));
     }
@@ -1104,11 +1104,11 @@ mod tests {
     }
 
     #[test]
-    fn feed_open_publishes_on_the_same_base_subject() {
+    fn live_open_publishes_on_the_same_base_subject() {
         let base = "live.v1.route.Watch";
         let open = open(LiveSessionKind::Standalone, base, base);
         verify_offer_identity(&open, &offer(LiveSessionKind::Standalone, base))
-            .expect("feed offer");
+            .expect("live offer");
     }
 
     #[test]
@@ -1131,7 +1131,7 @@ mod tests {
     }
 
     #[test]
-    fn operation_watch_rejects_feed_session_kind() {
+    fn operation_watch_rejects_live_session_kind() {
         let base = "operation.v1.Billing.Refund";
         let open = open(
             LiveSessionKind::Operation,

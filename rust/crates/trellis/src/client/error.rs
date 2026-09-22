@@ -315,8 +315,8 @@ pub enum TrellisClientError {
     #[error("event subscription protocol error: {0}")]
     EventSubscriptionProtocol(String),
 
-    #[error("feed protocol error: {0}")]
-    FeedProtocol(String),
+    #[error("live protocol error: {0}")]
+    LiveProtocol(String),
 
     /// A live observation failed after setup with a bounded public envelope.
     #[error(transparent)]

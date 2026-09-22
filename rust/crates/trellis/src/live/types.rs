@@ -6,8 +6,8 @@ use tokio::sync::watch;
 
 pub use trellis_protocol::{LiveEndReason, LiveErrorCode};
 
-/// Bounded `trellis.reason` value for one committed Feed terminal.
-pub(crate) fn feed_end_reason(reason: LiveEndReason) -> &'static str {
+/// Bounded `trellis.reason` value for one committed Live terminal.
+pub(crate) fn live_end_reason(reason: LiveEndReason) -> &'static str {
     use LiveEndReason::*;
     match reason {
         Complete => "complete",

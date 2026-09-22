@@ -296,7 +296,7 @@ impl OptionalAction {
         }
     }
 
-    /// Declare an optional feed subscription.
+    /// Declare an optional live subscription.
     pub const fn live(api_id: &'static str, name: &'static str) -> Self {
         Self {
             api_id,
@@ -422,14 +422,14 @@ pub trait EventDescriptor {
     }
 }
 
-/// Metadata emitted for one generated feed action.
+/// Metadata emitted for one generated live action.
 pub trait LiveDescriptor {
-    /// Feed subscription input type.
+    /// Live subscription input type.
     type Input: Codec + Serialize + DeserializeOwned;
-    /// Feed event payload type.
+    /// Live event payload type.
     type Event: Codec + Serialize + DeserializeOwned;
 
-    /// Qualified API identity owning this feed.
+    /// Qualified API identity owning this live.
     const API_ID: &'static str;
     /// Exact generated descriptor name.
     const DESCRIPTOR_NAME: &'static str;
@@ -707,7 +707,7 @@ impl Client {
         self.client.subscribe_with_options::<D>(options).await
     }
 
-    /// Subscribe to one generated feed descriptor.
+    /// Subscribe to one generated live descriptor.
     pub async fn live<D>(
         &self,
         input: &D::Input,
