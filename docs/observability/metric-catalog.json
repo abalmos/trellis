@@ -129,7 +129,7 @@
         "trellis.outcome": ["ok", "declared_error", "invalid", "denied", "rate_limited", "timeout", "unavailable", "cancelled", "error"]
       },
       "owner": "Rust request loop / TS RPC dispatcher",
-      "observation": "Receive through validation, handler and response handoff. Only unary RPC, not feed/operation lifetime.",
+      "observation": "Receive through validation, handler and response handoff. Only unary RPC, not live/operation lifetime.",
       "boundaries": [0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
     },
     {
@@ -512,7 +512,7 @@
       "instrument": "UpDownCounter<i64>",
       "unit": "{session}",
       "attributes": {
-        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.kind": ["live", "operation_watch"],
         "trellis.side": ["consumer", "provider"],
         "trellis.phase": ["prepared", "activating", "active", "draining", "closing"]
       },
@@ -524,7 +524,7 @@
       "instrument": "Counter<u64>",
       "unit": "{session}",
       "attributes": {
-        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.kind": ["live", "operation_watch"],
         "trellis.side": ["consumer", "provider"],
         "trellis.reason": ["complete", "cancelled", "local_shutdown", "setup_timeout", "peer_lost", "disconnected", "authorization_lost", "binding_changed", "consumer_slow", "delivery_gap", "source_error", "protocol_error", "resource_exhausted"]
       },
@@ -536,7 +536,7 @@
       "instrument": "Histogram<f64>",
       "unit": "s",
       "attributes": {
-        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.kind": ["live", "operation_watch"],
         "trellis.side": ["consumer", "provider"]
       },
       "owner": "Same endpoint record",
@@ -548,7 +548,7 @@
       "instrument": "UpDownCounter<i64>",
       "unit": "By",
       "attributes": {
-        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.kind": ["live", "operation_watch"],
         "trellis.side": ["consumer", "provider"]
       },
       "owner": "Same endpoint record",
@@ -559,7 +559,7 @@
       "instrument": "Counter<u64>",
       "unit": "{frame}",
       "attributes": {
-        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.kind": ["live", "operation_watch"],
         "trellis.side": ["consumer", "provider"],
         "trellis.class": ["data", "control"],
         "trellis.direction": ["send", "receive"]
@@ -572,7 +572,7 @@
       "instrument": "Counter<u64>",
       "unit": "{message}",
       "attributes": {
-        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.kind": ["live", "operation_watch"],
         "trellis.side": ["consumer", "provider"],
         "trellis.reason": ["invalid_signature", "foreign_identity", "invalid_protocol", "over_capacity"]
       },
@@ -584,7 +584,7 @@
       "instrument": "UpDownCounter<i64>",
       "unit": "{source}",
       "attributes": {
-        "trellis.kind": ["feed", "operation_watch"],
+        "trellis.kind": ["live", "operation_watch"],
         "trellis.side": ["consumer", "provider"]
       },
       "owner": "Same endpoint record",

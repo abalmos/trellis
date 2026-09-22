@@ -31,7 +31,7 @@ installed digest.
 
 ## APIs, capabilities, and grants
 
-APIs define RPCs, Operations, Events, Feeds, API-scoped errors, and one
+APIs define RPCs, Operations, Events, Live observations, API-scoped errors, and one
 capabilities block. A capability groups exact actions and carries human consent
 wording. A capability declaration or approval does not itself confer runtime
 authority. The server derives and signs the exact selected permission atoms for
@@ -43,7 +43,7 @@ changing a title or the exact actions covered does not, provided newly selected
 actions remain within the approved capability and delegation ceiling. Public
 actions remain selected exact actions, not anonymous wildcard grants.
 
-Feeds and Operation observation are declared through this same API/capability
+Live observations and Operation observation are declared through this same API/capability
 surface: authors select the existing observation action and its generated
 capability. The provider and consumer transport permissions a live session
 needs—separate connection-scoped data-publish and control-subscribe atoms, and

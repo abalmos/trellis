@@ -86,7 +86,7 @@ These headings are intentionally named for fast human and AI lookup.
 | `core/store-resource-patterns.md`   | You are changing service-owned blob store resources                       | Store resource shape, runtime semantics, and auth boundaries                                  |
 | `core/type-system-patterns.md`      | You are changing schemas, Result, or error modeling                       | Shared type-system and validation rules                                                       |
 | `core/service-development.md`       | You are implementing service code or service runtime ergonomics           | Service layout, lifecycle, jobs vs operations                                                 |
-| `core/live-observation-sessions.md` | You are changing Feed or Operation live transport, activation, or closure | Signed live observation sessions: ownership, credit, liveness, and observation-vs-execution   |
+| `core/live-observation-sessions.md` | You are changing Live or Operation live transport, activation, or closure | Signed live observation sessions: ownership, credit, liveness, and observation-vs-execution   |
 | `core/testing-patterns.md`          | You are adding, moving, or deleting tests for Trellis behavior            | Smallest real test boundaries, live integration discovery, and infrastructure                 |
 | `core/observability-patterns.md`    | You are changing telemetry, correlation, health, or docs guidance         | Observability and request-correlation rules                                                   |
 | `core/frontend-svelte-patterns.md`  | You are changing Svelte frontend conventions                              | Trellis frontend state patterns                                                               |

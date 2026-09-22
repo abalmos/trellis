@@ -128,7 +128,7 @@ bounded M1a–M1c implementations:
   the actual request and CLI boundaries instead.
 - Rust `trellis.delivery.dispositions` remains a source-inspected owner; this
   candidate captures the Rust `trellis.event.process.duration` Consumer outcomes
-  and Feed active/end values, but the Rust ACK/NAK/TERM counter is not
+  and Live active/end values, but the Rust ACK/NAK/TERM counter is not
   separately re-exercised in the new capture.
 
 These are explicit decisions, not omitted owners: the helper-only rows are

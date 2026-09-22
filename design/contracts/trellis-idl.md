@@ -74,7 +74,7 @@ unchanged in IDL references and generated API paths. Generated language symbols
 may use PascalCase names such as `Orders`.
 
 API bodies contain title, description, optional human version, named RPC,
-Operation, Event, and Feed declarations, API-scoped named errors, and one
+Operation, Event, and Live declarations, API-scoped named errors, and one
 capabilities block. Action names are exact unquoted identifiers or dot paths.
 Inputs, outputs, progress, events, and error payloads reference top-level types.
 There is no `rpc internal`, `EventClass`, per-action version, general transfer

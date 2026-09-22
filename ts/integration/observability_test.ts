@@ -496,13 +496,13 @@ Deno.test("TS standalone live telemetry derives exact per-side deltas from one o
   try {
     await withTrellisRuntime(async (runtime) => {
       const identity = await runtime.registerService({
-        name: "feed-owner-observability",
+        name: "live-owner-observability",
         contract: participants.Provider.participant,
       });
       const service = await TrellisService.connect({
         trellisUrl: runtime.trellisUrl,
         participant: participants.Provider.participant,
-        name: "feed-owner-observability",
+        name: "live-owner-observability",
         seed: identity.seed,
       }).orThrow();
       const serviceExit = service.wait().catch((error: unknown) => error);
@@ -515,7 +515,7 @@ Deno.test("TS standalone live telemetry derives exact per-side deltas from one o
         sourceEnds += 1;
       });
       const client = await runtime.connectClient({
-        name: "feed-owner-caller",
+        name: "live-owner-caller",
         contract: participants.Caller.participant,
       });
       try {

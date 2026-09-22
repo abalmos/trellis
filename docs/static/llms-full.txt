@@ -31,7 +31,7 @@ orders = "contract.trellis"
 ```
 
 Author APIs and participants in the `.trellis` files explicitly listed under
-`[sources]`. An API defines models and public RPC, event, feed, and operation
+`[sources]`. An API defines models and public RPC, event, live, and operation
 surfaces. A participant identifies a service, app, agent, or device, the API it
 implements, its selected dependencies, and its runtime resources. Participant
 identity, API identity, API release version, and surface transport version are
@@ -149,7 +149,7 @@ auth design documentation for protocol details.
 - Event: a published fact. Durable consumption uses participant-declared
   Consumer resources and can redeliver; handlers need an appropriate duplicate
   handling strategy for their side effects.
-- Feed: connection-scoped live data. Closing or aborting the subscription
+- Live: connection-scoped live data. Closing or aborting the subscription
   cancels provider work; it is not a durable event history.
 - Operation: caller-visible asynchronous work with progress, terminal output,
   and optional cancellation, updates, or transfer.
@@ -190,7 +190,7 @@ matching totals, groups, and statistics independently of any `Jobs.Query` page.
 Job deadlines are creation-relative. Omitted retry means five deliveries with
 delays of 5s, 30s, 2m, and 10m; explicit retry declares total attempts and
 exactly attempts-minus-one positive ordered backoffs.
-Feeds and Operation watchers are authorized live sessions negotiated with
+Live observations and Operation watchers are authorized live sessions negotiated with
 bounded opening requests. The provider signs its offer and frames; control
 responses bind the session ID, logical command sequence, and command hash, and
 continued authority is rechecked from retained context rather than by a network
@@ -248,7 +248,7 @@ Declare these dependencies only when the application uses them:
   profiles.
 - Jobs administration uses `Jobs.Query`, `Jobs.Metrics`, `Jobs.Inspect`, and
   `Jobs.Summary`, and `Jobs.Watch`. Summary is page-independent; Watch is an
-  invalidation feed, so reread the affected query and summary.
+  invalidation live, so reread the affected query and summary.
 - Events offers event history, Consumer observability, and per-Consumer DLQ
   through its Query, Inspect, Metrics, Consumers, and Watch surfaces.
 

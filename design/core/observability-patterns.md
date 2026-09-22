@@ -70,13 +70,13 @@ Heartbeat behavior:
   heartbeat payloads at publish time using callback-based state snapshots; the
   same helper surface is also available on device connections
 - heartbeat samples are not Trellis events and are not exposed as a public live
-  feed; Console reads the Rust-owned health projection through `Health.Query`,
+  live; Console reads the Rust-owned health projection through `Health.Query`,
   `Health.Inspect`, and `Health.Metrics`, then uses `Health.Watch` as a
-  post-commit invalidation feed
+  post-commit invalidation live
 
 ### Live Observation Telemetry
 
-The live-observation contract requires Feeds and Operation watchers to be
+The live-observation contract requires Live observations and Operation watchers to be
 observed as live sessions through bounded instruments in both languages:
 `trellis.live.sessions` (phase
 `prepared`/`activating`/`active`/`draining`/`closing`), `trellis.live.ends`,
@@ -94,7 +94,7 @@ pending is still a visible leak. All seven families are emitted by the same
 endpoint record that owns the local state, and each session reports its
 `trellis.kind` as `standalone` or `operation`.
 
-Labels stay bounded: `trellis.kind` (`feed`/`operation_watch`), `trellis.side`
+Labels stay bounded: `trellis.kind` (`live`/`operation_watch`), `trellis.side`
 (`consumer`/`provider`), `trellis.phase`, fixed `reason` and rejection codes,
 and `send`/`receive` direction. Raw subjects, session and Operation IDs,
 principal or deployment identities, digests, inputs, and free-form error strings

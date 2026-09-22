@@ -21,7 +21,7 @@
   "scenarios": {
     "tsWork": "TRELLIS_OBS_CAPTURE_ENDPOINT=http://127.0.0.1:4318 TRELLIS_OBS_PROMETHEUS_URL=http://127.0.0.1:9464/metrics deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts --filter 'collector enabled'",
     "serviceConnection": "deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts --filter 'TS service connection observes'",
-    "feedOwner": "deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts --filter 'TS Feed active'",
+    "standaloneOwner": "deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts --filter 'TS standalone live telemetry'",
     "rustWork": "deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts --filter 'durable attempt links'",
     "kv": "TRELLIS_OBS_CAPTURE_ENDPOINT=http://127.0.0.1:4318 deno test -A -c ts/integration/deno.json ts/integration/kv_telemetry_test.ts --filter 'one bounded storage'",
     "delivery": "deno test -A -c ts/integration/deno.json ts/integration/events_test.ts --filter 'typescript durable delivery leases'",
@@ -415,31 +415,31 @@
       "value": 1.0
     },
     {
-      "scenario": "feedOwner",
-      "owner": "trellis/feed-owner-observability",
-      "metric": "trellis_feed_active",
+      "scenario": "standaloneOwner",
+      "owner": "trellis/live-owner-observability",
+      "metric": "trellis_live_sessions",
       "trellis.side": "client",
       "value": 0.0
     },
     {
-      "scenario": "feedOwner",
-      "owner": "trellis/feed-owner-observability",
-      "metric": "trellis_feed_active",
+      "scenario": "standaloneOwner",
+      "owner": "trellis/live-owner-observability",
+      "metric": "trellis_live_sessions",
       "trellis.side": "server",
       "value": 0.0
     },
     {
-      "scenario": "feedOwner",
-      "owner": "trellis/feed-owner-observability",
-      "metric": "trellis_feed_ends",
+      "scenario": "standaloneOwner",
+      "owner": "trellis/live-owner-observability",
+      "metric": "trellis_live_ends",
       "trellis.side": "client",
       "trellis.reason": "cancelled",
       "value": 2.0
     },
     {
-      "scenario": "feedOwner",
-      "owner": "trellis/feed-owner-observability",
-      "metric": "trellis_feed_ends",
+      "scenario": "standaloneOwner",
+      "owner": "trellis/live-owner-observability",
+      "metric": "trellis_live_ends",
       "trellis.side": "server",
       "trellis.reason": "cancelled",
       "value": 2.0
@@ -525,21 +525,21 @@
     {
       "scenario": "rustWork",
       "owner": "trellis/runtime-rust-caller",
-      "metric": "trellis_feed_active",
+      "metric": "trellis_live_sessions",
       "trellis.side": "client",
       "value": 0.0
     },
     {
       "scenario": "rustWork",
       "owner": "trellis/runtime-rust-caller",
-      "metric": "trellis_feed_active",
+      "metric": "trellis_live_sessions",
       "trellis.side": "client",
       "value": 0.0
     },
     {
       "scenario": "rustWork",
       "owner": "trellis/runtime-rust-caller",
-      "metric": "trellis_feed_ends",
+      "metric": "trellis_live_ends",
       "trellis.side": "client",
       "value": 1.0,
       "trellis.reason": "cancelled"
@@ -547,7 +547,7 @@
     {
       "scenario": "rustWork",
       "owner": "trellis/runtime-rust-caller",
-      "metric": "trellis_feed_ends",
+      "metric": "trellis_live_ends",
       "trellis.side": "client",
       "value": 1.0,
       "trellis.reason": "cancelled"

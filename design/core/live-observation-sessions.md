@@ -1,12 +1,12 @@
 ---
 title: Live Observation Sessions
-description: Signed, connection-owned transport for Feed and Operation live observation.
+description: Signed, connection-owned transport for Live and Operation live observation.
 ---
 
 # Live Observation Sessions
 
 A **live observation session** is the ephemeral, caller-specific live transport
-behind a Feed `Watch` or an Operation observation. It replaces the older
+behind a Live `Watch` or an Operation observation. It replaces the older
 indefinite request/reply reply-inbox stream. Ordinary RPCs and finite Operation
 controls remain request/reply.
 
@@ -16,7 +16,7 @@ schemas, constants, and error codes live in the shared protocol crate
 
 ## Model
 
-- A **Feed** is an ephemeral caller-specific live view. Closing an observation
+- A **Live** is an ephemeral caller-specific live view. Closing an observation
   ends only that view.
 - An **Operation** is durable work. Its observer is ephemeral and does not own
   the executor; closing an observation never cancels, restarts, or changes the
@@ -29,10 +29,10 @@ schemas, constants, and error codes live in the shared protocol crate
 
 ## Wire flow
 
-1. The consumer sends one bounded opening request to the bound Feed base with a
+1. The consumer sends one bounded opening request to the bound Live base with a
    fresh request-proof reply inbox. An Operation watch opening is carried on the
    existing Operation control route.
-2. The provider authenticates the exact Feed `Subscribe` (or Operation
+2. The provider authenticates the exact Live `Subscribe` (or Operation
    `Observe`) authority, reserves a session, and returns a **signed offer** over
    one finite reply. No producer starts here.
 3. The first consumer iteration installs a distinct **exact** data subscription
@@ -77,7 +77,7 @@ signature all verify.
 Both endpoints retain a real covered authority lease, not a digest snapshot:
 self and peer for a consumer, self and admitted caller for a provider. The
 selected provider deployment comes from the installed binding (the bound subject
-for a Feed, the bound route for an Operation), never from the offer's own claim;
+for a Live, the bound route for an Operation), never from the offer's own claim;
 the complete advertised provider tuple must match its verified context, and the
 offered consumer tuple must match the opener's current local identity.
 Provider/caller contexts carry their authority through admission-time
@@ -142,7 +142,7 @@ extending liveness and without closing an otherwise valid session.
   `cancelRequestedAt`, or changes the executor lease.
 - Reopening an Operation observation reconciles the current durable snapshot;
   transient updates missed while disconnected are not replayed.
-- Feed and Operation observers never receive an automatic producer restart or a
+- Live and Operation observers never receive an automatic producer restart or a
   silent data-loss fallback.
 
 ## Observability

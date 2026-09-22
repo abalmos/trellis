@@ -35,7 +35,7 @@ source-pinned manifest for this candidate (`94caa7ee`, the same `rs`
 `aae0b66dd43990924395c4483d4ac5c904c67645`). It adds the TypeScript owners that
 the previous two captures could not claim: the service connection
 `usable`→terminal transition case with `coverage_lost`, the outer request and
-event verifier outcomes, Feed `active`/`ends` for normal and early client close,
+event verifier outcomes, Live `active`/`ends` for normal and early client close,
 and the real-NATS connection and refresh cases. It also records the new
 attempt-context trace evidence: `trellis.job.attempt.start`/`finish` spans in
 distinct per-attempt traces whose finish links target the same exported
@@ -92,7 +92,7 @@ deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \
 deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \
   --filter 'TS service connection observes'
 deno test -A -c ts/integration/deno.json ts/integration/observability_test.ts \
-  --filter 'TS Feed active'
+  --filter 'TS Live active'
 deno test -A -c ts/integration/deno.json ts/integration/runtime_test.ts \
   --filter 'surviving replica reclaims an expired operation lease'
 deno test -A -c ts/integration/deno.json ts/integration/kv_telemetry_test.ts \
@@ -216,7 +216,7 @@ Collector:
   restoration through a collecting reader.
 - `ts/integration/observability_test.ts` — the capture-enabled cases exercise a
   real service connection through usable, suspended, and terminal states, a real
-  Feed across normal and early client cancellation with balanced active counts,
+  Live across normal and early client cancellation with balanced active counts,
   and the outer TypeScript verifier's bounded outcomes.
 
 ## Candidate

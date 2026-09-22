@@ -106,7 +106,7 @@ be conflated, but transient updates are not silently dropped. Opening or closing
 a watcher never starts, cancels, or completes the durable work. Completed,
 failed, and cancelled records are immutable.
 
-Feeds and Operation watchers are authorized live sessions negotiated with
+Live observations and Operation watchers are authorized live sessions negotiated with
 bounded opening requests. The provider signs its offer and frames; control
 responses bind the session ID, logical command sequence, and command hash, and
 continued authority is rechecked from retained context rather than per-frame

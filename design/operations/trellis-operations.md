@@ -52,7 +52,7 @@ continue or finish with zero observers.
 Provider routing binds an API to a deployment; the selected provider deployment
 comes from the installed binding, and routine admission compiles delivery
 permissions from the participant evidence rather than from context atoms. Queue
-groups derive only from the actual subscription subject. Feed cancellation uses
+groups derive only from the actual subscription subject. Live cancellation uses
 owner-specific authenticated control routing, not the queued open subject.
 
 Upload/download staging is platform-managed rather than mapped to a participant

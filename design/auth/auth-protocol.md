@@ -179,7 +179,7 @@ transport permissions but do not define semantic authority.
 
 ## Live Observation Sessions
 
-Feeds and Operation watchers are authorized live sessions rather than repeated
+Live observations and Operation watchers are authorized live sessions rather than repeated
 request/reply. An opening request is a bounded, verified request; the provider
 answers with a signed offer and, per session, signs every data frame, challenge,
 end frame, and control response. This provider-message proof is a distinct proof
