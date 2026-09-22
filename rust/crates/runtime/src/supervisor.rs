@@ -646,6 +646,17 @@ enum RuntimeStopCause {
 
 /// Loads configuration, validates selected subsystem storage, and runs the runtime.
 pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
+    run_with_stop(options, None).await
+}
+
+/// Runs the runtime until the host shutdown signal or the owner's stop handle fires.
+///
+/// An owner-supplied handle lets an in-process caller (a test harness owning the runtime,
+/// a supervisor restarting it) request the same cooperative shutdown a host signal triggers.
+pub async fn run_with_stop(
+    options: RuntimeOptions,
+    stop: Option<crate::shutdown::StopHandle>,
+) -> Result<(), RuntimeError> {
     let config = options.config;
     config.validate_for_mode(options.mode)?;
     let nats = config
@@ -672,6 +683,7 @@ pub async fn run(options: RuntimeOptions) -> Result<(), RuntimeError> {
         options.nats_override,
         trellis_nats.clone(),
         &mut ownership,
+        stop,
     )
     .await;
     let release_result = ownership.shutdown().await;
@@ -712,6 +724,20 @@ fn preserve_primary(
     primary.map_or(Ok(()), Err)
 }
 
+/// Resolves when the host shutdown signal fires or the owner requests a stop. With no owner
+/// handle the signal is the only trigger, preserving host behavior exactly.
+async fn shutdown_or_stop(stop: Option<crate::shutdown::StopHandle>) {
+    match stop {
+        Some(handle) => {
+            tokio::select! {
+                () = crate::shutdown::shutdown_signal() => {}
+                () = handle.stopped() => {}
+            }
+        }
+        None => crate::shutdown::shutdown_signal().await,
+    }
+}
+
 async fn run_owned(
     config: RuntimeConfig,
     mode: RuntimeMode,
@@ -719,6 +745,7 @@ async fn run_owned(
     nats_override: Option<NatsEndpointOverride>,
     trellis_nats: async_nats::Client,
     ownership: &mut RuntimeOwnership,
+    stop: Option<crate::shutdown::StopHandle>,
 ) -> Result<(), RuntimeError> {
     ExpectedRuntimeResources::for_mode(mode, &config)
         .converge_streams(trellis_nats.clone())
@@ -764,7 +791,7 @@ async fn run_owned(
     // observable. A host can connect to the bound port immediately, so a
     // SIGTERM delivered during startup must already be observed cooperatively
     // instead of terminating the process with its runtime lease held.
-    let shutdown = crate::shutdown::shutdown_signal();
+    let shutdown = shutdown_or_stop(stop);
     tokio::pin!(shutdown);
     std::future::poll_fn(|cx| {
         let _ = std::future::Future::poll(shutdown.as_mut(), cx);
@@ -1176,6 +1203,19 @@ mod tests {
             ..options.clone()
         };
         assert_eq!(plain.nats_override, None);
+    }
+
+    #[tokio::test]
+    async fn owner_stop_handle_ends_the_runtime_without_a_signal() {
+        let handle = crate::shutdown::StopHandle::new();
+        let stopper = handle.clone();
+        let waiter = tokio::spawn(shutdown_or_stop(Some(handle)));
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        stopper.stop();
+        tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
+            .await
+            .expect("owner stop is observed")
+            .expect("waiter task joined");
     }
 
     #[tokio::test]

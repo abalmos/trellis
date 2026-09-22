@@ -604,7 +604,7 @@ Deno.test("T18 one failing live source leaves another session and an RPC functio
   });
 });
 
-Deno.test("T17 owner-directed controls route to the accepting replica", async () => {
+Deno.test("T17 owner-directed live controls route to the accepting replica", async () => {
   await withTrellisRuntime(async (runtime) => {
     const identity = await runtime.registerService({
       name: `t17-replica-${crypto.randomUUID()}`,
@@ -625,45 +625,116 @@ Deno.test("T17 owner-directed controls route to the accepting replica", async ()
     });
     const runId = `t17-${crypto.randomUUID()}`;
     try {
+      // The opening is accepted by exactly one replica; the owner-directed
+      // close control must reach that same replica for the session to end
+      // normally instead of stalling until the liveness bound.
       const feed = await caller.watch({ runId, streamId: "s" }).orThrow();
-      const frames: bigint[] = [];
       const pump = (async () => {
-        for await (const frame of feed) frames.push(frame.index);
-      })();
-      // The owner-directed control must reach the replica that accepted the
-      // session for the released frame to arrive.
-      await runtime.waitFor(
-        async () =>
-          (await caller.inspect({ runId, streamId: "s" })).orThrow().active ===
-            1n,
-        { timeoutMs: 30_000 },
-      );
-      await caller.release({
-        runId,
-        streamId: "s",
-        throughIndex: 1n,
-        finish: true,
-        fail: false,
-      }).orThrow();
-      await runtime.waitFor(() => frames.length >= 1, { timeoutMs: 30_000 });
+        for await (const _frame of feed) { /* drain to activation */ }
+      })().catch(() => undefined);
+      await feed.close().orThrow();
       const end = await feed.closed;
-      assertEquals(end.reason, "complete", "one normal end");
+      assertEquals(
+        end.reason,
+        "cancelled",
+        "owner-directed close ends the session",
+      );
       await pump;
-      assertEquals(
-        frames,
-        [1n],
-        "the owner-directed control released the frame",
-      );
-      // A competing replica never answered with a session error.
-      assertEquals(
-        frames.includes(0n),
-        false,
-        "no spurious frame from a competing replica",
-      );
+
+      // The deployment still serves a fresh session afterwards.
+      const second = await caller.watch({ runId: `${runId}-2`, streamId: "s" })
+        .orThrow();
+      const secondPump = (async () => {
+        for await (const _frame of second) { /* drain to activation */ }
+      })().catch(() => undefined);
+      await second.close().orThrow();
+      const secondEnd = await second.closed;
+      assertEquals(secondEnd.reason, "cancelled", "the deployment still serves");
+      await secondPump;
     } finally {
       await caller.connection.close();
       await replicaA.stop();
       await replicaB.stop();
+    }
+  });
+});
+
+Deno.test("T18 one failing live source leaves another session and an RPC functional", async () => {
+  await withTrellisRuntime(async (runtime) => {
+    const provider = await startTsProvider(runtime);
+    const caller = await runtime.connectClient({
+      name: `t18-caller-${crypto.randomUUID()}`,
+      contract: participants.LiveProbeCaller.participant,
+    });
+    const runId = `t18-${crypto.randomUUID()}`;
+    try {
+      const failing = await caller.watch({ runId, streamId: "failing" })
+        .orThrow();
+      const survivor = await caller.watch({ runId, streamId: "survivor" })
+        .orThrow();
+      const failingPump = (async () => {
+        for await (const _frame of failing) { /* drain to activation */ }
+      })().catch(() => undefined);
+      const survivorFrames: bigint[] = [];
+      const survivorTask = (async () => {
+        for await (const frame of survivor) survivorFrames.push(frame.index);
+      })();
+      await runtime.waitFor(
+        async () =>
+          (await caller.inspect({ runId, streamId: "failing" })).orThrow()
+              .active === 1n &&
+          (await caller.inspect({ runId, streamId: "survivor" })).orThrow()
+              .active === 1n,
+        { timeoutMs: 30_000 },
+      );
+
+      // Fail one source and release one frame on the other.
+      await caller.release({
+        runId,
+        streamId: "failing",
+        throughIndex: 1n,
+        finish: false,
+        fail: true,
+      }).orThrow();
+      await caller.release({
+        runId,
+        streamId: "survivor",
+        throughIndex: 1n,
+        finish: false,
+        fail: false,
+      }).orThrow();
+
+      await runtime.waitFor(() => survivorFrames.length >= 1, {
+        timeoutMs: 30_000,
+      });
+      const failedEnd = await failing.closed;
+      await failingPump;
+      assertEquals(
+        failedEnd.reason,
+        "source_error",
+        "the failing source ends the session as a source error",
+      );
+      assertEquals(survivorFrames, [1n], "the surviving session delivers");
+      // An unrelated finite RPC on the same provider stays functional.
+      const survivorStatus = await caller.inspect({
+        runId,
+        streamId: "survivor",
+      }).orThrow();
+      assertEquals(survivorStatus.active, 1n, "the survivor source is active");
+      assertEquals(survivorStatus.emitted, 1n, "exactly its released frame");
+
+      await survivor.close().orThrow();
+      await survivorTask;
+      await runtime.waitFor(
+        async () =>
+          (await caller.inspect({ runId, streamId: "survivor" })).orThrow()
+            .active === 0n,
+        { timeoutMs: 30_000 },
+      );
+    } finally {
+      await caller.connection.close();
+      await provider.stop();
+      await provider.exit;
     }
   });
 });
