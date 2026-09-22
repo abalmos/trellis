@@ -491,7 +491,7 @@ Deno.test("TS service connection observes usable, suspended, resumed, and dispos
   });
 });
 
-Deno.test("TS Feed telemetry derives exact per-side deltas from one owner", async () => {
+Deno.test("TS standalone live telemetry derives exact per-side deltas from one owner", async () => {
   const capture = ensureCapture();
   try {
     await withTrellisRuntime(async (runtime) => {
@@ -510,7 +510,7 @@ Deno.test("TS Feed telemetry derives exact per-side deltas from one owner", asyn
       await service.handleWatch(async ({ emit }) => {
         // A finite source returns normally so the consumer sees a normal END.
         for (let frame = 1; frame <= 3; frame++) {
-          await emit({ value: `owner-feed-${frame}` }).orThrow();
+          await emit({ value: `owner-live-${frame}` }).orThrow();
         }
         sourceEnds += 1;
       });
@@ -521,18 +521,13 @@ Deno.test("TS Feed telemetry derives exact per-side deltas from one owner", asyn
       try {
         await capture.flush();
         const before = {
-          clientEnds: capture.total("trellis.feed.ends", {
-            "trellis.side": "client",
-          }),
-          serverEnds: capture.total("trellis.feed.ends", {
-            "trellis.side": "server",
-          }),
-          clientActive: capture.total("trellis.feed.active", {
-            "trellis.side": "client",
-          }),
-          liveConsumerEnds: capture.total("trellis.live.ends", {
-            "trellis.kind": "feed",
+          consumerEnds: capture.total("trellis.live.ends", {
+            "trellis.kind": "standalone",
             "trellis.side": "consumer",
+          }),
+          providerEnds: capture.total("trellis.live.ends", {
+            "trellis.kind": "standalone",
+            "trellis.side": "provider",
           }),
         };
 
@@ -550,52 +545,34 @@ Deno.test("TS Feed telemetry derives exact per-side deltas from one owner", asyn
         await iterator.next();
         await iterator.return?.();
 
-        // 3. Prepared cancellation before the first next(): no
-        // active/end pair, but one live end still applies.
+        // 3. Prepared cancellation before the first next(): no source start,
+        // but one live end still applies.
         const prepared = await client.watch({}).orThrow();
         await prepared[Symbol.asyncIterator]().return?.();
 
         await runtime.waitFor(async () => {
           await capture.flush();
-          return capture.total("trellis.feed.ends", {
-                "trellis.side": "client",
-              }) >= before.clientEnds + 2 &&
-            capture.total("trellis.feed.ends", {
-                "trellis.side": "server",
-              }) >= before.serverEnds + 2 &&
-            capture.total("trellis.live.ends", {
-                "trellis.kind": "feed",
-                "trellis.side": "consumer",
-              }) >= before.liveConsumerEnds + 3;
+          return capture.total("trellis.live.ends", {
+            "trellis.kind": "standalone",
+            "trellis.side": "consumer",
+          }) >= before.consumerEnds + 3;
         }, { timeoutMs: 30_000 });
         await capture.flush();
 
         assertEquals(sourceEnds, 2);
         assertEquals(
-          capture.total("trellis.feed.ends", {
-            "trellis.side": "client",
-          }) - before.clientEnds,
-          2,
-        );
-        assertEquals(
-          capture.total("trellis.feed.ends", {
-            "trellis.side": "server",
-          }) - before.serverEnds,
-          2,
+          capture.total("trellis.live.ends", {
+            "trellis.kind": "standalone",
+            "trellis.side": "consumer",
+          }) - before.consumerEnds,
+          3,
         );
         assertEquals(
           capture.total("trellis.live.ends", {
-            "trellis.kind": "feed",
-            "trellis.side": "consumer",
-          }) - before.liveConsumerEnds,
+            "trellis.kind": "standalone",
+            "trellis.side": "provider",
+          }) - before.providerEnds,
           3,
-        );
-        // No active Feed projection remains once every handle settled.
-        assertEquals(
-          capture.total("trellis.feed.active", {
-            "trellis.side": "client",
-          }),
-          before.clientActive,
         );
       } finally {
         await client.connection.close();
