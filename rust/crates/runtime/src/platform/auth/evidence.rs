@@ -589,7 +589,7 @@ fn action_kind(kind: ActionKind) -> &'static str {
         ActionKind::Rpc => "rpc",
         ActionKind::Operation => "operation",
         ActionKind::Event => "event",
-        ActionKind::Live => "feed",
+        ActionKind::Live => "live",
     }
 }
 

@@ -46,50 +46,20 @@ type LiveTelemetryPhase =
   | "draining"
   | "closing";
 
-/** Maps one detailed live end onto the fixed Live-only reason. */
-function feedProjectionReason(end: LiveEnd): string {
-  switch (end.reason) {
-    case "complete":
-      return "complete";
-    case "cancelled":
-    case "local_shutdown":
-      return "cancelled";
-    case "peer_lost":
-    case "disconnected":
-    case "binding_changed":
-      return "unavailable";
-    case "authorization_lost": {
-      const code = end.error?.code ?? "";
-      if (
-        code.includes("revoked") || code.includes("expired") ||
-        code.includes("permission")
-      ) {
-        return "revoked";
-      }
-      return "unavailable";
-    }
-    default:
-      return "error";
-  }
-}
-
 /** Local state owner for one endpoint's live telemetry. */
 export class LiveTelemetryOwner {
-  readonly #kind: "standalone" | "operation_watch";
+  readonly #kind: "standalone" | "operation";
   readonly #side: LiveTelemetrySide;
-  readonly #feedSide: "client" | "server";
   #phase: LiveTelemetryPhase | undefined;
   #handshakeStarted: number | undefined;
   #handshakeRecorded = false;
-  #feedActive = false;
   #ended = false;
   #removed = false;
   #cleanupPending = false;
 
   constructor(kind: LiveTelemetryKind, side: LiveTelemetrySide) {
-    this.#kind = kind === "standalone" ? "standalone" : "operation_watch";
+    this.#kind = kind === "standalone" ? "standalone" : "operation";
     this.#side = side;
-    this.#feedSide = side === "consumer" ? "client" : "server";
   }
 
   #base(): Record<string, string> {
@@ -138,12 +108,6 @@ export class LiveTelemetryOwner {
   active(): void {
     this.#recordHandshake();
     this.#transition("active");
-    if (this.#kind === "standalone" && !this.#feedActive) {
-      this.#feedActive = true;
-      recordCatalogUpDown("trellis.feed.active", 1, {
-        "trellis.side": this.#feedSide,
-      });
-    }
   }
 
   /** A verified normal end was admitted and the queue is draining. */
@@ -171,16 +135,6 @@ export class LiveTelemetryOwner {
       ...this.#base(),
       "trellis.reason": end.reason,
     });
-    if (this.#feedActive) {
-      this.#feedActive = false;
-      recordCatalogUpDown("trellis.feed.active", -1, {
-        "trellis.side": this.#feedSide,
-      });
-      recordCatalogCounter("trellis.feed.ends", 1, {
-        "trellis.side": this.#feedSide,
-        "trellis.reason": feedProjectionReason(end),
-      });
-    }
   }
 
   /** Retained cleanup exceeded the shared grace. */

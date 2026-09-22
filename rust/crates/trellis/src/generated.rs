@@ -297,7 +297,7 @@ impl OptionalAction {
     }
 
     /// Declare an optional feed subscription.
-    pub const fn feed(api_id: &'static str, name: &'static str) -> Self {
+    pub const fn live(api_id: &'static str, name: &'static str) -> Self {
         Self {
             api_id,
             surface: trellis_protocol::ApiSurfaceKind::Live,
@@ -719,7 +719,7 @@ impl Client {
         D: LiveDescriptor,
         D::Event: Codec + Send + 'static,
     {
-        self.ensure_available(OptionalAction::feed(
+        self.ensure_available(OptionalAction::live(
             D::API_ID,
             action_name(D::DESCRIPTOR_NAME),
         ))?;

@@ -35,9 +35,13 @@ export function boundApiSubject(
   providerDeploymentId: string,
   action: string,
 ): string {
-  return `${family}.v1.${subjectToken(apiId)}.${
-    subjectToken(providerDeploymentId)
-  }.${action}`;
+  return family === "live"
+    ? `live.v1.route.${subjectToken(apiId)}.${
+      subjectToken(providerDeploymentId)
+    }.${action}`
+    : `${family}.v1.${subjectToken(apiId)}.${
+      subjectToken(providerDeploymentId)
+    }.${action}`;
 }
 
 /** Derives one API-qualified event subject template. */

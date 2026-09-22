@@ -48,9 +48,8 @@ function startCapture() {
 
 const capture = startCapture();
 
-Deno.test("prepared failure records one live end without a Live projection", async () => {
+Deno.test("prepared failure records one live end", async () => {
   const beforeLiveEnds = capture.total("trellis.live.ends");
-  const beforeLiveEnds = capture.total("trellis.feed.ends");
   const owner = new LiveTelemetryOwner("standalone", "consumer");
   owner.prepared();
   owner.end(new LiveEnd("setup_timeout"));
@@ -59,13 +58,9 @@ Deno.test("prepared failure records one live end without a Live projection", asy
   owner.cleanupFinished();
   await capture.flush();
   assertEquals(capture.total("trellis.live.ends") - beforeLiveEnds, 1);
-  assertEquals(capture.total("trellis.feed.ends") - beforeLiveEnds, 0);
 });
 
-Deno.test("active Live moves active once and removes the session at cleanup", async () => {
-  const beforeActive = capture.total("trellis.feed.active", {
-    "trellis.side": "server",
-  });
+Deno.test("active Live moves the session to active", async () => {
   const beforeSessions = capture.total("trellis.live.sessions", {
     "trellis.phase": "active",
   });
@@ -75,11 +70,6 @@ Deno.test("active Live moves active once and removes the session at cleanup", as
   owner.active();
   await capture.flush();
   assertEquals(
-    capture.total("trellis.feed.active", { "trellis.side": "server" }) -
-      beforeActive,
-    1,
-  );
-  assertEquals(
     capture.total("trellis.live.sessions", { "trellis.phase": "active" }) -
       beforeSessions,
     1,
@@ -87,17 +77,11 @@ Deno.test("active Live moves active once and removes the session at cleanup", as
   owner.end(new LiveEnd("complete"));
   owner.cleanupFinished();
   await capture.flush();
-  assertEquals(
-    capture.total("trellis.feed.active", { "trellis.side": "server" }) -
-      beforeActive,
-    0,
-  );
 });
 
-Deno.test("Operation watch never projects to the Live families", async () => {
-  const beforeActive = capture.total("trellis.feed.active");
+Deno.test("Operation sessions report the operation kind", async () => {
   const beforeLive = capture.total("trellis.live.sessions", {
-    "trellis.kind": "operation_watch",
+    "trellis.kind": "operation",
     "trellis.phase": "active",
   });
   const owner = new LiveTelemetryOwner("operation", "consumer");
@@ -107,12 +91,11 @@ Deno.test("Operation watch never projects to the Live families", async () => {
   await capture.flush();
   assertEquals(
     capture.total("trellis.live.sessions", {
-      "trellis.kind": "operation_watch",
+      "trellis.kind": "operation",
       "trellis.phase": "active",
     }) - beforeLive,
     1,
   );
-  assertEquals(capture.total("trellis.feed.active") - beforeActive, 0);
   owner.cleanupFinished();
   await capture.flush();
 });
