@@ -539,7 +539,7 @@ Deno.test("T18 one failing live source leaves another session and an RPC functio
         .orThrow();
       const failingPump = (async () => {
         for await (const _frame of failing) { /* drain to activation */ }
-      })();
+      })().catch(() => undefined);
       const survivorFrames: bigint[] = [];
       const survivorTask = (async () => {
         for await (const frame of survivor) survivorFrames.push(frame.index);
@@ -573,7 +573,7 @@ Deno.test("T18 one failing live source leaves another session and an RPC functio
         timeoutMs: 30_000,
       });
       const failedEnd = await failing.closed;
-      await failingPump.catch(() => undefined);
+      await failingPump;
       assertEquals(
         failedEnd.reason,
         "source_error",
