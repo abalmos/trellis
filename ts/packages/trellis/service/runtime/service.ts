@@ -1003,10 +1003,10 @@ type TypedServiceHandleFacade<
     };
   };
   readonly live: {
-    readonly [TGroup in SurfaceGroupName<keyof TOwnedApi["feeds"] & string>]: {
+    readonly [TGroup in SurfaceGroupName<keyof TOwnedApi["lives"] & string>]: {
       readonly [
         F in SurfaceKeysForGroup<
-          keyof TOwnedApi["feeds"] & string,
+          keyof TOwnedApi["lives"] & string,
           TGroup
         > as SurfaceLeafName<F>
       ]: (
@@ -1053,7 +1053,7 @@ type RpcHandleFn<
 type LiveHandleFn<
   TOwnedApi extends RuntimeApi,
   TTrellisApi extends RuntimeApi,
-  F extends keyof TOwnedApi["feeds"] & string,
+  F extends keyof TOwnedApi["lives"] & string,
   TKv extends ParticipantKvMetadata,
   TJobs extends ParticipantJobsMetadata,
 > = (context: {
@@ -1112,7 +1112,7 @@ export type OperationRegistration<
 
 export type LiveRegistration<
   TOwnedApi extends RuntimeApi,
-  F extends keyof TOwnedApi["feeds"] & string,
+  F extends keyof TOwnedApi["lives"] & string,
 > = RootLiveRegistration<LiveInputOf<TOwnedApi, F>, LiveEventOf<TOwnedApi, F>>;
 
 export type TrellisServiceConnectArgs<
@@ -3160,7 +3160,7 @@ export class TrellisServiceSession<
     }
 
     const live: ServiceHandleFacade["live"] = {};
-    for (const liveName of Object.keys(this.#runtime.api.feeds ?? {})) {
+    for (const liveName of Object.keys(this.#runtime.api.lives ?? {})) {
       addSurfaceLeaf(
         live,
         liveName,

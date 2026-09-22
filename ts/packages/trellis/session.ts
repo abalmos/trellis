@@ -809,7 +809,7 @@ export type OperationsOf<TA extends RuntimeApi> =
   & string;
 type EventsOf<TA extends RuntimeApi> = keyof TA["events"] & string;
 export type LivesOf<TA extends RuntimeApi> =
-  & keyof NonNullable<TA["feeds"]>
+  & keyof NonNullable<TA["lives"]>
   & string;
 type RpcMethodOf<TA extends RuntimeApi, M extends keyof TA["rpc"] & string> =
   RpcMethodsOf<TA>[M];
@@ -963,16 +963,16 @@ export type PreparedTrellisEvent<
   headers: Readonly<Record<string, string>>;
 }>;
 export type LiveInputOf<TA extends RuntimeApi, F extends LivesOf<TA>> =
-  NonNullable<TA["feeds"]>[F] extends LiveDesc<infer TInput, infer _TEvent>
+  NonNullable<TA["lives"]>[F] extends LiveDesc<infer TInput, infer _TEvent>
     ? InferSchemaType<TInput>
     : never;
 export type LiveEventOf<TA extends RuntimeApi, F extends LivesOf<TA>> =
-  NonNullable<TA["feeds"]>[F] extends LiveDesc<infer _TInput, infer TEvent>
+  NonNullable<TA["lives"]>[F] extends LiveDesc<infer _TInput, infer TEvent>
     ? InferSchemaType<TEvent>
     : never;
 type LiveDescriptorOf<TA extends RuntimeApi, F extends LivesOf<TA>> =
-  NonNullable<TA["feeds"]>[F] extends LiveDesc<infer TInput, infer TEvent>
-    ? LiveDesc<TInput, TEvent> & NonNullable<TA["feeds"]>[F]
+  NonNullable<TA["lives"]>[F] extends LiveDesc<infer TInput, infer TEvent>
+    ? LiveDesc<TInput, TEvent> & NonNullable<TA["lives"]>[F]
     : never;
 export type OperationInputOf<
   TA extends RuntimeApi,
@@ -2386,7 +2386,7 @@ const EMPTY_TRELLIS_API: RuntimeApi = {
   rpc: {},
   operations: {},
   events: {},
-  feeds: {},
+  lives: {},
   subjects: {},
 };
 
@@ -2719,7 +2719,7 @@ export class Trellis<
 
   #createLiveFacade(): ActiveLiveFacade<TA> {
     const surface: SurfaceGroups<RuntimeLiveLeaf> = {};
-    for (const feed of Object.keys(this.api.feeds ?? {})) {
+    for (const feed of Object.keys(this.api.lives ?? {})) {
       const leaf: RuntimeLiveLeaf = (input, opts) =>
         this.liveHandle(feed as LivesOf<TA>).input(
           input as LiveInputOf<TA, LivesOf<TA>>,
@@ -3237,7 +3237,7 @@ export class Trellis<
   ):
     & LiveInputBuilder<LiveInputOf<TA, F>, LiveEventOf<TA, F>>
     & LiveRegistration<LiveInputOf<TA, F>, LiveEventOf<TA, F>> {
-    const descriptor = this.api.feeds?.[feed] as
+    const descriptor = this.api.lives?.[feed] as
       | LiveDescriptorOf<TA, F>
       | undefined;
     if (!descriptor) {
@@ -3305,7 +3305,7 @@ export class Trellis<
         }
         if (opts?.signal?.aborted) {
           const error = createTransportError({
-            code: "trellis.feed.subscribe_aborted",
+            code: "trellis.live.subscribe_aborted",
             message:
               "The feed subscription was aborted before Trellis acknowledged it.",
             hint: "Retry the subscription if the feed is still needed.",
@@ -3409,7 +3409,7 @@ export class Trellis<
               context: { feed, subject },
             })
             : createTransportError({
-              code: "trellis.feed.subscribe_failed",
+              code: "trellis.live.subscribe_failed",
               message: "Trellis could not subscribe to the feed.",
               hint:
                 "Retry the subscription. If it keeps failing, check Trellis runtime health.",
@@ -3440,9 +3440,9 @@ export class Trellis<
     const cache = this.#auth.authorizationProviderCache;
     if (!cache) {
       throw createTransportError({
-        code: "trellis.feed.listen_failed",
+        code: "trellis.live.listen_failed",
         message: "Trellis could not listen for feed requests.",
-        hint: "Provider authorization cache is required for live feeds.",
+        hint: "Provider authorization cache is required for live observations.",
         context: { feed, subject },
       });
     }
@@ -3479,7 +3479,7 @@ export class Trellis<
       controlSub = this.#nats.subscribe(provider.wildcardSubject(subject));
     } catch (cause) {
       const error = createTransportError({
-        code: "trellis.feed.listen_failed",
+        code: "trellis.live.listen_failed",
         message: "Trellis could not listen for feed requests.",
         hint:
           "Check the service deployment digest and runtime permissions, then restart the service.",

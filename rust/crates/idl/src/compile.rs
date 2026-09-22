@@ -921,7 +921,7 @@ fn derive_api_subjects(
         rpc: BTreeMap::new(),
         operations: BTreeMap::new(),
         events: BTreeMap::new(),
-        feeds: BTreeMap::new(),
+        lives: BTreeMap::new(),
     };
     for (id, action) in actions {
         let logical_name = format!("{api_name}.{}", id.name);
@@ -969,7 +969,7 @@ fn derive_api_subjects(
                 );
             }
             ActionDefinition::Live { .. } => {
-                result.feeds.insert(
+                result.lives.insert(
                     id.name.clone(),
                     protocol(trellis_protocol::derive_feed_subject(
                         &version,

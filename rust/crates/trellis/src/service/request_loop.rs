@@ -142,7 +142,7 @@ impl ErrorAnnotationContext {
             self.method = Some(method.to_string());
         } else if let Some(feed) = surface_key(subject, "feed") {
             self.feed = Some(feed.to_string());
-        } else if let Some(feed) = surface_key(subject, "feeds") {
+        } else if let Some(feed) = surface_key(subject, "lives") {
             self.feed = Some(feed.to_string());
         } else if let Some(operation) = surface_key(subject, "operations") {
             self.operation = Some(trim_operation_control(operation).to_string());

@@ -81,7 +81,7 @@ type ProviderRegistrations<TContract extends GeneratedParticipant> =
   & {
     readonly [
       K in
-        & keyof NonNullable<OwnedApi<TContract>["feeds"]>
+        & keyof NonNullable<OwnedApi<TContract>["lives"]>
         & string as `handle${PascalActionName<K>}`
     ]: (handler: LiveHandler<ServiceContract<TContract>, K>) => unknown;
   }
@@ -291,7 +291,7 @@ export function createProviderRuntime<
   }
   for (
     const name of Object.keys(
-      getParticipantRuntime(contract).ownedApi.feeds ?? {},
+      getParticipantRuntime(contract).ownedApi.lives ?? {},
     )
   ) {
     const [group, leaf] = surfacePath(name);

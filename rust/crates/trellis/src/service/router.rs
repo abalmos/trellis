@@ -1262,7 +1262,7 @@ mod tests {
         const API_ID: &'static str = "test@v1";
         const DESCRIPTOR_NAME: &'static str = "feed.Live";
         const KEY: &'static str = "Test.Live";
-        const SUBJECT: &'static str = "feeds.v1.Test.Live";
+        const SUBJECT: &'static str = "live.v1.route.Test.Live";
         const SUBSCRIBE_CAPABILITIES: &'static [&'static str] = &[];
     }
 

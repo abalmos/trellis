@@ -154,7 +154,7 @@ export type RuntimeApiFromGenerated<
   rpc: GeneratedRuntimeFamily<TApi, TNames, "rpc">;
   operations: GeneratedRuntimeFamily<TApi, TNames, "operation">;
   events: GeneratedRuntimeFamily<TApi, TNames, "event">;
-  feeds: GeneratedRuntimeFamily<TApi, TNames, "live">;
+  lives: GeneratedRuntimeFamily<TApi, TNames, "live">;
   subjects: Record<string, unknown>;
 };
 
@@ -415,8 +415,8 @@ export function bindApiRoutes(
         bind(descriptor, "operation"),
       ]),
     ),
-    feeds: Object.fromEntries(
-      Object.entries(api.feeds ?? {}).map(([name, descriptor]) => [
+    lives: Object.fromEntries(
+      Object.entries(api.lives ?? {}).map(([name, descriptor]) => [
         name,
         bind(descriptor, "live"),
       ]),
@@ -430,7 +430,7 @@ export function refreshApiRoutes(
   apiBindings: Readonly<Record<string, unknown>>,
 ): void {
   const next = bindApiRoutes(api, apiBindings);
-  for (const family of ["rpc", "operations", "feeds"] as const) {
+  for (const family of ["rpc", "operations", "lives"] as const) {
     for (const [name, descriptor] of Object.entries(next[family] ?? {})) {
       const current = api[family]?.[name];
       if (current) current.subject = descriptor.subject;
@@ -451,9 +451,9 @@ function addAction(
   } else if (descriptor.kind === "event") {
     target.events[name] = runtime as EventDesc;
   } else {
-    const feeds = target.feeds ?? {};
-    feeds[name] = runtime as LiveDesc;
-    target.feeds = feeds;
+    const lives = target.lives ?? {};
+    lives[name] = runtime as LiveDesc;
+    target.lives = lives;
   }
 }
 
@@ -470,7 +470,7 @@ function generatedActionName(
 }
 
 function emptyApi(): RuntimeApi {
-  return { rpc: {}, operations: {}, events: {}, feeds: {}, subjects: {} };
+  return { rpc: {}, operations: {}, events: {}, lives: {}, subjects: {} };
 }
 
 /** Projects generated descriptors into the participant runtime. */
@@ -568,7 +568,7 @@ export function getParticipantRuntime(
       rpc: { ...ownedApi.rpc, ...usedApi.rpc },
       operations: { ...ownedApi.operations, ...usedApi.operations },
       events: { ...ownedApi.events, ...usedApi.events },
-      feeds: { ...ownedApi.feeds, ...usedApi.feeds },
+      lives: { ...ownedApi.lives, ...usedApi.lives },
       subjects: {},
     },
     actions,

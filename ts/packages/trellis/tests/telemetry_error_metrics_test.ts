@@ -157,9 +157,9 @@ Deno.test("Live client template failures record trellis error metric", async () 
   const api = {
     rpc: {},
     events: {},
-    feeds: {
+    lives: {
       "Test.Stream": {
-        subject: "feeds.v1.Test.Stream.{id}",
+        subject: "lives.v1.Test.Stream.{id}",
         permission: Object.freeze({
           apiId: "test@v1",
           apiVersion: "v1",

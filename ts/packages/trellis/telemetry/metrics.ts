@@ -15,7 +15,7 @@ const UUID_PATTERN =
 const ULID_PATTERN = /(^|[_.:-])[0-7][0-9A-HJKMNP-TV-Z]{25}($|[_.:-])/i;
 const LONG_HEX_SEGMENT_PATTERN = /(^|[_.:-])[0-9a-f]{12,}($|[_.:-])/i;
 const TRELLIS_SUBJECT_PREFIX_PATTERN =
-  /^(rpc|events|feeds|operations|jobs|state|kv|store|resources|transfer)\.v\d+\./;
+  /^(rpc|events|lives|operations|jobs|state|kv|store|resources|transfer)\.v\d+\./;
 
 const AUTH_REASONS = new Set([
   "invalid_request",

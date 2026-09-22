@@ -243,6 +243,6 @@ export type RuntimeApi = {
   rpc: Record<string, RPCDesc>;
   operations: Record<string, OperationDesc>;
   events: Record<string, EventDesc>;
-  feeds?: Record<string, LiveDesc>;
+  lives?: Record<string, LiveDesc>;
   subjects: Record<string, unknown>;
 };

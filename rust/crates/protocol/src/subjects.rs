@@ -48,7 +48,7 @@ pub struct DerivedApiSubjects {
     /// Event base and wildcard subjects keyed by logical name.
     pub events: BTreeMap<String, DerivedEventSubjects>,
     /// Feed subjects keyed by logical name.
-    pub feeds: BTreeMap<String, String>,
+    pub lives: BTreeMap<String, String>,
 }
 
 /// Base, publish template, and wildcard subscription subjects for one event.

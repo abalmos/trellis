@@ -2237,7 +2237,8 @@ mod tests {
         let encoded = serde_json::to_string(&offer).unwrap();
         let decoded: LiveOffer = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, offer);
-        let with_unknown = encoded.replace("\"kind\":\"standalone\"", "\"kind\":\"feed\",\"extra\":1");
+        let with_unknown =
+            encoded.replace("\"kind\":\"standalone\"", "\"kind\":\"feed\",\"extra\":1");
         assert!(with_unknown.contains("extra"));
         assert!(serde_json::from_str::<LiveOffer>(&with_unknown).is_err());
     }
