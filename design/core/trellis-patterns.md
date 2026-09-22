@@ -133,7 +133,7 @@ Contract-owned subject naming (deployment-bound route plus runtime-derived
 session subjects):
 
 ```text
-feed.v1.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
+live.v1.route.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
 <base>.observe.<b64(providerConnectionId)>.<sessionId>
 live.v1.data.<b64(providerConnectionId)>.<b64(consumerConnectionId)>.<sessionId>
 ```

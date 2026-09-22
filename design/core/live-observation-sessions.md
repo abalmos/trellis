@@ -49,10 +49,11 @@ starts a producer.
 
 ## Subjects
 
-Deployment-bound subject families are **singular** `feed.v1` and `operation.v1`:
+Deployment-bound subject families are **singular** `live.v1.route` and
+`operation.v1`:
 
 ```text
-Feed base:        feed.v1.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
+Standalone base:  live.v1.route.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
 Owner controls:   <base>.observe.<b64(P)>.<sessionId>
 Live delivery:    live.v1.data.<b64(P)>.<b64(C)>.<sessionId>
 ```
@@ -165,13 +166,10 @@ both SDKs:
 - `trellis.live.cleanup.pending` counts owned cleanup that exceeded the grace
   until it truly settles.
 
-The `trellis.feed.active` / `trellis.feed.ends` pair is a narrow
-Feed-only projection of that same owner: `kind != feed` produces no Feed
-observation, the first `ACTIVE` increments active, the first terminal after
-`ACTIVE` decrements it and records one end, and a prepared failure/cancel/expiry
-records no Feed active/end pair. Labels are bounded; session and Operation ids, subjects,
-principals and arbitrary error text never become dimensions. No span is held
-open for the lifetime of a session, and no per-frame spans are emitted.
+Each session reports its `trellis.kind` as `standalone` or `operation`. Labels
+are bounded; session and Operation ids, subjects, principals and arbitrary error
+text never become dimensions. No span is held open for the lifetime of a
+session, and no per-frame spans are emitted.
 
 ## Testing
 

@@ -116,8 +116,8 @@ Participant installation precedes the corresponding grant-change event.
 Superseded contexts are durably revoked before connection kicks are attempted.
 
 Auth's own event publisher uses the ordinary event authorization path and a
-durably prepared body/proof tuple. The Events journal retains the context digest rather
-than copying authorization state.
+durably prepared body/proof tuple. The Events journal retains the context digest
+rather than copying authorization state.
 
 ## Non-Goals
 

@@ -114,10 +114,10 @@ use integer `ms`, `s`, `m`, `h`, or `d`; capacities use `B`, `KiB`, `MiB`, or
 `GiB`.
 
 On JSON wires, 64-bit integers are canonical decimal strings, bytes are padded
-standard base64, timestamps decode RFC3339 (except leap seconds) and emit canonical UTC
-RFC3339, ULIDs are uppercase, and models are open to unknown fields.
-Optional absence and nullable `null` are
-different. Enums retain an unknown-symbol arm.
+standard base64, timestamps decode RFC3339 (except leap seconds) and emit
+canonical UTC RFC3339, ULIDs are uppercase, and models are open to unknown
+fields. Optional absence and nullable `null` are different. Enums retain an
+unknown-symbol arm.
 
 ## Canonicalization and evidence
 
