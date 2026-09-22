@@ -702,7 +702,7 @@ export type OperationHandler<
     },
 ) => unknown | Promise<unknown>;
 
-/** Typed feed handler function for an extracted Trellis service handler. */
+/** Typed live handler function for an extracted Trellis service handler. */
 export type LiveHandler<
   TContract extends GeneratedServiceParticipant<
     RuntimeApi,

@@ -1192,7 +1192,7 @@ type SerializableRuntimeError = {
 export type HandlerErrorAnnotationContext = {
   method?: string;
   event?: string;
-  feed?: string;
+  live?: string;
   operation?: string;
   jobType?: string;
   requestId?: string;
@@ -2509,7 +2509,7 @@ export class Trellis<
   #ephemeralEventNeeds?: ReadonlySet<string>;
   #durableEventLoops = new Map<string, DurableEventConsumerLoop<TA>>();
   #durableEventListenersStopped = false;
-  #feedClosers = new Set<() => void>();
+  #liveClosers = new Set<() => void>();
   #resourceGeneration: () => number;
   #resourceAvailability: (name: string) => boolean;
   #stateMigrations: Readonly<
@@ -2528,10 +2528,10 @@ export class Trellis<
 
     this.name = name;
     this.#nats = nats;
-    const feedClosers = this.#feedClosers;
+    const liveClosers = this.#liveClosers;
     void nats.closed().then(() => {
-      for (const close of feedClosers) close();
-      feedClosers.clear();
+      for (const close of liveClosers) close();
+      liveClosers.clear();
     });
     this.#js = jetstream(this.#nats);
     this.#auth = auth as TrellisAuth;
@@ -2719,15 +2719,15 @@ export class Trellis<
 
   #createLiveFacade(): ActiveLiveFacade<TA> {
     const surface: SurfaceGroups<RuntimeLiveLeaf> = {};
-    for (const feed of Object.keys(this.api.lives ?? {})) {
+    for (const live of Object.keys(this.api.lives ?? {})) {
       const leaf: RuntimeLiveLeaf = (input, opts) =>
-        this.liveHandle(feed as LivesOf<TA>).input(
+        this.liveHandle(live as LivesOf<TA>).input(
           input as LiveInputOf<TA, LivesOf<TA>>,
         ).subscribe(opts) as AsyncResult<
           LiveSubscription<unknown>,
           BaseError
         >;
-      addSurfaceLeaf(surface, feed, leaf);
+      addSurfaceLeaf(surface, live, leaf);
     }
     return surface as ActiveLiveFacade<TA>;
   }
@@ -3233,22 +3233,22 @@ export class Trellis<
   }
 
   liveHandle<F extends LivesOf<TA>>(
-    feed: F,
+    live: F,
   ):
     & LiveInputBuilder<LiveInputOf<TA, F>, LiveEventOf<TA, F>>
     & LiveRegistration<LiveInputOf<TA, F>, LiveEventOf<TA, F>> {
-    const descriptor = this.api.lives?.[feed] as
+    const descriptor = this.api.lives?.[live] as
       | LiveDescriptorOf<TA, F>
       | undefined;
     if (!descriptor) {
-      throw this.#unknownApiError("live", feed.toString());
+      throw this.#unknownApiError("live", live.toString());
     }
 
     return {
       input: (input: LiveInputOf<TA, F>) => ({
         subscribe: (opts?: LiveSubscribeOpts) =>
           this.#subscribeLive(
-            feed.toString(),
+            live.toString(),
             descriptor,
             input,
             opts,
@@ -3261,22 +3261,22 @@ export class Trellis<
         handler: (
           context: LiveHandlerContext<LiveInputOf<TA, F>, LiveEventOf<TA, F>>,
         ) => unknown | Promise<unknown>,
-      ) => this.#handleLive(feed.toString(), descriptor, handler),
+      ) => this.#handleLive(live.toString(), descriptor, handler),
     };
   }
 
   #subscribeLive<TInput, TEvent>(
-    feed: string,
+    live: string,
     descriptor: LiveDesc,
     input: TInput,
     opts?: LiveSubscribeOpts,
   ): AsyncResult<LiveSubscription<TEvent>, BaseError> {
-    const route = trellisRoute("rpc", feed);
+    const route = trellisRoute("rpc", live);
     let owned = false;
     let subscription: LiveSubscription<TEvent> | undefined;
     const closeOnNats = () => {
       subscription?.close();
-      this.#feedClosers.delete(closeOnNats);
+      this.#liveClosers.delete(closeOnNats);
     };
     return AsyncResult.from(
       (async (): Promise<Result<LiveSubscription<TEvent>, BaseError>> => {
@@ -3285,7 +3285,7 @@ export class Trellis<
           recordRuntimeError(payload.error, {
             surface: "live",
             direction: "client",
-            operation: feed,
+            operation: live,
             phase: "request_encoding",
           });
           return payload;
@@ -3298,7 +3298,7 @@ export class Trellis<
           recordRuntimeError(subject.error, {
             surface: "live",
             direction: "client",
-            operation: feed,
+            operation: live,
             phase: "request_template",
           });
           return subject;
@@ -3307,9 +3307,10 @@ export class Trellis<
           const error = createTransportError({
             code: "trellis.live.subscribe_aborted",
             message:
-              "The feed subscription was aborted before Trellis acknowledged it.",
-            hint: "Retry the subscription if the feed is still needed.",
-            context: { feed, subject },
+              "The live subscription was aborted before Trellis acknowledged it.",
+            hint:
+              "Retry the subscription if the live observation is still needed.",
+            context: { live, subject },
           });
           return err(error);
         }
@@ -3321,7 +3322,7 @@ export class Trellis<
               "provider authorization cache is required for live observations",
             );
           }
-          // The bound feed subject encodes the exact API identity and the
+          // The bound live subject encodes the exact API identity and the
           // provider deployment the installed binding selected; decode them
           // from the subject rather than trusting the offer's own claim.
           const routeTokens = subject.split(".");
@@ -3389,12 +3390,12 @@ export class Trellis<
             throw new LiveStreamError("cancelled", "live open was aborted");
           }
           owned = true;
-          this.#feedClosers.add(closeOnNats);
+          this.#liveClosers.add(closeOnNats);
           // The endpoint's own telemetry owner records the legacy Live
           // projection from the same local state; no second accounting here.
           void subscription.closed.then(() => {
             opts?.signal?.removeEventListener("abort", abort);
-            this.#feedClosers.delete(closeOnNats);
+            this.#liveClosers.delete(closeOnNats);
           });
           const _ = route;
           return ok(subscription!);
@@ -3406,20 +3407,20 @@ export class Trellis<
               hint:
                 "Retry the subscription. If it keeps failing, check Trellis runtime health.",
               cause,
-              context: { feed, subject },
+              context: { live, subject },
             })
             : createTransportError({
               code: "trellis.live.subscribe_failed",
-              message: "Trellis could not subscribe to the feed.",
+              message: "Trellis could not subscribe to the live observation.",
               hint:
                 "Retry the subscription. If it keeps failing, check Trellis runtime health.",
               cause,
-              context: { feed, subject },
+              context: { live, subject },
             });
           recordRuntimeError(error, {
             surface: "live",
             direction: "client",
-            operation: feed,
+            operation: live,
             phase: "handshake",
           });
           return err(error);
@@ -3429,7 +3430,7 @@ export class Trellis<
   }
 
   async #handleLive<TInput, TEvent>(
-    feed: string,
+    live: string,
     descriptor: LiveDesc,
     handler: (
       context: LiveHandlerContext<TInput, TEvent>,
@@ -3441,9 +3442,9 @@ export class Trellis<
     if (!cache) {
       throw createTransportError({
         code: "trellis.live.listen_failed",
-        message: "Trellis could not listen for feed requests.",
+        message: "Trellis could not listen for live requests.",
         hint: "Provider authorization cache is required for live observations.",
-        context: { feed, subject },
+        context: { live, subject },
       });
     }
     const own = await cache.resolveContext(this.#contextDigest());
@@ -3480,22 +3481,22 @@ export class Trellis<
     } catch (cause) {
       const error = createTransportError({
         code: "trellis.live.listen_failed",
-        message: "Trellis could not listen for feed requests.",
+        message: "Trellis could not listen for live requests.",
         hint:
           "Check the service deployment digest and runtime permissions, then restart the service.",
         cause,
-        context: { feed, subject },
+        context: { live, subject },
       });
       recordRuntimeError(error, {
         surface: "live",
         direction: "server",
-        operation: feed,
+        operation: live,
         phase: "listen",
       });
       throw error;
     }
     this.#tasks.add(
-      `feed:${feed}`,
+      `live:${live}`,
       AsyncResult.try(async () => {
         // Admission bound before any verification work is spawned: an unbounded
         // set of attacker-supplied openings must not create unbounded tasks.
@@ -3504,7 +3505,7 @@ export class Trellis<
           if (inFlight >= MAX_PENDING_OPENINGS) continue;
           inFlight += 1;
           void this.#acceptLiveOpen(
-            feed,
+            live,
             descriptor,
             msg,
             handler,
@@ -3516,7 +3517,7 @@ export class Trellis<
       }),
     );
     this.#tasks.add(
-      `feed:${feed}:control`,
+      `live:${live}:control`,
       AsyncResult.try(async () => {
         for await (const msg of controlSub) {
           await provider.handleControl(msg, async (controlMsg) => {
@@ -3545,7 +3546,7 @@ export class Trellis<
   }
 
   async #acceptLiveOpen<TInput, TEvent>(
-    feed: string,
+    live: string,
     descriptor: LiveDesc,
     msg: Msg,
     handler: (
@@ -3580,7 +3581,7 @@ export class Trellis<
             code: "trellis.live.invalid_request",
             message: "Live opening is not a live open envelope.",
             hint: "Use the live Live client.",
-            context: { feed },
+            context: { live },
           }),
         );
         return;
@@ -3634,7 +3635,7 @@ export class Trellis<
     } catch (cause) {
       if (!replyOwned) return;
       const error = annotateHandlerBoundaryError(cause, {
-        feed,
+        live,
         requestId: msg.headers?.get("request-id"),
         service: this.name,
         contractId: this.contractId,

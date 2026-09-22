@@ -153,7 +153,7 @@ Deno.test("RPC client template failures record trellis error metric", async () =
 
 Deno.test("Live client template failures record trellis error metric", async () => {
   exporter.reset();
-  const { Trellis } = await import(`../session.ts?feed=${ulid()}`);
+  const { Trellis } = await import(`../session.ts?live=${ulid()}`);
   const api = {
     rpc: {},
     events: {},

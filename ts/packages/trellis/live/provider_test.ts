@@ -23,9 +23,9 @@ function digest(kind: string): string {
   return base64urlEncode(bytes);
 }
 
-const BASE_SUBJECT = `live.v1.route.${encodeEventSubjectParameterToken("api")}.${
-  encodeEventSubjectParameterToken("deploy")
-}.Watch`;
+const BASE_SUBJECT = `live.v1.route.${
+  encodeEventSubjectParameterToken("api")
+}.${encodeEventSubjectParameterToken("deploy")}.Watch`;
 
 function identity(kind: string): LiveProviderIdentity {
   return {
@@ -86,7 +86,7 @@ function msg(args: {
   subject?: string;
 }): Msg {
   return {
-    subject: args.subject ?? "feed.watch",
+    subject: args.subject ?? "live.watch",
     data: args.data,
     reply: args.reply,
     headers: args.headers,

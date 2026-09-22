@@ -360,7 +360,7 @@ function validateAction(name: string, action: Record<string, unknown>): void {
       break;
     case "live":
       if (!isCodec(action.input) || !isCodec(action.event)) {
-        fail("generated feed descriptor");
+        fail("generated live descriptor");
       }
       break;
   }

@@ -50,17 +50,17 @@ export function eventSubject(apiId: string, action: string): string {
 }
 
 /** Derives an owner control subscription or an exact subject for one Live instance. */
-export function feedControlSubject(
-  feedSubject: string,
+export function liveControlSubject(
+  liveSubject: string,
   ownerInstanceId: string,
-  feedId?: string,
+  liveId?: string,
 ): string {
-  const ownerSubject = `${feedSubject}.control.${
+  const ownerSubject = `${liveSubject}.control.${
     subjectToken(ownerInstanceId)
   }`;
-  return feedId === undefined
+  return liveId === undefined
     ? `${ownerSubject}.*`
-    : `${ownerSubject}.${subjectToken(feedId)}`;
+    : `${ownerSubject}.${subjectToken(liveId)}`;
 }
 
 /** Derives the stable queue shared by replicas subscribed to an exact route. */
@@ -192,7 +192,7 @@ export type LiveDesc<
   subject: string;
   input: I;
   event: E;
-  /** Exact permission required to subscribe to this feed. */
+  /** Exact permission required to subscribe to this live observation. */
   permission: PermissionAtom;
   subscribeCapabilities: readonly string[];
 };
