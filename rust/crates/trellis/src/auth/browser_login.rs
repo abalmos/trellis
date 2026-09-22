@@ -275,6 +275,9 @@ impl AgentLoginChallenge {
     #[doc = concat!("Asynchronous Trellis API operation `", stringify!(complete), "`.")]
     pub async fn complete(&self, trellis_url: &str) -> Result<AdminLoginOutcome, TrellisAuthError> {
         let outcome = self.complete_without_persistence(trellis_url).await?;
+        if !outcome.is_admin {
+            return Err(TrellisAuthError::NotAdmin);
+        }
         super::session_store::save_admin_session(&outcome.state)?;
         Ok(outcome)
     }
@@ -347,15 +350,16 @@ impl AgentLoginChallenge {
                 "admin connection omitted authorization context".to_owned(),
             )
         })?;
-        if !parse_authorization_context(&context.context)?
+        let is_admin = parse_authorization_context(&context.context)?
             .unsigned
             .platform_privileges
-            .contains(&trellis_protocol::PlatformPrivilege::Admin)
-        {
-            return Err(TrellisAuthError::NotAdmin);
-        }
+            .contains(&trellis_protocol::PlatformPrivilege::Admin);
 
-        Ok(AdminLoginOutcome { state, user })
+        Ok(AdminLoginOutcome {
+            state,
+            user,
+            is_admin,
+        })
     }
 }
 

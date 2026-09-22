@@ -83,6 +83,7 @@ app Caller {
   state savedResource { title "Saved resource"; description "Rust State acceptance value."; schema ResourceValue; version 1; }
 }
 app StateCaller {
+  use auth { rpc Sessions.Me; }
   state savedResource { title "Saved resource"; description "Rust State acceptance value."; schema ResourceValue; version 1; }
 }
 app Denied { use runtime; }
@@ -184,5 +185,6 @@ api liveprobe@v1 {
 service LiveProbeProvider { implements liveprobe; }
 
 app LiveProbeCaller {
+  use auth { rpc Sessions.Me; }
   use liveprobe { rpc Inspect; rpc Release; live Watch; }
 }

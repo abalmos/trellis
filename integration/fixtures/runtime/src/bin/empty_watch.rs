@@ -17,7 +17,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .await?;
     println!("empty login {}", login.login_url());
     std::io::stdout().flush()?;
-    let _ = login.complete(&url).await;
+    let outcome = login.complete_without_persistence(&url).await?;
+    trellis_rs::auth::save_admin_session(&outcome.state)?;
     let session = load_admin_session()?;
     let client = Client::connect(UserConnectOptions::new(
         &url,
