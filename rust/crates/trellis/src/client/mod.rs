@@ -35,7 +35,7 @@ pub use authorization::{
 #[cfg(feature = "runtime-internals")]
 pub use authorization::{RuntimeAuthorizationIoCounters, RuntimeAuthorizationTrust};
 
-pub use crate::generated::{EventDescriptor, FeedDescriptor, RpcDescriptor};
+pub use crate::generated::{EventDescriptor, LiveDescriptor, RpcDescriptor};
 pub(crate) use connection::fetch_device_activation;
 pub(crate) use connection::DeviceEnrollmentResponse;
 pub use connection::{

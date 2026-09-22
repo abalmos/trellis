@@ -14,7 +14,7 @@ import {
 } from "@nats-io/nats-core";
 import type {
   EventDesc,
-  FeedDesc,
+  LiveDesc,
   InferSchemaType,
   RPCDesc,
 } from "./participant.ts";
@@ -26,8 +26,8 @@ import {
 } from "./participant_runtime/api.ts";
 import type { Codec } from "./generated.ts";
 import { encodeEventSubjectParameterToken } from "./helpers.ts";
-import { openLiveFeed, openLiveOperationWatch } from "./live/client_open.ts";
-import { LiveFeedProvider, parseLiveOpen } from "./live/provider.ts";
+import { openLive, openLiveOperationWatch } from "./live/client_open.ts";
+import { LiveProvider, parseLiveOpen } from "./live/provider.ts";
 import type { PermissionAtom } from "./auth/protocol_wasm.ts";
 import { LiveAuthorityGuard } from "./live/authority.ts";
 import type { LiveSubscription } from "./live/subscription.ts";
@@ -808,7 +808,7 @@ export type OperationsOf<TA extends RuntimeApi> =
   & keyof TA["operations"]
   & string;
 type EventsOf<TA extends RuntimeApi> = keyof TA["events"] & string;
-export type FeedsOf<TA extends RuntimeApi> =
+export type LivesOf<TA extends RuntimeApi> =
   & keyof NonNullable<TA["feeds"]>
   & string;
 type RpcMethodOf<TA extends RuntimeApi, M extends keyof TA["rpc"] & string> =
@@ -962,17 +962,17 @@ export type PreparedTrellisEvent<
   encodedPayload: string;
   headers: Readonly<Record<string, string>>;
 }>;
-export type FeedInputOf<TA extends RuntimeApi, F extends FeedsOf<TA>> =
-  NonNullable<TA["feeds"]>[F] extends FeedDesc<infer TInput, infer _TEvent>
+export type LiveInputOf<TA extends RuntimeApi, F extends LivesOf<TA>> =
+  NonNullable<TA["feeds"]>[F] extends LiveDesc<infer TInput, infer _TEvent>
     ? InferSchemaType<TInput>
     : never;
-export type FeedEventOf<TA extends RuntimeApi, F extends FeedsOf<TA>> =
-  NonNullable<TA["feeds"]>[F] extends FeedDesc<infer _TInput, infer TEvent>
+export type LiveEventOf<TA extends RuntimeApi, F extends LivesOf<TA>> =
+  NonNullable<TA["feeds"]>[F] extends LiveDesc<infer _TInput, infer TEvent>
     ? InferSchemaType<TEvent>
     : never;
-type FeedDescriptorOf<TA extends RuntimeApi, F extends FeedsOf<TA>> =
-  NonNullable<TA["feeds"]>[F] extends FeedDesc<infer TInput, infer TEvent>
-    ? FeedDesc<TInput, TEvent> & NonNullable<TA["feeds"]>[F]
+type LiveDescriptorOf<TA extends RuntimeApi, F extends LivesOf<TA>> =
+  NonNullable<TA["feeds"]>[F] extends LiveDesc<infer TInput, infer TEvent>
+    ? LiveDesc<TInput, TEvent> & NonNullable<TA["feeds"]>[F]
     : never;
 export type OperationInputOf<
   TA extends RuntimeApi,
@@ -1763,21 +1763,20 @@ type ConsumerReplayEnvelope = {
   originalHeaders: Record<string, string[]>;
 };
 
-export type FeedSubscribeOpts = {
+export type LiveSubscribeOpts = {
   signal?: AbortSignal;
 };
 
-export type FeedSubscription<TEvent> = LiveSubscription<TEvent>;
 
-export type FeedInputBuilder<TInput, TEvent> = {
+export type LiveInputBuilder<TInput, TEvent> = {
   input(input: TInput): {
     subscribe(
-      opts?: FeedSubscribeOpts,
-    ): AsyncResult<FeedSubscription<TEvent>, BaseError>;
+      opts?: LiveSubscribeOpts,
+    ): AsyncResult<LiveSubscription<TEvent>, BaseError>;
   };
 };
 
-export type FeedHandlerContext<TInput, TEvent> = {
+export type LiveHandlerContext<TInput, TEvent> = {
   input: TInput;
   caller: SessionCaller;
   signal: AbortSignal;
@@ -1789,10 +1788,10 @@ export type FeedHandlerContext<TInput, TEvent> = {
   >;
 };
 
-export type FeedRegistration<TInput, TEvent> = {
+export type LiveRegistration<TInput, TEvent> = {
   handle(
     handler: (
-      context: FeedHandlerContext<TInput, TEvent>,
+      context: LiveHandlerContext<TInput, TEvent>,
     ) => unknown | Promise<unknown>,
   ): Promise<void>;
 };
@@ -1816,10 +1815,10 @@ type RuntimeEventLeaf = {
   ): AsyncResult<void, ValidationError | UnexpectedError>;
 };
 type RuntimeEventPublishLeaf = Omit<RuntimeEventLeaf, "listen">;
-type RuntimeFeedLeaf = (
+type RuntimeLiveLeaf = (
   input: unknown,
-  opts?: FeedSubscribeOpts,
-) => AsyncResult<FeedSubscription<unknown>, BaseError>;
+  opts?: LiveSubscribeOpts,
+) => AsyncResult<LiveSubscription<unknown>, BaseError>;
 type RuntimeOperationLeaf = OperationInvoker<RuntimeOperationDesc>;
 type PascalSurfaceName<T extends string> = T extends
   `${infer Head}.${infer Tail}`
@@ -1890,14 +1889,14 @@ export type ActiveEventPublishFacade<TA extends RuntimeApi = RuntimeApi> = {
   };
 };
 
-export type ActiveFeedFacade<TA extends RuntimeApi = RuntimeApi> = {
-  readonly [TGroup in SurfaceGroupName<FeedsOf<TA>>]: {
+export type ActiveLiveFacade<TA extends RuntimeApi = RuntimeApi> = {
+  readonly [TGroup in SurfaceGroupName<LivesOf<TA>>]: {
     readonly [
-      F in SurfaceKeysForGroup<FeedsOf<TA>, TGroup> as SurfaceLeafName<F>
+      F in SurfaceKeysForGroup<LivesOf<TA>, TGroup> as SurfaceLeafName<F>
     ]: (
-      input: FeedInputOf<TA, F>,
-      opts?: FeedSubscribeOpts,
-    ) => AsyncResult<FeedSubscription<FeedEventOf<TA, F>>, BaseError>;
+      input: LiveInputOf<TA, F>,
+      opts?: LiveSubscribeOpts,
+    ) => AsyncResult<LiveSubscription<LiveEventOf<TA, F>>, BaseError>;
   };
 };
 
@@ -1924,13 +1923,13 @@ export type ActiveRpcHandleFacade<
   };
 };
 
-export type FeedSurface<
+export type LiveSurface<
   TA extends RuntimeApi,
   TMode extends TrellisMode,
-  F extends FeedsOf<TA>,
+  F extends LivesOf<TA>,
 > = TMode extends "service"
-  ? FeedRegistration<FeedInputOf<TA, F>, FeedEventOf<TA, F>>
-  : FeedInputBuilder<FeedInputOf<TA, F>, FeedEventOf<TA, F>>;
+  ? LiveRegistration<LiveInputOf<TA, F>, LiveEventOf<TA, F>>
+  : LiveInputBuilder<LiveInputOf<TA, F>, LiveEventOf<TA, F>>;
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -1966,7 +1965,7 @@ export type HandlerTrellis<
 > = {
   readonly rpc: ActiveRpcFacade<TA>;
   readonly event: ActiveEventPublishFacade<TA>;
-  readonly feed: ActiveFeedFacade<TA>;
+  readonly live: ActiveLiveFacade<TA>;
   readonly operation: ActiveOperationFacade<TA>;
   request<const M extends RequestMethodOf<TRequests>>(
     method: M,
@@ -2485,7 +2484,7 @@ export class Trellis<
   readonly state: StateFacade<TState>;
   readonly rpc: ActiveRpcFacade<TA>;
   readonly event: ActiveEventFacade<TA>;
-  readonly feed: ActiveFeedFacade<TA>;
+  readonly live: ActiveLiveFacade<TA>;
   readonly operation: ActiveOperationFacade<TA>;
   readonly handle: { readonly rpc: ActiveRpcHandleFacade<TA, TRequests> };
   /** Framework-neutral lifecycle handle for this Trellis runtime connection. */
@@ -2564,7 +2563,7 @@ export class Trellis<
     this.rpc = this.#createRpcFacade();
     this.handle = { rpc: this.#createRpcHandleFacade() };
     this.event = this.#createEventFacade();
-    this.feed = this.#createFeedFacade();
+    this.live = this.#createLiveFacade();
     this.operation = this.#createOperationFacade();
   }
 
@@ -2719,26 +2718,26 @@ export class Trellis<
     return surface as ActiveEventPublishFacade<TA>;
   }
 
-  #createFeedFacade(): ActiveFeedFacade<TA> {
-    const surface: SurfaceGroups<RuntimeFeedLeaf> = {};
+  #createLiveFacade(): ActiveLiveFacade<TA> {
+    const surface: SurfaceGroups<RuntimeLiveLeaf> = {};
     for (const feed of Object.keys(this.api.feeds ?? {})) {
-      const leaf: RuntimeFeedLeaf = (input, opts) =>
-        this.feedHandle(feed as FeedsOf<TA>).input(
-          input as FeedInputOf<TA, FeedsOf<TA>>,
+      const leaf: RuntimeLiveLeaf = (input, opts) =>
+        this.feedHandle(feed as LivesOf<TA>).input(
+          input as LiveInputOf<TA, LivesOf<TA>>,
         ).subscribe(opts) as AsyncResult<
-          FeedSubscription<unknown>,
+          LiveSubscription<unknown>,
           BaseError
         >;
       addSurfaceLeaf(surface, feed, leaf);
     }
-    return surface as ActiveFeedFacade<TA>;
+    return surface as ActiveLiveFacade<TA>;
   }
 
   #createHandlerTrellis(): HandlerTrellis<TA, TRequests> {
     return {
       rpc: this.rpc,
       event: this.#createEventPublishFacade(),
-      feed: this.feed,
+      live: this.live,
       operation: this.operation,
       request: this.request.bind(this),
       prepare: (event, data) => this.prepare(event, data),
@@ -2763,7 +2762,7 @@ export class Trellis<
   }
 
   #unknownApiError(
-    kind: "RPC method" | "operation" | "event" | "feed",
+    kind: "RPC method" | "operation" | "event" | "live",
     name: string,
   ): Error {
     const base = `Unknown ${kind} '${name}'.`;
@@ -3220,7 +3219,7 @@ export class Trellis<
     await this.#onSessionNotFound();
   }
 
-  async #authenticateFeedRequest(args: {
+  async #authenticateLiveRequest(args: {
     msg: Msg;
     permission: DescriptorPermissionAtom | undefined;
     requiredCapabilities: readonly string[];
@@ -3234,58 +3233,58 @@ export class Trellis<
     });
   }
 
-  feedHandle<F extends FeedsOf<TA>>(
+  feedHandle<F extends LivesOf<TA>>(
     feed: F,
   ):
-    & FeedInputBuilder<FeedInputOf<TA, F>, FeedEventOf<TA, F>>
-    & FeedRegistration<FeedInputOf<TA, F>, FeedEventOf<TA, F>> {
+    & LiveInputBuilder<LiveInputOf<TA, F>, LiveEventOf<TA, F>>
+    & LiveRegistration<LiveInputOf<TA, F>, LiveEventOf<TA, F>> {
     const descriptor = this.api.feeds?.[feed] as
-      | FeedDescriptorOf<TA, F>
+      | LiveDescriptorOf<TA, F>
       | undefined;
     if (!descriptor) {
-      throw this.#unknownApiError("feed", feed.toString());
+      throw this.#unknownApiError("live", feed.toString());
     }
 
     return {
-      input: (input: FeedInputOf<TA, F>) => ({
-        subscribe: (opts?: FeedSubscribeOpts) =>
-          this.#subscribeFeed(
+      input: (input: LiveInputOf<TA, F>) => ({
+        subscribe: (opts?: LiveSubscribeOpts) =>
+          this.#subscribeLive(
             feed.toString(),
             descriptor,
             input,
             opts,
           ) as AsyncResult<
-            FeedSubscription<FeedEventOf<TA, F>>,
+            LiveSubscription<LiveEventOf<TA, F>>,
             BaseError
           >,
       }),
       handle: (
         handler: (
-          context: FeedHandlerContext<FeedInputOf<TA, F>, FeedEventOf<TA, F>>,
+          context: LiveHandlerContext<LiveInputOf<TA, F>, LiveEventOf<TA, F>>,
         ) => unknown | Promise<unknown>,
-      ) => this.#handleFeed(feed.toString(), descriptor, handler),
+      ) => this.#handleLive(feed.toString(), descriptor, handler),
     };
   }
 
-  #subscribeFeed<TInput, TEvent>(
+  #subscribeLive<TInput, TEvent>(
     feed: string,
-    descriptor: FeedDesc,
+    descriptor: LiveDesc,
     input: TInput,
-    opts?: FeedSubscribeOpts,
-  ): AsyncResult<FeedSubscription<TEvent>, BaseError> {
+    opts?: LiveSubscribeOpts,
+  ): AsyncResult<LiveSubscription<TEvent>, BaseError> {
     const route = trellisRoute("rpc", feed);
     let owned = false;
-    let subscription: FeedSubscription<TEvent> | undefined;
+    let subscription: LiveSubscription<TEvent> | undefined;
     const closeOnNats = () => {
       subscription?.close();
       this.#feedClosers.delete(closeOnNats);
     };
     return AsyncResult.from(
-      (async (): Promise<Result<FeedSubscription<TEvent>, BaseError>> => {
+      (async (): Promise<Result<LiveSubscription<TEvent>, BaseError>> => {
         const payload = encodeRuntimeSchema(descriptor.input, input).take();
         if (isErr(payload)) {
           recordRuntimeError(payload.error, {
-            surface: "feed",
+            surface: "live",
             direction: "client",
             operation: feed,
             phase: "request_encoding",
@@ -3298,7 +3297,7 @@ export class Trellis<
         ).take();
         if (isErr(subject)) {
           recordRuntimeError(subject.error, {
-            surface: "feed",
+            surface: "live",
             direction: "client",
             operation: feed,
             phase: "request_template",
@@ -3353,7 +3352,7 @@ export class Trellis<
           if (opts?.signal?.aborted) {
             throw new LiveStreamError("cancelled", "live open was aborted");
           }
-          subscription = await openLiveFeed(
+          subscription = await openLive(
             {
               nats: this.#nats,
               inboxPrefix: this.#inboxPrefix,
@@ -3387,7 +3386,7 @@ export class Trellis<
           }
           owned = true;
           this.#feedClosers.add(closeOnNats);
-          // The endpoint's own telemetry owner records the legacy Feed
+          // The endpoint's own telemetry owner records the legacy Live
           // projection from the same local state; no second accounting here.
           void subscription.closed.then(() => {
             opts?.signal?.removeEventListener("abort", abort);
@@ -3414,7 +3413,7 @@ export class Trellis<
               context: { feed, subject },
             });
           recordRuntimeError(error, {
-            surface: "feed",
+            surface: "live",
             direction: "client",
             operation: feed,
             phase: "handshake",
@@ -3425,11 +3424,11 @@ export class Trellis<
     );
   }
 
-  async #handleFeed<TInput, TEvent>(
+  async #handleLive<TInput, TEvent>(
     feed: string,
-    descriptor: FeedDesc,
+    descriptor: LiveDesc,
     handler: (
-      context: FeedHandlerContext<TInput, TEvent>,
+      context: LiveHandlerContext<TInput, TEvent>,
     ) => unknown | Promise<unknown>,
   ): Promise<void> {
     const subject = this.template(descriptor.subject, {}, true).take();
@@ -3449,7 +3448,7 @@ export class Trellis<
       this.#contextDigest(),
       { kind: "local-provider" },
     );
-    const provider = new LiveFeedProvider({
+    const provider = new LiveProvider({
       nats: this.#nats,
       identity: {
         connectionId: own.context.connectionId,
@@ -3484,7 +3483,7 @@ export class Trellis<
         context: { feed, subject },
       });
       recordRuntimeError(error, {
-        surface: "feed",
+        surface: "live",
         direction: "server",
         operation: feed,
         phase: "listen",
@@ -3500,7 +3499,7 @@ export class Trellis<
         for await (const msg of sub) {
           if (inFlight >= MAX_PENDING_OPENINGS) continue;
           inFlight += 1;
-          void this.#acceptLiveFeedOpen(
+          void this.#acceptLiveOpen(
             feed,
             descriptor,
             msg,
@@ -3517,7 +3516,7 @@ export class Trellis<
       AsyncResult.try(async () => {
         for await (const msg of controlSub) {
           await provider.handleControl(msg, async (controlMsg) => {
-            const caller = await this.#authenticateFeedRequest({
+            const caller = await this.#authenticateLiveRequest({
               msg: controlMsg,
               permission: descriptor.permission,
               requiredCapabilities: descriptor.subscribeCapabilities,
@@ -3541,18 +3540,18 @@ export class Trellis<
     );
   }
 
-  async #acceptLiveFeedOpen<TInput, TEvent>(
+  async #acceptLiveOpen<TInput, TEvent>(
     feed: string,
-    descriptor: FeedDesc,
+    descriptor: LiveDesc,
     msg: Msg,
     handler: (
-      context: FeedHandlerContext<TInput, TEvent>,
+      context: LiveHandlerContext<TInput, TEvent>,
     ) => unknown | Promise<unknown>,
-    provider: LiveFeedProvider,
+    provider: LiveProvider,
   ): Promise<void> {
     let replyOwned = false;
     try {
-      const caller = await this.#authenticateFeedRequest({
+      const caller = await this.#authenticateLiveRequest({
         msg,
         permission: descriptor.permission,
         requiredCapabilities: descriptor.subscribeCapabilities,
@@ -3575,8 +3574,8 @@ export class Trellis<
           msg,
           createTransportError({
             code: "trellis.live.invalid_request",
-            message: "Feed opening is not a live open envelope.",
-            hint: "Use the live Feed client.",
+            message: "Live opening is not a live open envelope.",
+            hint: "Use the live Live client.",
             context: { feed },
           }),
         );

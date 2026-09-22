@@ -10,7 +10,7 @@
 //! # Wire grammar
 //!
 //! ```text
-//! Feed base:      feed.v1.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
+//! Feed base:      live.v1.route.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
 //! Operation base: operation.v1.<b64(apiId)>.<b64(providerDeploymentId)>.<action>
 //! Owner control:  <base>.observe.<b64(P)>.<sessionId>
 //! Live delivery:  live.v1.data.<b64(P)>.<b64(C)>.<sessionId>
@@ -758,10 +758,10 @@ pub enum LiveOfferKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LiveSessionKind {
-    /// Descriptor-backed Feed.
-    Feed,
-    /// Operation watch observation.
-    OperationWatch,
+    /// Standalone live observation.
+    Standalone,
+    /// Operation live observation.
+    Operation,
 }
 
 impl LiveSessionKind {
@@ -769,8 +769,8 @@ impl LiveSessionKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Feed => "feed",
-            Self::OperationWatch => "operation-watch",
+            Self::Standalone => "standalone",
+            Self::Operation => "operation",
         }
     }
 }
@@ -1514,13 +1514,14 @@ pub fn derive_live_observe_wildcard_subject(
     Ok(format!("{base_subject}.observe.{provider}.*"))
 }
 
-/// Validate that one base subject is a deployment-bound Feed or Operation route.
+/// Validate that one base subject is a deployment-bound standalone live or
+/// Operation route.
 ///
 /// # Errors
 ///
 /// Returns [`ProtocolError::Live`] unless the subject is exactly
-/// `feed.v1.<token>.<token>.<action>` or `operation.v1.<token>.<token>.<action>`
-/// with a valid logical action.
+/// `live.v1.route.<token>.<token>.<action>` or
+/// `operation.v1.<token>.<token>.<action>` with a valid logical action.
 pub fn validate_base_subject(
     base_subject: &str,
     tokens: impl IntoIterator<Item = &'static str> + Clone,
@@ -1529,23 +1530,24 @@ pub fn validate_base_subject(
         live_error(
             LiveProtocolErrorCode::InvalidSubjectToken,
             tokens.clone(),
-            "base subject must be a canonical deployment-bound Feed or Operation route",
+            "base subject must be a canonical deployment-bound live or Operation route",
         )
     };
-    let mut parts = base_subject.splitn(5, '.');
-    let family = parts.next().ok_or_else(invalid)?;
-    if family != "feed" && family != "operation" {
+    let parts = base_subject.split('.').collect::<Vec<_>>();
+    let prefix_len = match parts.first() {
+        Some(&"live") if parts.get(1) == Some(&"v1") && parts.get(2) == Some(&"route") => 3,
+        Some(&"operation") if parts.get(1) == Some(&"v1") => 2,
+        _ => return Err(invalid()),
+    };
+    if parts.len() < prefix_len + 3 {
         return Err(invalid());
     }
-    if parts.next() != Some("v1") {
-        return Err(invalid());
-    }
-    let api_token = parts.next().ok_or_else(invalid)?;
-    let deployment_token = parts.next().ok_or_else(invalid)?;
-    let action = parts.next().ok_or_else(invalid)?;
+    let api_token = parts[prefix_len];
+    let deployment_token = parts[prefix_len + 1];
+    let action = parts[prefix_len + 2..].join(".");
     validate_subject_token(api_token, ["baseSubject"])?;
     validate_subject_token(deployment_token, ["baseSubject"])?;
-    validate_logical_name(action).map_err(|_| invalid())?;
+    validate_logical_name(&action).map_err(|_| invalid())?;
     Ok(base_subject)
 }
 
@@ -1564,21 +1566,18 @@ pub fn validate_live_subject(subject: &str) -> Result<(), ProtocolError> {
         )
     };
     let tokens = subject.split('.').collect::<Vec<_>>();
+    if tokens.len() == 6
+        && tokens[0] == "live"
+        && tokens[1] == "v1"
+        && tokens[2] == "data"
+        && is_canonical_token(tokens[3])
+        && is_canonical_token(tokens[4])
+        && parse_nonce(tokens[5], ["sessionId"]).is_ok()
+    {
+        return Ok(());
+    }
     match tokens.first() {
-        Some(&"live") => {
-            let matches = tokens.len() == 6
-                && tokens[1] == "v1"
-                && tokens[2] == "data"
-                && is_canonical_token(tokens[3])
-                && is_canonical_token(tokens[4])
-                && parse_nonce(tokens[5], ["sessionId"]).is_ok();
-            if matches {
-                Ok(())
-            } else {
-                Err(invalid("subject"))
-            }
-        }
-        Some(&"feed") | Some(&"operation") => {
+        Some(&"live") | Some(&"operation") => {
             // A base action may itself contain dots, so locate the observe
             // marker relative to the fixed trailing provider/session tokens.
             let Some(observe_index) = tokens.len().checked_sub(3) else {
@@ -1822,14 +1821,14 @@ pub fn logical_open_hash(identity: &LogicalOpenIdentity) -> Result<String, Proto
     validate_subject_token(&identity.consumer_session_key, ["consumerSessionKey"])?;
     validate_logical_identity(&identity.consumer_principal_id, "consumerPrincipalId")?;
     validate_logical_identity(&identity.consumer_participant_id, "consumerParticipantId")?;
-    if identity.kind == LiveSessionKind::Feed && identity.feed_input.is_none() {
+    if identity.kind == LiveSessionKind::Standalone && identity.feed_input.is_none() {
         return Err(live_error(
             LiveProtocolErrorCode::InvalidFormat,
             ["input"],
             "Feed open identity requires the native input value",
         ));
     }
-    if identity.kind == LiveSessionKind::OperationWatch {
+    if identity.kind == LiveSessionKind::Operation {
         let operation_id = identity.operation_id.as_deref().unwrap_or_default();
         if operation_id.is_empty() {
             return Err(live_error(
@@ -1932,7 +1931,7 @@ mod tests {
             derive_live_data_subject(provider, consumer, &session).unwrap(),
             format!("live.v1.data.{provider_token}.{consumer_token}.{session}")
         );
-        let base = "feed.v1.YWNtZS5oZWFsdGhAdjE.ZGVwLTAx.Watch";
+        let base = "live.v1.route.YWNtZS5oZWFsdGhAdjE.ZGVwLTAx.Watch";
         assert_eq!(
             derive_live_observe_subject(base, provider, &session).unwrap(),
             format!("{base}.observe.{provider_token}.{session}")
@@ -2156,8 +2155,8 @@ mod tests {
     #[test]
     fn logical_open_hash_is_stable_and_input_sensitive() {
         let identity = LogicalOpenIdentity {
-            kind: LiveSessionKind::Feed,
-            base_subject: "feed.v1.YXBpQHYx.ZGVwLTAx.Watch".into(),
+            kind: LiveSessionKind::Standalone,
+            base_subject: "live.v1.route.YXBpQHYx.ZGVwLTAx.Watch".into(),
             open_id: URL_SAFE_NO_PAD.encode([1u8; 16]),
             consumer_connection_id: "01JYCONNECTION0000000000".into(),
             consumer_session_key: URL_SAFE_NO_PAD.encode([2u8; 32]),
@@ -2204,13 +2203,13 @@ mod tests {
         let offer = LiveOffer {
             format: LIVE_VERSION.into(),
             kind: LiveOfferKind::Offer,
-            session_kind: LiveSessionKind::Feed,
+            session_kind: LiveSessionKind::Standalone,
             open_id: URL_SAFE_NO_PAD.encode([1u8; 16]),
             request_id: "req-1".into(),
             session_id: URL_SAFE_NO_PAD.encode([2u8; 16]),
-            base_subject: "feed.v1.YXBpQHYx.ZGVwLTAx.Watch".into(),
+            base_subject: "live.v1.route.YXBpQHYx.ZGVwLTAx.Watch".into(),
             data_subject: "live.v1.data.A.B.C".into(),
-            control_subject: "feed.v1.YXBpQHYx.ZGVwLTAx.Watch.observe.A.C".into(),
+            control_subject: "live.v1.route.YXBpQHYx.ZGVwLTAx.Watch.observe.A.C".into(),
             provider: LiveOfferProvider {
                 connection_id: "P".into(),
                 session_key: "K".into(),
@@ -2238,7 +2237,7 @@ mod tests {
         let encoded = serde_json::to_string(&offer).unwrap();
         let decoded: LiveOffer = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, offer);
-        let with_unknown = encoded.replace("\"kind\":\"feed\"", "\"kind\":\"feed\",\"extra\":1");
+        let with_unknown = encoded.replace("\"kind\":\"standalone\"", "\"kind\":\"feed\",\"extra\":1");
         assert!(with_unknown.contains("extra"));
         assert!(serde_json::from_str::<LiveOffer>(&with_unknown).is_err());
     }

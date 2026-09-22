@@ -12,7 +12,7 @@ use trellis_jobs_runtime::{
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, RequestValidator, ServerError,
 };
-use trellis_runtime_apis::apis::trellis_jobs_v1::{feeds, rpc};
+use trellis_runtime_apis::apis::trellis_jobs_v1::{lives, rpc};
 
 use crate::shutdown::StopHandle;
 use crate::supervisor::{RuntimeContext, RuntimeError, SubsystemHandle};
@@ -34,7 +34,7 @@ const JOBS_SUBJECTS: &[&str] = &[
     rpc::ReplayDLQ::SUBJECT,
     rpc::Retry::SUBJECT,
     rpc::Summary::SUBJECT,
-    feeds::Watch::SUBJECT,
+    lives::Watch::SUBJECT,
 ];
 const JOBS_API_ID: &str = "trellis.jobs@v1";
 const DEFAULT_JANITOR_INTERVAL: Duration = Duration::from_secs(30);

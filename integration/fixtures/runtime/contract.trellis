@@ -18,8 +18,8 @@ api runtime@v1 {
   operation Work { input Value; progress Update; output Value; signals { Continue Value; } }
   operation Upload { input Value; output Value; signals { Continue Value; } upload; }
   event Changed { payload Value; }
-  feed Watch { input Empty; event Value; }
-  capabilities { public { allows { rpc Echo; operation Work; operation Upload; publish event Changed; subscribe event Changed; feed Watch; } } }
+  live Watch { input Empty; event Value; }
+  capabilities { public { allows { rpc Echo; operation Work; operation Upload; publish event Changed; subscribe event Changed; live Watch; } } }
 }
 
 api events@v1 {
@@ -77,7 +77,7 @@ service OperationProvider {
 }
 service OperationCaller { use runtime { operation Work; } }
 app Caller {
-  use runtime { rpc Echo; operation Work; operation Upload; publish event Changed; subscribe event Changed; feed Watch; }
+  use runtime { rpc Echo; operation Work; operation Upload; publish event Changed; subscribe event Changed; live Watch; }
   state saved { title "Saved"; description "Caller-owned saved value."; schema Saved; version 1; }
   state savedResource { title "Saved resource"; description "Rust State acceptance value."; schema ResourceValue; version 1; }
 }
@@ -176,12 +176,12 @@ api liveprobe@v1 {
   description "Case-owned source control and observed source lifetime.";
   rpc Inspect { input LiveProbeKey; output LiveProbeStatus; }
   rpc Release { input LiveProbeRelease; output LiveProbeStatus; }
-  feed Watch { input LiveProbeKey; event LiveProbeFrame; }
-  capabilities { public { allows { rpc Inspect; rpc Release; feed Watch; } } }
+  live Watch { input LiveProbeKey; event LiveProbeFrame; }
+  capabilities { public { allows { rpc Inspect; rpc Release; live Watch; } } }
 }
 
 service LiveProbeProvider { implements liveprobe; }
 
 app LiveProbeCaller {
-  use liveprobe { rpc Inspect; rpc Release; feed Watch; }
+  use liveprobe { rpc Inspect; rpc Release; live Watch; }
 }

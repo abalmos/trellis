@@ -17,8 +17,8 @@ pub enum ApiSurfaceKind {
     Operation,
     /// A published event.
     Event,
-    /// A subscribable feed.
-    Feed,
+    /// A subscribable live observation.
+    Live,
     /// Shared state.
     State,
 }
@@ -29,7 +29,7 @@ impl ApiSurfaceKind {
             Self::Rpc => "rpc",
             Self::Operation => "operation",
             Self::Event => "event",
-            Self::Feed => "feed",
+            Self::Live => "live",
             Self::State => "state",
         }
     }
@@ -395,7 +395,7 @@ impl PermissionAtom {
                     action,
                     PermissionAction::Publish | PermissionAction::Subscribe
                 ),
-                ApiSurfaceKind::Feed => matches!(action, PermissionAction::Subscribe),
+                ApiSurfaceKind::Live => matches!(action, PermissionAction::Subscribe),
                 ApiSurfaceKind::State => {
                     matches!(action, PermissionAction::Read | PermissionAction::Write)
                 }

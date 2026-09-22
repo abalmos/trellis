@@ -4,7 +4,7 @@ use futures_util::{stream, Stream, StreamExt};
 use trellis_rs::jobs::types::{JobEvent, JobState, JobTriggerKind};
 use trellis_rs::jobs::{JobsRuntime, JobsRuntimeMessageStream};
 use trellis_rs::service::{Router, ServerError};
-use trellis_runtime_apis::apis::trellis_jobs_v1::feeds::Watch;
+use trellis_runtime_apis::apis::trellis_jobs_v1::lives::Watch;
 use trellis_runtime_apis::types::{
     Bytes, JobsWatchFrame as JobsWatchEvent, JobsWatchRequest as JobsWatchInput,
     JobsWatchRequestquery as JobsWatchInputQuery,
@@ -18,7 +18,7 @@ pub fn register_jobs_watch_feed(
     jobs_runtime: JobsRuntime,
     jobs_stream: String,
 ) {
-    router.register_feed::<Watch, _, _>(move |_ctx, input| {
+    router.register_live::<Watch, _, _>(move |_ctx, input| {
         watch_jobs(input, jobs_runtime.clone(), jobs_stream.clone())
     });
 }

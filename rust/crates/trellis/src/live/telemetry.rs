@@ -175,8 +175,8 @@ impl LiveTelemetryOwner {
 
     fn kind_str(&self) -> &'static str {
         match self.kind {
-            LiveSessionKind::Feed => "feed",
-            LiveSessionKind::OperationWatch => "operation_watch",
+            LiveSessionKind::Standalone => "feed",
+            LiveSessionKind::Operation => "operation_watch",
         }
     }
 
@@ -188,7 +188,7 @@ impl LiveTelemetryOwner {
     }
 
     fn is_feed(&self) -> bool {
-        matches!(self.kind, LiveSessionKind::Feed)
+        matches!(self.kind, LiveSessionKind::Standalone)
     }
 
     fn transition(&mut self, next: LivePhase) {
@@ -474,7 +474,7 @@ mod tests {
         let feed_ends = CounterFamily::FeedEnds.name();
 
         let before = values(&capture, sessions);
-        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Feed, LiveSide::Provider);
+        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Standalone, LiveSide::Provider);
         assert_eq!(
             delta(&before, &values(&capture, sessions)),
             BTreeMap::from([(phase_key("prepared"), 1.0)]),
@@ -560,7 +560,7 @@ mod tests {
         let _guard = meter_test_lock().await;
         let capture = process_capture();
 
-        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Feed, LiveSide::Provider);
+        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Standalone, LiveSide::Provider);
 
         let ends_before = values(&capture, CounterFamily::LiveEnds.name());
         let feed_active_before = values(&capture, UpDownFamily::FeedActive.name());
@@ -603,7 +603,7 @@ mod tests {
 
         let feed_active_before = values(&capture, UpDownFamily::FeedActive.name());
         let mut owner =
-            LiveTelemetryOwner::new_prepared(LiveSessionKind::OperationWatch, LiveSide::Consumer);
+            LiveTelemetryOwner::new_prepared(LiveSessionKind::Operation, LiveSide::Consumer);
         owner.activating();
         owner.active();
 
@@ -625,7 +625,7 @@ mod tests {
         let _guard = meter_test_lock().await;
         let capture = process_capture();
 
-        let owner = LiveTelemetryOwner::new(LiveSessionKind::Feed, LiveSide::Provider);
+        let owner = LiveTelemetryOwner::new(LiveSessionKind::Standalone, LiveSide::Provider);
 
         let buffered = UpDownFamily::LiveBufferedBytes.name();
         let net_before = values(&capture, buffered);
@@ -691,7 +691,7 @@ mod tests {
         let pending = UpDownFamily::LiveCleanupPending.name();
         let sessions = UpDownFamily::LiveSessions.name();
 
-        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Feed, LiveSide::Provider);
+        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Standalone, LiveSide::Provider);
         let pending_before = values(&capture, pending);
         let sessions_before = values(&capture, sessions);
 
@@ -730,7 +730,7 @@ mod tests {
         let feed_active = UpDownFamily::FeedActive.name();
         let feed_ends = CounterFamily::FeedEnds.name();
 
-        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Feed, LiveSide::Provider);
+        let mut owner = LiveTelemetryOwner::new_prepared(LiveSessionKind::Standalone, LiveSide::Provider);
         owner.activating();
         owner.active();
 

@@ -226,13 +226,29 @@ pub fn derive_bound_operation_subject(
     derive_bound_subject("operation", api_id, provider_deployment_id, action)
 }
 
-/// Derive a deployment-bound Feed open subject.
+/// Derive a deployment-bound standalone live open subject.
+///
+/// The standalone family is `live.v1.route.<token>.<token>.<action>`; the
+/// Operation family remains `operation.v1.<token>.<token>.<action>`.
 pub fn derive_bound_feed_subject(
     api_id: &str,
     provider_deployment_id: &str,
     action: &str,
 ) -> Result<String, ProtocolError> {
-    derive_bound_subject("feed", api_id, provider_deployment_id, action)
+    crate::validate_api_id(api_id)?;
+    validate_logical_name(action)?;
+    if provider_deployment_id.is_empty() {
+        return Err(ProtocolError::InvalidIdentifier {
+            field: "provider deployment id",
+            reason: "must not be empty",
+        });
+    }
+    Ok(format!(
+        "live.v1.route.{}.{}.{}",
+        subject_token(api_id),
+        subject_token(provider_deployment_id),
+        action
+    ))
 }
 
 /// Derive the wildcard control subscription for one Feed owner instance.

@@ -19,7 +19,7 @@ import { createActionUnavailableError } from "./session.ts";
 import type {
   EventListenerContext,
   EventOpts,
-  FeedSubscribeOpts,
+  LiveSubscribeOpts,
   PreparedTrellisEvent,
   RequestOpts,
   RuntimeStateStoresForContract,
@@ -36,7 +36,7 @@ type CodecValue<T> = T extends { decode(value: unknown): infer TValue } ? TValue
   : never;
 type GeneratedCodec = Readonly<{ decode(value: unknown): unknown }>;
 type SelectedActionShape = {
-  kind: "rpc" | "operation" | "event" | "feed";
+  kind: "rpc" | "operation" | "event" | "live";
   descriptorName: string;
   direction: unknown;
   input?: unknown;
@@ -116,11 +116,11 @@ type ActionMethod<TAction extends SelectedActionShape> = TAction["kind"] extends
         >)
         & { resume: OperationInvoker<never>["resume"] }
     : never
-  : TAction["kind"] extends "feed"
+  : TAction["kind"] extends "live"
     ? TAction["input"] extends GeneratedCodec
       ? TAction["event"] extends GeneratedCodec ? (
           input: CodecValue<TAction["input"]>,
-          opts?: FeedSubscribeOpts,
+          opts?: LiveSubscribeOpts,
         ) => AsyncResult<
           LiveSubscription<CodecValue<TAction["event"]>>,
           BaseError
@@ -282,10 +282,10 @@ export function createCallerRuntime<TContract extends GeneratedParticipant>(
           caller[action.connectedName] = invoke;
         }
         break;
-      case "feed":
+      case "live":
         caller[action.connectedName] = (
           input: unknown,
-          opts?: FeedSubscribeOpts,
+          opts?: LiveSubscribeOpts,
         ) => {
           const error = unavailable();
           return error

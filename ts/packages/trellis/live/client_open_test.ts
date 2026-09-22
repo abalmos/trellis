@@ -24,13 +24,13 @@ function offer(): LiveOfferWire {
   return {
     format: "trellis.live.v1",
     type: "offer",
-    kind: "feed",
+    kind: "standalone",
     openId: "open",
     requestId: "req",
     sessionId: "session",
-    baseSubject: "feed.v1.Watch",
+    baseSubject: "live.v1.route.Watch",
     dataSubject: "live.v1.data.A.B.C",
-    controlSubject: "feed.v1.Watch.observe.A.C",
+    controlSubject: "live.v1.route.Watch.observe.A.C",
     provider: {
       connectionId: "P",
       sessionKey: "K",

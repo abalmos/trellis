@@ -668,7 +668,7 @@ pub(crate) fn close_receipt(
 /// Return whether one session kind uses the Operation control route.
 #[must_use]
 pub(crate) fn kind_uses_operation_control(kind: LiveSessionKind) -> bool {
-    matches!(kind, LiveSessionKind::OperationWatch)
+    matches!(kind, LiveSessionKind::Operation)
 }
 
 /// Tombstone expiry for one receipt recorded now.

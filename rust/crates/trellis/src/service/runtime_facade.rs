@@ -27,7 +27,7 @@ use super::transfer::{
 };
 use super::{
     bootstrap_service_host, control_subject, BootstrapBindingInfo, DownloadTransferGrantPlan,
-    EventPublisher, FeedDescriptor, HandlerResult, JobsResourceBinding, KvResourceBinding,
+    EventPublisher, LiveDescriptor, HandlerResult, JobsResourceBinding, KvResourceBinding,
     OperationControl, OperationDescriptor, OperationTransferProgress, RequestContext, Router,
     RpcDescriptor, ServerError, ServiceResourceBindings, StoreResourceBinding, StoreResourceClient,
     UploadTransferCompletion, UploadTransferSession,
@@ -743,7 +743,7 @@ impl ServiceHandle {
 /// scope's cancellation token. The token has no authority constructor exposed
 /// to applications.
 #[derive(Debug, Clone)]
-pub struct ServiceFeedHandlerContext {
+pub struct ServiceLiveHandlerContext {
     /// Ordinary service handler context for this invocation.
     pub context: ServiceHandlerContext,
     /// Cancellation for this Feed source scope.
@@ -1214,17 +1214,17 @@ impl<C> ConnectedServiceRuntime<C> {
     ///
     /// The high-level handler receives the embedded ordinary
     /// [`ServiceHandlerContext`] plus this source scope's cancellation token.
-    pub fn register_feed<D, F, S>(&mut self, handler: F)
+    pub fn register_live<D, F, S>(&mut self, handler: F)
     where
-        D: FeedDescriptor + 'static,
+        D: LiveDescriptor + 'static,
         D::Input: Send + 'static,
-        F: Fn(ServiceFeedHandlerContext, D::Input) -> S + Send + Sync + 'static,
+        F: Fn(ServiceLiveHandlerContext, D::Input) -> S + Send + Sync + 'static,
         S: Stream<Item = Result<D::Event, ServerError>> + Send + 'static,
     {
         let handle = self.generated_handle();
-        self.router.register_feed::<D, _, _>(move |request, input| {
+        self.router.register_live::<D, _, _>(move |request, input| {
             handler(
-                ServiceFeedHandlerContext {
+                ServiceLiveHandlerContext {
                     context: ServiceHandlerContext::new(request.request, handle.clone()),
                     cancellation: request.cancellation,
                 },

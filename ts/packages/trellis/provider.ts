@@ -16,7 +16,7 @@ import type {
   ParticipantKvMetadata,
 } from "./participant_runtime/metadata.ts";
 import type {
-  FeedHandler,
+  LiveHandler,
   GeneratedServiceParticipant,
   OperationHandler,
   RpcHandler,
@@ -83,7 +83,7 @@ type ProviderRegistrations<TContract extends GeneratedParticipant> =
       K in
         & keyof NonNullable<OwnedApi<TContract>["feeds"]>
         & string as `handle${PascalActionName<K>}`
-    ]: (handler: FeedHandler<ServiceContract<TContract>, K>) => unknown;
+    ]: (handler: LiveHandler<ServiceContract<TContract>, K>) => unknown;
   }
   & {
     readonly [

@@ -35,7 +35,7 @@ import {
   UnexpectedError,
   ValidationError,
 } from "../../errors/index.ts";
-import { LiveFeedProvider } from "../../live/provider.ts";
+import { LiveProvider } from "../../live/provider.ts";
 import {
   parseOperationWatchOpen,
   runDelayedOperationSource,
@@ -1487,7 +1487,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
       queue: routeQueueGroup(controlSubject),
     });
     void (async () => {
-      let liveProvider: LiveFeedProvider | undefined;
+      let liveProvider: LiveProvider | undefined;
       try {
         liveProvider = await this.#createOperationLiveProvider(ctx);
       } catch (error) {
@@ -1636,7 +1636,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
                   },
                 );
               },
-              "operation-watch",
+              "operation",
             );
           } catch (cause) {
             respondControlError(
@@ -1756,7 +1756,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
 
   async #createOperationLiveProvider(
     ctx: RegisteredRuntimeOperationDesc,
-  ): Promise<LiveFeedProvider | undefined> {
+  ): Promise<LiveProvider | undefined> {
     const cache = this.auth.authorizationProviderCache;
     const digest = typeof this.auth.contextDigest === "function"
       ? this.auth.contextDigest()
@@ -1768,7 +1768,7 @@ export class TrellisServiceRuntime extends Trellis<RuntimeApi, TrellisMode> {
     const ownGuard = await LiveAuthorityGuard.retain(cache, digest, {
       kind: "local-provider",
     });
-    const provider = new LiveFeedProvider({
+    const provider = new LiveProvider({
       nats: this.#nats,
       identity: {
         connectionId: own.context.connectionId,

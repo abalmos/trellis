@@ -4,8 +4,8 @@ root = "trellis-test-generated"
 [[packages]]
 name = "trellis"
 version = "0.12.0"
-digest = "olfZWlhfujeEP1Au7d1504OBs7YyE-qvox6U3Xi1xpo"
-distribution-digest = "sha256:f073c1bcd82f8a67dfdcfdd9b4435f2e48d0e7f9225dfa947408ade3d1fa12d7"
+digest = "jrwvEmXfrHI4l0hzRmlLv7aQZdydTMVy6oKFsN-Drn0"
+distribution-digest = "sha256:04ed0f1e487f974478d53c5ab775769b78301b017d19e0e4c3663feb0a2819de"
 dependencies = []
 
 [packages.source]
@@ -15,13 +15,13 @@ path = "./../../../rust/crates/runtime"
 [[packages]]
 name = "trellis-test-generated"
 version = "0.12.0"
-digest = "rJMySEZh7UH7Qkb-ZaMxixkaWRuvzJ81bfTsnB9U3rs"
-distribution-digest = "sha256:3c7c8ec31cc8472a906ce400a37e3300a11fb532c4a51dbb80024a0d1908cb2f"
+digest = "rCO0lR11SQkMcC-LMFe-dipKGBGPcy5FGsY849tFtqA"
+distribution-digest = "sha256:554bc0d635e26fdd7a2dd6e6f33e96857620e7fde4062ea9f1363510a5542103"
 
 [[packages.dependencies]]
 name = "trellis"
 version = "0.12.0"
-digest = "olfZWlhfujeEP1Au7d1504OBs7YyE-qvox6U3Xi1xpo"
+digest = "jrwvEmXfrHI4l0hzRmlLv7aQZdydTMVy6oKFsN-Drn0"
 
 [packages.source]
 kind = "path"

@@ -75,11 +75,11 @@ import type {
   ActiveEventPublishFacade,
   EventListenerContext,
   EventOpts,
-  FeedEventOf,
-  FeedHandlerContext,
-  FeedInputOf,
-  FeedRegistration as RootFeedRegistration,
-  FeedsOf,
+  LiveEventOf,
+  LiveHandlerContext,
+  LiveInputOf,
+  LiveRegistration as RootLiveRegistration,
+  LivesOf,
   HandlerTrellis,
   OperationHandlerContext,
   OperationHandlerErrorOf,
@@ -615,13 +615,13 @@ type ContractOperationName<
   >,
 > = keyof ParticipantOwnedApi<TContract>["operations"] & string;
 
-type ContractFeedName<
+type ContractLiveName<
   TContract extends GeneratedServiceParticipant<
     RuntimeApi,
     RuntimeApi | undefined,
     ParticipantJobsMetadata
   >,
-> = FeedsOf<ParticipantOwnedApi<TContract>>;
+> = LivesOf<ParticipantOwnedApi<TContract>>;
 
 type ContractJobName<
   TContract extends GeneratedServiceParticipant<
@@ -703,18 +703,18 @@ export type OperationHandler<
 ) => unknown | Promise<unknown>;
 
 /** Typed feed handler function for an extracted Trellis service handler. */
-export type FeedHandler<
+export type LiveHandler<
   TContract extends GeneratedServiceParticipant<
     RuntimeApi,
     RuntimeApi | undefined,
     ParticipantJobsMetadata,
     ParticipantKvMetadata
   >,
-  F extends ContractFeedName<TContract>,
+  F extends ContractLiveName<TContract>,
 > = (
-  context: FeedHandlerContext<
-    FeedInputOf<ParticipantOwnedApi<TContract>, F>,
-    FeedEventOf<ParticipantOwnedApi<TContract>, F>
+  context: LiveHandlerContext<
+    LiveInputOf<ParticipantOwnedApi<TContract>, F>,
+    LiveEventOf<ParticipantOwnedApi<TContract>, F>
   >,
 ) => unknown | Promise<unknown>;
 
@@ -923,7 +923,7 @@ type ServiceHandleFacade = {
     string,
     Record<string, (handler: (args: unknown) => unknown) => Promise<void>>
   >;
-  readonly feed: Record<
+  readonly live: Record<
     string,
     Record<string, (handler: (args: unknown) => unknown) => Promise<void>>
   >;
@@ -1002,7 +1002,7 @@ type TypedServiceHandleFacade<
       ) => Promise<void>;
     };
   };
-  readonly feed: {
+  readonly live: {
     readonly [TGroup in SurfaceGroupName<keyof TOwnedApi["feeds"] & string>]: {
       readonly [
         F in SurfaceKeysForGroup<
@@ -1010,7 +1010,7 @@ type TypedServiceHandleFacade<
           TGroup
         > as SurfaceLeafName<F>
       ]: (
-        handler: FeedHandleFn<TOwnedApi, TTrellisApi, F, TKv, TJobs>,
+        handler: LiveHandleFn<TOwnedApi, TTrellisApi, F, TKv, TJobs>,
       ) => Promise<void>;
     };
   };
@@ -1050,18 +1050,18 @@ type RpcHandleFn<
   >
   | Result<RpcMethodOutput<TOwnedApi, M>, RpcHandlerErrorOf<TOwnedApi, M>>;
 
-type FeedHandleFn<
+type LiveHandleFn<
   TOwnedApi extends RuntimeApi,
   TTrellisApi extends RuntimeApi,
   F extends keyof TOwnedApi["feeds"] & string,
   TKv extends ParticipantKvMetadata,
   TJobs extends ParticipantJobsMetadata,
 > = (context: {
-  input: FeedInputOf<TOwnedApi, F>;
+  input: LiveInputOf<TOwnedApi, F>;
   caller: unknown;
   signal: AbortSignal;
   emit(
-    event: FeedEventOf<TOwnedApi, F>,
+    event: LiveEventOf<TOwnedApi, F>,
   ): AsyncResult<void, ValidationError | UnexpectedError>;
   client: Trellis<TTrellisApi, TKv, TJobs>;
 }) => unknown | Promise<unknown>;
@@ -1110,10 +1110,10 @@ export type OperationRegistration<
   ): Promise<void>;
 };
 
-export type FeedRegistration<
+export type LiveRegistration<
   TOwnedApi extends RuntimeApi,
   F extends keyof TOwnedApi["feeds"] & string,
-> = RootFeedRegistration<FeedInputOf<TOwnedApi, F>, FeedEventOf<TOwnedApi, F>>;
+> = RootLiveRegistration<LiveInputOf<TOwnedApi, F>, LiveEventOf<TOwnedApi, F>>;
 
 export type TrellisServiceConnectArgs<
   TContract extends GeneratedServiceParticipant<
@@ -1313,7 +1313,7 @@ export async function createConnectedService<
   const handlerTrellis: Trellis<TTrellisApi, TKv, TJobs> = {
     rpc: outbound.rpc,
     event: createServiceEventPublishFacade(outbound),
-    feed: outbound.feed,
+    live: outbound.live,
     operation: outbound.operation,
     request: outbound.request.bind(outbound),
     prepare: (event, data) => outbound.prepare(event, data),
@@ -3159,7 +3159,7 @@ export class TrellisServiceSession<
         ));
     }
 
-    const feed: ServiceHandleFacade["feed"] = {};
+    const live: ServiceHandleFacade["live"] = {};
     for (const feedName of Object.keys(this.#runtime.api.feeds ?? {})) {
       addSurfaceLeaf(
         feed,

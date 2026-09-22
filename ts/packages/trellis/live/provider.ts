@@ -101,7 +101,7 @@ export type LiveProviderHost = {
   /** Route permission the admitted observer must hold. */
   permission: PermissionAtom;
   /** Route session kind used for admission-level telemetry. */
-  kind?: "feed" | "operation-watch";
+  kind?: "standalone" | "operation";
   /** Retain one admitted caller context as a covered fence. */
   retainCallerAuthority: (
     digest: string,
@@ -243,7 +243,7 @@ function singletonHeader(
  * shares a single output lane; the sent watermark advances only after a
  * successful transport handoff.
  */
-export class LiveFeedProvider {
+export class LiveProvider {
   readonly #host: LiveProviderHost;
   readonly #clock: LiveClock;
   readonly #sessions = new Map<string, ProviderSessionRecord>();
@@ -254,7 +254,7 @@ export class LiveFeedProvider {
     this.#host = host;
     this.#clock = host.clock ?? productionLiveClock;
     this.#routeTelemetry = new LiveTelemetryOwner(
-      host.kind ?? "feed",
+      host.kind ?? "standalone",
       "provider",
     );
   }
@@ -315,7 +315,7 @@ export class LiveFeedProvider {
       emit: (value: unknown) => Promise<void>;
       signal: AbortSignal;
     }) => Promise<void>,
-    kind: LiveSessionKind = "feed",
+    kind: LiveSessionKind = "standalone",
   ): Promise<void> {
     // An opening without a reply destination cannot hand off an offer.
     if (!msg.reply) return;
@@ -1361,7 +1361,7 @@ export class LiveFeedProvider {
   }
 }
 
-/** Parse one bounded live Feed opening request. */
+/** Parse one bounded live Live opening request. */
 export function parseLiveOpen(
   raw: Uint8Array,
 ):

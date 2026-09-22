@@ -356,7 +356,7 @@ pub(crate) async fn reserve_feed<D, F>(
     source_factory: F,
 ) -> Result<ReservedFeed, ServerError>
 where
-    D: crate::generated::FeedDescriptor,
+    D: crate::generated::LiveDescriptor,
     F: FnOnce() -> std::pin::Pin<
             Box<dyn futures_util::Stream<Item = Result<SourceItem, String>> + Send>,
         > + Send
@@ -395,7 +395,7 @@ where
     };
     let action_name = D::KEY.split_once('.').map_or(D::KEY, |(_, action)| action);
     let observer_permission = PermissionAtom::new(
-        PermissionTarget::api_surface(D::API_ID, ApiSurfaceKind::Feed, action_name.to_owned())
+        PermissionTarget::api_surface(D::API_ID, ApiSurfaceKind::Live, action_name.to_owned())
             .map_err(|error| ServerError::Nats(error.to_string()))?,
         PermissionAction::Subscribe,
     )
@@ -426,7 +426,7 @@ where
     })?;
     let canonical_open_hash =
         trellis_protocol::logical_open_hash(&trellis_protocol::LogicalOpenIdentity {
-            kind: LiveSessionKind::Feed,
+            kind: LiveSessionKind::Standalone,
             base_subject: inputs.base_subject.clone(),
             open_id: opening.open_id.clone(),
             consumer_connection_id: consumer.connection_id.clone(),
@@ -441,7 +441,7 @@ where
         .map_err(|error| ServerError::Nats(error.to_string()))?;
     let now_ms = crate::client::now_iat_seconds() * 1_000;
     let open_request = ProviderOpenRequest {
-        kind: LiveSessionKind::Feed,
+        kind: LiveSessionKind::Standalone,
         base_subject: inputs.base_subject.clone(),
         open_id: opening.open_id.clone(),
         consumer: consumer.clone(),
@@ -610,7 +610,7 @@ where
     })?;
     let canonical_open_hash =
         trellis_protocol::logical_open_hash(&trellis_protocol::LogicalOpenIdentity {
-            kind: LiveSessionKind::OperationWatch,
+            kind: LiveSessionKind::Operation,
             base_subject: inputs.base_subject.clone(),
             open_id: opening.open_id.clone(),
             consumer_connection_id: consumer.connection_id.clone(),
@@ -625,7 +625,7 @@ where
         .map_err(|error| ServerError::Nats(error.to_string()))?;
     let now_ms = crate::client::now_iat_seconds() * 1_000;
     let open_request = ProviderOpenRequest {
-        kind: LiveSessionKind::OperationWatch,
+        kind: LiveSessionKind::Operation,
         base_subject: inputs.base_subject.clone(),
         open_id: opening.open_id.clone(),
         consumer: consumer.clone(),

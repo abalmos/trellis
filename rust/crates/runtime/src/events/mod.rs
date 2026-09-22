@@ -15,7 +15,7 @@ use trellis_protocol::{
 use trellis_rs::service::{
     internal::run_builtin_authenticated_router, RequestContext, RequestValidator, ServerError,
 };
-use trellis_runtime_apis::apis::trellis_events_v1::{self as events, feeds, rpc};
+use trellis_runtime_apis::apis::trellis_events_v1::{self as events, lives, rpc};
 
 use crate::shutdown::StopHandle;
 use crate::supervisor::{RuntimeContext, RuntimeError, SubsystemHandle};
@@ -33,7 +33,7 @@ const EVENTS_SUBJECTS: &[&str] = &[
     rpc::Inspect::SUBJECT,
     rpc::Metrics::SUBJECT,
     rpc::Query::SUBJECT,
-    feeds::Watch::SUBJECT,
+    lives::Watch::SUBJECT,
 ];
 
 #[derive(Clone)]

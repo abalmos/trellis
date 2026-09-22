@@ -868,7 +868,7 @@ where
         )
         .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
         let open = crate::live::client_open::ClientOpen {
-            kind: trellis_protocol::LiveSessionKind::OperationWatch,
+            kind: trellis_protocol::LiveSessionKind::Operation,
             api_id: D::API_ID,
             base_subject: &base_subject,
             publish_subject: &publish_subject,

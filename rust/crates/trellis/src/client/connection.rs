@@ -39,7 +39,7 @@ use crate::client::transfer::{get_download_grant, DownloadTransferGrant};
 use crate::client::transfer::{put_upload_grant, FileInfo, UploadTransferGrant};
 use crate::client::{
     prepare_event, AuthorizationContextBundle, AuthorizationContextCache,
-    AuthorizationProviderCache, AuthorizationRuntimeBinding, EventDescriptor, FeedDescriptor,
+    AuthorizationProviderCache, AuthorizationRuntimeBinding, EventDescriptor, LiveDescriptor,
     PreparedTrellisEvent, RpcErrorPayload, SessionAuth, TrellisClientError,
 };
 use crate::generated::Codec as _;
@@ -1069,7 +1069,7 @@ impl TrellisClient {
             "operation" => {
                 trellis_protocol::derive_bound_operation_subject(api_id, &deployment_id, action)
             }
-            "feed" => trellis_protocol::derive_bound_feed_subject(api_id, &deployment_id, action),
+            "live" => trellis_protocol::derive_bound_feed_subject(api_id, &deployment_id, action),
             _ => unreachable!("only request route families are deployment-bound"),
         };
         subject.map_err(|error| TrellisClientError::Bootstrap(error.to_string()))
@@ -2027,18 +2027,18 @@ impl TrellisClient {
     ///
     /// Returns a setup error for an invalid input, a missing live manager, an
     /// incompatible peer, or a lost/invalid offer.
-    pub async fn feed<D>(
+    pub async fn live<D>(
         &self,
         input: &D::Input,
     ) -> Result<crate::live::subscription::LiveSubscription<D::Event>, TrellisClientError>
     where
-        D: FeedDescriptor,
+        D: LiveDescriptor,
         D::Event: Send + 'static,
     {
         let encoded = input
             .encode()
             .map_err(|error| TrellisClientError::Codec(error.to_string()))?;
-        let base_subject = self.bound_key_subject("feed", D::API_ID, D::KEY)?;
+        let base_subject = self.bound_key_subject("live", D::API_ID, D::KEY)?;
         let open_id = trellis_protocol::generate_nonce()
             .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
         let body = serde_json::json!({
@@ -2052,7 +2052,7 @@ impl TrellisClient {
         let permission = trellis_protocol::PermissionAtom::new(
             trellis_protocol::PermissionTarget::api_surface(
                 D::API_ID,
-                trellis_protocol::ApiSurfaceKind::Feed,
+                trellis_protocol::ApiSurfaceKind::Live,
                 action_name.to_owned(),
             )
             .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?,
@@ -2060,7 +2060,7 @@ impl TrellisClient {
         )
         .map_err(|error| TrellisClientError::FeedProtocol(error.to_string()))?;
         let open = crate::live::client_open::ClientOpen {
-            kind: trellis_protocol::LiveSessionKind::Feed,
+            kind: trellis_protocol::LiveSessionKind::Standalone,
             api_id: D::API_ID,
             base_subject: &base_subject,
             publish_subject: &base_subject,

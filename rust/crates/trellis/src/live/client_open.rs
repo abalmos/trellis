@@ -299,7 +299,7 @@ pub(crate) async fn install_feed_handle<D>(
     prepared: PreparedClientSession,
 ) -> Result<crate::live::subscription::LiveSubscription<D::Event>, TrellisClientError>
 where
-    D: crate::generated::FeedDescriptor,
+    D: crate::generated::LiveDescriptor,
     D::Event: crate::generated::Codec + Send + 'static,
 {
     install_prepared_handle(client, prepared, |value| {
@@ -1093,7 +1093,7 @@ mod tests {
             permission: trellis_protocol::PermissionAtom::new(
                 trellis_protocol::PermissionTarget::api_surface(
                     "api@v1",
-                    trellis_protocol::ApiSurfaceKind::Feed,
+                    trellis_protocol::ApiSurfaceKind::Live,
                     "Watch".to_owned(),
                 )
                 .expect("api surface"),
@@ -1106,16 +1106,16 @@ mod tests {
     #[test]
     fn feed_open_publishes_on_the_same_base_subject() {
         let base = "feed.v1.Watch";
-        let open = open(LiveSessionKind::Feed, base, base);
-        verify_offer_identity(&open, &offer(LiveSessionKind::Feed, base)).expect("feed offer");
+        let open = open(LiveSessionKind::Standalone, base, base);
+        verify_offer_identity(&open, &offer(LiveSessionKind::Standalone, base)).expect("feed offer");
     }
 
     #[test]
     fn operation_watch_offer_binds_the_operation_route_not_control() {
         let base = "operation.v1.Billing.Refund";
         let publish = "operation.v1.Billing.Refund.control";
-        let open = open(LiveSessionKind::OperationWatch, base, publish);
-        verify_offer_identity(&open, &offer(LiveSessionKind::OperationWatch, base))
+        let open = open(LiveSessionKind::Operation, base, publish);
+        verify_offer_identity(&open, &offer(LiveSessionKind::Operation, base))
             .expect("operation watch offer");
     }
 
@@ -1123,8 +1123,8 @@ mod tests {
     fn operation_watch_rejects_control_subject_as_offer_base() {
         let base = "operation.v1.Billing.Refund";
         let publish = "operation.v1.Billing.Refund.control";
-        let open = open(LiveSessionKind::OperationWatch, base, publish);
-        let error = verify_offer_identity(&open, &offer(LiveSessionKind::OperationWatch, publish))
+        let open = open(LiveSessionKind::Operation, base, publish);
+        let error = verify_offer_identity(&open, &offer(LiveSessionKind::Operation, publish))
             .expect_err("control is not the offer base");
         assert!(error.to_string().contains("base subject"));
     }
@@ -1133,11 +1133,11 @@ mod tests {
     fn operation_watch_rejects_feed_session_kind() {
         let base = "operation.v1.Billing.Refund";
         let open = open(
-            LiveSessionKind::OperationWatch,
+            LiveSessionKind::Operation,
             base,
             "operation.v1.Billing.Refund.control",
         );
-        let error = verify_offer_identity(&open, &offer(LiveSessionKind::Feed, base))
+        let error = verify_offer_identity(&open, &offer(LiveSessionKind::Standalone, base))
             .expect_err("kind must match");
         assert!(error.to_string().contains("session kind"));
     }
@@ -1173,10 +1173,10 @@ mod tests {
     #[test]
     fn offer_from_a_non_selected_deployment_is_rejected() {
         let base = "feed.v1.Watch";
-        let open = open(LiveSessionKind::Feed, base, base);
+        let open = open(LiveSessionKind::Standalone, base, base);
         let error = verify_offer_claims(
             &open,
-            &signed_offer(LiveSessionKind::Feed, base),
+            &signed_offer(LiveSessionKind::Standalone, base),
             "dep-other",
             &provider_identity(),
             &consumer_identity(),
@@ -1189,12 +1189,12 @@ mod tests {
     #[test]
     fn offer_with_a_mutated_provider_tuple_is_rejected() {
         let base = "feed.v1.Watch";
-        let open = open(LiveSessionKind::Feed, base, base);
+        let open = open(LiveSessionKind::Standalone, base, base);
         let mut mutated = provider_identity();
         mutated.instance_id = Some("inst-mutated".into());
         let error = verify_offer_claims(
             &open,
-            &signed_offer(LiveSessionKind::Feed, base),
+            &signed_offer(LiveSessionKind::Standalone, base),
             "dep",
             &mutated,
             &consumer_identity(),
@@ -1207,12 +1207,12 @@ mod tests {
     #[test]
     fn offer_with_a_mutated_consumer_tuple_is_rejected() {
         let base = "feed.v1.Watch";
-        let open = open(LiveSessionKind::Feed, base, base);
+        let open = open(LiveSessionKind::Standalone, base, base);
         let mut mutated = consumer_identity();
         mutated.participant_id = "other".into();
         let error = verify_offer_claims(
             &open,
-            &signed_offer(LiveSessionKind::Feed, base),
+            &signed_offer(LiveSessionKind::Standalone, base),
             "dep",
             &provider_identity(),
             &mutated,
@@ -1225,10 +1225,10 @@ mod tests {
     #[test]
     fn selected_deployment_and_complete_tuples_are_accepted() {
         let base = "feed.v1.Watch";
-        let open = open(LiveSessionKind::Feed, base, base);
+        let open = open(LiveSessionKind::Standalone, base, base);
         verify_offer_claims(
             &open,
-            &signed_offer(LiveSessionKind::Feed, base),
+            &signed_offer(LiveSessionKind::Standalone, base),
             "dep",
             &provider_identity(),
             &consumer_identity(),

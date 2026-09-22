@@ -23,7 +23,7 @@ use trellis_rs::service::{
 };
 use trellis_runtime_apis::__types::trellis::HealthHeartbeatSample;
 use trellis_runtime_apis::apis::trellis_health_v1::events::StatusChanged as HealthStatusChangedEvent;
-use trellis_runtime_apis::apis::trellis_health_v1::feeds::Watch as HealthWatchFeedDescriptor;
+use trellis_runtime_apis::apis::trellis_health_v1::lives::Watch as HealthWatchLiveDescriptor;
 use trellis_runtime_apis::apis::trellis_health_v1::rpc::{
     Inspect as HealthInspectRpc, Metrics as HealthMetricsRpc, Query as HealthQueryRpc,
     Summary as HealthSummaryRpc,
@@ -247,7 +247,7 @@ fn build_router(store: HealthStore, invalidations: broadcast::Sender<Invalidatio
         async move { store.metrics(&input, now_ns()).map_err(map_store_error) }
     });
     let feed_store = store.clone();
-    router.register_feed::<HealthWatchFeedDescriptor, _, _>(move |_context, input| {
+    router.register_live::<HealthWatchLiveDescriptor, _, _>(move |_context, input| {
         let store = feed_store.clone();
         let receiver = invalidations.subscribe();
         let ready = health_watch_frame(json!({

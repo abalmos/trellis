@@ -46,7 +46,7 @@ export const LIVE_VERSION = "trellis.live.v1";
 const C = liveConstants();
 
 /** Live session kind advertised on a signed offer. */
-export type LiveSessionKind = "feed" | "operation-watch";
+export type LiveSessionKind = "standalone" | "operation";
 
 /** Fresh request proof material for one live control or open. */
 export type LiveProof = {
@@ -175,8 +175,8 @@ async function request(
   }
 }
 
-/** Open one live Feed session and return a prepared handle. */
-export async function openLiveFeed<T>(
+/** Open one live Live session and return a prepared handle. */
+export async function openLive<T>(
   host: LiveOpenHost<T>,
   subject: string,
   inputJson: string,
@@ -190,7 +190,7 @@ export async function openLiveFeed<T>(
     receiveMaxPayloadBytes: maxPayload,
     input: JSON.parse(inputJson),
   });
-  return await openLiveSession(host, subject, subject, "feed", body, openId);
+  return await openLiveSession(host, subject, subject, "standalone", body, openId);
 }
 
 /** Open one Operation-watch live session on the existing control route. */
@@ -217,7 +217,7 @@ export async function openLiveOperationWatch<T>(
     host,
     controlSubject,
     operationSubject,
-    "operation-watch",
+    "operation",
     body,
     openId,
   );

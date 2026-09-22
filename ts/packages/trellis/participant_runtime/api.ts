@@ -30,7 +30,7 @@ export function eventDescriptorIdentity(
 
 /** Derives one deployment-bound API request subject. */
 export function boundApiSubject(
-  family: "rpc" | "operation" | "feed",
+  family: "rpc" | "operation" | "live",
   apiId: string,
   providerDeploymentId: string,
   action: string,
@@ -45,7 +45,7 @@ export function eventSubject(apiId: string, action: string): string {
   return `events.v1.${subjectToken(apiId)}.${action}`;
 }
 
-/** Derives an owner control subscription or an exact subject for one Feed instance. */
+/** Derives an owner control subscription or an exact subject for one Live instance. */
 export function feedControlSubject(
   feedSubject: string,
   ownerInstanceId: string,
@@ -126,7 +126,7 @@ export type PermissionAtom = Readonly<{
   /** Version of the source API surface. */
   apiVersion: `v${number}`;
   /** API surface family. */
-  surfaceKind: "rpc" | "operation" | "event" | "feed" | "state";
+  surfaceKind: "rpc" | "operation" | "event" | "live" | "state";
   /** Exact API-local surface name. */
   surfaceName: string;
   /** Exact action required for the surface. */
@@ -181,7 +181,7 @@ export type EventDesc<S extends SchemaLike = SchemaLike> = {
   subscribeCapabilities: readonly string[];
 };
 
-export type FeedDesc<
+export type LiveDesc<
   I extends SchemaLike = SchemaLike,
   E extends SchemaLike = SchemaLike,
 > = {
@@ -239,6 +239,6 @@ export type RuntimeApi = {
   rpc: Record<string, RPCDesc>;
   operations: Record<string, OperationDesc>;
   events: Record<string, EventDesc>;
-  feeds?: Record<string, FeedDesc>;
+  feeds?: Record<string, LiveDesc>;
   subjects: Record<string, unknown>;
 };

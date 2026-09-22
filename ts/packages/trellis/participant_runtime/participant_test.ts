@@ -34,7 +34,7 @@ Deno.test("deployment subjects and replica queues match protocol vectors", () =>
   assertEquals(
     feedControlSubject(
       boundApiSubject(
-        "feed",
+        "live",
         "acme-orders.orders@v1",
         "deployment-01",
         "Watch",
@@ -42,7 +42,7 @@ Deno.test("deployment subjects and replica queues match protocol vectors", () =>
       "instance-01",
       "feed-01",
     ),
-    "feed.v1.YWNtZS1vcmRlcnMub3JkZXJzQHYx.ZGVwbG95bWVudC0wMQ.Watch.control.aW5zdGFuY2UtMDE.ZmVlZC0wMQ",
+    "live.v1.route.YWNtZS1vcmRlcnMub3JkZXJzQHYx.ZGVwbG95bWVudC0wMQ.Watch.control.aW5zdGFuY2UtMDE.ZmVlZC0wMQ",
   );
 });
 

@@ -100,7 +100,7 @@ Deno.test("live subject derivation, nonces, and counters agree with Rust", () =>
     }.${nonce}`,
   );
   liveValidateSubject(dataSubject);
-  const base = "feed.v1.YXBpQHYx.ZGVwLTAx.Watch";
+  const base = "live.v1.route.YXBpQHYx.ZGVwLTAx.Watch";
   assertEquals(
     liveObserveSubject(base, provider, nonce),
     `${base}.observe.${base64urlEncode(utf8(provider))}.${nonce}`,

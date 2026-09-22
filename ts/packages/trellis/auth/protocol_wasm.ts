@@ -49,7 +49,7 @@ export type PermissionTarget =
   | {
     kind: "apiSurface";
     api: string;
-    surface: "rpc" | "operation" | "event" | "feed" | "state";
+    surface: "rpc" | "operation" | "event" | "live" | "state";
     name: string;
   }
   | {
@@ -492,7 +492,7 @@ export type LiveControlWire = {
 export type LiveOfferWire = {
   format: string;
   type: "offer";
-  kind: "feed" | "operation-watch";
+  kind: "standalone" | "operation";
   openId: string;
   requestId: string;
   sessionId: string;

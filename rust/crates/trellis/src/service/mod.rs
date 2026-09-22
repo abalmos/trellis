@@ -38,7 +38,7 @@ mod transfer;
 pub(crate) use transfer::transfer_frame_proof_payload;
 
 #[doc(hidden)]
-pub use crate::generated::{EventDescriptor, FeedDescriptor, RpcDescriptor};
+pub use crate::generated::{EventDescriptor, LiveDescriptor, RpcDescriptor};
 pub use crate::jobs::{ActiveJob, JobDescriptor, JobRef, JobUpdateDescriptor, JobsError};
 #[doc(hidden)]
 pub use authenticated_router::{AuthenticatedRouter, RequestValidation, RequestValidator};
@@ -88,7 +88,7 @@ pub use runtime_facade::{ConnectedServiceRuntime, CoreBootstrapBinding, ServiceH
 pub use runtime_facade::{
     ServiceConnectOptions, ServiceEventListenOptions, ServiceEventListenerContext,
     ServiceEventListenerHandle, ServiceEventListenerMode, ServiceEventPublisherContext,
-    ServiceFeedHandlerContext, ServiceHandlerContext, ServiceRuntimeError, DEFAULT_TIMEOUT_MS,
+    ServiceLiveHandlerContext, ServiceHandlerContext, ServiceRuntimeError, DEFAULT_TIMEOUT_MS,
 };
 #[doc(hidden)]
 pub use schema_validation::validate_input_schema;
@@ -170,7 +170,7 @@ pub mod internal {
                         derived
                     });
                 }
-                "feed" => {
+                "live" => {
                     let derived =
                         trellis_protocol::derive_bound_feed_subject(api_id, deployment_id, action)
                             .map_err(|error| super::ServerError::Nats(error.to_string()))?;

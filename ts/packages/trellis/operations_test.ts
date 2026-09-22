@@ -27,7 +27,7 @@ function completedWatch<T>(
   value: T,
   onDispose?: () => void,
 ): LiveSubscription<T> {
-  const core = new ConsumerCore<T>("watch", "operation-watch");
+  const core = new ConsumerCore<T>("watch", "operation");
   core.setPhase("draining");
   core.admit({ value, encodedLen: 1 });
   core.setPendingEnd(new LiveEnd("complete"));

@@ -9,7 +9,7 @@ import { encodeEventSubjectParameterToken } from "../helpers.ts";
 import { base64urlEncode } from "../auth/utils.ts";
 import { LIVE_VERSION } from "./client_open.ts";
 import {
-  LiveFeedProvider,
+  LiveProvider,
   type LiveProviderCaller,
   type LiveProviderHost,
   type LiveProviderIdentity,
@@ -23,7 +23,7 @@ function digest(kind: string): string {
   return base64urlEncode(bytes);
 }
 
-const BASE_SUBJECT = `feed.v1.${encodeEventSubjectParameterToken("api")}.${
+const BASE_SUBJECT = `live.v1.route.${encodeEventSubjectParameterToken("api")}.${
   encodeEventSubjectParameterToken("deploy")
 }.Watch`;
 
@@ -58,7 +58,7 @@ function authority(kind: string): ProviderAuthorityPort {
   };
 }
 
-function makeProvider(nats: NatsConnection): LiveFeedProvider {
+function makeProvider(nats: NatsConnection): LiveProvider {
   const host: LiveProviderHost = {
     nats,
     identity: identity("provider"),
@@ -68,7 +68,7 @@ function makeProvider(nats: NatsConnection): LiveFeedProvider {
       target: {
         kind: "apiSurface",
         api: "api@v1",
-        surface: "feed",
+        surface: "live",
         name: "Watch",
       },
       action: "subscribe",
@@ -76,7 +76,7 @@ function makeProvider(nats: NatsConnection): LiveFeedProvider {
     retainCallerAuthority: async () => authority("owner"),
     manager: new LiveSessionManager(),
   };
-  return new LiveFeedProvider(host);
+  return new LiveProvider(host);
 }
 
 function msg(args: {
@@ -120,7 +120,7 @@ Deno.test("NX04 foreign controls are dropped without reflection", async () => {
   const offerJson = JSON.parse(
     new TextDecoder().decode(published.at(-1)!.data),
   );
-  assertEquals(offerJson.kind, "feed");
+  assertEquals(offerJson.kind, "standalone");
   const sessionId = offerJson.sessionId as string;
   const encode = (value: unknown) =>
     new TextEncoder().encode(JSON.stringify(value));
@@ -246,9 +246,9 @@ Deno.test("operation-watch offers advertise operation-watch kind", async () => {
     { openId: "open-2", receiveMaxPayloadBytes: 1_048_576 },
     caller("owner"),
     async () => {},
-    "operation-watch",
+    "operation",
   );
   const offerJson = JSON.parse(new TextDecoder().decode(encodedOffers.at(-1)!));
-  assertEquals(offerJson.kind, "operation-watch");
+  assertEquals(offerJson.kind, "operation");
   assertEquals(offerJson.baseSubject, operationSubject);
 });

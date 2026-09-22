@@ -2,7 +2,7 @@
  * One truthful telemetry owner per live observation endpoint.
  *
  * The endpoint record owns exactly one of these; it derives both the seven
- * `trellis.live.*` families and the narrow Feed-only projections from the
+ * `trellis.live.*` families and the narrow Live-only projections from the
  * same local state. Instruments are never recorded from a detached closer, a
  * UI status, or handle garbage collection.
  *
@@ -21,7 +21,7 @@ import {
 import type { LiveEnd } from "./types.ts";
 
 /** Live observation session kind as it appears in metric dimensions. */
-export type LiveTelemetryKind = "feed" | "operation-watch";
+export type LiveTelemetryKind = "standalone" | "operation";
 
 /** Endpoint side dimension for every live family. */
 export type LiveTelemetrySide = "consumer" | "provider";
@@ -46,7 +46,7 @@ type LiveTelemetryPhase =
   | "draining"
   | "closing";
 
-/** Maps one detailed live end onto the fixed Feed-only reason. */
+/** Maps one detailed live end onto the fixed Live-only reason. */
 function feedProjectionReason(end: LiveEnd): string {
   switch (end.reason) {
     case "complete":
@@ -75,7 +75,7 @@ function feedProjectionReason(end: LiveEnd): string {
 
 /** Local state owner for one endpoint's live telemetry. */
 export class LiveTelemetryOwner {
-  readonly #kind: "feed" | "operation_watch";
+  readonly #kind: "standalone" | "operation_watch";
   readonly #side: LiveTelemetrySide;
   readonly #feedSide: "client" | "server";
   #phase: LiveTelemetryPhase | undefined;
@@ -87,7 +87,7 @@ export class LiveTelemetryOwner {
   #cleanupPending = false;
 
   constructor(kind: LiveTelemetryKind, side: LiveTelemetrySide) {
-    this.#kind = kind === "feed" ? "feed" : "operation_watch";
+    this.#kind = kind === "standalone" ? "standalone" : "operation_watch";
     this.#side = side;
     this.#feedSide = side === "consumer" ? "client" : "server";
   }
@@ -138,7 +138,7 @@ export class LiveTelemetryOwner {
   active(): void {
     this.#recordHandshake();
     this.#transition("active");
-    if (this.#kind === "feed" && !this.#feedActive) {
+    if (this.#kind === "standalone" && !this.#feedActive) {
       this.#feedActive = true;
       recordCatalogUpDown("trellis.feed.active", 1, {
         "trellis.side": this.#feedSide,
@@ -160,7 +160,7 @@ export class LiveTelemetryOwner {
    * Commit the one local terminal outcome.
    *
    * A prepared failure/cancel/expiry records `trellis.live.ends` without a
-   * Feed active/end pair.
+   * Live active/end pair.
    */
   end(end: LiveEnd): void {
     if (this.#ended) return;

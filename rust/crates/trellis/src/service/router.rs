@@ -17,7 +17,7 @@ use super::operations::ServiceOperationProvider;
 use super::request_loop::{HandlerResponse, ResponseStream};
 use super::schema_validation::validate_input_schema;
 use super::{
-    control_subject, FeedDescriptor, HandlerResult, OperationControlRequest, OperationDescriptor,
+    control_subject, LiveDescriptor, HandlerResult, OperationControlRequest, OperationDescriptor,
     OperationLiveEvent, OperationLiveWatch, OperationSignalAccepted, OperationSnapshot,
     OperationSnapshotFrame, RpcDescriptor, ServerError,
 };
@@ -504,9 +504,9 @@ impl Router {
     /// handler runs; handler output starts only after the delivery-path
     /// challenge is answered. The response is one signed offer, never an
     /// infinite reply loop.
-    pub fn register_feed<D, F, S>(&mut self, handler: F)
+    pub fn register_live<D, F, S>(&mut self, handler: F)
     where
-        D: FeedDescriptor + 'static,
+        D: LiveDescriptor + 'static,
         D::Input: Send + 'static,
         F: Fn(FeedRequestContext, D::Input) -> S + Send + Sync + 'static,
         S: Stream<Item = Result<D::Event, ServerError>> + Send + 'static,
@@ -530,7 +530,7 @@ impl Router {
                 capabilities: RouteCapabilities::Static(capabilities),
                 permission: RoutePermissionSpec::Static(
                     D::API_ID.to_owned(),
-                    ApiSurfaceKind::Feed,
+                    ApiSurfaceKind::Live,
                     self.descriptor_name(D::KEY),
                     PermissionAction::Subscribe,
                 ),
@@ -1255,7 +1255,7 @@ mod tests {
 
     struct TestFeed;
 
-    impl FeedDescriptor for TestFeed {
+    impl LiveDescriptor for TestFeed {
         type Input = Value;
         type Event = Value;
 
@@ -1270,7 +1270,7 @@ mod tests {
     async fn feed_routes_require_a_live_provider_owner() {
         let mut router = Router::new();
         router.set_provider_instance_id("provider-instance");
-        router.register_feed::<TestFeed, _, _>(|_, _| {
+        router.register_live::<TestFeed, _, _>(|_, _| {
             stream::pending::<Result<Value, ServerError>>()
         });
         let response = router
@@ -1293,7 +1293,7 @@ mod tests {
     async fn live_open_rejects_a_non_live_envelope_before_reserving() {
         let mut router = Router::new();
         router.set_provider_instance_id("provider-instance");
-        router.register_feed::<TestFeed, _, _>(|_, _| {
+        router.register_live::<TestFeed, _, _>(|_, _| {
             stream::pending::<Result<Value, ServerError>>()
         });
         // A legacy finite request body is an explicit incompatible-protocol

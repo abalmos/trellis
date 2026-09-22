@@ -268,7 +268,7 @@ fn compile_provider_action(
                 subscribe.insert(format!("transfer.v1.upload.{session_prefix}.*"));
             }
         }
-        RuntimeActionKind::Feed => {
+        RuntimeActionKind::Live => {
             let subject = trellis_protocol::derive_bound_feed_subject(api_id, deployment_id, name)
                 .map_err(|error| invalid_error(error.to_string()))?;
             subscribe.insert(subject.clone());
@@ -396,7 +396,7 @@ fn compile_api_surface(
                 .map_err(|error| invalid_error(error.to_string()))?,
             );
         }
-        (ApiSurfaceKind::Feed, PermissionAction::Subscribe) => {
+        (ApiSurfaceKind::Live, PermissionAction::Subscribe) => {
             let deployment_id = &api_bindings
                 .get(api_id)
                 .ok_or_else(|| invalid_error(format!("API {api_id} is not bound")))?
@@ -427,7 +427,7 @@ fn surface_name(surface: ApiSurfaceKind) -> &'static str {
         ApiSurfaceKind::Rpc => "rpc",
         ApiSurfaceKind::Operation => "operation",
         ApiSurfaceKind::Event => "event",
-        ApiSurfaceKind::Feed => "feed",
+        ApiSurfaceKind::Live => "live",
         ApiSurfaceKind::State => "state",
     }
 }
@@ -841,7 +841,7 @@ mod tests {
     #[test]
     fn feed_provider_subscribes_only_to_its_bound_open_and_owner_control_routes() {
         let action = ActionRuntimeProjection {
-            kind: RuntimeActionKind::Feed,
+            kind: RuntimeActionKind::Live,
             upload: false,
             download: false,
             event_parameter_count: 0,
@@ -893,7 +893,7 @@ mod tests {
             ))
         );
         assert!(!subscribe.contains(&format!("{subject}.control.>")));
-        assert!(!subscribe.contains("feed.v1.Watch"));
+        assert!(!subscribe.contains("live.v1.route.Watch"));
     }
 
     #[test]
@@ -903,9 +903,9 @@ mod tests {
             digest: "digest".to_owned(),
             major: 1,
             actions: BTreeMap::from([(
-                "feed:Watch".to_owned(),
+                "live:Watch".to_owned(),
                 ActionRuntimeProjection {
-                    kind: RuntimeActionKind::Feed,
+                    kind: RuntimeActionKind::Live,
                     upload: false,
                     download: false,
                     event_parameter_count: 0,
@@ -928,7 +928,7 @@ mod tests {
             "caller-connection",
             &api_permission(
                 api_id,
-                ApiSurfaceKind::Feed,
+                ApiSurfaceKind::Live,
                 "Watch",
                 PermissionAction::Subscribe,
             ),
@@ -953,7 +953,7 @@ mod tests {
             subscribe,
             BTreeSet::from([format!("live.v1.data.*.{own_token}.*")])
         );
-        assert!(!publish.contains("feed.v1.Watch"));
+        assert!(!publish.contains("live.v1.route.Watch"));
         assert!(!publish.contains(&format!("{subject}.control.>")));
     }
 
@@ -1087,9 +1087,9 @@ mod nats_reply_permission_tests {
             major: 1,
             actions: BTreeMap::from([
                 (
-                    "feed:Watch".to_owned(),
+                    "live:Watch".to_owned(),
                     ActionRuntimeProjection {
-                        kind: RuntimeActionKind::Feed,
+                        kind: RuntimeActionKind::Live,
                         upload: false,
                         download: false,
                         event_parameter_count: 0,
@@ -1243,7 +1243,7 @@ mod nats_reply_permission_tests {
 
     fn feed_subscribe_permission() -> PermissionAtom {
         PermissionAtom::new(
-            PermissionTarget::api_surface(API_ID, ApiSurfaceKind::Feed, "Watch").unwrap(),
+            PermissionTarget::api_surface(API_ID, ApiSurfaceKind::Live, "Watch").unwrap(),
             PermissionAction::Subscribe,
         )
         .unwrap()

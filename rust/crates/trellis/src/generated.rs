@@ -300,7 +300,7 @@ impl OptionalAction {
     pub const fn feed(api_id: &'static str, name: &'static str) -> Self {
         Self {
             api_id,
-            surface: trellis_protocol::ApiSurfaceKind::Feed,
+            surface: trellis_protocol::ApiSurfaceKind::Live,
             name,
             action: trellis_protocol::PermissionAction::Subscribe,
         }
@@ -423,7 +423,7 @@ pub trait EventDescriptor {
 }
 
 /// Metadata emitted for one generated feed action.
-pub trait FeedDescriptor {
+pub trait LiveDescriptor {
     /// Feed subscription input type.
     type Input: Codec + Serialize + DeserializeOwned;
     /// Feed event payload type.
@@ -708,7 +708,7 @@ impl Client {
     }
 
     /// Subscribe to one generated feed descriptor.
-    pub async fn feed<D>(
+    pub async fn live<D>(
         &self,
         input: &D::Input,
     ) -> Result<
@@ -716,14 +716,14 @@ impl Client {
         crate::client::TrellisClientError,
     >
     where
-        D: FeedDescriptor,
+        D: LiveDescriptor,
         D::Event: Codec + Send + 'static,
     {
         self.ensure_available(OptionalAction::feed(
             D::API_ID,
             action_name(D::DESCRIPTOR_NAME),
         ))?;
-        self.client.feed::<D>(input).await
+        self.client.live::<D>(input).await
     }
 
     /// Create a typed facade for one complete generated Operation.
